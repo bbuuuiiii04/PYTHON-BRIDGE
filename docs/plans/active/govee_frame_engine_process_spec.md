@@ -100,11 +100,14 @@ and makes the band half controllable + measurable.
   named in Part D, and the Part E docs. The orchestrator (not you) adds the AWR-146 registry row
   before you start; verify it exists (`rg -n "AWR-146" docs/status/active_work_registry.md`) and
   STOP if it does not.
+- Additionally touchable for the NUMBERED task that names them and nothing else:
+  `led_dispatch_coordinator.py` (Task 6), `led_models.py` + `led_config.py` +
+  `config/led_look_director.example.json` (optional Task 7, only if its precondition proves out).
 - Out of scope — must not change: `govee_frame_renderer.py`, `beat_sync_engine.py`,
-  `govee_realtime_transport.py`, `led_dispatch_coordinator.py`, `govee_owner_state.py`,
+  `govee_realtime_transport.py`, `govee_owner_state.py`,
   `govee_scene_adapter.py`, `govee_runtime_sender.py`, `govee_lan_discovery.py`, `state_manager.py`,
-  `tools/led_pad_playback.py`, `runtime_status.py`, laser/SoundSwitch/reader subsystems, config
-  schema and example values, transport packet formats, `bridge_log.py`.
+  `tools/led_pad_playback.py`, `runtime_status.py`, laser/SoundSwitch/reader subsystems, transport
+  packet formats, `bridge_log.py`.
 - Behavior that must not change: every AWR-145 guarantee (keepalive cadence, assert-on-takeover,
   brightness backstop, cloud-handoff-never-dims, edge-activate brightness 100, dispatch retry,
   pad auto-stop); cloud dispatch stays in-bridge exactly as today; the operator-blackout cloud
@@ -345,6 +348,43 @@ In `_sanitize_led_adapter_status`, extend the realtime key tuple
 (`led_dispatch_policy.py:422-433`) with `"engine_alive"`, `"achieved_fps"`, `"respawn_count"`,
 `"fps_degraded"` so the runtime status surface shows the self-report. No other policy change.
 
+### Task 6 - operator blackout sends the LAN brightness-0 backstop regardless of runner state (operator review finding, 2026-07-08)
+
+Gap found by the operator's independent AWR-145 review, folded into this workstream because it
+lives on the exact surface being moved: `_emergency_teardown` guards its whole transport block
+with `if self._active or handoff:` (`govee_realtime_runner.py:456`), so a pure operator/emergency
+blackout while the runner is INACTIVE — the common case when the strip is showing a cloud look —
+never sends the LAN brightness-0 backstop, and darkness relies on the internet cloud `off`
+command alone. The fix goes in at the policy/coordinator level so it is independent of runner
+active state (the runner drains brightness requests regardless of `_active`,
+`govee_realtime_runner.py:275-276`) — and, moved into the child, independent of the frame
+process's streaming state too:
+
+1. `led_dispatch_coordinator.py`: add method `blackout_brightness() -> None` next to
+   `restore_brightness` (`led_dispatch_coordinator.py:206-212`), body
+   `self._runner.request_brightness(0)`, docstring naming the inactive-runner gap.
+2. `led_dispatch_policy.py`: in the `Ev.LED_BLACKOUT` handler (`led_dispatch_policy.py:545-559`),
+   after `self._led_emergency_blackout = bool(self._led_blackout_owners)` (`:557`) and before
+   `_dispatch_led_manual_command`, add the duck-typed mirror of the existing clear-side restore
+   (`:561-574`): `dim = getattr(self._led_scene_adapter, "blackout_brightness", None);
+   if callable(dim): dim()`. Fires only after the blackout is accepted (the unknown-target
+   early-return at `:548-553` must NOT dim). Repeat blackouts (second owner) re-request — the
+   2-tick resend is idempotent.
+3. Do NOT touch the tactical (pre-drop) blackout — it must never dim (AWR-145 rule,
+   `led_dispatch_coordinator.py:199-201`).
+
+### Task 7 (OPTIONAL — skip unless the precondition proves out) - remove the dead WI-6 config surface
+
+`rt_reconcile_window_s` / `rt_reconcile_interval_s` in `LEDRateLimits` (`led_models.py:187-188`)
+are dead config after AWR-145 removed WI-6. Remove them from `led_models.py`, any
+`led_config.py` parsing/validation references, and `config/led_look_director.example.json` ONLY
+if you first prove BOTH: (a) `rg -n "rt_reconcile" --type py` shows no reader outside the
+dataclass definition and config parsing, and (b) the loader IGNORES unknown keys inside
+`rate_limits` (read `_validate_rate_limits`, `led_config.py:682`, and the `LEDRateLimits`
+construction site) — the operator's live gitignored config may still carry the keys, and a
+strict loader would refuse to start the bridge over a cosmetic cleanup. If either check fails,
+SKIP with one reported line. This task must not change any parsed value or default.
+
 ## Part C - Invariants That MUST Still Hold (live safety)
 
 - **Single realtime writer:** the child process is the only holder of a realtime UDP socket to
@@ -366,6 +406,9 @@ In `_sanitize_led_adapter_status`, extend the realtime key tuple
   (policy) and pad auto-stop are bridge-side and untouched.
 - **Cloud path untouched:** cloud dispatch, `GoveeSceneAdapter`, `GoveeRuntimeSender`, the
   owner state machine, and the operator-blackout cloud `off` command work exactly as today.
+- **Operator blackout darkens in ANY state (Task 6):** the LAN brightness-0 backstop fires from
+  the policy blackout handler regardless of runner/frame-process streaming state — it no longer
+  depends on the runner's teardown branch at all. Tactical (pre-drop) blackout still never dims.
 - **Child shutdown does not dim cloud looks:** EOF/shutdown teardown is `runner.stop()`
   (blackout + deactivate — ignored by a strip showing a cloud scene outside razer mode), never
   brightness-0 unless the emergency path latched it. Mirrors today's bridge-shutdown behavior.
@@ -432,6 +475,17 @@ Integration tests (real `subprocess` + real socketpair, dry-run transport only,
     `streaming=True` and `achieved_fps >= 55.0`; then `shutdown` → exit code 0 within 2 s.
 16. Orphan safety: close the parent socket end → child exits 0 within 2 s (EOF teardown ran).
 
+Task 6 tests (pure):
+17. `tests/test_led_dispatch_coordinator.py`: `blackout_brightness()` calls
+    `runner.request_brightness(0)` (recording fake runner).
+18. `tests/test_led_state_manager.py`: an `Ev.LED_BLACKOUT` event invokes the adapter's
+    `blackout_brightness` (recording fake adapter); a cloud-only adapter WITHOUT the method is a
+    safe no-op (no exception); the unknown-target rejected blackout does NOT invoke it.
+19. `tests/test_govee_realtime_runner.py`: a runner that was NEVER active receives
+    `request_brightness(0)` and the fake transport sees `set_brightness(0)` on 2 consecutive
+    ticks — the emergency-while-inactive darkness proof at the runner level. Extend pure host
+    test 5 to drive the same brightness message with the runner inactive through the IPC path.
+
 Run: `python3 -m unittest tests.test_govee_frame_engine
 tests.test_govee_frame_engine_integration tests.test_govee_realtime_runner
 tests.test_led_dispatch_coordinator tests.test_led_state_manager tests.test_led_pad_playback`
@@ -439,11 +493,14 @@ then `python3 -m unittest discover tests`.
 
 ## Part E - Acceptance (definition of done)
 
-1. All Part D tests pass; every AWR-145 test stays green (`tests/test_govee_realtime_runner.py`,
-   `tests/test_led_dispatch_coordinator.py`, `tests/test_led_state_manager.py`,
-   `tests/test_led_pad_playback.py`); `python3 -m unittest discover tests` green except the three
-   known environmental reds (live-config LED test, export-pack parity fixtures fallback,
-   SoundSwitch golden `test_ddj_slots_8_16_17_24_exact_ch1_ch19`) — do not fix or mask those.
+1. All Part D tests pass (including Task 6 tests 17-19); every AWR-145 test stays green
+   (`tests/test_govee_realtime_runner.py`, `tests/test_led_dispatch_coordinator.py`,
+   `tests/test_led_state_manager.py`, `tests/test_led_pad_playback.py`);
+   `python3 -m unittest discover tests` green except the three known environmental reds
+   (live-config LED test, export-pack parity fixtures fallback, SoundSwitch golden
+   `test_ddj_slots_8_16_17_24_exact_ch1_ch19`) — do not fix or mask those. If optional Task 7
+   ran, the LED config suite proves example config still loads and no parsed value changed; if
+   skipped, say so in one line.
 2. Integration test 15 passed on THIS machine with `achieved_fps >= 55.0` — record the measured
    number in your final report.
 3. Contract checks green: `python3 tools/check_docs_metadata.py`,
