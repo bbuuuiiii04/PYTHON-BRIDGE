@@ -74,7 +74,8 @@ source of truth when documents conflict. A doc is *active* only if it is listed 
 | `docs/subsystems/logging.md` | CURRENT SUPPORTING — matches `bridge_log.py`/`bridge_view.py` (AWR-125; `logging_manager.py` is retired). |
 | `docs/data/offsets-*.yaml` (3) | CURRENT SUPPORTING — Rekordbox offset reference data. |
 | `docs/data/cues_*.md` (2) | GENERATED OUTPUT — relocated cue dumps; not in the reading path. |
-| `docs/research/led_color_quality_audit_2026_07_08.md` | RESEARCH / AUDIT (AWR-152) — read-only LED white-leakage + hue-smoothness audit with veto-pending knob proposals; analysis only, not implementation-authorizing. |
+| `docs/research/led_color_quality_audit_2026_07_08.md` | RESEARCH / AUDIT (AWR-152) — read-only LED white-leakage + hue-smoothness audit; veto round closed 2026-07-08 (#1 vetoed, #2/#3/#6/#7/#8/#10 approved → `docs/plans/active/led_white_knobs_round1_spec.md`, #4/#5/#9 visual-test-gated); analysis only, not implementation-authorizing. |
+| `docs/research/led_white_strobe_gate_diagnosis_2026_07_08.md` | RESEARCH / DIAGNOSIS (AWR-153) — full-strip white strobe hold/stutter mechanism (fps/stall-fragile gate, code defect confirmed); fix direction named, not specced; analysis only. |
 | `docs/research/*.md` | RESEARCH — ANLZ energy/waveform-tag evidence plus Rekordbox mixer active-deck RE proof. |
 | `docs/research/soundswitch/*.md` | SOUNDSWITCH RE AUTHORITY — current closure report, format/binary findings, evidence matrices, tool guide, and product contract. Start with `README.md`. |
 | `docs/research/soundswitch/history/*.md` | SOUNDSWITCH RE HISTORY — superseded handoffs, intermediate findings, and draft exporter/player specs. Historical provenance only. |
