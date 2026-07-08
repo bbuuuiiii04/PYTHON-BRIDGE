@@ -66,6 +66,27 @@ ear-labels on ~17 tracks he grouped himself, THEN decide whether to trust it. Hi
 
 Pass = chill trio reads clearly lower than the bangers/rippers. If scrambled, don't use the auto-tagger.
 
+### RESULT (2026-07-08): TEST FAILED — do NOT auto-tag energy off the spectral cache
+- The bridge has **no stored field called "energy."** The v4 spectral cache (`~/Library/Application Support/
+  RBSS Bridge/spectral_cache/v4/`, populated, ~660/801 = 82% coverage, actively growing) stores 8 acoustic
+  TEXTURE scalars: grit, punch, drama (dynamic-range contrast), brightness_med, loudness_ref_db, + derived
+  bass_duty. `drama` is the doc's "closest to energy" but is explicitly a LED-color axis, not an energy tier
+  (`audio_spectral_features.py:118-121`, `spectral_cache.py:284-296`, `docs/research/spectral_audio_analysis_redesign.md:180`).
+- A real per-track energy/"vibe" labeler exists (`energy_model.py`, `tools/analyze_anlz_energy_corpus.py`,
+  groove/drive/contrast/peak) but has **NEVER been run** — zero output on disk; report is a template only.
+- **None of the cached scalars match Brandon's ear.** Money proof: his CHILL pick **Utopia** = punch 1.48
+  (highest of all 17), drama 19.3 (top). His BANGER **Force Majeure** = drama 8.0 (lowest), punch 0.67.
+  The computer ranks them backwards from Brandon. Texture ≠ felt energy. Test caught it before 800 mislabels.
+
+### PIVOT (pending his veto): capture HIS labels, don't trust the computer's
+Brandon sorted 17 cross-genre tracks into bangers/chill/euphoric/mainstage/tech-house in ~10s and his labels
+are correct exactly where the cache is wrong → HE is the accurate sensor. Direction: cheap capture of his own
+vibe-family calls (tag-as-you-play, one tap, no 800-track marathon), not a computer-guessed 1–5 energy dial.
+Note his mental model is ~5 vibe FAMILIES, not a single energy ladder — may reshape the tag scheme.
+- Parked experiment for the executive-manager chat (NOT blocking): can the never-run energy labeler be made
+  to match his ear? Run it, validate against these 17 labels, report. If it works, it backfills the rest.
+  → goes in `docs/plans/active/music_library_automation_ideas.md`.
+
 ## Boundaries
 - No rekordbox DB writes; Brandon clicks in the UI, guided step by tiny step.
 - Automation ideas (auto-tagging from spectral profiles, forgotten-gems surfacing tool) → write to
