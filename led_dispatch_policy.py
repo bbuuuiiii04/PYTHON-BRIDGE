@@ -39,6 +39,10 @@ LED_HOLD_RELEASE_BEATS = 1.0
 LED_IDLE_FREEWHEEL_BPM = 120.0
 LED_HOLD_BACKSTOP_BEATS = 16.0
 LED_HOLD_BACKSTOP_S = 8.0
+# Retry a coordinator-rejected dispatch (e.g. min-dwell gate) with the SAME decision
+# — no director re-tick — until it lands, the role_key changes, or attempts run out.
+LED_DISPATCH_RETRY_S = 0.35
+LED_DISPATCH_RETRY_MAX = 8
 _LED_DROP_IMPACT_PREDECESSORS = frozenset({"up", "low", "buildup", "breakdown"})
 # Max drop impacts per drop lifecycle. The first fires off an Up/Low buildup;
 # this allows one extra back-to-back Chorus->Chorus drop before settling into
@@ -111,6 +115,12 @@ class LEDDispatchPolicyMixin:
         self._led_cloud_automation_offset_s = 0.0
         self._led_realtime_automation_offset_s = 0.0
         self._led_last_idle_role_key = ""
+        # Latch-on-accept retry: a coordinator-rejected dispatch is re-sent with the
+        # SAME decision (no director re-tick) until accepted / role_key changes / attempts run out.
+        self._led_auto_retry: tuple[str, str, Any, int] | None = None  # (role_key, role, decision, attempts)
+        self._led_auto_retry_at = 0.0
+        self._led_idle_retry: tuple[str, Any, int] | None = None       # (role_key, decision, attempts)
+        self._led_idle_retry_at = 0.0
         # Armed on active deck switch or active-deck track load; released by LED phrase timing.
         self._led_hold_active: bool = False
         self._led_hold_started_mono: float = 0.0
@@ -277,6 +287,83 @@ class LEDDispatchPolicyMixin:
 
     def _led_blackout_active(self) -> bool:
         return bool(self._led_blackout_owners or self._led_emergency_blackout)
+
+    def _led_clear_dispatch_retries(self) -> None:
+        """Drop any pending latch-on-accept retry. Called at every deck switch,
+        track load, blackout, manual override, or gate transition so a stale retry
+        never fires across a mode change."""
+        self._led_auto_retry = None
+        self._led_idle_retry = None
+
+    def _led_retry_auto_dispatch(self, *, role_key: str, active: int, sp_state: SmartPhrasingState) -> None:
+        """Re-send a coordinator-rejected automation decision on the retry schedule.
+
+        Same cached decision, same role_key — the director is NOT re-ticked (that
+        would advance its cursors/shuffle bags and queue paired post-drops). Fires
+        only when the retry slot matches this role_key and the retry time is due.
+        """
+        retry = self._led_auto_retry
+        if retry is None or retry[0] != role_key or time.monotonic() < self._led_auto_retry_at:
+            return
+        _rk, r_role, r_decision, r_attempts = retry
+        outcome = self._led_send_decision(
+            r_decision,
+            look=str(getattr(r_decision, "look", "")),
+            role=r_role,
+            role_key=role_key,
+            automation=True,
+            active_deck=active,
+            sp_state=sp_state,
+        )
+        if outcome == "accepted":
+            self._led_auto_retry = None
+            self._led_smart_drop_blackout_key = ""
+            if r_role == "drop":
+                self._led_note_drop_decision_accepted(r_decision, sp_state)
+        elif outcome == "error":
+            self._led_auto_retry = None
+        else:  # rejected — schedule the next attempt or give up
+            r_attempts += 1
+            self._led_auto_retry_at = time.monotonic() + LED_DISPATCH_RETRY_S
+            self._led_auto_retry = (
+                None if r_attempts > LED_DISPATCH_RETRY_MAX
+                else (role_key, r_role, r_decision, r_attempts)
+            )
+
+    def _led_retry_idle_dispatch(self, *, role_key: str, active: int) -> None:
+        """Re-send a coordinator-rejected idle-ambient decision on the retry schedule.
+
+        On acceptance, replicate the idle-freewheel bookkeeping exactly.
+        """
+        retry = self._led_idle_retry
+        if retry is None or retry[0] != role_key or time.monotonic() < self._led_idle_retry_at:
+            return
+        _rk, r_decision, r_attempts = retry
+        r_look = str(getattr(r_decision, "look", ""))
+        outcome = self._led_send_decision(
+            r_decision,
+            look=r_look,
+            role="ambient",
+            role_key=role_key,
+            automation=True,
+            active_deck=active,
+        )
+        if outcome == "accepted":
+            self._led_idle_retry = None
+            if getattr(r_decision, "backend", "") == "realtime_razer":
+                self._led_idle_freewheel_since = time.monotonic()
+                log.info("[RGB] idle-freewheel-start look=%s", r_look)
+            else:
+                self._led_idle_freewheel_since = None
+        elif outcome == "error":
+            self._led_idle_retry = None
+        else:  # rejected — schedule the next attempt or give up
+            r_attempts += 1
+            self._led_idle_retry_at = time.monotonic() + LED_DISPATCH_RETRY_S
+            self._led_idle_retry = (
+                None if r_attempts > LED_DISPATCH_RETRY_MAX
+                else (role_key, r_decision, r_attempts)
+            )
 
     def color_engine_status_provider(self) -> dict[str, Any]:
         """Return the latest StateManager-published color engine status copy."""
@@ -457,6 +544,7 @@ class LEDDispatchPolicyMixin:
 
         if ev.kind == Ev.LED_BLACKOUT:
             self._led_idle_freewheel_since = None
+            self._led_clear_dispatch_retries()
             if "target" in ev.payload:
                 target = str(ev.payload.get("target", "")).strip()
                 if target and not self._led_target_exists(target):
@@ -509,6 +597,7 @@ class LEDDispatchPolicyMixin:
         self._led_last_event = reason
         self._led_last_auto_role_key = ""
         self._led_last_idle_role_key = ""
+        self._led_clear_dispatch_retries()
 
         if self._led_look_director is None or self._led_scene_adapter is None:
             self._led_last_error = "not_configured"
@@ -974,7 +1063,9 @@ class LEDDispatchPolicyMixin:
         role = self._led_effective_role_for_dispatch(role, scripted=scripted_led_mode)
         role_key = self._led_automation_role_key(active, d, sp_state, original_role)
         if role_key == self._led_last_auto_role_key:
+            self._led_retry_auto_dispatch(role_key=role_key, active=active, sp_state=sp_state)
             return
+        self._led_auto_retry = None  # a new role_key supersedes any pending retry
 
         # M1b WI-5: structured section/cycle published by the role_key builder.
         section_id, cycle = self._led_last_section_cycle
@@ -1120,6 +1211,11 @@ class LEDDispatchPolicyMixin:
             role_key,
             active,
         )
+        # Latch-on-accept: the coordinator rejected this (e.g. min-dwell). Retry the
+        # SAME decision shortly — the role_key is already latched at :1048 above, so
+        # without this it would never be re-sent until the role_key string changes.
+        self._led_auto_retry = (role_key, role, decision, 1)
+        self._led_auto_retry_at = time.monotonic() + LED_DISPATCH_RETRY_S
 
     def _dispatch_led_idle_ambient(
         self,
@@ -1149,7 +1245,9 @@ class LEDDispatchPolicyMixin:
             self._gate_led_automation("manual_override", active_deck=active, role="ambient")
             return
         if role_key == self._led_last_idle_role_key:
+            self._led_retry_idle_dispatch(role_key=role_key, active=active)
             return
+        self._led_idle_retry = None  # a new idle role_key supersedes any pending retry
 
         if self._led_color_engine is not None:
             self._led_color_engine.reset_fade_memory()
@@ -1215,6 +1313,10 @@ class LEDDispatchPolicyMixin:
                 self._led_idle_freewheel_since = None
             return
 
+        # rejected — latch-on-accept retry (idle role_key already latched at :1170-1171)
+        self._led_idle_retry = (role_key, decision, 1)
+        self._led_idle_retry_at = time.monotonic() + LED_DISPATCH_RETRY_S
+
 
     def _gate_led_automation(
         self,
@@ -1238,6 +1340,7 @@ class LEDDispatchPolicyMixin:
             role_key=role_key,
         )
         self._led_last_auto_role_key = ""
+        self._led_clear_dispatch_retries()
 
     def _led_tick_director(
         self,

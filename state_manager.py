@@ -2006,6 +2006,7 @@ class StateManager(LEDDispatchPolicyMixin):
         self._led_last_auto_role_key = ""
         self._led_last_idle_role_key = ""
         self._led_smart_drop_blackout_key = ""
+        self._led_clear_dispatch_retries()
         self._clear_led_drop_lifecycle()
         self._clear_smart_rearm_state()
         self._autoloop.clear_arm_phrase_lock()
@@ -2050,6 +2051,7 @@ class StateManager(LEDDispatchPolicyMixin):
         self._led_last_auto_role_key = ""
         self._led_last_idle_role_key = ""
         self._led_smart_drop_blackout_key = ""
+        self._led_clear_dispatch_retries()
         self._led_hold_active = False
         self._led_hold_started_mono = 0.0
         self._led_hold_started_beat = None
@@ -3049,6 +3051,7 @@ class StateManager(LEDDispatchPolicyMixin):
             self._led_last_auto_role_key = ""
             self._led_last_idle_role_key = ""
             self._led_smart_drop_blackout_key = ""
+            self._led_clear_dispatch_retries()
             self._clear_led_drop_lifecycle()
             if self._laser_director is not None:
                 self._laser_director.reset_runtime_state(reason="scripted")
@@ -4840,6 +4843,7 @@ class StateManager(LEDDispatchPolicyMixin):
         self._led_last_auto_role_key = ""
         self._led_last_idle_role_key = ""
         self._led_smart_drop_blackout_key = ""
+        self._led_clear_dispatch_retries()
         self._led_hold_active = False
         self._led_hold_started_mono = 0.0
         self._led_hold_started_beat = None
@@ -4894,6 +4898,7 @@ class StateManager(LEDDispatchPolicyMixin):
         self._led_last_auto_role_key = ""
         self._led_last_idle_role_key = ""
         self._led_smart_drop_blackout_key = ""
+        self._led_clear_dispatch_retries()
         self._clear_led_drop_lifecycle()
         if self._laser_director is not None:
             self._laser_director.reset_runtime_state(reason="resume")
