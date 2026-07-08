@@ -1184,13 +1184,6 @@ def _validate_color_engine(data: dict[str, Any]) -> list[str]:
                         f"{p_prefix}.range endpoint '{endpoint}' is not a key in scale_stops"
                     )
 
-        # white in [0, 1]
-        white = palette_data.get("white", 0.0)
-        if not isinstance(white, (int, float)) or isinstance(white, bool):
-            errors.append(f"{p_prefix}.white must be a number")
-        elif not (0.0 <= float(white) <= 1.0):
-            errors.append(f"{p_prefix}.white must be in [0, 1]")
-
         # spread >= 0
         spread = palette_data.get("spread", 0.10)
         if not isinstance(spread, (int, float)) or isinstance(spread, bool):
@@ -1334,6 +1327,8 @@ def _validate_identity_v2_block(data: dict[str, Any]) -> list[str]:
             hue_span = zone_data.get("hue_span", 0.06)
             if not isinstance(hue_span, (int, float)) or isinstance(hue_span, bool) or float(hue_span) < 0.0:
                 errors.append(f"color_engine.v2.zones.{zone_name}.hue_span must be >= 0")
+            if "slot5_white" in zone_data and not _is_rgb_seq(zone_data.get("slot5_white")):
+                errors.append(f"color_engine.v2.zones.{zone_name}.slot5_white must be an RGB list 0..255")
 
     palette_control = data.get("palette_control", {})
     if enabled and isinstance(palette_control, dict):
@@ -1388,7 +1383,7 @@ def _build_identity_v2_config(raw: dict[str, Any]) -> IdentityV2Config:
         zones[str(zone)] = ZoneRampConfig(
             base_ramp=tuple(tuple(int(v) for v in rgb) for rgb in data["base_ramp"]),  # type: ignore[arg-type]
             accent_ramp=tuple(tuple(int(v) for v in rgb) for rgb in data["accent_ramp"]),  # type: ignore[arg-type]
-            white=float(data.get("white", 0.0)),
+            slot5_white=tuple(int(v) for v in data.get("slot5_white", (255, 255, 255))),  # type: ignore[arg-type]
             hue_span=float(data.get("hue_span", 0.06)),
         )
     bass_norm = raw.get("bass_norm", [0.15, 0.90])
