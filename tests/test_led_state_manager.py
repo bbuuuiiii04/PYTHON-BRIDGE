@@ -848,6 +848,24 @@ class LEDStateManagerTests(unittest.TestCase):
         self.assertEqual(adapter3.dim_calls, 0)
         self.assertIn("unknown_target", sm3.led_status_provider()["last_error"])
 
+    def test_sanitize_preserves_frame_engine_health_keys(self) -> None:
+        """AWR-146 REQUIRED-4e: engine_alive/achieved_fps/respawn_count/fps_degraded
+        survive `_sanitize_led_adapter_status`, so the frame-engine self-report
+        reaches the runtime status surface."""
+        sm = _make_sm(director=_StubLEDLookDirector(enabled=True), adapter=_StubLEDAdapter())
+        safe = sm._sanitize_led_adapter_status({
+            "realtime": {
+                "owner": "realtime_razer", "active": True,
+                "engine_alive": True, "achieved_fps": 60.9,
+                "respawn_count": 2, "fps_degraded": False,
+            }
+        })
+        rt = safe["realtime"]
+        self.assertEqual(rt["engine_alive"], True)
+        self.assertEqual(rt["achieved_fps"], 60.9)
+        self.assertEqual(rt["respawn_count"], 2)
+        self.assertEqual(rt["fps_degraded"], False)
+
     def test_disabled_led_layer_is_inert_and_status_visible(self) -> None:
         director = _StubLEDLookDirector(enabled=True)
         adapter = _StubLEDAdapter()

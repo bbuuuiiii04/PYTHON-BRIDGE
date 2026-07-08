@@ -331,6 +331,37 @@ class FrameEngineHostTests(unittest.TestCase):
         self.assertEqual([m["t"] for m in msgs], ["a", "b"])  # malformed skipped
         self.assertEqual(remainder, b'{"t":"par')  # partial line retained
 
+    def test_7b_heartbeat_blockingio_is_skipped(self) -> None:
+        """REQUIRED-4c: a send that raises BlockingIOError skips that heartbeat and
+        does not propagate (the parent is slow to drain; the next hb is in 1 s)."""
+        class _BlockConn(HostFakeConn):
+            def send(self, data: bytes) -> int:
+                raise BlockingIOError()
+
+        conn = _BlockConn()
+        runner = RecordingRunner()
+        host = FrameEngineHost(conn, transport_factory=lambda i: None, time_fn=lambda: 100.0)
+        host._runner = runner
+        host._fps = 60
+        host._send_heartbeat(100.0)  # must not raise
+        self.assertEqual(bytes(conn.sent), b"")
+        conn.close()
+
+    def test_qos_missing_symbol_is_safe(self) -> None:
+        """REQUIRED-3: a missing pthread_set_qos_class_self_np is a warn-and-return,
+        not an exception that would silently kill the runner thread."""
+        import rb_ss_bridge_v2.govee_frame_engine as eng
+
+        class _Lib:  # no pthread_set_qos_class_self_np attribute
+            pass
+
+        orig = eng.ctypes.CDLL
+        eng.ctypes.CDLL = lambda *a, **k: _Lib()
+        try:
+            eng._qos_user_interactive()  # must not raise
+        finally:
+            eng.ctypes.CDLL = orig
+
 
 # ── Client fakes ────────────────────────────────────────────────────────────────
 
@@ -498,6 +529,44 @@ class GoveeFrameEngineClientTests(unittest.TestCase):
         clk[0] += 2.1            # COMMAND_STUCK_S exceeded
         c._tick(clk[0])          # detect stuck → kill
         self.assertIsNotNone(sp.procs[0].poll())
+        clk[0] += 1.0
+        c._tick(clk[0])          # backoff elapsed → a NEW child is spawned
+        self.assertEqual(len(sp.procs), 2)
+        self.assertEqual(c._respawn_count, 1)
+
+    def test_12b_emergency_preserves_queued_brightness(self) -> None:
+        """BLOCKING-1 regression: a blackout brightness-0 enqueued microseconds
+        before emergency_stop() must survive promotion and follow emergency_stop
+        on the wire (both delivered) — dropping it left the room lit."""
+        clk = [100.0]
+        sp = Spawner()
+        c = _make_client(sp, clk)
+        c._tick(clk[0])  # spawn #0
+        sp.conns[0].sent.clear()
+        c.request_brightness(0)  # operator-blackout LAN backstop
+        c.emergency_stop()       # promotes; must NOT drop the brightness
+        c._tick(clk[0])
+        cmds = [t for t in sp.conns[0].types() if t in ("emergency_stop", "brightness")]
+        self.assertEqual(cmds, ["emergency_stop", "brightness"])  # both, in order
+        bright = [m for m in sp.conns[0].messages() if m["t"] == "brightness"][0]
+        self.assertEqual(bright["value"], 0)
+
+    def test_10b_respawn_replays_pending_brightness_only(self) -> None:
+        """REQUIRED-2: when ONLY `_brightness_pending` is set (no desired/emergency/
+        handoff), respawn replays exactly that brightness message — the trailing
+        still-pending brightness resend in _replay_intent."""
+        clk = [100.0]
+        sp = Spawner()
+        c = _make_client(sp, clk)
+        c._tick(clk[0])          # spawn #0
+        c.request_brightness(0)  # pending brightness, nothing else in intent
+        sp.procs[0].rc = 1       # child crashes before the brightness drains
+        c._tick(clk[0])          # detect dead → kill + schedule respawn
+        clk[0] += 1.0
+        c._tick(clk[0])          # respawn #1 + replay
+        self.assertEqual(sp.conns[1].types(), ["init", "brightness"])
+        bright = [m for m in sp.conns[1].messages() if m["t"] == "brightness"][0]
+        self.assertEqual(bright["value"], 0)
 
     def test_12_emergency_jumps_queue(self) -> None:
         clk = [100.0]
@@ -553,6 +622,16 @@ class GoveeFrameEngineClientTests(unittest.TestCase):
         c._tick(clk[0])
         self.assertFalse(c.stop())
         self.assertEqual(sp.procs[0].poll(), -9)  # killed
+
+    def test_14b_stop_terminate_middle_path_returns_true(self) -> None:
+        """REQUIRED-4a: child ignores `shutdown` (never exits on the message) but
+        honors terminate() → stop() returns True (exited before kill was needed)."""
+        clk = [100.0]
+        sp = Spawner(honor_terminate=True)
+        c = _make_client(sp, clk)
+        c._tick(clk[0])
+        self.assertTrue(c.stop())
+        self.assertEqual(sp.procs[0].poll(), -15)  # SIGTERM, not SIGKILL
 
 
 if __name__ == "__main__":

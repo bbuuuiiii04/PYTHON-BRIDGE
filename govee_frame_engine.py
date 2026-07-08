@@ -75,11 +75,21 @@ def decode_buffer(buf: bytes) -> tuple[list[dict], bytes]:
 # ── Scheduling band (macOS) ────────────────────────────────────────────────────
 
 def _qos_user_interactive() -> None:
-    """Frame-thread QoS hook passed to the runner via on_thread_start."""
+    """Frame-thread QoS hook passed to the runner via on_thread_start.
+
+    This runs as the runner thread's first statement, so a raised exception would
+    silently kill the frame thread while heartbeats keep flowing (streaming stays
+    False). A missing symbol is therefore a WARNING-and-continue, not a crash — the
+    band still has setpriority + NSActivity, and fps self-measure catches any decay.
+    """
     lib = ctypes.CDLL(
         ctypes.util.find_library("pthread") or ctypes.util.find_library("c")
     )
-    fn = lib.pthread_set_qos_class_self_np
+    fn = getattr(lib, "pthread_set_qos_class_self_np", None)
+    if fn is None:
+        _LOG.warning(
+            "[ENGINE] pthread_set_qos_class_self_np missing — frame-thread QoS not set")
+        return
     fn.argtypes = [ctypes.c_uint, ctypes.c_int]
     fn(0x21, 0)  # QOS_CLASS_USER_INTERACTIVE — confirmed returns 0 on this machine
 

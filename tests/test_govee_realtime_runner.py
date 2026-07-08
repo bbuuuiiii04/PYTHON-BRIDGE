@@ -622,6 +622,18 @@ class GoveeRealtimeRunnerTests(unittest.TestCase):
         self.assertEqual(transport.calls.count("brightness:0"), 2)
         self.assertNotIn("activate", transport.calls)  # never activated
 
+    def test_on_thread_start_called_once_before_loop(self) -> None:
+        """AWR-146 Task 2: the on_thread_start hook runs exactly once as the frame
+        thread's first statement (the child uses it to set frame-thread QoS)."""
+        calls: list[int] = []
+        transport = _FakeTransport()
+        runner = GoveeRealtimeRunner(
+            transport, GoveeFrameRenderer(), segments=4, fps=1000,
+            on_thread_start=lambda: calls.append(1))
+        runner.start()
+        runner.stop()  # the hook is the first _loop statement — runs before the while
+        self.assertEqual(calls, [1])
+
     def test_emergency_teardown_hard_dims_on_pure_emergency(self) -> None:
         """Pure emergency teardown sends set_brightness(0); handoff teardown does not."""
         # Pure emergency: bring active, then emergency_stop.

@@ -195,10 +195,13 @@ class GoveeFrameEngineClient:
         self._outbox.append((self._time_fn(), msg))
 
     def _promote_emergency(self, msg: dict) -> None:
-        # Drop queued looks/commands (init is never queued — sent directly at
-        # spawn), then put the emergency at the front.
+        # Keep any queued `brightness` (a just-enqueued operator-blackout
+        # brightness-0 must survive so it follows the front-loaded emergency_stop
+        # on the wire — dropping it was a real Task 6 defect) and `init` (never
+        # actually queued — sent directly at spawn). Drop only queued looks, then
+        # put the emergency at the front.
         self._outbox = collections.deque(
-            (ts, m) for ts, m in self._outbox if m.get("t") == "init")
+            (ts, m) for ts, m in self._outbox if m.get("t") in ("init", "brightness"))
         self._outbox.appendleft((self._time_fn(), msg))
 
     # ── Client thread ───────────────────────────────────────────────────────────
