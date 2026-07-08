@@ -115,20 +115,24 @@ class GoveeRealtimeRunner:
         with self._lock:
             self._pending_manual = min(self._pending_manual + 1, MAX_MANUAL_PENDING)
 
-    def note_cloud_dispatch(self, now: float, *, window_s: float = 5.0, interval_s: float = 1.0) -> None:
-        """Signal that a cloud DIY command was just dispatched.
+    def request_activate_assert(self) -> None:
+        """Ask the runner thread to re-assert razer mode on its next tick.
 
-        Opens a reconcile window during which _tick_once will periodically
-        re-assert razer activate() to self-heal from a late cloud command that
-        might flip the strip out of razer mode.
-
-        Only takes effect when RBSS_LED_RT_RECONCILE=1 (default).
+        Used on realtime takeover and blackout so a strip that a cloud scene
+        knocked out of razer mode is recovered before the frames matter.
         """
         with self._lock:
-            self._reconcile_window_s = float(window_s)
-            self._reconcile_interval_s = max(0.01, float(interval_s))
-            self._cloud_suspect_until = float(now) + self._reconcile_window_s
+            self._assert_pending = True
 
+    def request_brightness(self, value: int) -> None:
+        """Ask the runner thread to send a LAN brightness command (any device mode).
+
+        Sent on 2 consecutive ticks — idempotent insurance against a single lost
+        UDP packet. This darkens/restores the strip even while a cloud scene plays.
+        """
+        with self._lock:
+            self._brightness_request = int(value)
+            self._brightness_repeat = 2
 
     def emergency_stop(self) -> None:
         self._emergency.set()
@@ -189,7 +193,7 @@ class GoveeRealtimeRunner:
             last_error = self._last_error
             engine_status = dict(self._engine_status)
             pending_manual = self._pending_manual
-            rt_reconcile_count = self._rt_reconcile_count
+            razer_assert_count = self._razer_assert_count
         transport_status = {}
         status = getattr(self._transport, "status", None)
         if callable(status):
@@ -205,7 +209,7 @@ class GoveeRealtimeRunner:
             "transport": transport_status,
             **engine_status,
             "pending_manual": pending_manual,
-            "rt_reconcile_count": rt_reconcile_count,
+            "razer_assert_count": razer_assert_count,
         }
 
     def _loop(self) -> None:
@@ -238,20 +242,38 @@ class GoveeRealtimeRunner:
             self._emergency_teardown()
             return
 
-        # WI-6 reconcile: if a cloud DIY may have flipped the device out of razer
-        # mode, periodically re-assert activate() while we are still active.
-        # Gated by RBSS_LED_RT_RECONCILE (default ON).
-        if (
-            self._active and self._desired_spec is not None
-            and self._reconcile_enabled
-            and now < self._cloud_suspect_until
-            and (now - self._last_activate_mono) >= self._reconcile_interval_s
+        # Razer keepalive + on-demand assert (runs on the runner thread only). A cloud
+        # DIY scene silently knocks the strip out of razer mode, after which realtime
+        # frames — including blackout — are ignored. Re-assert activate() on demand
+        # (takeover/blackout) and, while streaming, unconditionally every
+        # RAZER_KEEPALIVE_S so a knockout or a lost activate heals in <=2 s. Any-mode
+        # brightness requests (backstop blackout / restore) are drained here too.
+        with self._lock:
+            assert_now = self._assert_pending
+            self._assert_pending = False
+            desired = self._desired_spec
+            brightness = self._brightness_request
+            if brightness is not None:
+                self._brightness_repeat -= 1
+                if self._brightness_repeat <= 0:
+                    self._brightness_request = None
+        if assert_now:
+            self._transport.activate()
+            self._last_activate_mono = now
+            with self._lock:
+                self._razer_assert_count += 1
+            self._log.debug("[RGB] razer-assert reason=on_demand now=%.3f", now)
+        elif (
+            self._active and desired is not None
+            and (now - self._last_activate_mono) >= RAZER_KEEPALIVE_S
         ):
             self._transport.activate()
             self._last_activate_mono = now
             with self._lock:
-                self._rt_reconcile_count += 1
-            self._log.info("[RGB] reconcile-reactivate now=%.3f", now)
+                self._razer_assert_count += 1
+            self._log.debug("[RGB] razer-assert reason=keepalive now=%.3f", now)
+        if brightness is not None:
+            self._transport.set_brightness(brightness)
 
         with self._lock:
             spec = self._desired_spec
@@ -432,6 +454,12 @@ class GoveeRealtimeRunner:
         with self._lock:
             handoff = self._handoff_deactivate_pending
         if self._active or handoff:
+            if not handoff:
+                # Operator/pure emergency must hold dark in ANY device mode (even if
+                # a cloud scene knocked the strip out of razer mode). Blackout > beauty:
+                # a crash mid-blackout leaves the strip dark. The cloud handoff path is
+                # untouched — cloud looks must never dim.
+                self._transport.set_brightness(0)
             self._transport.blackout()
             self._transport.deactivate()
             if handoff:
