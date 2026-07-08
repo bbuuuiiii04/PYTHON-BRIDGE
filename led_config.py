@@ -1451,7 +1451,6 @@ def _parse_color_engine(data: dict[str, Any]) -> Optional[ColorEngineConfig]:
         dwell_raw = p.get("dwell")
         palettes[name] = Palette(
             range=p_range,
-            white=float(p.get("white", 0.0)),
             spread=float(p.get("spread", 0.10)),
             weight=float(p.get("weight", 1.0)),
             dwell=int(dwell_raw) if dwell_raw is not None else None,
