@@ -612,6 +612,7 @@ contracts:
       - spectral_cache.py
       - spectral_profile.py
       - tools/spectral_sweep.py
+      - tools/spectral_calibration_report.py
     key_symbols:
       - extract_spectral_features
       - extract_spectral_features_v4

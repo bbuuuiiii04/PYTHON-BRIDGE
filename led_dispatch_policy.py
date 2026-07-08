@@ -560,6 +560,15 @@ class LEDDispatchPolicyMixin:
                 self._led_manual_target_override = target
             self._led_blackout_owners.add(str(ev.payload.get("reason") or "legacy"))
             self._led_emergency_blackout = bool(self._led_blackout_owners)
+            # Operator blackout hard-dims via a LAN brightness-0 command so it
+            # darkens even when the runner/frame-process is INACTIVE (cloud look
+            # showing). Only after the blackout is accepted — the unknown-target
+            # early-return above must not dim. Duck-typed so a cloud-only adapter
+            # (no runner) is a safe no-op. Tactical (pre-drop) blackout never
+            # reaches here and still never dims.
+            dim = getattr(self._led_scene_adapter, "blackout_brightness", None)
+            if callable(dim):
+                dim()
             self._dispatch_led_manual_command(reason="blackout")
             return
 

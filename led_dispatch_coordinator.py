@@ -211,6 +211,18 @@ class LEDDispatchCoordinator:
         """
         self._runner.request_brightness(100)
 
+    def blackout_brightness(self) -> None:
+        """Hard-dim the strip via a LAN brightness-0 command on operator blackout.
+
+        The runner's own emergency teardown only sends transport commands when it
+        was active (govee_realtime_runner.py:456); a pure operator blackout while
+        the runner is INACTIVE — the common case when the strip shows a cloud look
+        — would otherwise rely on the cloud `off` command alone. The LAN
+        brightness request runs regardless of active state, so darkness no longer
+        depends on the runner's teardown branch.
+        """
+        self._runner.request_brightness(0)
+
     def status(self) -> dict[str, Any]:
         payload = self._adapter.status()
         if not isinstance(payload, dict):
