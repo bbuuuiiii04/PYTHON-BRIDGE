@@ -46,6 +46,16 @@ Implementation notes:
 - For realtime-to-cloud handoff changes, `force_deactivate()` must not perform transport socket
   calls on the caller/push-loop thread; prove teardown on the runner thread in
   `tests/test_govee_realtime_runner.py`.
+- The realtime frame trio runs in a bridge-owned child process (AWR-146): `govee_frame_engine.py`
+  (`FrameEngineHost` + JSON-lines protocol + `main()`) and `govee_frame_engine_client.py`
+  (`GoveeFrameEngineClient`, the in-bridge supervisor and drop-in for `GoveeRealtimeRunner`). Keep
+  every client method the coordinator calls lock-and-flag (zero I/O on the caller thread); all IPC,
+  spawning, respawn/replay, and IP re-resolution stay on the client thread. Fail-dark on EOF is
+  `runner.stop()` (blackout + deactivate, never brightness-0 so cloud looks survive a restart); a
+  pure-emergency respawn replays `emergency_stop` + an unconditional brightness-0. The runner change
+  is only the additive `on_thread_start` hook. Prove host/client behavior in
+  `tests/test_govee_frame_engine.py` and the real-subprocess fps/orphan proof in
+  `tests/test_govee_frame_engine_integration.py`.
 - For Govee cloud health-reporting changes, keep fixes reporting-only: log
   mirror send failure/recovery on state changes only, do not alter send order or
   queue/rate-limit behavior, and prove status healing in the sender/adapter
@@ -63,6 +73,7 @@ Required tests:
 - Run `python -m unittest discover tests` when practical for cross-subsystem changes.
 - Run docs checks for docs changes.
 - For Govee cloud health-reporting changes, run `python3 -m unittest tests.test_govee_runtime_sender tests.test_govee_scene_adapter`.
+- For frame-engine child-process changes (AWR-146), run `python3 -m unittest tests.test_govee_frame_engine tests.test_govee_frame_engine_integration` (the integration suite is timing-sensitive and skips under `CI=true`).
 - For M2.5 slot-cue work, include every existing `tests/test_led_color_engine_m2_patch_*.py` file, including the newest Patch F file when present.
 - For LIGHTING ENGINE v2 identity work, include `tests/test_led_identity_v2.py`,
   `tests/test_led_color_engine.py`, `tests/test_color_engine_config.py`,
