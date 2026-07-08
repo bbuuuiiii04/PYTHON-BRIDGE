@@ -91,11 +91,10 @@ from .led_identity_v2 import ALL_ZONES, IdentityStore
 from .led_palette_control import LIVE_PALETTE_STATE_PATH
 from .govee_scene_adapter import GoveeSceneAdapter
 from .govee_runtime_sender import GoveeRuntimeSender
-from .govee_frame_renderer import GoveeFrameRenderer
 from .govee_owner_state import GoveeOwnerStateMachine
 from .govee_realtime_runner import GoveeRealtimeRunner
 from .govee_lan_discovery import resolve_realtime_ip
-from .govee_realtime_transport import GoveeRealtimeDryRunTransport, GoveeRealtimeTransport
+from .govee_frame_engine_client import GoveeFrameEngineClient
 from .led_dispatch_coordinator import LEDDispatchCoordinator
 from .personality_resolver import PersonalityResolver, PlaylistCache
 from .runtime_status import CommandReader, StatusWriter
@@ -148,7 +147,7 @@ class LEDStartupBundle:
     led_director: Optional[LEDLookDirector]
     led_adapter: Optional[Any]
     status_provider: Optional[Callable[[], dict]]
-    realtime_runner: Optional[GoveeRealtimeRunner] = None
+    realtime_runner: Optional[Any] = None  # GoveeRealtimeRunner | GoveeFrameEngineClient
     led_color_engine: Optional[Any] = None
     led_identity_store: Optional[IdentityStore] = None
 
@@ -518,7 +517,7 @@ def _build_led_startup_wiring(
             status_provider=govee_sender.status if govee_sender is not None else None,
         )
         led_adapter: Any = cloud_adapter
-        realtime_runner: GoveeRealtimeRunner | None = None
+        realtime_runner: GoveeRealtimeRunner | GoveeFrameEngineClient | None = None
         realtime_enabled = (
             os.environ.get(GOVEE_REALTIME_ENV) == "1"
             and any(target.realtime.enabled for target in cfg.targets.values())
@@ -529,13 +528,8 @@ def _build_led_startup_wiring(
             )
             rt = realtime_target.realtime
             resolved_ip = rt.ip
-            if cfg.dry_run:
-                transport = GoveeRealtimeDryRunTransport(
-                    ip=rt.ip,
-                    port=rt.port,
-                    segments=rt.segments,
-                )
-            else:
+            resolve_ip_fn = None
+            if not cfg.dry_run:
                 # DHCP drifts the strip's IP; multicast-discover the live address
                 # so a stale config IP no longer silently dark-outs realtime.
                 resolved_ip, ip_source = resolve_realtime_ip(
@@ -553,21 +547,39 @@ def _build_led_startup_wiring(
                     log.info(
                         "[MAIN] govee realtime ip source=%s ip=%s", ip_source, resolved_ip
                     )
-                transport = GoveeRealtimeTransport(
-                    resolved_ip,
-                    port=rt.port,
-                    segments=rt.segments,
-                    header_bytes=rt.header_bytes,
-                    stretch=rt.stretch,
-                    activate_pt=rt.activate_pt,
-                    deactivate_pt=rt.deactivate_pt,
-                )
-                transport.deactivate()
-            realtime_runner = GoveeRealtimeRunner(
-                transport,
-                GoveeFrameRenderer(),
-                segments=rt.segments,
-                fps=rt.fps,
+
+                def _resolve_realtime_ip_for_respawn(_target=realtime_target, _rt=rt):
+                    # Re-resolve the strip IP when the frame-engine child respawns
+                    # (shorter timeout — the room is already dark during the gap).
+                    ip, _src = resolve_realtime_ip(
+                        _rt.ip,
+                        device_ref=_target.device_ref,
+                        expected_sku=_target.expected_model,
+                        timeout_s=1.0,
+                    )
+                    return ip
+
+                resolve_ip_fn = _resolve_realtime_ip_for_respawn
+            # AWR-146: the realtime frame trio (runner + renderer + transport) now
+            # runs in a bridge-owned child process. GoveeFrameEngineClient is a
+            # drop-in for GoveeRealtimeRunner from the coordinator's point of view;
+            # the transport.deactivate() that used to run here happens child-side
+            # on init.
+            engine_init = {
+                "t": "init",
+                "dry_run": cfg.dry_run,
+                "ip": resolved_ip,
+                "port": rt.port,
+                "segments": rt.segments,
+                "fps": rt.fps,
+                "grace_s": 0.25,
+                "header_bytes": list(rt.header_bytes),
+                "stretch": rt.stretch,
+                "activate_pt": rt.activate_pt,
+                "deactivate_pt": rt.deactivate_pt,
+            }
+            realtime_runner = GoveeFrameEngineClient(
+                engine_init, resolve_ip_fn=resolve_ip_fn
             )
             led_adapter = LEDDispatchCoordinator(
                 cloud_adapter,
