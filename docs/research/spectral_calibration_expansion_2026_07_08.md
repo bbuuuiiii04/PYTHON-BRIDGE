@@ -175,6 +175,36 @@ The 7-track boundary sheet came back. Ear verdicts against the measured reads:
 
 **Net for this lane:** analysis layer measured everything faithfully (operator descriptions match the vectors); zero `SPECTRAL_V4_CALIBRATION` changes remain the right call. All rule changes land in the F2 consumer spec, not in `spectral_profile.py`.
 
+> **§6b's level-term recommendation is SUPERSEDED by §6c below** (round-2 labels falsified the monotonic level rule). The measurements stand; the proposed rule shape does not.
+
+## 6c. Operator listening pass, round 2 — 10/10 answered (2026-07-08, same day; targeted boundary probes)
+
+Ten more labeled moments (5 blackout-length probes spanning window lift −12.0→−4.9, one busy-kill, two family, one tier-contrast, one NEUTRAL re-check). Verdicts with the measured values:
+
+| Case (lift = window med full_db − ref) | Rule said | Operator said |
+|---|---|---|
+| FE!N (Chris Lorenzo) @2:22, lift −12.0 | 16 dark | **2 beats** |
+| ONE CHANCE (HIVE FLIP) @1:55, lift −9.5 | 14 dark | agree — but he re-marked that drop as an UP phrase in Rekordbox mid-review; separately wants **8 beats at the 2:36.9 hard dubstep-trap drop "to emphasize… even though it goes against the rules"** |
+| Can't Say Nah (Benni Ola) @1:28, lift −8.0 | 16 dark | **1 beat** |
+| Cruel Summer (Proppa) @1:17, lift −6.5 | 14 dark | **8 beats — "percussive elements done, with just vocals (and some other effects)"** |
+| Take It @1:20, lift −4.9 | 16 dark | **1 beat** |
+| Diamond Therapy (VIP) @1:15, busy-killed (duty 0.93) | stay lit | **1 bar (4 beats) blackout** — busy-kill reversed here (vs Wanna Go Dancin' round 1, where no-blackout was right) |
+| Show Me Love x Perfect @0:11, COMET T3 | full relentless show | **"Not really no"** — third early-track overshoot datapoint |
+| kidstopbreathing (ionika) @3:31, lift −4.9 | WALL T2, 13 dark | **WALL yes; 16-beat blackout** — at the LOUDEST window on the sheet; also: chorus marker was mis-placed 2 bars early by a fake drop (he corrected it) |
+| STFU 0:39 (T1) vs 0:59 (T3) | different tiers | **same drop section** — the 2nd chorus marker is Rekordbox phrasing, not a real drop; the track is "one of the hardest hitting… relentless" |
+| Can I @0:41, NEUTRAL v0.79 | plain look | **"Yeah it's plain"** — NEUTRAL validated again. Creative anchor recorded verbatim: LEDs should be *"sparkly and dancy, not too intensive and strobey, like glitter with a groove"* (whistly tune, groovy bassline) |
+
+**Standing operator rule (verbatim in substance): blackout lengths are QUANTIZED — 1, 2, 4, 8, or 16 beats before the drop only. No 13s/14s.**
+
+**What the combined 11 labels actually show (confirmed pattern, formula deliberately NOT fitted at n=11):**
+1. **The "audio-matched gap length" premise of §4.1 is overturned.** Both the raw-gap length AND window loudness fail to predict his lengths (quietest window → 2 beats; loudest → 16). Blackout is drop *emphasis*, not gap mirroring.
+2. What long blacks (8/16) have in common: **a monster WALL-grade drop incoming** (kidstopbreathing 16, ONE CHANCE 2:36.9 wish 8) or **a true stop — percussion done, vocals/effects only** (Cruel Summer 8). Groove/tech-house contexts where music keeps moving default SHORT (1-2), regardless of how quiet the mix measures. CSN 352's approved 16 (halftime lows-out breakdown, round 1) is consistent: a real stop into an ODDMOB monster.
+3. The measured gap still plausibly CAPS the length (nobody asked for dark over landed music), and the busy test is not a hard veto (Diamond Therapy: 4 beats over a 0.93-duty build) nor a hard pass (Wanna Go Dancin': 0). The discriminator between those two is unknown at n=2.
+4. **Marker hygiene is a first-class input:** three early-track/fake-drop/phrase-artifact cases (WHICH ONE intro, Show Me Love 0:11, kidstopbreathing fake drop; STFU chorus-remark = same section). The operator actively corrects markers when reviewing — consecutive chorus markers inside one drop section must read as ONE drop (matches the existing smart-drop main-vs-continuation design note), and track-start drops need damping (matches AWR-139's runway rule for lasers).
+5. Rekordbox phrase edits made mid-review (ONE CHANCE, kidstopbreathing) mean those tracks' drop lists changed after this report's run — the report tool re-runs cheaply and picks them up; cache entries stay valid (beatgrids unchanged).
+
+**F2-spec input (replaces §6b's level-term ask):** pre-drop blackout = quantized {1,2,4,8,16}, chosen by incoming-drop family/tier and a pre-window "true stop" class (percussion gone + vocals/effects only — derivable from cached `perc_full`/band series), capped by the measured gap, defaulting SHORT; drop markers de-duplicated per section (continuation markers) and damped near track start. These 11 labels are the calibration set; gather more only if the spec author needs a specific boundary.
+
 ## 7. Re-run
 
 ```bash
