@@ -681,11 +681,18 @@ class LEDDispatchPolicyMixin:
 
         drop_preview = self._led_drop_decision_for_anchor(sp_state, commit=True)
         tactical_blackout = getattr(self._led_scene_adapter, "tactical_blackout", None)
-        if (
-            drop_preview is not None
-            and str(getattr(drop_preview, "backend", "")) == "realtime_razer"
-            and callable(tactical_blackout)
-        ):
+        # Interim guard (live 2026-07-08, 3 consecutive drops 15:09-15:11): the
+        # pre-drop blackout ALWAYS rides realtime tactical frames when the adapter
+        # has them — instant razer black + activate assert, no internet leg —
+        # regardless of the previewed drop transport. Riding the cloud
+        # room_blackout scene for cloud-previewed drops lost the latency race
+        # every time and latched the room dark THROUGH the drop. A later cloud
+        # drop scene knocking razer out at the crossing is fine and correct: the
+        # room shows the drop instead of latched darkness. The cloud branch below
+        # remains only for cloud-only adapters (no tactical_blackout) and for
+        # ticks with no committed drop preview. Full impact-transport guarantee
+        # (early cloud stage / RT fallback) is AWR-150.
+        if drop_preview is not None and callable(tactical_blackout):
             self._led_last_auto_role_key = blackout_key
             self._led_last_event = f"automation:smart_drop_blackout:{phase}:realtime"
             outcome = self._led_send_decision(

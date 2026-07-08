@@ -1984,6 +1984,32 @@ class LEDStateManagerTests(unittest.TestCase):
         self.assertTrue(status["smart_drop_blackout_active"])
         self.assertEqual(status["adapter"]["realtime"]["desired_effect"], "blackout")
 
+    def test_cloud_previewed_drop_still_gets_realtime_tactical_blackout(self) -> None:
+        """Interim guard (live 2026-07-08): the pre-drop blackout must never ride
+        the internet. A cloud-previewed drop on a tactical-capable adapter takes
+        the realtime tactical branch — razer black frames, no cloud scene."""
+        director = _AutomationLEDLookDirector()
+        director.preview_decision = _drop_decision("cloud_drop")
+        adapter = _TacticalLEDAdapter()
+        sm = _make_sm(director=director, adapter=adapter)
+        _prepare_playing_push_tick(
+            sm,
+            SmartPhrasingState(
+                transition_mask_arm_latched=True,
+                transition_window_active=True,
+                next_smart_drop_beat=64.0,
+            ),
+        )
+
+        sm._push_tick()
+
+        self.assertEqual(len(adapter.trigger_calls), 0)
+        self.assertEqual(len(adapter.tactical_calls), 1)
+        self.assertEqual(adapter.tactical_calls[0].look, "cloud_drop")
+        status = sm.led_status_provider()
+        self.assertTrue(status["smart_drop_blackout_active"])
+        self.assertEqual(status["adapter"]["realtime"]["desired_effect"], "blackout")
+
     def test_committed_cloud_drop_is_the_look_fired_after_blackout(self) -> None:
         director = _AutomationLEDLookDirector()
         director.preview_decision = _drop_decision("cloud_drop")
