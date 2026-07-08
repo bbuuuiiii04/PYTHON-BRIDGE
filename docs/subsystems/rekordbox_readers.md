@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 74febec
-last_verified_date: 2026-06-29
+last_verified_commit: 4a827f7
+last_verified_date: 2026-07-08
 validation_scope: software-only plus Rekordbox 7.2.11 passive mixer RE evidence routing; hardware-output unvalidated
 ---
 
@@ -63,6 +63,20 @@ Runtime flow:
 - A transient failed ANLZ pointer-chain read (`None`) must not overwrite the last
   successful ANLZ cache entry; empty-string successful reads still represent
   unloaded/empty state. `tests/test_rb_state_reader.py` covers the recovery path.
+- The unresolved-deck-2 playhead scans (`_scan_objc_zone`,
+  `_scan_static_elapsed_candidates`, `_scan_objc_heap_moving`) compare two memory
+  snapshots int32-by-int32. Done as a pure-Python loop that holds the GIL these
+  froze the whole bridge: measured ~54 ms per 512 KB zone pass and ~427 ms per
+  4 MB heap chunk, up to a 128 MB cap = multiple seconds, recurring every 5 s
+  while deck 2 is unresolved during play (the live 1-7 fps LED collapse and
+  `event-late` bursts at cue/load moments). The numeric pre-filter is now shared
+  helpers `_i32_moving_candidates` / `_i32_static_candidates` with a numpy fast
+  path (measured 28-40× — 1.9 ms / 10.6 ms) and a pure fallback that yields the
+  GIL every 16,384 ints. numpy is a lazy OPTIONAL import (repo pattern); it never
+  becomes a hard dependency and any numpy error falls back to the pure loop for
+  that call. Candidate values, order, per-candidate checks, retries, and every log
+  line are unchanged — proven byte-identical against an old-loop oracle (incl. the
+  int32-overflow edge) in `tests/test_rb_memory_scans.py`.
 
 Config:
 - `config.py`
