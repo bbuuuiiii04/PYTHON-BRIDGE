@@ -497,21 +497,13 @@ def _scan_objc_zone(
     actual_dt = max(t1 - t0, 0.001)
     scan_ms = (time.monotonic() - t_scan0) * 1000.0
     results: list[tuple[int, float]] = []
-    n = len(chunk0) // 4
 
-    for i in range(n):
-        r0 = struct.unpack_from("<i", chunk0, i * 4)[0]
-        r1 = struct.unpack_from("<i", chunk1, i * 4)[0]
-        d  = r1 - r0
-        if d <= 0:
-            continue
-        rate = d / actual_dt
-        if not (_D2_RATE_LO <= rate <= _D2_RATE_HI):
-            continue
-        ms = max(0, int(r1 * RB_SCALE))
-        if ms > MEM_MAX_ELAPSED_MS:
-            continue
-        pos_addr  = scan_lo + i * 4
+    for idx, rate, _ms in _i32_moving_candidates(
+        chunk0, chunk1, actual_dt,
+        rate_lo=_D2_RATE_LO, rate_hi=_D2_RATE_HI,
+        scale=RB_SCALE, max_ms=MEM_MAX_ELAPSED_MS, clamp_ms_zero=True,
+    ):
+        pos_addr  = scan_lo + idx * 4
         inner_ptr = pos_addr - RB_POS_OFF
         results.append((inner_ptr, rate))
 
@@ -551,18 +543,11 @@ def _scan_static_elapsed_candidates(
         return []
 
     matches: list[tuple[int, int, int]] = []
-    n = len(chunk) // 4
-    for i in range(n):
-        raw = struct.unpack_from("<i", chunk, i * 4)[0]
-        if raw < 0:
-            continue
-        ms = int(raw * RB_SCALE)
-        if ms > MEM_MAX_ELAPSED_MS:
-            continue
-        delta_ms = abs(ms - target_ms)
-        if delta_ms > tolerance_ms:
-            continue
-        pos_addr = scan_lo + i * 4
+    for idx, ms, delta_ms in _i32_static_candidates(
+        chunk, scale=RB_SCALE, max_ms=MEM_MAX_ELAPSED_MS,
+        target_ms=target_ms, tolerance_ms=tolerance_ms,
+    ):
+        pos_addr = scan_lo + idx * 4
         inner_ptr = pos_addr - RB_POS_OFF
         if inner_ptr & 0xF:
             continue
@@ -640,29 +625,23 @@ def _scan_objc_heap_moving(
 
     time.sleep(dt)
 
-    for addr, chunk0, t0 in chunks0:
+    for chunk_index, (addr, chunk0, t0) in enumerate(chunks0):
+        if chunk_index:
+            time.sleep(0)  # release the GIL between heap chunks
         try:
             chunk1 = _read_bytes(task, addr, len(chunk0))
             t1 = time.monotonic()
         except OSError:
             continue
         actual_dt = max(t1 - t0, 0.001)
-        n = min(len(chunk0), len(chunk1)) // 4
-        for i in range(n):
-            r0 = struct.unpack_from("<i", chunk0, i * 4)[0]
-            r1 = struct.unpack_from("<i", chunk1, i * 4)[0]
-            d = r1 - r0
-            if d <= 0:
-                continue
-            rate = d / actual_dt
-            if not (_D2_RATE_LO <= rate <= _D2_RATE_HI):
-                continue
-            ms = int(r1 * RB_SCALE)
-            if ms < 0 or ms > MEM_MAX_ELAPSED_MS:
-                continue
-            if abs(ms - target_ms) > _D2_HEAP_TARGET_TOL_MS:
-                continue
-            pos_addr = addr + i * 4
+        for idx, rate, ms in _i32_moving_candidates(
+            chunk0, chunk1, actual_dt,
+            rate_lo=_D2_RATE_LO, rate_hi=_D2_RATE_HI,
+            scale=RB_SCALE, max_ms=MEM_MAX_ELAPSED_MS,
+            target_ms=target_ms, target_tol_ms=_D2_HEAP_TARGET_TOL_MS,
+            clamp_ms_zero=False,
+        ):
+            pos_addr = addr + idx * 4
             inner_ptr = pos_addr - RB_POS_OFF
             if inner_ptr & 0xF:
                 continue
