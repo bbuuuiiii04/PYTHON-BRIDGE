@@ -1,6 +1,6 @@
 # Implementation Spec - Drop-Impact Transport Guarantee (impact never gambles on internet latency)
 
-status: planned (awaiting executive review; Task 3.1 already landed as the live interim guard `e707199`)
+status: APPROVED FOR IMPLEMENTATION (executive review 2026-07-08, no required changes; Task 3.1 already landed as the live interim guard `e707199`). SEQUENCING RULE: implement only AFTER the AWR-151 Tasks 1-2 instrumentation round has landed and been reviewed — both touch led_dispatch_policy.py and the runner/frame-engine surface; one implementer at a time on those files, never parallel.
 last_verified_commit: e707199
 owner: operator (Brandon) via Claude Fable 5 orchestration session 2026-07-08
 registry: AWR-150
