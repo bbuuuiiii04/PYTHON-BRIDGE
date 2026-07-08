@@ -288,21 +288,17 @@ class ResolveSlotColorsTests(unittest.TestCase):
 
     def test_gradient_slots_within_focus_window(self):
         # Sample each gradient slot's p and confirm it equals _p_to_rgb on a
-        # p inside [focus_lo, focus_hi] blended with palette.white.
-        from rb_ss_bridge_v2.led_color_engine import _p_to_rgb, _blend_white
+        # p inside [focus_lo, focus_hi].
+        from rb_ss_bridge_v2.led_color_engine import _p_to_rgb
         eng = _engine(seed=3)
         focus_lo, focus_hi = eng._focus_window("groove")
-        palette = eng._config.palettes[eng._current_palette]
         res = self._resolve(eng)
         gradient = res["slot_colors"][:5]
         for i, rgb in enumerate(gradient):
             t = i / 4  # gradient_count - 1 == 4
             p = focus_lo + t * (focus_hi - focus_lo)
             p = max(0.0, min(1.0, p))
-            expect = _blend_white(
-                _p_to_rgb(p, eng._config.scale_stops, eng._stop_positions),
-                palette.white,
-            )
+            expect = _p_to_rgb(p, eng._config.scale_stops, eng._stop_positions)
             self.assertEqual(rgb, expect)
 
     def test_mono_focus_collapses_gradient_slots(self):
@@ -369,7 +365,7 @@ class ResolveColorRegressionTests(unittest.TestCase):
         # so instead assert resolve_color equals an INDEPENDENT recomputation of
         # the exact original inline formula — proving _focus_window is faithful.
         from rb_ss_bridge_v2.led_color_engine import (
-            _p_to_rgb, _blend_white, _blake2b_int, _rng_from_seed,
+            _p_to_rgb, _blake2b_int, _rng_from_seed,
         )
         for (seed, role, section_id, cycle, multi) in self.GOLDEN:
             eng = self._state(seed)
