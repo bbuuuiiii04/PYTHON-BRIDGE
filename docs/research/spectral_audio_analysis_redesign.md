@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified + measured-corpus
-last_verified_commit: f3c06bb
-last_verified_date: 2026-07-05
+last_verified_commit: 016b3bd
+last_verified_date: 2026-07-08
 validation_scope: software build + corpus validation only — v4 analysis layer built and validated against the local Rekordbox library (BY GENRE playlists as labeled ground truth); no lighting behavior change, no bridge execution, no hardware validation
 ---
 
@@ -572,6 +572,16 @@ Every event above is a description; ANLZ markers remain the only structural trig
 - **m4a**: decoded via the installed audioread fallback during the sweep (deprecation-
   warned; works today). If it ever disappears, those ≤8 tracks degrade to the ANLZ tier.
 - Calibration, stability, and discrimination numbers from these entries: §6.5.
+
+**Re-verification at full-library scale (2026-07-08, AWR-147):** the sweep re-ran on the
+grown library (731 on-disk tracks, +10 extracted, same 19 `no_grid` + 1 known undecodable
+flac), and every §6.5 calibration claim was recomputed on the FULL BY GENRE set (545
+tracks / ~3.3k drops vs. the 219-track partial-cache basis above) by the permanent report
+tool `tools/spectral_calibration_report.py`. Every claim holds — including the frozen F2
+tier cuts landing within 0.0005 of their original percentiles — with two marginal watch
+items (roll threshold now exactly at corpus p90; grit even/odd Spearman 0.9016 vs the
+0.902 gate floor). No constant was changed. Full numbers, named counterexamples, and the
+re-run recipe: `docs/research/spectral_calibration_expansion_2026_07_08.md`.
 
 ## 7b. Claim-label index (load-bearing claims of this report)
 
