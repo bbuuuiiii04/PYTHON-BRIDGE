@@ -82,6 +82,7 @@ class GoveeFrameEngineClient:
         self._pending_respawn = False
         self._respawn_ready_at: float | None = None
         self._backoff = RESPAWN_BACKOFF_S
+        self._band_hb_logged = False  # AWR-151: band report is logged once per spawn
 
     # ── Public surface (lock-and-flag, ZERO I/O on the caller thread) ───────────
     def set_beat_provider(self, provider: Callable[[], Any] | None) -> None:
@@ -156,6 +157,8 @@ class GoveeFrameEngineClient:
                 "respawn_count": respawn_count, "active": False,
                 "provider_bound": provider_bound, "desired_effect": "",
                 "last_error": "",
+                "band_setpriority": False, "band_nsactivity": False,
+                "band_darwin_prio": None,
             }
         age = (now - last_hb_at) if last_hb_at is not None else 0.0
         return {
@@ -164,6 +167,9 @@ class GoveeFrameEngineClient:
             "respawn_count": respawn_count,
             "heartbeat_age_s": round(age, 3),
             "fps_degraded": bool(hb.get("fps_degraded", False)),
+            "band_setpriority": bool(hb.get("band_setpriority", False)),
+            "band_nsactivity": bool(hb.get("band_nsactivity", False)),
+            "band_darwin_prio": hb.get("band_darwin_prio"),
             **(hb.get("status") or {}),
         }
 
@@ -274,6 +280,7 @@ class GoveeFrameEngineClient:
         self._recv_buf = b""
         self._child_started_at = now
         self._last_hb = None
+        self._band_hb_logged = False  # re-log the band report for the new child
         self._ever_spawned = True
         init_msg = {**self._engine_init, "t": "init"}
         self._write(init_msg)  # init is sent first, directly (never queued)
@@ -349,6 +356,7 @@ class GoveeFrameEngineClient:
                 got_hb = True
         if got_hb:
             self._child_alive_health()
+            self._log_band_report()
 
     # ── Health edge-trigger (client thread only) ────────────────────────────────
     def _child_alive_health(self) -> None:
@@ -358,6 +366,38 @@ class GoveeFrameEngineClient:
     def _child_dead_health(self) -> None:
         if log_changed("govee_frame_engine_alive", False):
             bridge_log.health("govee.frame_engine", "child down — respawning")
+
+    def _log_band_report(self) -> None:
+        """AWR-151 Task 2: surface the child's scheduling-band self-report into the
+        jsonl. One INFO line on the first heartbeat after each (re)spawn, plus an
+        edge-triggered health warning if a priority lever failed to take hold — the
+        raise result lived only in the watcher terminal before this."""
+        hb = self._last_hb_msg
+        if hb is None:
+            return
+        setp = bool(hb.get("band_setpriority", False))
+        nsact = bool(hb.get("band_nsactivity", False))
+        if not self._band_hb_logged:
+            self._band_hb_logged = True
+            bridge_log.perf(
+                "govee.frame_engine",
+                "frame-engine band setpriority=%s nsactivity=%s darwin_prio=%s",
+                setp, nsact, hb.get("band_darwin_prio"),
+                data={
+                    "band_setpriority": setp,
+                    "band_nsactivity": nsact,
+                    "band_darwin_prio": hb.get("band_darwin_prio"),
+                })
+        band_ok = setp and nsact
+        if log_changed("govee_frame_engine_band_ok", band_ok):
+            if band_ok:
+                bridge_log.health(
+                    "govee.frame_engine", "scheduling band healthy", lvl=logging.INFO)
+            else:
+                bridge_log.health(
+                    "govee.frame_engine",
+                    "scheduling band raise failed (setpriority=%s nsactivity=%s)"
+                    % (setp, nsact))
 
     # ── Process I/O helpers (client / shutdown thread only) ─────────────────────
     def _write(self, msg: dict) -> bool:

@@ -435,6 +435,10 @@ class LEDDispatchPolicyMixin:
                 "achieved_fps",
                 "respawn_count",
                 "fps_degraded",
+                # AWR-151 scheduling-band self-report
+                "band_setpriority",
+                "band_nsactivity",
+                "band_darwin_prio",
             ):
                 value = realtime.get(key)
                 if isinstance(value, (str, int, float, bool)) or value is None:

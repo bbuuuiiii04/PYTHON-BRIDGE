@@ -102,11 +102,42 @@ def _qos_user_interactive() -> None:
     fn(0x21, 0)  # QOS_CLASS_USER_INTERACTIVE — confirmed returns 0 on this machine
 
 
+def _libc() -> ctypes.CDLL:
+    return ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+
+
+def _set_darwin_prio_normal() -> bool:
+    """Re-assert the normal darwin scheduling band (idempotent, cheap syscall).
+
+    setpriority(PRIO_DARWIN_PROCESS=4, 0, 0) clears any darwin background band on
+    this process, healing a post-start demotion. Safe to call every heartbeat.
+    """
+    return _libc().setpriority(4, 0, 0) == 0
+
+
+def _get_darwin_prio() -> int | None:
+    """Read this process's live darwin scheduling-band value, or None on error.
+
+    getpriority(PRIO_DARWIN_PROCESS=4, 0). Verified live on this machine
+    (2026-07-08): returns 0 with errno 0 when the process is NOT in the darwin
+    background/throttled band; a nonzero reading would signal a demotion.
+    getpriority can legitimately return -1, so errno is cleared first and checked
+    to tell a real -1 reading from a syscall error.
+    """
+    libc = _libc()
+    ctypes.set_errno(0)
+    val = libc.getpriority(4, 0)
+    if val == -1 and ctypes.get_errno() != 0:
+        return None
+    return int(val)
+
+
 def raise_scheduling_band() -> dict:
-    report = {"setpriority": False, "nsactivity": False}
-    libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
-    # PRIO_DARWIN_PROCESS=4: clear any darwin background band on this process.
-    report["setpriority"] = libc.setpriority(4, 0, 0) == 0
+    report: dict = {"setpriority": False, "nsactivity": False, "darwin_prio": None}
+    # PRIO_DARWIN_PROCESS=4: clear any darwin background band on this process,
+    # then read the resulting band value back for the heartbeat.
+    report["setpriority"] = _set_darwin_prio_normal()
+    report["darwin_prio"] = _get_darwin_prio()
     try:
         import Foundation  # pyobjc — confirmed installed on this machine
 
@@ -161,6 +192,22 @@ class FrameEngineHost:
         self._hb_prev_index = 0
         self._low_hb_count = 0
         self._degraded_latched = False
+
+        # AWR-151 Task 1 scheduling-band state. nsactivity is set once at startup
+        # (seeded via set_band_report); setpriority + darwin_prio are re-asserted
+        # and re-read every heartbeat so a post-start demotion self-heals and
+        # becomes visible as a changing number.
+        self._band_setpriority = False
+        self._band_nsactivity = False
+        self._band_darwin_prio: int | None = None
+
+    def set_band_report(self, report: dict) -> None:
+        """Seed the host with the startup scheduling-band report so the first
+        heartbeat already carries nsactivity + the initial darwin_prio (setpriority
+        is re-asserted live each heartbeat)."""
+        self._band_setpriority = bool(report.get("setpriority", False))
+        self._band_nsactivity = bool(report.get("nsactivity", False))
+        self._band_darwin_prio = report.get("darwin_prio")
 
     # -- anchor / beat provider --------------------------------------------------
     def beat_provider(self) -> BeatAnchor | None:
@@ -332,10 +379,25 @@ class FrameEngineHost:
             self._degraded_latched = False
             self._log.info("[ENGINE] fps recovered: %.1f", achieved)
 
+        # Task 1: re-assert the cheap darwin-band lever and re-read the live band
+        # value every heartbeat. The re-assert heals a post-start demotion; the
+        # re-read makes it visible. Edge-triggered INFO only when the value moves —
+        # per-heartbeat detail stays out of INFO.
+        self._band_setpriority = _set_darwin_prio_normal()
+        prio = _get_darwin_prio()
+        if prio != self._band_darwin_prio:
+            self._log.info(
+                "[ENGINE] darwin prio band changed: %s -> %s",
+                self._band_darwin_prio, prio)
+        self._band_darwin_prio = prio
+
         hb = {
             "t": "hb", "pid": os.getpid(),
             "achieved_fps": round(achieved, 2),
             "streaming": streaming, "fps_degraded": degraded,
+            "band_setpriority": self._band_setpriority,
+            "band_nsactivity": self._band_nsactivity,
+            "band_darwin_prio": self._band_darwin_prio,
             "status": status,
         }
         try:
@@ -368,6 +430,7 @@ def main(argv: list[str] | None = None) -> None:
     conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM, fileno=args.fd)
     conn.setblocking(False)
     host = FrameEngineHost(conn, transport_factory=_make_transport)
+    host.set_band_report(report)  # first heartbeat carries the startup band state
 
     def _on_sigterm(_signum: int, _frame: Any) -> None:
         host.request_shutdown()
