@@ -1664,6 +1664,10 @@ class LEDDispatchPolicyMixin:
         return decision
 
     def _led_diy_eligible_predicate(self) -> Any:
+        # AWR-152 #6: under v2 the v1 palette is frozen at init, so tag filtering
+        # is arbitrary (and white-tagged looks always pass) — filter nothing.
+        if bool(getattr(self, "_led_v2_latch", False)):
+            return None
         engine = self._led_color_engine
         return engine.diy_eligible if (engine is not None and engine.enabled) else None
 
