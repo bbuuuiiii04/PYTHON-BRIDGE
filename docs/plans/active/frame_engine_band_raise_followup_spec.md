@@ -1,6 +1,6 @@
 # Implementation Spec - Frame Engine Scheduling-Band Follow-up (verify the raise, self-heal the timing)
 
-status: planned (awaiting executive review)
+status: approved for implementation (executive review 2026-07-08; two amendments folded: wall-clock spin cap, named time-constraint escalation)
 last_verified_commit: e707199
 owner: operator (Brandon) via Claude Fable 5 orchestration session 2026-07-08
 registry: AWR-151
@@ -35,6 +35,10 @@ Execute tasks **in order, one commit per task**. File:lines verified at HEAD `e7
 4. [confirmed] The runner already accepts an injected `sleep_fn`
    (`govee_realtime_runner.py:60,79`), so a precision-sleep backstop needs ZERO runner changes —
    the child owns the sleep function.
+5. [confirmed, operator live 2026-07-08 evening — post coast-fix + AWR-148 restart] Scan
+   GIL-holds are down to ~30 ms and the blackout cycling is gone; live fps under load is
+   **15-19 with child CPU at 1.4%** — the loop is nowhere near compute-bound, so the 16.7 ms
+   sleep is stretching ~3-4×. Pure sleep-stretch: exactly the failure mode Task 3 attacks.
 
 ## Part B - Tasks (implement exactly, in order)
 
@@ -89,8 +93,12 @@ switch the runner's sleep to a two-stage precise mode at bounded CPU cost.
 2. The host builds the runner with `sleep_fn=self._adaptive_sleep` (a closure; the runner
    constructor already takes it — no runner change). Normal mode: `time.sleep(s)` verbatim.
    Precise mode: `time.sleep(max(0, s - PRECISE_COARSE_MARGIN_S))` then short
-   `time.sleep(PRECISE_SPIN_SLICE_S)` slices until the original deadline, never exceeding
-   `PRECISE_SPIN_MAX_S` of slicing per call.
+   `time.sleep(PRECISE_SPIN_SLICE_S)` slices until the original deadline. **Spin-cap semantics
+   are WALL-CLOCK (executive amendment 1): the slice loop exits at
+   `min(original_deadline, slice_loop_start + PRECISE_SPIN_MAX_S)` measured by
+   `time.monotonic()` — NOT by summed requested sleep time — because under the very throttling
+   this mode exists to defeat, each 0.5 ms slice may really take 2-3 ms. State this in a code
+   comment at the loop.**
 3. Mode switching lives in `_send_heartbeat` (single-writer: the host loop): after 3 consecutive
    degraded heartbeats (`fps_degraded` already computed there) → `sleep_mode = "precise"`;
    after 10 consecutive clean streaming heartbeats → back to `"normal"`. The mode is a plain
@@ -99,6 +107,15 @@ switch the runner's sleep to a two-stage precise mode at bounded CPU cost.
 4. Worst-case CPU cost, stated for the record: at 60 fps precise mode burns ≤ 4 ms × 60/s =
    24% of one core in slices — acceptable as a degraded-only backstop on this machine; it
    self-disarms after 10 clean heartbeats.
+
+### Escalation path (executive amendment 2 — DESIGN-ONLY NOTE, do not implement)
+
+If precise mode does not hold >= 50 fps on the next live mix, the named next lever is the macOS
+**thread time-constraint policy**: `thread_policy_set(THREAD_TIME_CONSTRAINT_POLICY)` via ctypes
+on the frame thread — the mach primitive audio apps use for guaranteed scheduling. The frame
+loop's duty cycle is tiny (~0.5 ms of work per 16.7 ms period), so a time-constraint declaration
+is safe here. Recorded so the escalation is a named plan, not a rediscovery; it requires a fresh
+spec + executive release before any implementation.
 
 ## Part C - Invariants That MUST Still Hold (live safety)
 
@@ -115,8 +132,10 @@ switch the runner's sleep to a two-stage precise mode at bounded CPU cost.
 Pure (`tests/test_govee_frame_engine.py`): heartbeat carries the four new scalars; getpriority
 re-read/re-assert called per heartbeat (fake libc seam — factor the ctypes calls behind a small
 module-level function the test monkeypatches); `plan_precise_sleep` arithmetic incl. the spin
-cap and sub-margin remainders; mode switches at exactly 3 degraded / 10 clean heartbeats (fake
-clock); the adaptive closure calls plain sleep in normal mode. Client: new fields pass through
+cap and sub-margin remainders; **the wall-clock spin cap: with a fake clock where each requested
+0.5 ms slice consumes 3 ms of wall time, the slice loop exits within `PRECISE_SPIN_MAX_S` of
+wall time (executive amendment 1)**; mode switches at exactly 3 degraded / 10 clean heartbeats
+(fake clock); the adaptive closure calls plain sleep in normal mode. Client: new fields pass through
 `status()` with safe defaults pre-heartbeat; the first-heartbeat INFO log fires once per spawn
 (fake bridge_log seam or log_changed key assertion). Policy: whitelist passes the four keys.
 Integration (`tests/test_govee_frame_engine_integration.py`, CI-skipped): the real child's first
@@ -144,4 +163,8 @@ output instead of a line lost in the watcher terminal; and if macOS still slows 
 it now notices within ~3 seconds and switches itself to a more precise (slightly more
 CPU-hungry) timing mode until the speed recovers, then switches back. What this does NOT do:
 change any look, blackout, or timing behavior — it is instrumentation plus a self-healing
-backstop, and the real proof is the fps number on his next mix.
+backstop, and the real proof is the fps number on his next mix. The summary must also name the
+escalation plan in plain words: if the precise mode still cannot hold at least 50 fps live,
+the next step is asking macOS for the same guaranteed-scheduling treatment audio apps get for
+their sound threads (time-constraint policy) — already scoped as a design note, needing only
+the go-ahead.
