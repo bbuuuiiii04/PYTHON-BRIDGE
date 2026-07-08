@@ -149,6 +149,9 @@ class LEDDispatchCoordinator:
                 return False
             self._runner.set_desired(self._spec_from_decision(decision))
             self._runner.fire_trigger()
+            # Re-assert razer mode: if a cloud scene had knocked the strip out of it,
+            # this realtime takeover would otherwise stream into the void.
+            self._runner.request_activate_assert()
             self._realtime_trigger_count += 1
             self._last_dispatch_mono = now
             self._last_dispatch_role = role
@@ -177,14 +180,6 @@ class LEDDispatchCoordinator:
                     "[LED] look=%s role=%s via=cloud",
                     getattr(decision, "look", ""), role,
             )
-            # WI-6: notify runner that a cloud DIY was dispatched so it can
-            # reconcile if a late response flips the strip out of razer mode.
-            rate_limits = getattr(self._config, "rate_limits", None)
-            window_s = float(getattr(rate_limits, "rt_reconcile_window_s", 5.0) or 5.0)
-            interval_s = float(getattr(rate_limits, "rt_reconcile_interval_s", 1.0) or 1.0)
-            note = getattr(self._runner, "note_cloud_dispatch", None)
-            if callable(note):
-                note(now, window_s=window_s, interval_s=interval_s)
         return accepted
 
     def tactical_blackout(self, decision: LEDLookDecision | None = None) -> bool:
@@ -201,8 +196,20 @@ class LEDDispatchCoordinator:
                 applied_monotonic=self._time_fn(),
             )
         )
+        # Re-assert razer so the black frames reliably reach the strip. No brightness
+        # change here: the pre-drop blackout is followed 1-4 beats later by a drop look,
+        # and dimming would risk a dark drop on one lost restore packet.
+        self._runner.request_activate_assert()
         self._tactical_blackout_count += 1
         return True
+
+    def restore_brightness(self) -> None:
+        """Restore full LAN brightness (used when the operator blackout clears).
+
+        The next look after a blackout may take the cloud path, whose scenes may not
+        reset device brightness, so the policy restores it explicitly.
+        """
+        self._runner.request_brightness(100)
 
     def status(self) -> dict[str, Any]:
         payload = self._adapter.status()
