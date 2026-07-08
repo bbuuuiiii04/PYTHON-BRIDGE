@@ -164,6 +164,44 @@ Evidence already captured at `e707199`+ (2026-07-08 evening, read-only, live pro
 3. **Deliverable: a findings report to the executive naming the mechanism with the flip
    experiment as proof — BEFORE any Phase C implementation (hard review gate).**
 
+### PHASE B FINDINGS (2026-07-08 evening — mechanism NAMED with flip proof; awaiting executive review before Phase C)
+
+**Root cause [confirmed by flip experiment]: launchd's default resource throttle on LaunchAgents
+with no `ProcessType` key.** All three lighting trees are LaunchAgents (`launchctl list`:
+`com.bbui.bridge-menubar` → menubar → watcher → bridge → frame-engine child;
+`com.bbui.led-pad`; `com.bbui.laser-pad`), and NONE of their plists sets `ProcessType`
+(`~/Library/LaunchAgents/*.plist`, read 2026-07-08). launchd.plist(5): an unspecified
+ProcessType gets "light resource limits, throttling CPU usage and I/O bandwidth" — applied to
+the job's coalition and inherited by every descendant at spawn (reparenting does NOT move a
+process out of its birth coalition, which is why the launchd-ppid Pad is still throttled).
+
+**The flip experiment (temporary user-domain probe agents, loaded then fully cleaned up):**
+identical stdlib probe replicating the runner's exact deadline-sleep loop —
+- as LaunchAgent, ProcessType UNSET: **28.1 fps** (p50 23.6 ms, p90 82.2 ms) — the Pad's
+  mysterious steady 28 reproduced to the decimal;
+- same agent + `ProcessType=Interactive`: **60.0 fps** (p50 16.6 ms, p90 19.6 ms).
+One plist key flips it. `darwin_prio=0` in BOTH runs — the coalition throttle is invisible to
+`getpriority`, which is why the AWR-146 `setpriority` lever measured success while doing
+nothing, and why per-thread QoS + NSActivity could not rescue it (all inside-the-coalition
+levers).
+
+**Eliminated by the probe matrix (10-case, 5 valid):** interpreter version (CLT 3.9 == homebrew
+3.14 == 60.0 fps in an interactive coalition), ambient machine load (60.0 under 3-core burn, no
+levers), plain parentage. Matrix harness note: the orphan cases failed silently (macOS has no
+`setsid` binary) — moot, since coalitions are birth-assigned. The child's deeper 15-19 (vs the
+Pad's 28) is the same throttled coalition plus real-mix load amplifying the timer-coalescing
+tail (p90 82 ms visible even at idle in the throttled agent).
+
+**Proposed Phase C (awaiting executive release):** add `ProcessType=Interactive` to
+`com.bbui.bridge-menubar.plist` (fixes the whole tree: bridge AND frame-engine child),
+`com.bbui.led-pad.plist`, `com.bbui.laser-pad.plist` — machine config, hand-installed (not
+repo-generated; referenced by `docs/setup/repo_move_checklist.md` as "the three lns"), so the
+fix = plist edits + `launchctl bootout/bootstrap` at an operator-safe moment + repo
+documentation (led_govee card, move checklist) + optionally a small repo checker so a future
+plist regression is caught. The AWR-151 instrumentation then verifies live: expect
+`achieved_fps ≈ 60` steady and the 15-19 wobble gone. The thread time-constraint contract stays
+a named reserve lever, likely unnecessary.
+
 ## Phase C - The true fix (design-gated; do not start until the executive reviews Phase B)
 
 Whatever Phase B names, the fix lands at the right layer: correct scheduling placement at spawn
