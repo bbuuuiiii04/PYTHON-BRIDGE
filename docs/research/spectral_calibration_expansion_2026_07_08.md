@@ -234,6 +234,27 @@ Round 3 presented complete per-track analysis stories (axes, zone, chapters, tex
 
 **Runtime-truth note (operator asked; verified at HEAD):** today the bridge consumes this analysis in exactly two places — LED color identity (`state_manager.py:339-341`) and the smart-drop energy-shadow scorer (`state_manager.py:268-283`, via the v3-compat envelopes). Families/tiers/blackouts/seasoning are design-only reads; nothing else renders from v4 yet.
 
+## 6e. Operator listening pass, round 4 — mainstage classics, zone/color reads, riser builds (2026-07-08)
+
+| Track | Analysis said | Operator said |
+|---|---|---|
+| Satisfaction (Hardwell & Maddix bootleg) | DEEP_POOL, all 6 drops COMET **T1**; 1:40 = 16-dark | dark ✓ but "hard techno — should be **red**, or blue works"; **1:40 16-black CORRECT ✓**; drops = "hard rolling relentless comet pounding" — **tier UNDER-read again**, family comet ✓ |
+| Laserbeam (Carlo Kalu) drops v0.06-0.16 | markers in a quiet stretch | "phrase analysis was TERRIBLE, fixing now" — marker quality, not analysis; color red (deep blue ok) |
+| NO BROKE BOYS (AVELLO) | ION, WALL T2/T3, 1-beat cuts | bright/punchy ✓, ION works "**but could actually be rainbow** — euphoric hard-hitting synths"; 1-beat cut ✓ |
+| Age Of Love (Dave Summer) | TWILIGHT, 1:30 WALL **T3**, 13-dark | "very dark techno — would be **red**"; "more like **wall 2**"; **16 beats works ✓** |
+| I COULD BE THE ONE (DRYDEN) | 51-beat sustained-synth from 0:18; 1:18 HOUSE T3, perc-flick | 0:18 is "straight **vocals** and backing melody" (class is source-agnostic — vocals count as harmonic sustain); **1:18 HOUSE T3 ✓**; **1-beat perc-flick "perfect" ✓** |
+| Feel So Close | EMBERCORE distortion 1.0; 3:00 10-dark | read distrusted ✓ — "**warm ember vibes, literally summer**" (warm hue family plausible, aggression wrong); 3:00 → "maybe 1 beat, or none — not sure" (soft label) |
+| Lean On (Tiesto & MOTi) | 16-dark ×3 incl. over playing verses | 0:15 "hardly a drop — DJ intro mixing section"; **track changes BPM throughout → beatgrid + phrasing wrong, all reads unreliable** |
+| Clarity | GLACIER, drops T1/T2, 4:22 4-dark | "my literal **weapon** — **full-speed rainbow cycling** track"; first drop 1-beat black, second drop 4-beat |
+
+**Model updates (running totals):**
+- **16-beat blackout REHABILITATED for true collapses before monster drops** — now ×3 validated (kidstopbreathing, Satisfaction 1:40, Age Of Love 1:30). Refined ladder: 1-2 = grooves / runs-straight-in; 4 = default emphasis unit; 8 = intense trap / stops; **16 = true collapse + monster only**. Perc-cut 1-beat flick rule ear-validated verbatim ("perfect").
+- **Tier misses now ~6 of ~15 clearly graded** — new: Satisfaction (six T1 reads vs "hard rolling relentless"), Age Of Love (T3 → "wall 2"); new validation: I COULD BE THE ONE HOUSE T3 ✓. Under-reads cluster on hard-techno/big-room/older masters — reinforces era/family-aware tier redesign.
+- **NEW COLOR CLASS: rainbow tracks** (Clarity "full-speed rainbow cycling", NO BROKE BOYS "could be rainbow") — connects to the existing Stream Deck Rainbow mode surface; candidate per-track identity treatment for the color lane.
+- **Red-for-hard-techno pattern (×4 labels): Satisfaction, Laserbeam, Age Of Love + Stereo Love (§6d) all want RED** where zones read DEEP_POOL/TWILIGHT (blue/purple). Systematic zone-hue divergence for the led_identity lane — and it matches the F2 COMET design's "driving red comet."
+- **Data-quality classes formalized:** (a) variable-BPM tracks invalidate the whole beat-aligned analysis (Lean On — grid wrong throughout); a cheap per-track **grid-health flag** (beat-interval variance over the cached grid) is a recommended future analysis-layer add — flagged, NOT implemented; (b) DJ-intro pseudo-drops at track start (Lean On 0:15) join the track-start damping rule; (c) operator fixed a third track's markers mid-review (Laserbeam).
+- **Semantics:** `sustained_synth` counts VOCALS (clean harmonic sustain, source-agnostic — I COULD BE THE ONE 0:18); fine for euphoric-clean seasoning, never present it as "synth pads."
+
 ## 7. Re-run
 
 ```bash
