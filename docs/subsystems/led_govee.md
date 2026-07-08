@@ -120,6 +120,51 @@ Frame engine child process (AWR-146, 2026-07-08; implemented, software-tested, h
   `request_brightness(0)` after the blackout is accepted (the unknown-target early-return does not
   dim), duck-typed so a cloud-only adapter no-ops. Tactical (pre-drop) blackout still never dims.
 
+Drop-impact transport guarantee (AWR-150, 2026-07-08; implemented, software-tested, hardware-unvalidated):
+- The problem. A cloud drop scene is a fire-and-forget HTTP send with no device-residency feedback;
+  its apply latency (observed tail ~5 s) routinely exceeds the 1-4 beat pre-drop runway. Live
+  2026-07-08: cloud-previewed drops rode the cloud `room_blackout` for the pre-drop blackout and the
+  late cloud drop scene latched the room dark through the beat. The rule (operator, do not re-litigate):
+  the pre-drop-blackout + drop-impact pair must never depend on internet latency, and cloud drops stay
+  in rotation (never deleted, never filtered) — they just cannot own the beat.
+- Pre-drop blackout (Task 3.1, interim guard `e707199`, unchanged). `_dispatch_led_smart_drop_blackout`
+  takes the realtime tactical branch for ANY previewed drop transport when the adapter has
+  `tactical_blackout`; the cloud `room_blackout` path remains only for cloud-only adapters (no
+  `tactical_blackout`) and no-preview ticks.
+- Drop impact. In `_dispatch_led_automation`'s drop branch, when the committed pick's backend is
+  `cloud_diy` AND the adapter can stage (duck-check: `stage_cloud_takeover` present) AND the drop bank
+  has a realtime look, the impact dispatches a realtime SUBSTITUTE through the normal `_led_send_decision`
+  path (coordinator realtime branch: owner acquire + assert + dwell, exactly like any RT drop) and, on
+  `"accepted"`, stages the committed cloud scene. `LEDLookDirector.substitute_realtime_drop` selects from
+  the drop bank's `realtime_razer` subset via the existing `(drop, realtime_razer)` shuffle bag and
+  backend cursor, advancing ONLY that backend cursor — never `_role_cursors["drop"]`, because the plan
+  slot was already consumed by the committed cloud pick (AWR-149 determinism) — and queues no paired
+  post_drop (the committed pick already queued its pair). It returns None on a cloud-only drop bank, and
+  the caller then keeps today's cloud dispatch.
+- Staging without a dark hole. `LEDDispatchCoordinator.stage_cloud_takeover(decision)` sends the cloud
+  scene with NO realtime teardown (no `force_deactivate`), NO owner-state change (owner stays
+  `REALTIME_RAZER` for the yield window), and NO dwell bookkeeping (the substitute recorded this tick;
+  a second record would poison the WI-3 dwell gate). It also calls the runner's new
+  `request_keepalive_yield()` — the AWR-145 2 s razer keepalive would otherwise steal the strip back
+  within 2 s of the cloud scene landing. The yield is bounded (`KEEPALIVE_YIELD_MAX_S = 30.0` cap, so a
+  forgotten yield self-heals) and CANCELLED by any new intent — `set_desired`, `fire_trigger`,
+  `request_activate_assert`, `emergency_stop`, `force_deactivate` — so a blackout never finds the
+  keepalive asleep; brightness requests and anchors do not cancel. It is forwarded across the
+  frame-engine IPC (`{"t":"keepalive_yield"}` in `govee_frame_engine.py`, a mirror lock-and-enqueue on
+  `GoveeFrameEngineClient`) and is intentionally NOT replayed on child respawn (a fresh child
+  re-asserting razer is the safe direction).
+- Bookkeeping + failure. The drop is recorded under the COMMITTED cloud identity
+  (`_led_note_drop_decision_accepted(committed)`), so pairing/presentation/duration are unchanged; the
+  substitute is a rendering stand-in only. The AWR-145 retry carries the committed decision in
+  `_led_drop_cloud_stage_pending` so a rejected-then-accepted substitute stages exactly once (both the
+  first-try and retry accepted paths). If staging errors, the realtime substitute already owns the beat
+  (room lit, on-beat) — `_led_stage_cloud_drop_takeover` logs and continues, never failing the impact.
+- Net effect. Every drop lands lit on the beat via realtime frames; a cloud drop scene, when the rotation
+  picks one, upgrades the room mid-drop (typically 1-5 s in) instead of gambling the impact moment; no
+  blackout sticks past its drop. F2-forward bonus: every drop impact now has realtime frames for future
+  within-drop choreography to ride, regardless of the picked transport. Software-tested only; the live
+  feel is the operator's next mix.
+
 Audit P5 (2026-07-03):
 - LED dispatch policy now lives in `led_dispatch_policy.py` as `LEDDispatchPolicyMixin`, mixed into
   `StateManager`. The `_led_*` fields remain on the `StateManager` instance, and the backend-routing
