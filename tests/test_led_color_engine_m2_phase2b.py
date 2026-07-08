@@ -48,7 +48,7 @@ from rb_ss_bridge_v2.state_manager import StateManager  # noqa: E402
 
 def _engine(*, enabled: bool = True, **overrides) -> LedColorEngine:
     palettes = {
-        "blue_cyan": Palette(range=("cyan", "blue"), white=0.0, spread=0.10, weight=10),
+        "blue_cyan": Palette(range=("cyan", "blue"), spread=0.10, weight=10),
     }
     cfg_kwargs = dict(
         enabled=enabled,

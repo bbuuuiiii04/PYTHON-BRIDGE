@@ -58,7 +58,6 @@ _SCALE_STOPS = {
 _PALETTES = {
     "blue_cyan": Palette(
         range=("cyan", "blue"),
-        white=0.0,
         spread=0.10,
         weight=14.0,
         dwell=4,
@@ -66,14 +65,12 @@ _PALETTES = {
     ),
     "red": Palette(
         range=("red", "red"),
-        white=0.0,
         spread=0.10,
         weight=9.0,
         dwell=6,
     ),
     "purple_pink_white": Palette(
         range=("purple", "magenta"),
-        white=0.5,
         spread=0.15,
         weight=1.0,
     ),
@@ -275,10 +272,9 @@ class ResolveSlotColorsTests(unittest.TestCase):
         self.assertEqual(len(res["slot_colors"]), 6)
 
     def test_slot_five_is_pure_white(self):
-        # Use a palette with white blend to prove slot 5 is NOT white-blended:
-        # it must be exactly (255,255,255) regardless of palette.white.
+        # Slot 5 is a reserved pure-white slot, independent of the selected palette.
         eng = _engine(seed=7)
-        eng.set_palette("purple_pink_white")  # white=0.5
+        eng.set_palette("purple_pink_white")
         res = self._resolve(eng)
         self.assertEqual(res["slot_colors"][5], (255, 255, 255))
 

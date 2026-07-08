@@ -11,11 +11,7 @@ from rb_ss_bridge_v2.govee_frame_renderer import (  # noqa: E402
     REALTIME_EFFECT_PARAM_KEYS,
     _M2_PHASE2A_PARAM_KEYS,
 )
-from rb_ss_bridge_v2.led_color_engine import (  # noqa: E402
-    LedColorEngine,
-    _blend_white,
-    _p_to_rgb,
-)
+from rb_ss_bridge_v2.led_color_engine import LedColorEngine  # noqa: E402
 from rb_ss_bridge_v2.led_models import ColorEngineConfig, Palette  # noqa: E402
 
 
@@ -63,7 +59,7 @@ def _config(
         palettes={
             "wide": palette
             if palette is not None
-            else Palette(range=("cyan", "red"), white=0.0, spread=0.0, weight=1.0)
+            else Palette(range=("cyan", "red"), spread=0.0, weight=1.0)
         },
         set_seed_mode="fixed:12345",
     )
@@ -155,17 +151,8 @@ class PatchSRandomWithMonoChanceTests(unittest.TestCase):
         }
         self.assertEqual(len(unstepped_vectors), 1)
 
-    def test_white_blend_applies_to_mono_hue(self) -> None:
-        palette = Palette(range=("red", "red"), white=0.5, spread=0.0, weight=1.0)
-        engine = _engine(_config(chance=1.0, palette=palette))
-        slots = _slot_colors(engine)
-        raw = _p_to_rgb(1.0, engine._config.scale_stops, engine._stop_positions)
-        expected = _blend_white(raw, palette.white)
-        self.assertEqual(slots[:5], [expected] * 5)
-        self.assertNotEqual(expected, raw)
-
     def test_degenerate_focus_still_solid_for_random_fill(self) -> None:
-        palette = Palette(range=("red", "red"), white=0.0, spread=0.0, weight=1.0)
+        palette = Palette(range=("red", "red"), spread=0.0, weight=1.0)
         random_fill = _slot_colors(
             _engine(_config(strategy="random_with_replacement", chance=0.0, palette=palette))
         )
@@ -221,7 +208,7 @@ class PatchSRandomWithMonoChanceTests(unittest.TestCase):
             self.assertNotIn("slot_colors", keys)
 
     def test_gradient_even_golden_vector_unchanged(self) -> None:
-        palette = Palette(range=("cyan", "blue"), white=0.0, spread=0.0, weight=1.0)
+        palette = Palette(range=("cyan", "blue"), spread=0.0, weight=1.0)
         slots = _slot_colors(_engine(_config(strategy="gradient_even", palette=palette)))
         self.assertEqual(
             slots,

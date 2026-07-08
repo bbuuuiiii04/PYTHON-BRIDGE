@@ -59,7 +59,6 @@ def _solid_config() -> ColorEngineConfig:
         palettes={
             "solid_red": Palette(
                 range=("red", "red"),
-                white=0.0,
                 spread=0.0,
                 weight=1.0,
             )
