@@ -163,7 +163,6 @@ start_bridge() {
             RBSS_LED_MIN_DWELL=1 \
             RBSS_LED_CANCEL_PENDING=1 \
             RBSS_LED_RT_RECONCILE=1 \
-            RBSS_LED_TRANSPORT_STICKY=1 \
             RBSS_LED_TRANSPORT_COOLDOWN=0 \
             RBSS_LASER_CONFIG="$LASER_CONFIG_PATH" \
             $TRUTH_ENV \

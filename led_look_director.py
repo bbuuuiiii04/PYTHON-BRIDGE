@@ -5,9 +5,9 @@ configured look should be active given manual and emergency policy inputs.
 """
 from __future__ import annotations
 
-import os as _os
 import random
 from dataclasses import asdict, replace
+from fractions import Fraction
 from typing import Callable, Iterable, Optional
 
 from .led_models import (
@@ -31,6 +31,54 @@ _AUTOMATION_ROLE_ORDER = LED_AUTOMATION_ROLE_ORDER
 _AUTOMATION_ROLES = frozenset(_AUTOMATION_ROLE_ORDER)
 
 
+def plan_backend_sequence(
+    look_names: Iterable[str],
+    backend_of: Callable[[str], str],
+) -> tuple[str, ...]:
+    """Deterministic, evenly-interleaved backend sequence for one role's
+    (already-filtered) bank.
+
+    Partition the names by backend preserving first-seen order, then emit one
+    backend label per future pick -- length == len(look_names) -- with the
+    smaller subset's slots spread evenly through the larger's. Ordering: the
+    larger subset leads; on a size tie 'realtime_razer' leads (F2-forward). A
+    single-backend bank returns that backend uniformly. Empty input -> ().
+
+    No RNG enters here: two directors with the same bank get the same plan, so
+    which transport a role runs on is a fixed rotation, not a per-session coin
+    flip. 6 realtime + 2 cloud -> (rt, rt, cloud, rt, rt, rt, cloud, rt).
+    """
+    names = tuple(look_names)
+    if not names:
+        return ()
+    groups: dict[str, list[str]] = {}
+    order: list[str] = []
+    for name in names:
+        backend = backend_of(name)
+        if backend not in groups:
+            groups[backend] = []
+            order.append(backend)
+        groups[backend].append(name)
+    if len(order) == 1:
+        return tuple(order[0] for _ in names)
+    # Leader order: larger subset first; ties -> realtime_razer, then first-seen.
+    ranked = sorted(
+        order,
+        key=lambda b: (-len(groups[b]), b != "realtime_razer", order.index(b)),
+    )
+    rank_of = {backend: i for i, backend in enumerate(ranked)}
+    # Even interleave: give each element the fractional position (k+0.5)/size
+    # within its subset, merge all elements sorted by that position, and break
+    # equal positions toward the leader. Fraction keeps the ties exact.
+    slots = [
+        (Fraction(2 * k + 1, 2 * len(groups[backend])), rank_of[backend], backend)
+        for backend in order
+        for k in range(len(groups[backend]))
+    ]
+    slots.sort(key=lambda slot: (slot[0], slot[1]))
+    return tuple(backend for _, _, backend in slots)
+
+
 class LEDLookDirector:
     """Minimal policy engine with emergency > manual > default ordering."""
 
@@ -44,7 +92,12 @@ class LEDLookDirector:
         self._config = config
         self._rng = rng if rng is not None else random.Random()
         self._shuffled_roles = frozenset(str(role) for role in shuffled_roles)
-        self._role_shuffle_bags: dict[str, tuple[str, ...]] = {}
+        # AWR-149: shuffle bags and within-transport cursors are keyed by
+        # (role, backend). The deterministic plan picks WHICH transport a pick
+        # runs on; these pick WHICH look inside that transport, so RNG never
+        # decides transport.
+        self._role_shuffle_bags: dict[tuple[str, str], tuple[str, ...]] = {}
+        self._role_backend_cursors: dict[tuple[str, str], int] = {}
         self._manual_override: str = ""
         self._emergency_blackout: bool = False
         self._last_decision: LEDLookDecision | None = None
@@ -52,21 +105,21 @@ class LEDLookDirector:
         self._last_source: str = "policy"
         self._role_cursors: dict[str, int] = {}
         self._queued_post_drop_look: str = ""
-        # WI-7 transport-sticky: remember the last dispatched backend per role
-        # so consecutive same-role selections stay on the same transport.
-        self._transport_sticky_enabled: bool = _os.environ.get("RBSS_LED_TRANSPORT_STICKY", "1") != "0"
-        self._last_role_backend: dict[str, str] = {}  # role → last backend
-        bank = self._config.banks.get("default")
+        # AWR-149: every role starts at plan index 0 (realtime-leading) so the
+        # mixed-transport rotation is deterministic across bridge relaunches --
+        # no RNG in the cursor. Look variety still comes from the shuffle bags.
         for role in _AUTOMATION_ROLE_ORDER:
-            look_names = getattr(bank, role, ()) if bank else ()
-            if look_names:
-                self._role_cursors[role] = self._rng.randrange(len(look_names))
-            else:
-                self._role_cursors[role] = 0
+            self._role_cursors[role] = 0
 
     def reset_for_track(self) -> None:
-        """Clear sticky staleness on track load."""
-        self._last_role_backend.clear()
+        """No-op: the deterministic plan/backend cursors deliberately persist
+        across tracks (AWR-149).
+
+        Kept for call-site parity with ``state_manager.py``; resetting here
+        would snap every role back to plan index 0 on each track load and
+        re-flatten the transport rotation.
+        """
+        pass
 
     def set_manual_override(self, look_name: str | None) -> bool:
         """Set or clear manual override. Returns False when unknown look."""
@@ -214,10 +267,27 @@ class LEDLookDirector:
                 role=role,
             )
         look_names = getattr(bank, role, ())
-        if not look_names:
+        # AWR-149: preview through the same plan as a commit, but filterless
+        # (no eligibility/preference) -- this preserves the pre-existing preview
+        # gap exactly. Peek the (role, backend) bag with RNG restore so nothing
+        # (cursor, bag, or RNG) is mutated.
+        known = tuple(n for n in look_names if n in self._config.looks)
+        if not known:
+            return None
+        plan = plan_backend_sequence(
+            known, lambda n: self._config.looks[n].backend
+        )
+        if not plan:
             return None
         cursor = self._role_cursors.get(role, 0)
-        look_name = self._look_name_for_role(role, look_names, cursor, peek=True)
+        chosen_backend = plan[cursor % len(plan)]
+        subset = tuple(
+            n for n in known if self._config.looks[n].backend == chosen_backend
+        )
+        backend_cursor = self._role_backend_cursors.get((role, chosen_backend), 0)
+        look_name = self._look_name_for_backend(
+            role, chosen_backend, subset, backend_cursor, peek=True
+        )
         if look_name not in self._config.looks:
             return None
         return self._decision_for_look(
@@ -285,15 +355,13 @@ class LEDLookDirector:
             look_name = self._queued_post_drop_look
             self._queued_post_drop_look = ""
             if look_name in self._config.looks:
-                decision = self._decision_for_look(
+                return self._decision_for_look(
                     look_name,
                     reason="paired_post_drop",
                     source="automation",
                     priority=2,
                     role=normalized_role,
                 )
-                self._last_role_backend[normalized_role] = decision.backend
-                return decision
         look_names = getattr(bank, normalized_role, ())
         if not look_names:
             return None
@@ -310,24 +378,30 @@ class LEDLookDirector:
             preferred = tuple(n for n in look_names if look_preference(n))
             if preferred:
                 look_names = preferred
+        # AWR-149: drop unknown names, then let the deterministic plan choose the
+        # transport for this pick and the (role, backend) bag choose the look.
+        # Both transports stay reachable in every role that has both -- this
+        # replaces the WI-7 sticky latch, which coin-flipped a role onto one
+        # transport for a whole session.
+        known = tuple(n for n in look_names if n in self._config.looks)
+        if not known:
+            return None
+        plan = plan_backend_sequence(
+            known, lambda n: self._config.looks[n].backend
+        )
+        if not plan:
+            return None
         cursor = self._role_cursors.get(normalized_role, 0)
-        # WI-7 transport-sticky: when flag is ON, prefer looks whose backend
-        # matches the last dispatched backend for this role.
-        if self._transport_sticky_enabled and normalized_role in self._last_role_backend:
-            sticky_backend = self._last_role_backend[normalized_role]
-            sticky_names = tuple(
-                n for n in look_names
-                if n in self._config.looks
-                and self._config.looks[n].backend == sticky_backend
-            )
-            if sticky_names:
-                # Select within the sticky subset using the cursor modulo its length
-                look_name = self._look_name_for_role(normalized_role, sticky_names, cursor)
-            else:
-                # Fallback: no matching-backend candidates; use the full bank
-                look_name = self._look_name_for_role(normalized_role, look_names, cursor)
-        else:
-            look_name = self._look_name_for_role(normalized_role, look_names, cursor)
+        chosen_backend = plan[cursor % len(plan)]
+        subset = tuple(
+            n for n in known if self._config.looks[n].backend == chosen_backend
+        )
+        backend_cursor = self._role_backend_cursors.get(
+            (normalized_role, chosen_backend), 0
+        )
+        look_name = self._look_name_for_backend(
+            normalized_role, chosen_backend, subset, backend_cursor
+        )
         if look_name not in self._config.looks:
             return None
         decision = self._decision_for_look(
@@ -339,36 +413,45 @@ class LEDLookDirector:
         )
         if normalized_role == "drop":
             self._queue_paired_post_drop(look_name)
+        # The role cursor advances the PLAN (which transport comes next); the
+        # (role, backend) cursor advances only for the transport actually picked
+        # and drives that transport's shuffle bag.
         self._role_cursors[normalized_role] = cursor + 1
-        self._last_role_backend[normalized_role] = decision.backend
+        self._role_backend_cursors[(normalized_role, chosen_backend)] = (
+            backend_cursor + 1
+        )
         return decision
 
-    def _look_name_for_role(
+    def _look_name_for_backend(
         self,
         role: str,
-        look_names: tuple[str, ...],
+        backend: str,
+        subset: tuple[str, ...],
         cursor: int,
         *,
         peek: bool = False,
     ) -> str:
-        if role not in self._shuffled_roles or len(look_names) <= 1:
-            return look_names[cursor % len(look_names)]
-        bag = self._role_shuffle_bags.get(role, ())
-        if cursor % len(look_names) == 0 or not bag:
+        """Pick a look within one transport's subset via the (role, backend)
+        shuffle bag. ``cursor`` is the per-(role, backend) cursor."""
+        if role not in self._shuffled_roles or len(subset) <= 1:
+            return subset[cursor % len(subset)]
+        key = (role, backend)
+        bag = self._role_shuffle_bags.get(key, ())
+        if cursor % len(subset) == 0 or not bag:
             if peek:
                 # Preview the would-be shuffled bag while restoring RNG state so
                 # the next real selection builds the exact same bag.
                 state = self._rng.getstate()
                 try:
-                    shuffled = list(look_names)
+                    shuffled = list(subset)
                     self._rng.shuffle(shuffled)
                 finally:
                     self._rng.setstate(state)
-                return tuple(shuffled)[cursor % len(look_names)]
-            shuffled = list(look_names)
+                return tuple(shuffled)[cursor % len(subset)]
+            shuffled = list(subset)
             self._rng.shuffle(shuffled)
             bag = tuple(shuffled)
-            self._role_shuffle_bags[role] = bag
+            self._role_shuffle_bags[key] = bag
         return bag[cursor % len(bag)]
 
     def _decision_for_look(

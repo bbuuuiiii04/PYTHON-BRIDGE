@@ -345,12 +345,13 @@ class LEDLookDirectorPriorityTests(unittest.TestCase):
         for role in LED_AUTOMATION_ROLE_ORDER:
             with self.subTest(role=role):
                 director._role_cursors[role] = 0
-                director._role_shuffle_bags.pop(role, None)
+                director._role_shuffle_bags.pop((role, "cloud_diy"), None)
 
                 decision = director.tick(LEDContext(role=role))
 
                 self.assertIsNotNone(decision)
-                self.assertIn(role, director._role_shuffle_bags)
+                # AWR-149: shuffle bags are keyed by (role, backend) now.
+                self.assertIn((role, "cloud_diy"), director._role_shuffle_bags)
                 self.assertEqual(director._role_cursors[role], 1)
 
     def test_shuffled_preview_matches_next_real_drop_without_existing_bag(self) -> None:
@@ -485,7 +486,8 @@ class LEDLookDirectorPriorityTests(unittest.TestCase):
 
         self.assertIsNotNone(committed)
         self.assertEqual(director._role_cursors["drop"], 1)
-        self.assertIn("drop", director._role_shuffle_bags)
+        # AWR-149: shuffle bags are keyed by (role, backend) now.
+        self.assertIn(("drop", "cloud_diy"), director._role_shuffle_bags)
 
     def test_clear_queued_post_drop_prevents_cross_teardown_leak(self) -> None:
         cfg = _director_config()
@@ -544,6 +546,196 @@ class LEDLookDirectorPriorityTests(unittest.TestCase):
         self.assertEqual(director.drop_duration_beats("room_manual"), 12.0)
         self.assertEqual(director.drop_duration_beats("room_safe_default"), 8.0)
         self.assertEqual(director.post_drop_cycle_beats(), 24.0)
+
+
+RT = "realtime_razer"
+CLOUD = "cloud_diy"
+
+
+def _mixed_config() -> dict:
+    """Config whose groove role has 2 realtime + 1 cloud look, so the
+    deterministic mixed-transport plan (AWR-149) can be exercised."""
+    cfg = _director_config()
+    cfg["automation_enabled"] = True
+    cfg["targets"]["room_perimeter"]["realtime"] = {
+        "enabled": True,
+        "protocol": "razer_dreamview",
+        "ip": "192.168.0.219",
+        "port": 4003,
+        "segments": 20,
+        "header_bytes": [187, 0, 250, 176, 0],
+        "fps": 30,
+        "activate_pt": "uwABsQEK",
+        "deactivate_pt": "uwABsQAL",
+    }
+
+    def _rt(scene: str) -> dict:
+        return {
+            "target": "room_perimeter",
+            "action": "realtime",
+            "scene_ref": scene,
+            "fallback": "",
+            "safety_class": "groove",
+            "brightness": 100,
+            "allow_strobe": True,
+            "backend": "realtime_razer",
+            "params": {},
+        }
+
+    cfg["looks"]["rt_groove_a"] = _rt("drop_chase_blue")
+    cfg["looks"]["rt_groove_b"] = _rt("drop_chase_blue")
+    cfg["looks"]["cloud_groove"] = copy.deepcopy(cfg["looks"]["room_safe_default"])
+    cfg["looks"]["cloud_drop"] = copy.deepcopy(cfg["looks"]["room_manual"])
+    cfg["looks"]["cloud_post"] = copy.deepcopy(cfg["looks"]["room_safe_default"])
+    # groove leads realtime (2 RT, 1 cloud) -> plan (RT, cloud, RT).
+    cfg["banks"]["default"]["groove"] = ["rt_groove_a", "rt_groove_b", "cloud_groove"]
+    cfg["banks"]["default"]["drop"] = ["cloud_drop"]
+    cfg["banks"]["default"]["post_drop"] = ["cloud_post"]
+    cfg["drop_pairs"] = {"cloud_drop": {"post_drop": "cloud_post", "duration_beats": 8.0}}
+    return cfg
+
+
+class LEDLookDirectorPlanRotationTests(unittest.TestCase):
+    def _director(self, *, seed: int = 0, shuffled: bool = True) -> LEDLookDirector:
+        result = load_led_look_director_config_from_dict(copy.deepcopy(_mixed_config()))
+        self.assertTrue(result.available, msg=result.errors)
+        return LEDLookDirector(
+            result.config,
+            rng=random.Random(seed),
+            shuffled_roles=LED_AUTOMATION_ROLE_ORDER if shuffled else (),
+        )
+
+    def _backend_of(self, mapping):
+        return lambda name: mapping[name]
+
+    # Part D.1 -----------------------------------------------------------
+    def test_plan_backend_sequence_exact_tuples(self) -> None:
+        from rb_ss_bridge_v2.led_look_director import plan_backend_sequence
+
+        names6_2 = [f"rt{i}" for i in range(6)] + [f"c{i}" for i in range(2)]
+        b6_2 = {n: (RT if n.startswith("rt") else CLOUD) for n in names6_2}
+        self.assertEqual(
+            plan_backend_sequence(names6_2, self._backend_of(b6_2)),
+            (RT, RT, CLOUD, RT, RT, RT, CLOUD, RT),
+        )
+        # 1 + 1 -> alternation, realtime first even though cloud is listed first.
+        self.assertEqual(
+            plan_backend_sequence(["c0", "rt0"], self._backend_of({"c0": CLOUD, "rt0": RT})),
+            (RT, CLOUD),
+        )
+        # 3 + 3 tie -> realtime leads.
+        names3 = [f"rt{i}" for i in range(3)] + [f"c{i}" for i in range(3)]
+        b3 = {n: (RT if n.startswith("rt") else CLOUD) for n in names3}
+        self.assertEqual(
+            plan_backend_sequence(names3, self._backend_of(b3)),
+            (RT, CLOUD, RT, CLOUD, RT, CLOUD),
+        )
+        # Single backend -> uniform.
+        self.assertEqual(
+            plan_backend_sequence(
+                ["c0", "c1", "c2"], self._backend_of({"c0": CLOUD, "c1": CLOUD, "c2": CLOUD})
+            ),
+            (CLOUD, CLOUD, CLOUD),
+        )
+        # Empty -> ().
+        self.assertEqual(plan_backend_sequence([], self._backend_of({})), ())
+        # Order stability: reordering names within a subset never changes labels.
+        shuffled_names = ["c0", *[f"rt{i}" for i in range(6)], "c1"]
+        self.assertEqual(
+            plan_backend_sequence(shuffled_names, self._backend_of(b6_2)),
+            (RT, RT, CLOUD, RT, RT, RT, CLOUD, RT),
+        )
+
+    # Part D.2 -----------------------------------------------------------
+    def test_backend_sequence_is_seed_independent(self) -> None:
+        def groove_backends(seed: int) -> list[str]:
+            director = self._director(seed=seed)
+            return [
+                director.tick(LEDContext(role="groove")).backend for _ in range(12)
+            ]
+
+        seq_a = groove_backends(1)
+        seq_b = groove_backends(2)
+        self.assertEqual(seq_a, seq_b)
+        # 2 RT + 1 cloud -> plan (RT, cloud, RT) cycled 12 times.
+        self.assertEqual(seq_a, [RT, CLOUD, RT] * 4)
+        # Look names within a backend may still differ across seeds.
+        looks_a = [self._director(seed=3).tick(LEDContext(role="groove")).look for _ in range(1)]
+        self.assertIsNotNone(looks_a)
+
+    # Part D.3 -----------------------------------------------------------
+    def test_no_latch_groove_follows_plan_cycle(self) -> None:
+        director = self._director(seed=7)
+        backends = [
+            director.tick(LEDContext(role="groove")).backend for _ in range(6)
+        ]
+        # Cloud recurs at its planned slots -- the OLD sticky code latched onto
+        # whichever transport it hit first and never returned to the other.
+        self.assertEqual(backends, [RT, CLOUD, RT, RT, CLOUD, RT])
+        self.assertEqual([i for i, b in enumerate(backends) if b == CLOUD], [1, 4])
+
+    # Part D.4 -----------------------------------------------------------
+    def test_session_phase_starts_at_zero_for_every_seed(self) -> None:
+        for seed in (0, 1, 17, 999):
+            director = self._director(seed=seed)
+            for role in LED_AUTOMATION_ROLE_ORDER:
+                self.assertEqual(director._role_cursors[role], 0)
+
+    # Part D.5 -----------------------------------------------------------
+    def test_eligibility_rebase_still_reaches_both_transports(self) -> None:
+        rt_only = self._director(seed=1)
+        for _ in range(6):
+            decision = rt_only.commit_role(
+                "groove",
+                diy_eligible=lambda n: rt_only._config.looks[n].backend == RT,
+            )
+            self.assertEqual(decision.backend, RT)
+
+        restored = self._director(seed=1)
+        backends = [restored.commit_role("groove").backend for _ in range(6)]
+        self.assertIn(CLOUD, backends)
+
+        # C4: a predicate that rejects everything keeps the FULL bank, so the
+        # pick still succeeds and follows the full-bank plan (RT at cursor 0).
+        c4 = self._director(seed=1)
+        decision = c4.commit_role("groove", diy_eligible=lambda n: False)
+        self.assertIsNotNone(decision)
+        self.assertEqual(decision.backend, RT)
+
+    # Part D.6 -----------------------------------------------------------
+    def test_preview_parity_and_no_mutation(self) -> None:
+        for seed in range(6):
+            with self.subTest(seed=seed):
+                director = self._director(seed=seed)
+                rng_before = director._rng.getstate()
+                p1 = director.preview_role("groove")
+                p2 = director.preview_role("groove")
+                self.assertIsNotNone(p1)
+                # Two previews agree and neither mutates cursor/bag/RNG.
+                self.assertEqual((p1.look, p1.backend), (p2.look, p2.backend))
+                self.assertEqual(director._role_cursors["groove"], 0)
+                self.assertEqual(director._role_shuffle_bags, {})
+                self.assertEqual(director._rng.getstate(), rng_before)
+                committed = director.commit_role("groove")
+                self.assertEqual((p1.look, p1.backend), (committed.look, committed.backend))
+                self.assertEqual(director._role_cursors["groove"], 1)
+
+    # Part D.7 -----------------------------------------------------------
+    def test_paired_post_drop_bypasses_plan_and_advances_no_cursor(self) -> None:
+        director = self._director(seed=0)
+        drop = director.tick(LEDContext(role="drop"))
+        self.assertEqual(drop.look, "cloud_drop")
+        role_before = dict(director._role_cursors)
+        backend_before = dict(director._role_backend_cursors)
+
+        paired = director.tick(LEDContext(role="post_drop"))
+
+        self.assertEqual(paired.look, "cloud_post")
+        self.assertEqual(paired.reason, "paired_post_drop")
+        # The paired post_drop advances neither the plan cursor nor any
+        # (role, backend) cursor.
+        self.assertEqual(director._role_cursors["post_drop"], role_before["post_drop"])
+        self.assertEqual(director._role_backend_cursors, backend_before)
 
 
 if __name__ == "__main__":
