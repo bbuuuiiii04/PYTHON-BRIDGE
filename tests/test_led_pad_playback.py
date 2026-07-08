@@ -109,7 +109,8 @@ class LedPadPlaybackTests(unittest.TestCase):
         ticks: list[int] = []
         polls: list[int] = []
         playback.tick = lambda: ticks.append(1)
-        playback._ownership = type("Owner", (), {"poll_owned": lambda _self: polls.append(1)})()
+        playback._clock = type("Clock", (), {"playing": False})()
+        playback._ownership = type("Owner", (), {"poll_owned": lambda _self: polls.append(1), "state": "free"})()
 
         counter = 0
         for _ in range(8):
@@ -117,6 +118,65 @@ class LedPadPlaybackTests(unittest.TestCase):
 
         self.assertEqual(len(ticks), 8)
         self.assertEqual(len(polls), 1)
+
+    def _pad_with_gate(self, gate: OwnershipGate, *, playing: bool):
+        playback = PadPlayback.__new__(PadPlayback)
+        stopped: list[int] = []
+        playback.tick = lambda: None
+        playback.stop = lambda: stopped.append(1)
+        playback._clock = type("Clock", (), {"playing": playing})()
+        playback._ownership = gate
+        return playback, stopped
+
+    def _run_poll_cycle(self, playback: PadPlayback) -> None:
+        counter = 0
+        for _ in range(8):  # counter 0..7 → one poll_owned/auto-stop check
+            counter = playback._poll_once(counter)
+
+    def test_playing_pad_auto_stops_when_bridge_owns_strip(self) -> None:
+        now = [100.0]
+        status = {"written_at": 100.0, "led_look_director": {"emergency_blackout": False}}
+        gate = OwnershipGate(
+            time_fn=lambda: now[0], status_reader=lambda: status,
+            appender=lambda _c: None, sleep_fn=lambda _s: None,
+        )  # gate.state starts "free"
+        playback, stopped = self._pad_with_gate(gate, playing=True)
+        self._run_poll_cycle(playback)
+        self.assertEqual(stopped, [1])
+        self.assertEqual(gate.last_warning, "auto_stopped_bridge_active")
+
+    def test_pad_owned_takeover_never_auto_stops(self) -> None:
+        now = [100.0]
+        status = {"written_at": 100.0, "led_look_director": {"emergency_blackout": False}}
+        gate = OwnershipGate(
+            time_fn=lambda: now[0], status_reader=lambda: status,
+            appender=lambda _c: None, sleep_fn=lambda _s: None,
+        )
+        gate.state = "pad_owned"  # deliberate takeover
+        playback, stopped = self._pad_with_gate(gate, playing=True)
+        self._run_poll_cycle(playback)
+        self.assertEqual(stopped, [])
+        self.assertEqual(gate.state, "pad_owned")
+
+    def test_stale_or_absent_bridge_keeps_pad_playing(self) -> None:
+        # Absent bridge status → pad is the only writer, keeps playing.
+        gate_absent = OwnershipGate(
+            time_fn=lambda: 100.0, status_reader=lambda: None,
+            appender=lambda _c: None, sleep_fn=lambda _s: None,
+        )
+        playback, stopped = self._pad_with_gate(gate_absent, playing=True)
+        self._run_poll_cycle(playback)
+        self.assertEqual(stopped, [])
+
+        # Stale bridge status (written >5 s ago) → treated as absent, keeps playing.
+        stale = {"written_at": 50.0, "led_look_director": {"emergency_blackout": False}}
+        gate_stale = OwnershipGate(
+            time_fn=lambda: 100.0, status_reader=lambda: stale,
+            appender=lambda _c: None, sleep_fn=lambda _s: None,
+        )
+        playback2, stopped2 = self._pad_with_gate(gate_stale, playing=True)
+        self._run_poll_cycle(playback2)
+        self.assertEqual(stopped2, [])
 
 
 if __name__ == "__main__":

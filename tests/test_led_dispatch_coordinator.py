@@ -54,7 +54,8 @@ class _Runner:
         self.fire_count = 0
         self.emergency_count = 0
         self.stop_called = False
-        self.cloud_dispatch_notes: list[float] = []
+        self.assert_count = 0
+        self.brightness_requests: list[int] = []
 
     def set_desired(self, spec) -> None:  # type: ignore[no-untyped-def]
         self.desired.append(spec)
@@ -68,8 +69,11 @@ class _Runner:
     def force_deactivate(self) -> None:
         self.desired.append(None)
 
-    def note_cloud_dispatch(self, now: float, **kwargs) -> None:  # type: ignore[no-untyped-def]
-        self.cloud_dispatch_notes.append(now)
+    def request_activate_assert(self) -> None:
+        self.assert_count += 1
+
+    def request_brightness(self, value: int) -> None:
+        self.brightness_requests.append(int(value))
 
     def status(self) -> dict:
         return {"active": bool(self.desired), "last_error": ""}
@@ -148,6 +152,8 @@ class LEDDispatchCoordinatorTests(unittest.TestCase):
         self.assertEqual(owner.current(), OwnerState.REALTIME_RAZER)
         self.assertEqual(runner.desired[-1].effect_name, "groove_chase_blue")
         self.assertEqual(runner.fire_count, 1)
+        # Realtime takeover re-asserts razer mode.
+        self.assertEqual(runner.assert_count, 1)
 
     def test_realtime_white_template_sets_white_moment_flag(self) -> None:
         coordinator, adapter, runner, owner = self._coordinator(min_dwell_env="0")
@@ -222,6 +228,10 @@ class LEDDispatchCoordinatorTests(unittest.TestCase):
         self.assertEqual(adapter.trigger_calls, [])
         self.assertEqual(owner.current(), OwnerState.REALTIME_RAZER)
         self.assertEqual(runner.desired[-1].effect_name, "blackout")
+        # Tactical blackout re-asserts razer so the black frames reach the strip,
+        # but does NOT dim (a drop look follows within a few beats).
+        self.assertEqual(runner.assert_count, 1)
+        self.assertEqual(runner.brightness_requests, [])
 
     # ── WI-3 min-dwell tests ──────────────────────────────────────────────────
 
@@ -325,16 +335,22 @@ class LEDDispatchCoordinatorTests(unittest.TestCase):
         result = coordinator.trigger(drop)
         self.assertTrue(result)
 
-    # ── WI-6 note_cloud_dispatch hook ────────────────────────────────────────
+    # ── razer keepalive replaces WI-6 reconcile ──────────────────────────────
 
-    def test_wi6_cloud_dispatch_notifies_runner(self) -> None:
-        """WI-6: after a cloud DIY trigger, runner.note_cloud_dispatch must be called."""
+    def test_cloud_dispatch_does_not_assert_razer(self) -> None:
+        """A cloud DIY trigger must not re-assert razer (WI-6 note_cloud_dispatch is gone)."""
         coordinator, adapter, runner, owner = self._coordinator()
+        self.assertFalse(hasattr(runner, "note_cloud_dispatch"))
         cloud = _decision(look="groove_cloud", action="scene", backend="cloud_diy",
                           scene_ref="Release-A", role="groove")
         coordinator.trigger(cloud)
-        self.assertEqual(len(runner.cloud_dispatch_notes), 1)
-        self.assertAlmostEqual(runner.cloud_dispatch_notes[0], 1000.0, places=3)
+        self.assertEqual(runner.assert_count, 0)
+
+    def test_restore_brightness_requests_full(self) -> None:
+        """restore_brightness() asks the runner for full LAN brightness."""
+        coordinator, adapter, runner, owner = self._coordinator()
+        coordinator.restore_brightness()
+        self.assertEqual(runner.brightness_requests, [100])
 
     # ── WI-8 status counters ──────────────────────────────────────────────────
 

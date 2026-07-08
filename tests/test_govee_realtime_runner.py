@@ -559,56 +559,87 @@ class GoveeRealtimeRunnerTests(unittest.TestCase):
         runner._tick_once(_anchor(), 100.01)
         self.assertEqual(runner.status()["instance_count"], 0)
 
-    def test_reconcile_reactivates_within_cloud_suspect_window(self) -> None:
-        """WI-6: after note_cloud_dispatch(), _tick_once re-sends activate()
-        at approximately rt_reconcile_interval_s cadence within the window."""
-        import os as _os
+    def test_keepalive_reasserts_activate_while_streaming(self) -> None:
+        """An active streaming runner re-sends activate() every RAZER_KEEPALIVE_S."""
         transport = _FakeTransport()
         runner = GoveeRealtimeRunner(transport, GoveeFrameRenderer(), segments=4, fps=30)
-        runner.set_desired(
-            EffectSpec("solid", {"color": [1, 2, 3]}, 1, 100.0)
-        )
-        # Bring runner to active state
+        runner.set_desired(EffectSpec("solid", {"color": [1, 2, 3]}, 1, 100.0))
+        # First tick brings it active (activate #1, _last_activate_mono = 100.0).
         runner._tick_once(_anchor(100.0), 100.0)
-        pre_reconcile_activates = transport.calls.count("activate")
-        self.assertEqual(pre_reconcile_activates, 1)
-
-        # Simulate a cloud DIY dispatch with a 5-second window, 1-second interval
-        t = 101.0
-        runner.note_cloud_dispatch(t, window_s=5.0, interval_s=1.0)
-
-        # Tick at t+1.1 (inside window, interval elapsed): reconcile fires
-        runner._tick_once(_anchor(t + 1.1), t + 1.1)
+        self.assertEqual(transport.calls.count("activate"), 1)
+        self.assertEqual(runner.status()["razer_assert_count"], 0)
+        # Tick before 2.0 s elapsed: no keepalive.
+        runner._tick_once(_anchor(101.5), 101.5)
+        self.assertEqual(transport.calls.count("activate"), 1)
+        self.assertEqual(runner.status()["razer_assert_count"], 0)
+        # Tick at >= 2.0 s since last activate: keepalive re-asserts.
+        runner._tick_once(_anchor(102.1), 102.1)
         self.assertEqual(transport.calls.count("activate"), 2)
-        self.assertEqual(runner.status()["rt_reconcile_count"], 1)
+        self.assertEqual(runner.status()["razer_assert_count"], 1)
 
-        # Tick at t+2.2 (another interval): reconcile fires again
-        runner._tick_once(_anchor(t + 2.2), t + 2.2)
-        self.assertEqual(transport.calls.count("activate"), 3)
-        self.assertEqual(runner.status()["rt_reconcile_count"], 2)
-
-        # Tick past window: no extra activate
-        activates_before = transport.calls.count("activate")
-        runner._tick_once(_anchor(t + 6.0), t + 6.0)
-        self.assertEqual(transport.calls.count("activate"), activates_before)
-
-    def test_reconcile_does_not_fire_when_not_active(self) -> None:
-        """WI-6: reconcile must not fire activate() when the runner is inactive."""
+    def test_keepalive_does_not_fire_when_idle(self) -> None:
+        """An idle (never-active) runner never re-asserts activate()."""
         transport = _FakeTransport()
         runner = GoveeRealtimeRunner(transport, GoveeFrameRenderer(), segments=4, fps=30)
-        # Don't tick to active state
-        t = 100.0
-        runner.note_cloud_dispatch(t, window_s=5.0, interval_s=0.1)
-        runner._tick_once(None, t + 0.2)
+        runner._tick_once(None, 100.0)
+        runner._tick_once(None, 103.0)
         self.assertEqual(transport.calls.count("activate"), 0)
-        self.assertEqual(runner.status()["rt_reconcile_count"], 0)
+        self.assertEqual(runner.status()["razer_assert_count"], 0)
 
-    def test_reconcile_status_counter_in_status_dict(self) -> None:
-        """WI-8: rt_reconcile_count must appear in status()."""
+    def test_request_activate_assert_fires_even_when_active(self) -> None:
+        """request_activate_assert() forces an activate on the next tick even mid-stream."""
         transport = _FakeTransport()
         runner = GoveeRealtimeRunner(transport, GoveeFrameRenderer(), segments=4, fps=30)
-        self.assertIn("rt_reconcile_count", runner.status())
-        self.assertEqual(runner.status()["rt_reconcile_count"], 0)
+        runner.set_desired(EffectSpec("solid", {"color": [1, 2, 3]}, 1, 100.0))
+        runner._tick_once(_anchor(100.0), 100.0)  # active, activate #1
+        self.assertEqual(transport.calls.count("activate"), 1)
+        runner.request_activate_assert()
+        # Only 0.01 s later — keepalive would NOT fire, but the assert does.
+        runner._tick_once(_anchor(100.01), 100.01)
+        self.assertEqual(transport.calls.count("activate"), 2)
+        self.assertEqual(runner.status()["razer_assert_count"], 1)
+
+    def test_request_brightness_sends_twice(self) -> None:
+        """request_brightness(100) sends set_brightness(100) on exactly 2 ticks, any mode."""
+        transport = _FakeTransport()
+        runner = GoveeRealtimeRunner(transport, GoveeFrameRenderer(), segments=4, fps=30)
+        runner.request_brightness(100)
+        runner._tick_once(None, 100.0)   # idle; brightness still sent (repeat 2->1)
+        runner._tick_once(None, 100.1)   # repeat 1->0, cleared
+        runner._tick_once(None, 100.2)   # no more sends
+        self.assertEqual(transport.calls.count("brightness:100"), 2)
+
+    def test_emergency_teardown_hard_dims_on_pure_emergency(self) -> None:
+        """Pure emergency teardown sends set_brightness(0); handoff teardown does not."""
+        # Pure emergency: bring active, then emergency_stop.
+        transport = _FakeTransport()
+        runner = GoveeRealtimeRunner(transport, GoveeFrameRenderer(), segments=4, fps=30)
+        runner.set_desired(EffectSpec("solid", {"color": [1, 2, 3]}, 1, 100.0))
+        runner._tick_once(_anchor(100.0), 100.0)
+        transport.calls.clear()
+        runner.emergency_stop()
+        runner._tick_once(_anchor(100.01), 100.01)
+        self.assertIn("brightness:0", transport.calls)
+        self.assertIn("blackout", transport.calls)
+
+        # Handoff to cloud: force_deactivate must NOT dim (cloud looks stay lit).
+        transport2 = _FakeTransport()
+        runner2 = GoveeRealtimeRunner(transport2, GoveeFrameRenderer(), segments=4, fps=30)
+        runner2.set_desired(EffectSpec("solid", {"color": [1, 2, 3]}, 1, 100.0))
+        runner2._tick_once(_anchor(100.0), 100.0)
+        transport2.calls.clear()
+        runner2.force_deactivate()
+        runner2._tick_once(_anchor(100.01), 100.01)
+        self.assertNotIn("brightness:0", transport2.calls)
+        self.assertIn("deactivate", transport2.calls)
+
+    def test_razer_assert_count_in_status_dict(self) -> None:
+        """razer_assert_count replaces rt_reconcile_count in status()."""
+        transport = _FakeTransport()
+        runner = GoveeRealtimeRunner(transport, GoveeFrameRenderer(), segments=4, fps=30)
+        self.assertIn("razer_assert_count", runner.status())
+        self.assertNotIn("rt_reconcile_count", runner.status())
+        self.assertEqual(runner.status()["razer_assert_count"], 0)
 
 
 class _FailableTransport(_FakeTransport):
