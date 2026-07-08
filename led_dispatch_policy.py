@@ -598,13 +598,16 @@ class LEDDispatchPolicyMixin:
                 return
             if outcome == "accepted":
                 self._led_smart_drop_blackout_key = blackout_key
+                runway = sp_state.beats_to_next_drop
+                runway_str = f"{runway:.1f}" if runway is not None else "-"
                 log.info(
-                    "[RGB] tactical-blackout-accepted phase=%s next_drop=%s role_key=%s trigger_count=%d active_deck=%d",
+                    "[RGB] tactical-blackout-accepted phase=%s next_drop=%s role_key=%s trigger_count=%d active_deck=%d transport=realtime runway_beats=%s",
                     phase,
                     str(getattr(drop_preview, "look", "")) or "-",
                     blackout_key,
                     self._led_automation_trigger_count,
                     active,
+                    runway_str,
                 )
                 return
             return
@@ -676,6 +679,16 @@ class LEDDispatchPolicyMixin:
 
         if outcome == "accepted":
             self._led_smart_drop_blackout_key = blackout_key
+            runway = sp_state.beats_to_next_drop
+            runway_str = f"{runway:.1f}" if runway is not None else "-"
+            log.info(
+                "[RGB] smart-drop-blackout-accepted transport=cloud phase=%s next_drop=%s runway_beats=%s role_key=%s active_deck=%d",
+                phase,
+                marker or "-",
+                runway_str,
+                blackout_key,
+                active,
+            )
             return
 
         log.warning(
@@ -1572,6 +1585,14 @@ class LEDDispatchPolicyMixin:
             return True
         if sp_state.smart_drop_crossing:
             return True
+        if previous == "chorus":
+            # Allow the operator's capped second chorus hit after the first
+            # true drop/anchor, then demote later chorus boundaries to post_drop.
+            if (
+                self._led_first_drop_anchor_beat is not None
+                and self._led_drop_impact_count < LED_MAX_DROP_IMPACTS
+            ):
+                return True
         return False
 
     def _led_drop_lifecycle_should_clear(self, sp_state: SmartPhrasingState) -> bool:

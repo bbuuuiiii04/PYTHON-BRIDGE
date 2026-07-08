@@ -34,6 +34,11 @@ Known consequences, deliberate:
 - `max_drops_in_a_row` / `LED_MAX_DROP_IMPACTS` and the `_impact_count` counters become inert (write-only) once the chorus re-arm branches are deleted. Leave the config/constants and counters in place (same precedent as the inert `post_drop_cycle_beats`) but document the inertness where those knobs are described.
 - The laser `drop_cycle` re-assert (`laser_director.py:495-500`) and the buildup gate (`laser_director.py:574-584`) are intentionally NOT touched — log analysis cleared the buildup gate as a misfire source tonight.
 
+2026-07-07 AWR-140 addendum: the inert-counter note above is historical to AWR-131.
+The marker collapse remains in force, but the capped two-hit label re-arm was restored in
+`docs/plans/active/drop_two_hit_rule_restore_spec.md`: one true smart-drop impact plus one
+chorus-to-chorus label re-hit may render `drop`; later chorus labels demote to `post_drop`.
+
 ## Part B - Tasks (implement exactly, in order)
 
 ### Absolute Rules

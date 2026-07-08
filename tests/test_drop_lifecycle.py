@@ -1,9 +1,9 @@
 """Tests for drop_lifecycle.py — the pure, renderer-agnostic drop/post_drop resolver.
 
 Covers: drop held for drop_impact_beats then post_drop; predecessor gate
-(up/low/buildup/breakdown → drop; groove/other label-only anchors → NOT drop);
-real smart-drop crossings always fire; lifecycle clear when chorus/post-drop ends; flat-vs-flat
-LED parity (WITHOUT _led_note_drop_decision_accepted rewrite).
+(up/low/buildup/breakdown -> drop; groove/other label-only anchors -> NOT drop);
+real smart-drop crossings always fire; capped chorus-to-chorus re-arms; lifecycle clear when
+chorus/post-drop ends; flat-vs-flat LED parity (WITHOUT _led_note_drop_decision_accepted rewrite).
 
 NOTE: This proves FLAT-WINDOW parity only. The live LED window is per-look-duration
 (rewritten by _led_note_drop_decision_accepted); the laser window is the flat
@@ -107,16 +107,19 @@ class TestImpactAllowed(unittest.TestCase):
         )
         self.assertTrue(lc.impact_allowed(sp))
 
-    def test_label_only_chorus_to_chorus_disallowed_after_anchor(self) -> None:
+    def test_label_only_chorus_to_chorus_allowed_after_anchor_until_cap(self) -> None:
         lc = DropLifecycle(_cfg(max_drops=2))
         lc._first_drop_anchor_beat = 64.0
+        lc._impact_count = 1
         sp = _sp(previous_phrase_label="chorus")
+        self.assertTrue(lc.impact_allowed(sp))
+
+        lc._impact_count = 2
         self.assertFalse(lc.impact_allowed(sp))
 
     def test_chorus_to_chorus_requires_first_anchor(self) -> None:
-        """chorus→chorus label-only re-arm is disallowed even after an anchor."""
+        """chorus-to-chorus label-only re-arm needs an existing lifecycle anchor."""
         lc = DropLifecycle(_cfg(max_drops=2))
-        lc._first_drop_anchor_beat = 64.0
         sp = _sp(previous_phrase_label="chorus")
         self.assertFalse(lc.impact_allowed(sp))
 
@@ -292,6 +295,109 @@ class TestResolve(unittest.TestCase):
         sp_96 = _sp(current_phrase_is_chorus=True, abs_beat=96.0)
         self.assertEqual(lc.resolve(sp_96, mutate=True).role, "post_drop")
 
+    def test_two_hit_chorus_rearm_cap_sequence(self) -> None:
+        lc = DropLifecycle(_cfg(impact_beats=8.0, max_drops=2))
+        sequence = [
+            _sp(
+                smart_drop_crossing=True,
+                active_drop_beat=64.0,
+                previous_phrase_label="up",
+                current_phrase_label="chorus",
+                current_phrase_is_chorus=True,
+                current_phrase_start_beat=64.0,
+                phrase_start_crossing=True,
+                abs_beat=64.0,
+            ),
+            _sp(
+                previous_phrase_label="chorus",
+                current_phrase_label="chorus",
+                current_phrase_is_chorus=True,
+                current_phrase_start_beat=96.0,
+                phrase_start_crossing=True,
+                abs_beat=96.0,
+            ),
+            _sp(
+                previous_phrase_label="chorus",
+                current_phrase_label="chorus",
+                current_phrase_is_chorus=True,
+                current_phrase_start_beat=128.0,
+                phrase_start_crossing=True,
+                abs_beat=128.0,
+            ),
+            _sp(
+                previous_phrase_label="chorus",
+                current_phrase_label="chorus",
+                current_phrase_is_chorus=True,
+                current_phrase_start_beat=160.0,
+                phrase_start_crossing=True,
+                abs_beat=160.0,
+            ),
+        ]
+
+        results = [lc.resolve(sp, mutate=True) for sp in sequence]
+
+        self.assertEqual([res.role for res in results], ["drop", "drop", "post_drop", "post_drop"])
+        self.assertEqual([res.armed_this_tick for res in results], [True, True, False, False])
+        self.assertEqual(lc._impact_count, 2)
+        self.assertEqual(lc._first_drop_anchor_beat, 64.0)
+
+    def test_cap_resets_after_section_clear(self) -> None:
+        lc = DropLifecycle(_cfg(impact_beats=8.0, max_drops=2))
+        for sp in (
+            _sp(
+                smart_drop_crossing=True,
+                active_drop_beat=64.0,
+                previous_phrase_label="up",
+                current_phrase_is_chorus=True,
+                current_phrase_start_beat=64.0,
+                phrase_start_crossing=True,
+                abs_beat=64.0,
+            ),
+            _sp(
+                previous_phrase_label="chorus",
+                current_phrase_is_chorus=True,
+                current_phrase_start_beat=96.0,
+                phrase_start_crossing=True,
+                abs_beat=96.0,
+            ),
+        ):
+            self.assertEqual(lc.resolve(sp, mutate=True).role, "drop")
+        self.assertEqual(lc._impact_count, 2)
+
+        self.assertEqual(lc.resolve(_sp(abs_beat=200.0), mutate=True).role, "none")
+        self.assertEqual(lc._impact_count, 0)
+        fresh = lc.resolve(
+            _sp(
+                smart_drop_crossing=True,
+                active_drop_beat=224.0,
+                previous_phrase_label="up",
+                current_phrase_is_chorus=True,
+                abs_beat=224.0,
+            ),
+            mutate=True,
+        )
+        self.assertEqual((fresh.role, fresh.armed_this_tick), ("drop", True))
+        self.assertEqual(lc._impact_count, 1)
+
+    def test_single_marker_track_stays_one_impact(self) -> None:
+        lc = DropLifecycle(_cfg(impact_beats=8.0, max_drops=2))
+        self.assertEqual(
+            lc.resolve(
+                _sp(
+                    smart_drop_crossing=True,
+                    active_drop_beat=64.0,
+                    previous_phrase_label="up",
+                    current_phrase_is_chorus=True,
+                    abs_beat=64.0,
+                ),
+                mutate=True,
+            ).role,
+            "drop",
+        )
+        self.assertEqual(lc.resolve(_sp(current_phrase_is_chorus=True, abs_beat=68.0), mutate=True).role, "drop")
+        self.assertEqual(lc.resolve(_sp(current_phrase_is_chorus=True, abs_beat=80.0), mutate=True).role, "post_drop")
+        self.assertEqual(lc._impact_count, 1)
+
 
 class TestParity(unittest.TestCase):
     """Flat-vs-flat parity with the LED resolver.
@@ -377,6 +483,27 @@ class TestParity(unittest.TestCase):
 
         sp2 = _sp(abs_beat=200.0, current_phrase_label="other")
         self.assertParity(sp2, "Clear leaving")
+
+    def test_parity_two_hit_chorus_cap_sequence(self) -> None:
+        from rb_ss_bridge_v2.smart_phrasing import SmartPhrasingState
+
+        sequence = [
+            _sp(smart_drop_crossing=True, active_drop_beat=64.0, previous_phrase_label="up", current_phrase_is_chorus=True, current_phrase_start_beat=64.0, phrase_start_crossing=True, abs_beat=64.0),
+            _sp(previous_phrase_label="chorus", current_phrase_is_chorus=True, current_phrase_start_beat=96.0, phrase_start_crossing=True, abs_beat=96.0),
+            _sp(previous_phrase_label="chorus", current_phrase_is_chorus=True, current_phrase_start_beat=128.0, phrase_start_crossing=True, abs_beat=128.0),
+            _sp(previous_phrase_label="chorus", current_phrase_is_chorus=True, current_phrase_start_beat=160.0, phrase_start_crossing=True, abs_beat=160.0),
+        ]
+        laser_roles = []
+        led_roles = []
+
+        for sp in sequence:
+            laser_roles.append(self.lc.resolve(sp, mutate=True).role)
+            sp_state = SmartPhrasingState(**sp.__dict__)
+            role = self.sm._led_role_from_smart_phrasing(sp_state, mutate=True)
+            led_roles.append("none" if role in ("breakdown", "pre_drop", "buildup", "low", "groove") else role)
+
+        self.assertEqual(laser_roles, ["drop", "drop", "post_drop", "post_drop"])
+        self.assertEqual(led_roles, laser_roles)
 
 
 class TestResolveMutateFalse(unittest.TestCase):

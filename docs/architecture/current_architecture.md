@@ -186,8 +186,9 @@ path was previously available.
 - `LaserDirector` consumes `SmartPhrasingState` through `LaserContext` to make
   scene policy decisions only. Its default-on drop lifecycle mirrors the LED
   impact gate: predecessor labels (`up`/`low`/`buildup`/`breakdown`) and real
-  smart-drop crossings fire impacts, while label-only chorus-to-chorus
-  boundaries settle into `post_drop`.
+  smart-drop crossings fire impacts; after the first anchor, one capped
+  label-only chorus-to-chorus boundary may re-fire the second drop hit, and
+  later chorus boundaries settle into `post_drop`.
 - `LaserSceneExecutor` consumes those decisions and handles laser MIDI output,
   role cooldown/rotation, blackout latching, and transition-mask cleanup.
   Drop/post-drop cycles use usable-only shuffle bags and autoloop-tick cadence;

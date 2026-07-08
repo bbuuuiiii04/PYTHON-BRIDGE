@@ -9,11 +9,87 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from rb_ss_bridge_v2.beat_sync_engine import (  # noqa: E402
     MAX_CATCHUP,
     MAX_PULSES,
+    WRAP_HOLD_BEATS,
     BeatSyncEngine,
+    TriggerClock,
 )
 
 
 class BeatSyncEngineTests(unittest.TestCase):
+    def test_clock_holds_sub_threshold_backward_step(self) -> None:
+        clock = TriggerClock(1.0, spawn_on_wrap=True)
+        self.assertEqual(clock.advance(10.0), (0, False))
+
+        self.assertEqual(clock.advance(9.995), (0, False))
+
+        self.assertEqual(clock._last_abs, 10.0)
+        self.assertEqual(clock._last_idx, 10)
+
+    def test_clock_oscillating_jitter_never_wraps_or_spawns(self) -> None:
+        clock = TriggerClock(1.0, spawn_on_wrap=True)
+        self.assertEqual(clock.advance(10.0), (0, False))
+
+        for beat in (9.995, 10.0, 9.996, 10.0) * 8:
+            self.assertEqual(clock.advance(beat), (0, False))
+
+        self.assertEqual(clock._last_abs, 10.0)
+        self.assertEqual(clock._last_idx, 10)
+
+    def test_clock_real_loop_wraps_and_reseeds(self) -> None:
+        clock = TriggerClock(1.0, spawn_on_wrap=True)
+        clock.advance(10.0)
+
+        self.assertEqual(clock.advance(2.0), (1, True))
+        self.assertEqual(clock._last_abs, 2.0)
+        self.assertEqual(clock._last_idx, 2)
+
+        no_spawn = TriggerClock(1.0, spawn_on_wrap=False)
+        no_spawn.advance(10.0)
+        self.assertEqual(no_spawn.advance(2.0), (0, True))
+        self.assertEqual(no_spawn._last_abs, 2.0)
+        self.assertEqual(no_spawn._last_idx, 2)
+
+    def test_clock_wrap_hold_boundary(self) -> None:
+        clock = TriggerClock(1.0, spawn_on_wrap=True)
+        clock.advance(10.0)
+        self.assertEqual(clock.advance(10.0 - WRAP_HOLD_BEATS), (1, True))
+
+        held = TriggerClock(1.0, spawn_on_wrap=True)
+        held.advance(10.0)
+        self.assertEqual(held.advance(10.0 - WRAP_HOLD_BEATS + 0.01), (0, False))
+        self.assertEqual(held._last_abs, 10.0)
+
+    def test_clock_forward_spawns_still_capped(self) -> None:
+        clock = TriggerClock(1.0, spawn_on_wrap=True)
+        clock.advance(0.0)
+        self.assertEqual(clock.advance(1.0), (1, False))
+        self.assertEqual(clock.advance(50.0), (MAX_CATCHUP, False))
+
+    def test_continuous_holds_jitter_but_reanchors_real_wrap(self) -> None:
+        engine = BeatSyncEngine()
+        engine.configure(
+            effect_name="solid",
+            sync_mode="continuous",
+            beat_division=1.0,
+            params={},
+            seed=42,
+            now=0.0,
+            abs_beat=10.0,
+            bpm=120.0,
+        )
+        born_before = engine._instances[0].born_abs_beat
+        bucket_before = engine._instances[0].bucket
+
+        engine.on_tick(10.25, 0.1, 120.0)
+        engine.on_tick(10.245, 0.2, 120.0)
+
+        self.assertEqual(engine._instances[0].born_abs_beat, born_before)
+        self.assertEqual(engine._instances[0].bucket, bucket_before)
+
+        engine.on_tick(9.75, 0.3, 120.0)
+        self.assertEqual(engine._instances[0].born_abs_beat, 9.75)
+        self.assertNotEqual(engine._instances[0].bucket, bucket_before)
+
     def test_born_bpm_stamped_on_activation_overlap_and_retrigger(self) -> None:
         engine = BeatSyncEngine()
         engine.configure(

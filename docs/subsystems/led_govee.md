@@ -40,9 +40,11 @@ Smart-drop marker collapse (2026-07-07):
 - LED drop-impact gating still lives in `StateManager` through
   `led_dispatch_policy.py`, not through `drop_lifecycle.py`. It now mirrors the
   laser pure resolver: predecessor labels and real smart-drop crossings fire
-  drop impacts, while label-only chorus-to-chorus boundaries settle into
-  `post_drop`. Collapsed smart-drop markers mean the pre-drop blackout arms once
-  per selected drop section instead of every 32-beat raw ANLZ marker.
+  drop impacts, and the first label-only chorus-to-chorus boundary after an
+  anchored section may fire one capped second drop impact. Later chorus
+  boundaries settle into `post_drop`. Collapsed smart-drop markers mean the
+  pre-drop blackout arms once per selected drop section instead of every
+  32-beat raw ANLZ marker.
 
 Intra-section look rotation (2026-07-07):
 - Long `buildup`, `pre_drop`, `breakdown`, and monotonic `ambient` LED role
@@ -81,6 +83,28 @@ LED idle/pause ambient fix (2026-07-07):
   firmware-revert explanation remains hardware-assumed until an operator live
   pause validates the room-visible behavior. SOFTWARE-VALIDATED ONLY /
   HARDWARE-UNVALIDATED.
+
+Realtime LED wrap-flicker guard (AWR-141, 2026-07-07):
+- `TriggerClock.advance()` now treats backward beat moves smaller than
+  `WRAP_HOLD_BEATS = 0.5` as live extrapolation jitter or short rolls: it holds
+  the high-water beat, returns no wrap, and does not restart continuous
+  realtime effects. A real loop, cue, or seek at or above the threshold still
+  wraps and re-syncs. The Govee realtime runner, renderer, upstream WI-1 beat
+  clamp, and config are unchanged. SOFTWARE-VALIDATED ONLY /
+  HARDWARE-UNVALIDATED.
+
+Smart-drop blackout transport + runway observability (AWR-142, 2026-07-07):
+- `_dispatch_led_smart_drop_blackout` now tags each accepted pre-drop room
+  blackout with which transport carried it and how much runway it had. The
+  realtime accept line keeps every existing field and appends
+  `transport=realtime runway_beats=<beats_to_next_drop>`; the previously silent
+  cloud accept now emits `[RGB] smart-drop-blackout-accepted transport=cloud
+  phase=... next_drop=... runway_beats=... role_key=... active_deck=...`.
+  `runway_beats` is `sp_state.beats_to_next_drop` formatted `%.1f`, or `-` when
+  unknown. This is observability only: transport selection, send order, returns,
+  and the `_led_smart_drop_blackout_key` lifecycle are unchanged, so a cloud
+  blackout that lands late is now distinguishable in the log from one that never
+  armed. SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
 
 LED pad queued-color restore (AWR-137, 2026-07-07):
 - AWR-134 instant realtime recolor is superseded by operator decision: color

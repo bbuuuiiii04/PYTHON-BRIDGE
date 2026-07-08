@@ -79,7 +79,9 @@ push loop.
   and transition-mask cleanup for laser output.
 - `DropLifecycle` is a pure resolver. Default-on laser impacts must stay
   structurally identical to the LED impact gate: predecessor labels and real
-  smart-drop crossings fire, label-only chorus-to-chorus boundaries do not.
+  smart-drop crossings fire, one capped chorus-to-chorus label boundary can
+  re-fire the second drop hit, and later chorus boundaries demote to
+  `post_drop`.
   Sustained drop/post-drop cycles may fire only on autoloop ticks and may
   select only usable autoloop scenes.
 - An initial laser drop impact may fall back to the configured static drop

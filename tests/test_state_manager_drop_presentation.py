@@ -279,6 +279,33 @@ class PlanAndTickIntegrationTests(unittest.TestCase):
         self.assertEqual(sm._drop_presentation_last_actions.reason, "both_finale")
         self.assertEqual(sm._drop_presentation_window._window_end_beat, 288.0)
 
+    def test_label_rearm_without_active_drop_does_not_reenter_window(self) -> None:
+        sm, d = self._sm_with_plan(drops=(32.0, 96.0))
+        sm._drop_presentation_session.opening_tracks_counted = 3
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(abs_beat=32.0, active_drop_beat=32.0, smart_drop_crossing=True),
+            impact_now=True,
+        )
+        original_end = sm._drop_presentation_window._window_end_beat
+
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(
+                abs_beat=64.0,
+                active_drop_beat=None,
+                smart_drop_crossing=False,
+                current_phrase_is_chorus=True,
+                phrase_start_crossing=True,
+                smart_post_drop_active=True,
+            ),
+            impact_now=True,
+        )
+
+        self.assertEqual(sm._drop_presentation_last_actions.presentation, LEDS_ONLY)
+        self.assertEqual(sm._drop_presentation_last_actions.reason, "leds_only_personality")
+        self.assertEqual(sm._drop_presentation_window._window_end_beat, original_end)
+
     def test_runway_less_hotcue_tag_still_opens_window(self) -> None:
         sm, d = self._sm_with_plan(
             drops=(64.0,),

@@ -1517,7 +1517,7 @@ class LEDStateManagerTests(unittest.TestCase):
         self.assertEqual(sm._led_first_drop_anchor_beat, 64.0)
         self.assertEqual(sm._led_drop_impact_until_beat, 72.0)
 
-    def test_label_only_second_chorus_marker_stays_post_drop(self) -> None:
+    def test_label_only_second_chorus_marker_fires_capped_drop(self) -> None:
         director = _AutomationLEDLookDirector()
         director.mapped_roles.add("post_drop")
         adapter = _StubLEDAdapter()
@@ -1540,11 +1540,12 @@ class LEDStateManagerTests(unittest.TestCase):
 
         sm._push_tick()
 
-        self.assertEqual(adapter.trigger_calls[0].role, "post_drop")
+        self.assertEqual(adapter.trigger_calls[0].role, "drop")
         self.assertEqual(sm._led_first_drop_anchor_beat, 64.0)
-        self.assertEqual(sm._led_drop_impact_count, 1)
+        self.assertEqual(sm._led_drop_impact_count, 2)
+        self.assertEqual(sm._led_drop_impact_until_beat, 88.0)
 
-    def test_chorus_anchor_without_impact_keeps_chorus_markers_post_drop(self) -> None:
+    def test_chorus_anchor_without_impact_allows_two_later_chorus_hits(self) -> None:
         director = _AutomationLEDLookDirector()
         director.mapped_roles.add("post_drop")
         adapter = _StubLEDAdapter()
@@ -1596,10 +1597,10 @@ class LEDStateManagerTests(unittest.TestCase):
 
         self.assertEqual(
             [call.role for call in adapter.trigger_calls],
-            ["post_drop", "post_drop", "post_drop", "post_drop"],
+            ["post_drop", "drop", "drop", "post_drop"],
         )
         self.assertEqual(sm._led_first_drop_anchor_beat, 32.0)
-        self.assertEqual(sm._led_drop_impact_count, 0)
+        self.assertEqual(sm._led_drop_impact_count, 2)
 
     def test_groove_retriggers_on_32_count_cycle_and_phrase_marker(self) -> None:
         director = _AutomationLEDLookDirector()

@@ -13,6 +13,11 @@ from typing import Any, Mapping
 MAX_PULSES = 16          # overlap: max concurrent comets
 MAX_CATCHUP = 1          # max spawns per tick from a forward beat jump/seek
 MAX_MANUAL_PENDING = 4   # max queued manual fires drained per tick
+WRAP_HOLD_BEATS = 0.5    # backward moves smaller than this are extrapolation jitter (~0.01 beat) or
+                         # sub-beat loop rolls: hold, do not wrap/restart. A real track loop or
+                         # seek is >= this (typically many beats) and still wraps. Tunable ceiling:
+                         # raise toward 1.0 if real short loops must not restart; lower toward the
+                         # jitter magnitude (~0.02) if a ~half-beat loop must restart animation.
 
 VALID_SYNC_MODES = frozenset({"retrigger", "overlap", "continuous"})
 _EPS = 1e-6
@@ -49,23 +54,30 @@ class TriggerClock:
 
     def advance(self, abs_beat: float) -> tuple[int, bool]:
         """Return (spawn_count, wrapped). spawn_count is forward crossings capped at
-        MAX_CATCHUP; wrapped is True when abs_beat moved backward."""
+        MAX_CATCHUP; wrapped is True only on a genuine backward jump
+        (>= WRAP_HOLD_BEATS) -- a track loop/seek. Sub-threshold backward moves
+        are held: no wrap, no spawn, and the high-water position is retained."""
         abs_beat = float(abs_beat)
         idx = math.floor(abs_beat / self.division)
         if self._last_idx is None or self._last_abs is None:
             self._last_idx = idx
             self._last_abs = abs_beat
             return (0, False)
-        wrapped = abs_beat < self._last_abs - _EPS
-        spawn = 0
-        if wrapped:
+        delta = abs_beat - self._last_abs
+        if delta <= -WRAP_HOLD_BEATS:
+            # genuine backward jump: track loop / cue / seek
             self._last_idx = idx
-            spawn = 1 if self.spawn_on_wrap else 0
-        elif idx > self._last_idx:
+            self._last_abs = abs_beat
+            return (1 if self.spawn_on_wrap else 0, True)
+        if delta < 0.0:
+            # sub-threshold backward jitter / short roll: hold high-water mark
+            return (0, False)
+        spawn = 0
+        if idx > self._last_idx:
             spawn = min(idx - self._last_idx, MAX_CATCHUP)
             self._last_idx = idx
         self._last_abs = abs_beat
-        return (spawn, wrapped)
+        return (spawn, False)
 
 
 class BeatSyncEngine:

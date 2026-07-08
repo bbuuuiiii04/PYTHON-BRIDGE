@@ -76,12 +76,13 @@ Runtime flow:
 - decisions: role selection, gated drop/post-drop lifecycle, manual override, blackout, cooldown, bank/personality rotation
 - outputs: MIDI note/CC/pulse/hold events through `MidiOutput`
 - `drop_lifecycle_mirror` defaults on. Allowed predecessor-label impacts and
-  real smart-drop crossings hold for the configured flat `drop_impact_beats`,
-  then `post_drop`/fallback drop cycles fire only on autoloop ticks. Label-only
-  chorus-to-chorus boundaries no longer re-fire impacts. Drop and post-drop
-  cycle banks use usable-only shuffle bags that reset per track; a static
-  configured drop scene remains valid for the at-anchor impact so an empty
-  cyclable bank does not make the hit dark.
+  real smart-drop crossings hold for the configured flat `drop_impact_beats`.
+  After the first anchor, one label-only chorus-to-chorus boundary may re-fire
+  a capped second drop impact; later chorus boundaries demote to
+  `post_drop`/fallback drop cycles on autoloop ticks. Drop and post-drop cycle
+  banks use usable-only shuffle bags that reset per track; a static configured
+  drop scene remains valid for the at-anchor impact so an empty cyclable bank
+  does not make the hit dark.
 - Setting `drop_lifecycle_mirror` to false preserves the previous ungated crossing and fixed post-drop-hold path (flag-OFF is byte-identical to pre-change EXCEPT the resume transition, which now also resets the executor: a benign phrase-bank reshuffle + active-scene clear; no dark, no drop leak). Director and executor lifecycle state reset on master/track/stop/resume transitions; director state also resets on scripted/idle transitions and personality application rebuilds it.
 - Blackout-mask migration: the transition blackout — the held `manual_blackout_on/off` note refcounted by `breakdown`/`master_switch` owners in `LaserSceneExecutor`, plus the Smart-Drop drop-window pending — now also drives the pack player's frame-level blackout through `StateManager._drive_pack_output`. Backend note rejection no longer discards smart owners; accepted MIDI backends still receive the same note on/off sequence. The manual laser-pad/web blackout stays in the separate MIDI-input binding refcount and must not be routed through executor `_mask_owners`, because executor lifecycle wipes intentionally clear only smart-side covers.
 - Laser color Package 4: the mapper is pure in-memory math and publishes an immutable held snapshot. `LaserPackPlayer` merges the current held snapshot by copying the rendered Autoloop frame and writing only CH8/CH9; missing/no-op snapshots, disabled config, null table entries, scripted tracks, diagnostics, blackout, and static override all fall back to authored pack output.
@@ -92,7 +93,7 @@ Config:
 - local ignored `config/laser_director.json`
 - launcher environment for `RBSS_LASER_CONFIG`
 - personality knobs: `drop_lifecycle_mirror` (default `true`),
-  `drop_impact_beats`, inert legacy `max_drops_in_a_row`, and operator-reserved
+  `drop_impact_beats`, `max_drops_in_a_row` (caps drop hits per section), and operator-reserved
   future `post_drop_cycle_beats`; laser cycle cadence still comes from autoloop
   ticks. Deprecated leftover `pre_drop_scene` keys are ignored for load
   compatibility.
