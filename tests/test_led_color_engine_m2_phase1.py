@@ -392,22 +392,13 @@ class ResolveColorRegressionTests(unittest.TestCase):
             )
             cue_rng = _rng_from_seed(cue_seed)
             p = max(0.0, min(1.0, cue_rng.uniform(focus_lo, focus_hi)))
-            rgb = _blend_white(
-                _p_to_rgb(p, eng._config.scale_stops, eng._stop_positions),
-                palette.white,
-            )
+            rgb = _p_to_rgb(p, eng._config.scale_stops, eng._stop_positions)
             expected = {"color": rgb}
             if multi:
                 p_low = max(0.0, min(1.0, focus_lo))
                 p_high = max(0.0, min(1.0, focus_hi))
-                expected["color_a"] = _blend_white(
-                    _p_to_rgb(p_low, eng._config.scale_stops, eng._stop_positions),
-                    palette.white,
-                )
-                expected["color_b"] = _blend_white(
-                    _p_to_rgb(p_high, eng._config.scale_stops, eng._stop_positions),
-                    palette.white,
-                )
+                expected["color_a"] = _p_to_rgb(p_low, eng._config.scale_stops, eng._stop_positions)
+                expected["color_b"] = _p_to_rgb(p_high, eng._config.scale_stops, eng._stop_positions)
 
             actual = eng.resolve_color(
                 role=role, section_id=section_id, cycle=cycle,
