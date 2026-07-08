@@ -159,6 +159,38 @@ class LEDDispatchCoordinatorTests(unittest.TestCase):
         # Realtime takeover re-asserts razer mode.
         self.assertEqual(runner.assert_count, 1)
 
+    def test_stage_cloud_takeover_triggers_without_teardown_and_yields(self) -> None:
+        coordinator, adapter, runner, owner = self._coordinator()
+        # The realtime substitute already owns the strip on the beat.
+        owner.acquire(OwnerState.REALTIME_RAZER)
+        cloud = _decision(
+            look="cloud_drop", action="diy_scene", backend="cloud_diy",
+            scene_ref="23254201", role="drop",
+        )
+
+        self.assertTrue(coordinator.stage_cloud_takeover(cloud))
+
+        self.assertEqual(adapter.trigger_calls, [cloud])        # cloud scene sent
+        self.assertEqual(runner.keepalive_yield_count, 1)       # keepalive told to yield
+        self.assertNotIn(None, runner.desired)                  # NO force_deactivate teardown
+        self.assertEqual(owner.current(), OwnerState.REALTIME_RAZER)  # owner untouched
+        # Dwell bookkeeping untouched (the substitute already recorded this tick).
+        self.assertEqual(coordinator._last_dispatch_mono, 0.0)
+        self.assertEqual(coordinator._last_dispatch_role, "")
+
+    def test_stage_cloud_takeover_rejected_does_not_yield(self) -> None:
+        coordinator, adapter, runner, owner = self._coordinator()
+        owner.acquire(OwnerState.REALTIME_RAZER)
+
+        def _reject(decision: LEDLookDecision) -> bool:
+            adapter.trigger_calls.append(decision)
+            return False
+        adapter.trigger = _reject
+        cloud = _decision(look="cloud_drop", backend="cloud_diy", role="drop")
+
+        self.assertFalse(coordinator.stage_cloud_takeover(cloud))
+        self.assertEqual(runner.keepalive_yield_count, 0)
+
     def test_realtime_white_template_sets_white_moment_flag(self) -> None:
         coordinator, adapter, runner, owner = self._coordinator(min_dwell_env="0")
 
