@@ -106,6 +106,22 @@ Smart-drop blackout transport + runway observability (AWR-142, 2026-07-07):
   blackout that lands late is now distinguishable in the log from one that never
   armed. SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
 
+LED solo pre-dark hold (AWR-144, 2026-07-07):
+- On a drop the room-split plan already marks a Laser Solo, the LEDs used to
+  flash a bright drop look for ~0.6 s before going dark. That gap exists because
+  the LED drop look keys off the chorus phrase-start anchor, which fires just
+  before the smart-drop marker where drop-presentation sets the `drop_spotlight`
+  LED blackout owner. `_dispatch_led_automation` now checks
+  `_led_upcoming_drop_is_lasers_only()` (pending
+  `_drop_presentation_last_pending[0] == LASERS_ONLY`) when the resolved role is
+  `drop`; if so it holds the current look via
+  `_gate_led_automation("solo_predark_hold", ...)` instead of dispatching the
+  drop look, and the marker's `drop_spotlight` blackout then owns the darkness.
+  This is LED-side only: solo length and the blackout itself are unchanged, the
+  lasers still fire the solo, and every non-solo drop
+  (`leds_only`/`leds_plus_lasers`/plan-unavailable/disabled) dispatches its drop
+  look byte-identically. SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
+
 LED pad queued-color restore (AWR-137, 2026-07-07):
 - AWR-134 instant realtime recolor is superseded by operator decision: color
   pad changes queue again. Manual color pad events (`red`, `green`, `blue`,
