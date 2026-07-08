@@ -118,6 +118,7 @@ Triggered by changes to:
 - `govee_frame_renderer.py`
 - `govee_owner_state.py`
 - `govee_frame_engine.py`
+- `govee_frame_engine_client.py`
 - `beat_sync_engine.py`
 - `state_manager.py` LED dispatch seam
 - LED/Govee config examples
