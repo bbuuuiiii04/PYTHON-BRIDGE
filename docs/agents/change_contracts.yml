@@ -118,6 +118,7 @@ contracts:
       - beat_sync_engine.py
       - led_identity_v2.py
       - tools/calibrate_identity_v2.py
+      - tools/led_pad_playback.py
       - config/led_look_director.example.json
       - streamdeck/streamdeck_midi.py
     key_symbols:
