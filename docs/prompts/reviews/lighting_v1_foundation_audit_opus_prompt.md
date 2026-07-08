@@ -32,7 +32,7 @@ Brandon (the operator, not a software engineer) is the audience for your gate me
 
 ## What "v2's path" means — the load-bearing classification
 
-The Fable prompt `docs/prompts/lighting_engine_v2_fable_prompt.md` is the definition of scope. Its **"Verified seams"** and **"Gaps to consider"** sections enumerate exactly the code v2 F1–F4 builds on. Treat everything reachable from those seams in the live LED render path as **on v2's path**. Concretely, on-path modules include (verify each against code, do not treat this list as exhaustive or as gospel):
+The Fable prompt `docs/prompts/active/lighting_engine_v2_fable_prompt.md` is the definition of scope. Its **"Verified seams"** and **"Gaps to consider"** sections enumerate exactly the code v2 F1–F4 builds on. Treat everything reachable from those seams in the live LED render path as **on v2's path**. Concretely, on-path modules include (verify each against code, do not treat this list as exhaustive or as gospel):
 
 - Stream Deck: `streamdeck_midi.py`
 - Color / palette / identity: `led_color_engine.py`, `led_palette_control.py`, `led_pad_controls.py`, `led_models.py`, `led_config.py`, `led_look_director.py`
@@ -68,7 +68,7 @@ Two artifacts, plus the gate message in chat:
 
 ## Evidence packet — source-of-truth order: code > tests > this packet > docs
 
-- **Scope definition:** `docs/prompts/lighting_engine_v2_fable_prompt.md` — "Verified seams" + "Gaps" = the v2-path surface.
+- **Scope definition:** `docs/prompts/active/lighting_engine_v2_fable_prompt.md` — "Verified seams" + "Gaps" = the v2-path surface.
 - **Intended behavior (authoritative):** `docs/architecture/lighting_engine_v2_authority.md`, `docs/architecture/LIGHTING_ENGINE_V2_DESIGN.md`, `docs/architecture/runtime_invariants.md`, `docs/agents/change_contracts.yml`, `docs/subsystems/led_govee.md` (and `runtime_commands.md`, `laser.md` for boundary calls).
 - **Working-tree state (uncommitted at session start — audit the actual current code, and flag anything here you cannot explain):** `led_dispatch_policy.py`, `led_palette_control.py`, `state_manager.py`, `tests/test_led_palette_control.py` are modified vs HEAD `34eb910`. These sit squarely on v2's path — read the working tree, not just HEAD, and note whether the uncommitted diff introduces, fixes, or masks any finding.
 - **Test surface:** `python3 -m unittest discover tests` (read-only, to establish the current green/red baseline and to see which behaviors are pinned). Some tests need optional deps and none prove hardware.

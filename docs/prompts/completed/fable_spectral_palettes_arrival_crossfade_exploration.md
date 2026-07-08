@@ -42,7 +42,7 @@ tests, maintainability, runtime safety, and operator behavior inside the named s
   library + `_pick_palette` machinery), not free RGB synthesis. Push back only with concrete evidence.
 - SoundSwitch is retiring to authoring-only; the bridge is the compositor. Build on that direction.
 - Every design must clear the generalization gate in
-  `docs/prompts/fable_creative_lead_crowd_experience_brainstorm.md` (§ Limitations): core behavior
+  `docs/prompts/completed/fable_creative_lead_crowd_experience_brainstorm.md` (§ Limitations): core behavior
   on reliable-backbone signals (beat/BPM/transport/deck/fader state), heuristics as gracefully
   degrading enrichment only, zero per-track authoring or tuning, safe-neutral failure on weird tracks.
 

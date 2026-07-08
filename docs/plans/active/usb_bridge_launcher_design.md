@@ -25,7 +25,7 @@ at HEAD before adoption; its F5-F12 are Codex-plan content). Next step after thi
 Milestone-1-only Codex implementation spec — target path
 `docs/plans/active/usb_bridge_launcher_m1_codex_spec.md`, **not yet authored** (the session
 that added this pointer was descoped before writing it; see
-`docs/prompts/usb_launcher_design_changes_handoff.md`). Milestones 2-4 get specced after M1's
+`docs/prompts/active/usb_launcher_design_changes_handoff.md`). Milestones 2-4 get specced after M1's
 unknowns resolve.
 
 ## 1. Goal

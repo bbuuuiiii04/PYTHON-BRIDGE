@@ -49,7 +49,7 @@ the cleared checks (Rekordbox restart, second plug-in).
 
 **Post-delivery status (2026-07-04 evening):** the gesture-v2 session folded F1-F4 plus
 the F5/F7/F8/F9 mechanics into the design spec at `02250de`, after independently
-re-verifying the repo claims (record: `docs/prompts/usb_launcher_design_changes_handoff.md`);
+re-verifying the repo claims (record: `docs/prompts/active/usb_launcher_design_changes_handoff.md`);
 it also added two new §6 risky bits — the PyInstaller×Python-3.14 build gate and the M1
 memory-read stop-rule — both endorsed by this review. The M1 Codex spec the design points
 at is **not yet authored**. Still open: F6/F10-F12 as Codex-plan content, and the Part 2

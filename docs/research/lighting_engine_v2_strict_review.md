@@ -8,7 +8,7 @@ validation_scope: strict review only — read-only verification of the v4 analys
 
 # LIGHTING ENGINE v2 — Strict Review (v4 capability + v2 feasibility/creative phase gate)
 
-Fable 5 strict review (2026-07-05, `docs/prompts/fable_lighting_engine_v2_strict_review.md`).
+Fable 5 strict review (2026-07-05, `docs/prompts/reviews/fable_lighting_engine_v2_strict_review.md`).
 Two targets: **(1)** the schema-v4 spectral analysis as built — implementation correctness and
 whether its measurements carry what every v2 feature needs; **(2)** LIGHTING ENGINE v2 as
 designed — feasibility and creative design, now that the built v4, the operator's beat-by-beat

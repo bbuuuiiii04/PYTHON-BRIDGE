@@ -8,6 +8,12 @@ validation_scope: Read-only per-file placement inventory of all 293 Markdown doc
 
 # Docs Inventory & Placement Audit - 2026-07-08
 
+> **UPDATE 2026-07-08 (post-audit, operator-directed):** all 30 Bucket-B moves plus the Bucket-D
+> Phase-9 archive were **executed** via `git mv` (history preserved). `docs/prompts/` root now holds
+> only `README.md`; `docs/plans/` root is empty of loose files. Stale path references in the registry,
+> `doc_index.md`, and 6 other docs were updated; the 3 hard doc checkers pass. The tables below are the
+> pre-move audit snapshot — the "correct folder" column is where each file now lives.
+
 Total docs under `docs/`: **293** (213 with `doc_status:` header, 80 without).
 
 **Bucket counts (sum = 293):** A (active, correctly placed) = **178** | B (misfiled) = **30** | C (inactive, correctly placed) = **84** | D (ambiguous / operator decision) = **1**.

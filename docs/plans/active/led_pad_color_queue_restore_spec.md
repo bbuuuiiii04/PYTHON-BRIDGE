@@ -11,7 +11,7 @@ validation_scope: spec only until tasks land; SOFTWARE-VALIDATED ONLY / HARDWARE
 Contract key: `led_govee` (`docs/agents/change_contracts.yml:101`). **Operator decision
 (2026-07-07): pad color changes SHOULD queue to the next look boundary — that is the intended
 musical behavior.** The AWR-134 instant-apply (implemented earlier today from
-`docs/plans/active/led_pad_color_immediacy_spec.md`) misread the symptom: the real problem was the
+`docs/plans/completed/led_pad_color_immediacy_spec.md`) misread the symptom: the real problem was the
 queue firing late/never, which the AWR-132 hold-starvation fix already cured (dispatch boundaries
 are now bounded at ≤32 beats). This spec removes the instant-apply behavior while keeping the
 harmless pure refactor underneath it.
@@ -73,7 +73,7 @@ and full `discover tests` (documented env reds excepted).
 - [ ] Docs: update `docs/subsystems/led_govee.md` (remove instant-recolor claim),
       `docs/status/active_work_registry.md` (AWR-134 row → superseded-by-operator-decision,
       AWR-137 row → implemented), and mark
-      `docs/plans/active/led_pad_color_immediacy_spec.md` frontmatter `doc_status: superseded`
+      `docs/plans/completed/led_pad_color_immediacy_spec.md` frontmatter `doc_status: superseded`
       (move to `docs/plans/completed/` if the repo convention prefers; follow existing precedent).
 - [ ] Operator summary: "color pads queue again — the color lands at the next look change, which
       the hold fix now guarantees arrives within ~32 beats."

@@ -8,7 +8,7 @@ validation_scope: software build + corpus validation only — v4 analysis layer 
 
 # Spectral Audio Analysis — v3 Audit, v4 Redesign, and Build
 
-Fable 5 one-shot (2026-07-05, `docs/prompts/fable_spectral_audio_redesign.md`, operator-granted
+Fable 5 one-shot (2026-07-05, `docs/prompts/completed/fable_spectral_audio_redesign.md`, operator-granted
 build exception). Audience: Claude (design lead) folding this into the LIGHTING ENGINE v2
 record and the Feature 1–4 Codex specs. Every load-bearing claim is labeled
 **confirmed / assumed / unknown / rejected / unproven** and tied to a file:line, a measured

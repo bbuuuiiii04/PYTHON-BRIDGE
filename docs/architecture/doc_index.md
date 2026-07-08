@@ -125,7 +125,6 @@ Active only if also listed in `docs/status/active_work_registry.md`. Confirm eac
 | `docs/prompts/reviews/rekordbox_mixer_active_deck_re_review_prompt.md` | REVIEW PROMPT (standing review handoff; re-verify before use) | Adversarial review handoff for the Rekordbox mixer RE process and implementation spec. Review-only. |
 | `docs/plans/completed/soundswitch/*.md` | COMPLETED / SUPERSEDED PLANNING | Material RW-1 through RW-5, hardware-procedure, T7/T8 specs/proofs, and the old progress ledger. Historical evidence only. |
 | `docs/plans/completed/led_agent_orchestrator_workflow.md`, `docs/plans/completed/led_look_director_integration_plan_revised.md` | COMPLETED / SUPERSEDED PLANNING | Early Govee/LED bootstrap plans superseded by the landed LED color engine + LED Pad work. |
-| `docs/plans/phase9_personality_resolver_plan.md` | PLAN (DORMANT — not registry-listed) | Personality resolver implemented; Phases 5 (live tuning) and 7–8 unscheduled; revive via a new AWR entry or archive — operator decision pending. |
 | `docs/prompts/active/*.md` | AGENT PROMPT (ACTIVE) | Active prompts only. Completed setup prompts belong in `docs/prompts/completed/`; obsolete SoundSwitch prompts — including the completed remaining-software scoping and static-toggle authoring prompts — were deleted; Git history preserves them. |
 | `docs/plans/completed/govee_realtime_codex_spec.md` | PLAN / SPEC | Tracked since `50f469e`; completed implementation record. |
 
@@ -140,7 +139,7 @@ Active only if also listed in `docs/status/active_work_registry.md`. Confirm eac
 | Zone | Type | Notes |
 | --- | --- | --- |
 | `docs/archive/prompts/*.md` (7) | ARCHIVE | Completed/superseded agent prompts. |
-| `docs/archive/plans/*.md` (3) | ARCHIVE | Completed autoloop spec + plan; deferred laser SM-net blackout-mask spec (do-not-implement in MIDI path, 2026-06-23 — reference design for future DMX-frame blackout). |
+| `docs/archive/plans/*.md` (4) | ARCHIVE | Completed autoloop spec + plan; deferred laser SM-net blackout-mask spec (do-not-implement in MIDI path, 2026-06-23 — reference design for future DMX-frame blackout); dormant Phase-9 personality-resolver plan (archived 2026-07-08 by operator decision — resolver implemented, Phases 5/7–8 unscheduled). |
 | `docs/prompts/completed/graphify_install_prompt.md` | ARCHIVE / HISTORICAL | Completed Graphify install/tuning prompt for AWR-114; current workflow is `docs/setup/graphify.md`. |
 | `docs/prompts/completed/*.md` | ARCHIVE / HISTORICAL | Retained completed prompts are provenance still referenced by current docs; spent zero-reference prompts were deleted 2026-07-03 (Git history preserves them). |
 | `docs/prompts/reviews/*.md` | REVIEW / AUDIT | Current review handoffs plus non-SoundSwitch historical review briefs retained where code references them. Completed SoundSwitch review prompts were deleted; Git history preserves them. |
