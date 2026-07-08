@@ -11,6 +11,7 @@ from rb_ss_bridge_v2.govee_frame_renderer import (  # noqa: E402
     REALTIME_EFFECT_NAMES,
     REALTIME_STROBE_EFFECTS,
     GoveeFrameRenderer,
+    _slot_breakdown_star_twinkle,
     default_sync_mode,
     is_comet_effect,
 )
@@ -47,6 +48,16 @@ class GoveeFrameRendererTests(unittest.TestCase):
     def test_requested_active_cues_are_registered(self) -> None:
         for cue in ACTIVE_CUES:
             self.assertIn(cue, EDM_BUILDS)
+
+    def test_breakdown_star_twinkle_never_lights_slot_five(self) -> None:
+        """AWR-152 T7: color_slot draws from 0..4 only — no random pure-white stars."""
+        for beat in (0.0, 3.5, 12.25, 40.0, 97.5):
+            for frame_index in range(5):
+                field = _slot_breakdown_star_twinkle(
+                    beat, 0.0, frame_index, {}, segments=30, seed=1
+                )
+                for pixel in field:
+                    self.assertEqual(pixel[5], 0.0)
 
     def test_active_cues_render_segment_frames(self) -> None:
         renderer = GoveeFrameRenderer()

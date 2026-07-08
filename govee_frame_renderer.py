@@ -1725,7 +1725,7 @@ def _slot_breakdown_star_twinkle(beat: float, local_t: float, frame_index: int,
         # Random starting phase so they all breathe at different times
         phase_offset = rng.uniform(0.0, 100.0)
         # Randomly assign this star to one of the color slots
-        color_slot = rng.randint(0, MAX_SLOTS - 1)
+        color_slot = rng.randint(0, 4)
 
         # Where are we in this pixel's personal lifecycle?
         cycle_pos = (cue_beat + phase_offset) % total_cycle
