@@ -158,7 +158,8 @@ class _RecordingRealtimeRunner:
         self.desired = []
         self.fire_count = 0
         self.emergency_count = 0
-        self.cloud_dispatch_notes: list[float] = []
+        self.assert_count = 0
+        self.brightness_requests: list[int] = []
 
     def set_desired(self, spec) -> None:  # type: ignore[no-untyped-def]
         self.desired.append(spec)
@@ -172,8 +173,11 @@ class _RecordingRealtimeRunner:
     def force_deactivate(self) -> None:
         self.desired.append(None)
 
-    def note_cloud_dispatch(self, now: float, **_kwargs) -> None:  # type: ignore[no-untyped-def]
-        self.cloud_dispatch_notes.append(now)
+    def request_activate_assert(self) -> None:
+        self.assert_count += 1
+
+    def request_brightness(self, value: int) -> None:
+        self.brightness_requests.append(int(value))
 
     def status(self) -> dict:
         return {"active": bool(self.desired), "last_error": ""}
@@ -838,6 +842,117 @@ class LEDStateManagerTests(unittest.TestCase):
         self.assertEqual(status["last_error"], "adapter_rejected")
         self.assertEqual(status["rejected_count"], 1)
         self.assertEqual(status["adapter"]["last_error"], "queue_full")
+
+    def test_dwell_rejected_automation_retries_same_decision_without_reticking(self) -> None:
+        """A coordinator-rejected automation dispatch is re-sent with the SAME
+        cached decision after ~0.35 s, without the role_key changing and without
+        re-ticking the director (AWR-145 latch-on-accept retry)."""
+        clock = [1000.0]
+
+        class _RejectOnceAdapter(_StubLEDAdapter):
+            def trigger(self, decision: LEDLookDecision) -> bool:
+                self.trigger_calls.append(decision)
+                return len(self.trigger_calls) > 1  # reject the 1st, accept after
+
+        director = _AutomationLEDLookDirector()
+        director.role_decisions["groove"] = _rt_decision()
+        adapter = _RejectOnceAdapter(accept=True)
+        sm = _make_sm(director=director, adapter=adapter)
+        _ready_led_active_deck(sm, 1)
+        sm._deck[1].load_gen = 33
+        sp = _groove_sp(2.0)
+
+        with patch("rb_ss_bridge_v2.led_dispatch_policy.time.monotonic", lambda: clock[0]):
+            # 1st dispatch: director ticks, decision sent, adapter rejects → retry cached.
+            sm._dispatch_led_automation(active=1, d=sm._deck[1], sp_state=sp)
+            self.assertEqual(len(adapter.trigger_calls), 1)
+            self.assertIsNotNone(sm._led_auto_retry)
+            director_ticks = len(director.tick_calls)
+
+            # Same role_key, retry not yet due (<0.35 s): no re-send.
+            clock[0] = 1000.2
+            sm._dispatch_led_automation(active=1, d=sm._deck[1], sp_state=sp)
+            self.assertEqual(len(adapter.trigger_calls), 1)
+
+            # Retry now due: same decision re-sent, adapter accepts, director NOT re-ticked.
+            clock[0] = 1000.4
+            sm._dispatch_led_automation(active=1, d=sm._deck[1], sp_state=sp)
+
+        self.assertEqual(len(adapter.trigger_calls), 2)
+        self.assertEqual(len(director.tick_calls), director_ticks)  # cursor unchanged
+        self.assertIsNone(sm._led_auto_retry)  # cleared on accept
+
+    def test_dwell_rejected_idle_retries_and_starts_freewheel(self) -> None:
+        """A rejected idle look retries and, once accepted with a realtime backend,
+        starts the idle freewheel (AWR-145)."""
+        clock = [500.0]
+
+        class _RejectOnceAdapter(_StubLEDAdapter):
+            def trigger(self, decision: LEDLookDecision) -> bool:
+                self.trigger_calls.append(decision)
+                return len(self.trigger_calls) > 1
+
+        director = _AutomationLEDLookDirector()
+        director.role_decisions["ambient"] = LEDLookDecision(
+            look="rt_twinkle", target="room_perimeter", action="realtime",
+            scene_ref="rt_twinkle", reason="role_entry:ambient", source="automation",
+            priority=2, role="ambient", backend="realtime_razer", params={},
+        )
+        adapter = _RejectOnceAdapter(accept=True)
+        sm = _make_sm(director=director, adapter=adapter)
+        d = sm._deck[1]
+        d.load_gen = 11
+        d.meta.filepath = "/tracks/current.wav"
+
+        with patch("rb_ss_bridge_v2.led_dispatch_policy.time.monotonic", lambda: clock[0]):
+            sm._dispatch_led_idle_ambient(active=1, d=d, reason="test")  # rejected → cached
+            self.assertEqual(len(adapter.trigger_calls), 1)
+            self.assertIsNotNone(sm._led_idle_retry)
+            self.assertIsNone(sm._led_idle_freewheel_since)
+
+            clock[0] = 500.2  # not yet due
+            sm._dispatch_led_idle_ambient(active=1, d=d, reason="test")
+            self.assertEqual(len(adapter.trigger_calls), 1)
+
+            clock[0] = 500.4  # due → accept → freewheel starts
+            sm._dispatch_led_idle_ambient(active=1, d=d, reason="test")
+
+        self.assertEqual(len(adapter.trigger_calls), 2)
+        self.assertIsNone(sm._led_idle_retry)
+        self.assertIsNotNone(sm._led_idle_freewheel_since)
+
+    def test_retry_slots_cleared_on_transitions(self) -> None:
+        """Both retry slots clear on deck switch, idle reset, LED_BLACKOUT, and gate
+        transition — a stale retry must never fire across a mode change (AWR-145)."""
+        sm = _make_sm(director=_AutomationLEDLookDirector(), adapter=_StubLEDAdapter())
+
+        def _arm_retries() -> None:
+            sm._led_auto_retry = ("k", "groove", _rt_decision(), 1)
+            sm._led_idle_retry = ("k", _rt_decision(), 1)
+
+        # Deck switch.
+        _arm_retries()
+        sm._reset_for_active_deck_entry(2, "test")
+        self.assertIsNone(sm._led_auto_retry)
+        self.assertIsNone(sm._led_idle_retry)
+
+        # Idle reset.
+        _arm_retries()
+        sm._enter_idle_no_audible(reason="test")
+        self.assertIsNone(sm._led_auto_retry)
+        self.assertIsNone(sm._led_idle_retry)
+
+        # LED_BLACKOUT event.
+        _arm_retries()
+        sm._handle_event(BridgeEvent(kind=Ev.LED_BLACKOUT, deck=0, payload={}, source="test"))
+        self.assertIsNone(sm._led_auto_retry)
+        self.assertIsNone(sm._led_idle_retry)
+
+        # Automation gate transition.
+        _arm_retries()
+        sm._gate_led_automation("manual_override", active_deck=1)
+        self.assertIsNone(sm._led_auto_retry)
+        self.assertIsNone(sm._led_idle_retry)
 
     def test_push_tick_does_not_call_led_adapter_methods(self) -> None:
         director = _StubLEDLookDirector(enabled=True)
