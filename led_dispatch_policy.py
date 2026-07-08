@@ -430,6 +430,11 @@ class LEDDispatchPolicyMixin:
                 "last_error",
                 "realtime_trigger_count",
                 "tactical_blackout_count",
+                # AWR-146 frame-engine self-report
+                "engine_alive",
+                "achieved_fps",
+                "respawn_count",
+                "fps_degraded",
             ):
                 value = realtime.get(key)
                 if isinstance(value, (str, int, float, bool)) or value is None:
