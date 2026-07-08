@@ -34,6 +34,12 @@ RGB = tuple[int, int, int]
 # re-assert razer this often so a knockout (or a single lost activate) heals in <=2 s.
 RAZER_KEEPALIVE_S = 2.0
 
+# AWR-150: when a cloud drop scene is deliberately staged mid-drop, the keepalive
+# would otherwise steal the strip back within 2 s. request_keepalive_yield() pauses
+# the keepalive for up to this long; the cap guarantees a forgotten yield cannot
+# disable the knockout-healing keepalive indefinitely.
+KEEPALIVE_YIELD_MAX_S = 30.0
+
 
 @dataclass(frozen=True)
 class EffectSpec:
@@ -102,6 +108,9 @@ class GoveeRealtimeRunner:
         self._brightness_request: int | None = None
         self._brightness_repeat = 0
         self._last_activate_mono: float = 0.0
+        # AWR-150: while now < this, the 2 s razer keepalive is paused (a staged
+        # cloud scene owns the strip). Any new intent cancels it (sets 0.0).
+        self._keepalive_yield_until: float = 0.0
         self._razer_assert_count = 0
         self._log = logging.getLogger("govee_realtime_runner")
 
@@ -112,12 +121,14 @@ class GoveeRealtimeRunner:
     def set_desired(self, spec: EffectSpec | None) -> None:
         with self._lock:
             self._desired_spec = spec
+            self._keepalive_yield_until = 0.0  # AWR-150: new intent reclaims the strip
             if spec is not None:
                 self._emergency.clear()
 
     def fire_trigger(self) -> None:
         with self._lock:
             self._pending_manual = min(self._pending_manual + 1, MAX_MANUAL_PENDING)
+            self._keepalive_yield_until = 0.0  # AWR-150
 
     def request_activate_assert(self) -> None:
         """Ask the runner thread to re-assert razer mode on its next tick.
@@ -127,6 +138,21 @@ class GoveeRealtimeRunner:
         """
         with self._lock:
             self._assert_pending = True
+            self._keepalive_yield_until = 0.0  # AWR-150: explicit reclaim cancels the yield
+
+    def request_keepalive_yield(self) -> None:
+        """Pause the 2 s razer keepalive for up to KEEPALIVE_YIELD_MAX_S (AWR-150).
+
+        Called when a cloud drop scene is deliberately staged mid-drop: the staged
+        scene knocks the strip out of razer whenever it lands, and without this the
+        keepalive would steal the strip back within 2 s. The yield is cancelled by
+        any new intent (set_desired / fire_trigger / request_activate_assert /
+        emergency_stop / force_deactivate) so a blackout never finds the keepalive
+        asleep; the cap makes a forgotten yield self-heal. The on-demand assert
+        branch is NOT clock-gated — it always fires when requested.
+        """
+        with self._lock:
+            self._keepalive_yield_until = self._time_fn() + KEEPALIVE_YIELD_MAX_S
 
     def request_brightness(self, value: int) -> None:
         """Ask the runner thread to send a LAN brightness command (any device mode).
@@ -139,6 +165,8 @@ class GoveeRealtimeRunner:
             self._brightness_repeat = 2
 
     def emergency_stop(self) -> None:
+        with self._lock:
+            self._keepalive_yield_until = 0.0  # AWR-150: a blackout must find keepalive awake
         self._emergency.set()
 
     def force_deactivate(self) -> None:
@@ -146,6 +174,7 @@ class GoveeRealtimeRunner:
         with self._lock:
             self._desired_spec = None
             self._handoff_deactivate_pending = True
+            self._keepalive_yield_until = 0.0  # AWR-150
         self._emergency.set()
 
     def start(self) -> None:
