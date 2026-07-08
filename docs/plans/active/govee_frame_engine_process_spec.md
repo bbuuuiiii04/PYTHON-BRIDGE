@@ -216,6 +216,23 @@ One flat repo-root module (matches the flat layout, AGENTS.md §4) containing:
    REQUIRED, not optional: pyobjc can hang normal interpreter exit (Part A.6). `if __name__ ==
    "__main__": main()` so the child runs as `python3 -m rb_ss_bridge_v2.govee_frame_engine`.
 
+### Task 2b (review round 2, 2026-07-08) - `govee_realtime_runner.py`: brightness drain must precede the emergency short-circuit
+
+Implementer-found defect, confirmed by the orchestrator: `_tick_once` returns at the emergency
+short-circuit (`govee_realtime_runner.py:241-243`) BEFORE the brightness drain, and the emergency
+Event stays latched for the whole held blackout (only a non-None `set_desired` clears it). A
+Task 6 `request_brightness(0)` arriving alongside `emergency_stop` therefore starves forever on
+an inactive runner — the drain code runs "regardless of `_active`" but is unreachable while the
+emergency latch is set. Fix: move the brightness-drain block (read+decrement under lock, then
+`transport.set_brightness(value)`) ABOVE the emergency check at the top of `_tick_once`, so a
+pending brightness request always sends on the next tick in ANY runner state, preserving the
+exact 2-consecutive-tick resend semantics. Do NOT bake a brightness send into
+`_emergency_teardown` — teardown runs every tick while the latch is held and would spam the
+device at 60 Hz (or need a new idempotence flag). Required tests: (a) runner never active +
+emergency latched + `request_brightness(0)` → fake transport sees `set_brightness(0)` on 2
+consecutive ticks; (b) host end-to-end: `emergency_stop` message then `brightness` 0 message →
+transport sees `set_brightness(0)`; (c) handoff teardown still never dims.
+
 ### Task 2 - `govee_realtime_runner.py`: one additive constructor arg
 
 Add keyword-only `on_thread_start: Callable[[], None] | None = None` to `__init__`
