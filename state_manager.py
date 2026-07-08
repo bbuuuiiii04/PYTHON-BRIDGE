@@ -2569,6 +2569,12 @@ class StateManager(LEDDispatchPolicyMixin):
             self._drop_presentation_last_actions = actions
             self._drop_presentation_last_pending = (None, "", None)
             return
+        # AWR-140 follow-up: the Laser Director now emits reason="drop_crossing" for the capped
+        # 2nd-chorus LABEL re-arm too (armed_this_tick without a smart-drop marker). A label re-arm
+        # is NOT a drop-presentation impact -- presentation stays per true drop / smart-drop marker
+        # (AWR-139). Require a real marker crossing this tick so a 2nd-chorus re-arm cannot re-enter
+        # or extend the window, re-fire the presentation verdict, or double-count drop stats.
+        impact_now = bool(impact_now and sp_state.smart_drop_crossing)
         session = self._drop_presentation_session
         track_key = (active, d.load_gen)
         previous_load_gen = self._drop_presentation_last_load_gen.get(active)
