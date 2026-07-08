@@ -123,15 +123,44 @@ Identify the ACTUAL demotion mechanism. All experiments are OFFLINE with throwaw
 (dry-run transport, own socketpairs, spawned by a standalone harness) — NEVER the live bridge,
 and full-compute experiments run only when the operator is not mixing.
 
-1. Baseline matrix: spawn the identical dry-run child (a) from an interactive login shell, (b)
-   from a chain mimicking the real launch path (menubar → watcher shell → python → child), (c)
-   detached (`start_new_session=True` / setsid), (d) with spawn-attribute variations worth
-   testing after reading the evidence. For each: measured fps (the Task 1 heartbeat now carries
-   it) + `launchctl procinfo <pid>` (coalition membership, role, darwin role, clamps) +
-   `getpriority(PRIO_DARWIN_PROCESS)` + thread QoS readback.
-2. Diff the fast case against the slow case until ONE variable flips fps 15-19 → ~60. Candidate
-   suspects to confirm or eliminate, not assume: coalition inheritance from the menubar/watcher
-   chain, App Nap on the coalition, darwin role clamp, timer-coalescing tier.
+**THE CONTROL GROUP (operator observation 2026-07-08 evening, live): "the LED pads dont look
+laggy when I play them."** The Pad process (pid 39899 that session, Python 3.9 CommandLineTools
+build, up since Jul-3) holds ~28 fps steady under the SAME live load, same machine, same hours,
+same renderer code, while the frame-engine child (Python 3.14 homebrew, menubar→watcher→bridge
+chain) wobbles at 15-19. This kills the global-machine-load hypothesis: the mechanism is
+whatever differs between the two chains.
+
+Evidence already captured at `e707199`+ (2026-07-08 evening, read-only, live processes):
+- Parent chains: the Pad is PARENTED TO LAUNCHD (ppid 1 — orphaned/detached from its launcher);
+  the frame-engine child sits inside the menubar app's tree (child ← bridge ← watcher bash ←
+  menubar python ← launchd). Coalition membership is inherited through spawn.
+- Per-thread priorities (`ps -M`): EVERY child thread runs at `20T` — including the frame
+  thread whose `on_thread_start` hook sets QOS_CLASS_USER_INTERACTIVE (which would read ~47) —
+  so the thread-QoS lever is visibly NOT in effect or is clamped at the process level. The Pad's
+  threads are also all `20T` (at 28 fps). The bridge owns one `97R` realtime thread (CoreMIDI's,
+  [assumed]) — elevated bands ARE attainable inside this coalition.
+- `launchctl procinfo` REQUIRES ROOT — the orchestrator cannot run it; the operator runs, when
+  convenient (pids are volatile — capture before any restart):
+  `sudo launchctl procinfo <child-pid> > /tmp/procinfo_child.txt` and the same for the pad,
+  bridge, and menubar pids. The interesting fields: coalition id/name, role, QoS clamp,
+  darwin role, App Nap state.
+
+1. Baseline matrix — spawn the identical dry-run child through: (a) an interactive login shell,
+   (b) a chain mimicking the real launch path (menubar → watcher shell → python → child), (c)
+   detached (`start_new_session=True` / setsid / double-fork — replicating the Pad's
+   orphaned-to-launchd placement), (d) `launchctl submit`/`launchctl asuser` placement, (e) the
+   SAME interpreter as the Pad (`/Library/Developer/CommandLineTools/.../3.9/bin/python3` — the
+   explicit Python 3.9-vs-3.14 elimination the operator required; the renderer imports are
+   stdlib-pure so a 3.9 test child is feasible [verify syntax compat, else measure sleep
+   overshoot with a minimal timer script instead]). For each: measured fps or direct
+   sleep-overshoot histogram (request 16.7 ms, measure actual, under a synthetic load) + thread
+   priorities via `ps -M` + `getpriority(PRIO_DARWIN_PROCESS)` + (operator-run) procinfo.
+2. Diff the fast case against the slow case until ONE variable flips 15-19 → ≥28 (the Pad's
+   band) and ideally → ~60 (the clean-shell band). Sharpened suspects, confirm or eliminate,
+   not assume: (a) a process-level QoS clamp capping thread QoS (explains the 20T frame
+   thread), (b) coalition inheritance from the menubar tree vs launchd-orphan placement, (c)
+   interpreter timer behavior (CLT 3.9 vs homebrew 3.14 — different sleep syscalls/leeway), (d)
+   per-thread timer-coalescing leeway at default QoS under load.
 3. **Deliverable: a findings report to the executive naming the mechanism with the flip
    experiment as proof — BEFORE any Phase C implementation (hard review gate).**
 
