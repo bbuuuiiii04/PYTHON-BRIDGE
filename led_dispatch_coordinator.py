@@ -182,6 +182,35 @@ class LEDDispatchCoordinator:
             )
         return accepted
 
+    def stage_cloud_takeover(self, decision: LEDLookDecision) -> bool:
+        """AWR-150: dispatch a cloud decision WITHOUT tearing realtime down.
+
+        Used at a drop impact whose committed pick is cloud: the realtime
+        substitute already fired on the beat (owner = REALTIME_RAZER, dispatch
+        already recorded), and this sends the cloud scene alongside it and asks
+        the runner to yield its 2 s razer keepalive so the cloud scene -- which
+        knocks the strip out of razer whenever it lands, typically 1-5 s into
+        the drop -- is not stolen back for the rest of the drop.
+
+        Deliberately does NOT force_deactivate, touch the owner state machine,
+        or record dwell bookkeeping (`_last_dispatch_*`): the substitute that
+        fired the same tick already recorded the dispatch, and recording twice
+        would poison the WI-3 dwell gate. Owner stays REALTIME_RAZER for the
+        yield window; the NEXT normal dispatch resolves ownership through the
+        existing paths (trigger's realtime branch re-asserts razer; its cloud
+        branch force-deactivates; blackout force-releases). Returns True only
+        when the cloud send was accepted.
+        """
+        accepted = bool(self._adapter.trigger(decision))
+        if accepted:
+            self._runner.request_keepalive_yield()
+            if log_changed("led_stage", (getattr(decision, "look", ""), getattr(decision, "role", ""))):
+                log.info(
+                    "[LED] staged cloud look=%s role=%s (realtime substitute on the beat)",
+                    getattr(decision, "look", ""), getattr(decision, "role", ""),
+                )
+        return accepted
+
     def tactical_blackout(self, decision: LEDLookDecision | None = None) -> bool:
         if self._owner.current() == OwnerState.CLOUD_DIY:
             self._owner.force_release()

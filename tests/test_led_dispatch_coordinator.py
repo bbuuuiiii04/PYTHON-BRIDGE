@@ -56,6 +56,7 @@ class _Runner:
         self.stop_called = False
         self.assert_count = 0
         self.brightness_requests: list[int] = []
+        self.keepalive_yield_count = 0
 
     def set_desired(self, spec) -> None:  # type: ignore[no-untyped-def]
         self.desired.append(spec)
@@ -74,6 +75,9 @@ class _Runner:
 
     def request_brightness(self, value: int) -> None:
         self.brightness_requests.append(int(value))
+
+    def request_keepalive_yield(self) -> None:
+        self.keepalive_yield_count += 1
 
     def status(self) -> dict:
         return {"active": bool(self.desired), "last_error": ""}
