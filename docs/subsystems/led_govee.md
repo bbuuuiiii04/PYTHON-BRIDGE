@@ -485,7 +485,7 @@ Config:
 - realtime enable flag if present in startup
 - `color_engine.slot_fill_strategy_by_look` and `color_engine.slot_fill_strategy_by_role` are optional objects; values must be `gradient_even`, `random_with_replacement`, or `random_with_mono_chance`.
 - `color_engine.slot_mono_chance_by_look` is an optional object mapping look names to numeric probabilities in `[0, 1]`; it defaults to `{}` and only affects looks using `random_with_mono_chance`.
-- `color_engine.locked_palette_by_look` is an optional object mapping look names to existing palette names. Locked looks resolve color and slot-color injection from that palette's full p-interval and white value without changing the color-engine journey palette, dwell, focus, or RNG state.
+- `color_engine.locked_palette_by_look` is an optional object mapping look names to existing palette names. Locked looks resolve color and slot-color injection from that palette's full p-interval without changing the color-engine journey palette, dwell, focus, or RNG state. (AWR-152: the per-palette `white` blend knob was removed — every palette shipped `white: 0.0` in practice, so `Palette` no longer has a `white` field.)
 - `color_engine.v2` is optional and default-off. When present and valid it defines v2 zone ramps,
   bass normalization anchors, the local identity store path, soft-flip, palate-reset, bloom, and
   motion/travel thresholds. The current tracked example/default `bass_norm` anchors are
