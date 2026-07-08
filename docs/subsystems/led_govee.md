@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: b660dcb
+last_verified_commit: 50578b3
 last_verified_date: 2026-07-08
 validation_scope: software-only; LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (lab_update/lab_switch/lab_preview), QR same-network access, pad editor unset-param-defaults, Stream Deck palette control Package 2 plus AWR-121 gesture v2, drop presentation policy Package 3, LED idle/pause ambient fix, and LED pad queued-color restore software-tested, hardware-unvalidated
 ---
@@ -233,6 +233,41 @@ Deterministic mixed-transport look rotation (AWR-149, 2026-07-08):
   blackout path. Emergency-blackout, manual-override, safe-default, and
   target-override decisions are byte-identical to before. Software-tested,
   hardware-unvalidated; the live gate is the operator's next mix.
+
+White-knob round 1 (AWR-152, 2026-07-08; implemented, software-tested, hardware-unvalidated):
+- Operator taste verdict: too much clinical white leaked into non-buildup cues. Two dead knobs are
+  gone — `Palette.white` (v1 blend toward pure white; every palette shipped `white: 0.0` in
+  practice, `_blend_white` and all 7 call sites deleted) and `ZoneRampConfig.white` (parsed,
+  consumed by nothing). Both fields no longer exist on `led_models.py`'s dataclasses.
+- Slot 5's white accent under v2 is now a per-zone tint: `ZoneRampConfig.slot5_white: RGB =
+  (255, 255, 255)`, resolved verbatim (no sat-floor/hue-shift) by `derive_dressing`
+  (`led_identity_v2.py`). Absent `slot5_white` in a config defaults to pure white, so an
+  un-mirrored live config renders byte-identical to before. v1's hardcoded slot-5 pure white
+  (scripted stand-down) is untouched.
+- Palate reset now dims all 6 slots by `palate_reset_dim` (was 5 dimmed + slot 5 held at hardcoded
+  pure white) — `_v2_resolve_slot_colors`'s reset branch matches the single-color path's treatment.
+- `_led_diy_eligible_predicate` (`led_dispatch_policy.py`) returns `None` under the v2 latch instead
+  of filtering by the frozen, non-advancing v1 palette: under v2 the v1 palette never updates
+  (`begin_dispatch` returns early into the v2 branch), so the old filter was arbitrary and
+  white-tagged cloud looks always passed it regardless. Under v2, every banked cloud look now
+  rotates evenly; DIY filtering under v1 (latch off) is unchanged.
+- `breakdown_star_twinkle` (`govee_frame_renderer.py`) draws its per-star color slot from 0-4 only
+  (was 0-5), matching `_slot_twinkle`; breakdown twinkles no longer throw random pure-white stars.
+- Example config (`config/led_look_director.example.json`): `groove_diy_bright_white_chase` moved
+  from `banks.default.groove` to `banks.default.buildup` (white is the buildup language); every
+  palette-level `white: 0.0` key and every v2 zone's `white` key deleted; each v2 zone carries an
+  audit-taste `slot5_white` default (e.g. GLACIER `[200, 235, 255]`, EMBERCORE `[255, 225, 200]`).
+- Unaffected/unchanged: `exempt_looks` (the three freestyle nebulas stay in the default banks — a
+  separate AWR-152 knob was vetoed), bank membership beyond the one move above, v1 scripted-mode
+  output (minus the identity `white=0.0` blend, which was already an identity no-op), blackout/
+  emergency semantics, AWR-145 keepalive, AWR-150 substitute flow, the 200 Hz push loop (no new
+  I/O), `REALTIME_EFFECT_PARAM_KEYS`/`REALTIME_STROBE_EFFECTS`, laser/SoundSwitch/Rekordbox.
+- The live, gitignored `config/led_look_director.json` was read-only for this round; the operator
+  mirrors the example config's zone/bank changes in and restarts via the menubar to pick this up.
+  Until mirrored, the legacy `white` keys still in the live config load harmlessly (no allowlist
+  rejection on palette/zone dict keys) and render exactly as before, except the reset-window
+  slot-5 dimming and the breakdown-star slot range, which apply immediately. Full detail:
+  `docs/plans/active/led_white_knobs_round1_spec.md`.
 
 LED hold starvation fix (2026-07-07):
 - Active-deck switches and active-deck track loads still protect against an

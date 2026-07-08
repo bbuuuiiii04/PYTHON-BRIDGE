@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: b660dcb
+last_verified_commit: 50578b3
 last_verified_date: 2026-07-08
 validation_scope: software-validated only plus Rekordbox 7.2.11 passive mixer RE evidence routing; hardware-unvalidated in repo evidence
 ---
@@ -71,6 +71,7 @@ Trusted publication is software-gated green; physical validation remains open.
 | Govee frame engine child process (AWR-146) | implemented | `tests/test_govee_frame_engine.py`; `tests/test_govee_frame_engine_integration.py`; `tests/test_govee_realtime_runner.py`; `tests/test_led_dispatch_coordinator.py`; `tests/test_led_state_manager.py` | The realtime frame trio moved into a bridge-owned child process over an `AF_UNIX` socketpair; supervision/respawn/intent-replay and the Task 6 operator-blackout LAN dim are software-tested only. The 60.9 fps figure is a clean-machine integration measurement, not live-under-load or hardware; kernel-EOF fail-dark and respawn timing rest on OS behavior not repeatably instrumented across devices. No bridge restart or room-visible hardware validation; the operator's next live pass is the remaining gate. |
 | LIGHTING ENGINE v2 F1 identity + correction surface | implemented, default-off | `tests/test_led_identity_v2.py`, `tests/test_led_color_engine.py`, `tests/test_color_engine_config.py`, `tests/test_led_palette_control.py`, `tests/test_runtime_status.py`, `tests/test_soundswitch_midi_input.py`, `tests/test_streamdeck_midi.py` | Per-track identity, local correction store, Stream Deck v2 zone/manual surface, temporary menubar latch, and runtime commands are software-tested only. v1 remains the compatibility path when v2 is off or unconfigured. No bridge restart, deck-in-hand pass, live Govee output, or visual hardware validation was performed. |
 | LED Pad + Template Lab | implemented/partial | `tests/test_led_pad_*.py`, `tests/test_led_color_engine.py`, `tests/test_govee_frame_renderer.py` | Local browser editor/playback tool. Phases 1-3 and Template Lab Phase 2 are software-tested; hardware-visible behavior, bridge restart effects, and strip restore behavior are not generalized or logged. |
+| LED white-knob round 1 (AWR-152 #2/#3/#6/#7/#8/#10) | implemented | `tests/test_led_identity_v2.py`; `tests/test_led_config.py`; `tests/test_led_color_engine.py`; `tests/test_color_engine_config.py`; `tests/test_led_color_engine_m2_phase1.py`; `tests/test_led_color_engine_m2_patch_s.py`; `tests/test_led_state_manager.py`; `tests/test_govee_frame_renderer.py` | Per-zone `slot5_white` tint (v2 slot 5), all-6-slot palate-reset dim, `_blend_white` removal, DIY tag filter removed under the v2 latch, and the breakdown-twinkle slot range fix are software-tested only. Live config untouched; the operator's mirror + menubar restart is the remaining gate, and room-visible white/hue rendering is not hardware-validated. |
 
 ## Hardware validation state
 

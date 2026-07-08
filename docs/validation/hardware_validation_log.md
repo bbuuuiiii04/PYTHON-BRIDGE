@@ -33,6 +33,13 @@ Audit P5 (2026-07-03): no hardware, SoundSwitch app, Rekordbox, laser, LED, Gove
 Enttec validation was performed. LED dispatch bookkeeping centralization and the
 `led_dispatch_policy.py` mixin extraction are software-tested only.
 
+LED white-knob round 1 (AWR-152, 2026-07-08): no hardware, Govee, or room-visible validation was
+performed. The per-zone `slot5_white` tint, the all-6-slot palate-reset dim, the deleted
+`_blend_white` blend, the v2 DIY-tag-filter removal, the breakdown-twinkle slot range, and the
+example-config bank/palette changes are software-tested only. The live, gitignored
+`config/led_look_director.json` was not touched or mirrored; the operator's config mirror +
+menubar restart + next mix is the remaining validation gate.
+
 The current exporter/importer evidence boundary is **SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED**.
 
 The pinned SoundSwitch 2.10.3 project/pack tooling, immutable loader/player,
