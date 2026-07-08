@@ -609,6 +609,19 @@ class GoveeRealtimeRunnerTests(unittest.TestCase):
         runner._tick_once(None, 100.2)   # no more sends
         self.assertEqual(transport.calls.count("brightness:100"), 2)
 
+    def test_inactive_runner_brightness0_reaches_transport(self) -> None:
+        """AWR-146 Task 6: a runner that was NEVER active still darkens via
+        request_brightness(0) — set_brightness(0) on 2 consecutive ticks. This
+        is the emergency-while-inactive darkness proof at the runner level (the
+        _emergency_teardown transport block is skipped when never active)."""
+        transport = _FakeTransport()
+        runner = GoveeRealtimeRunner(transport, GoveeFrameRenderer(), segments=4, fps=30)
+        runner.request_brightness(0)
+        runner._tick_once(None, 100.0)   # inactive; brightness still sent
+        runner._tick_once(None, 100.1)   # repeat cleared
+        self.assertEqual(transport.calls.count("brightness:0"), 2)
+        self.assertNotIn("activate", transport.calls)  # never activated
+
     def test_emergency_teardown_hard_dims_on_pure_emergency(self) -> None:
         """Pure emergency teardown sends set_brightness(0); handoff teardown does not."""
         # Pure emergency: bring active, then emergency_stop.

@@ -814,6 +814,40 @@ class LEDStateManagerTests(unittest.TestCase):
         self.assertEqual(adapter.trigger_calls[-1].look, "room_drop_a")
         self.assertEqual(len(adapter.trigger_calls), 3)
 
+    def test_blackout_brightness_backstop_fires_on_accept_only(self) -> None:
+        """AWR-146 Task 6: an accepted LED_BLACKOUT dims via the adapter's
+        blackout_brightness; a cloud-only adapter without the method is a safe
+        no-op; a rejected (unknown-target) blackout does NOT dim."""
+
+        class _DimAdapter(_StubLEDAdapter):
+            def __init__(self, **kw) -> None:
+                super().__init__(**kw)
+                self.dim_calls = 0
+
+            def blackout_brightness(self) -> None:
+                self.dim_calls += 1
+
+        # 1. accepted blackout invokes blackout_brightness exactly once
+        adapter = _DimAdapter()
+        sm = _make_sm(director=_StubLEDLookDirector(enabled=True), adapter=adapter)
+        sm._handle_event(BridgeEvent(kind=Ev.LED_BLACKOUT, deck=0, payload={}, source="test"))
+        self.assertEqual(adapter.dim_calls, 1)
+
+        # 2. cloud-only adapter WITHOUT the method → safe no-op (no exception)
+        plain = _StubLEDAdapter()
+        sm2 = _make_sm(director=_StubLEDLookDirector(enabled=True), adapter=plain)
+        sm2._handle_event(BridgeEvent(kind=Ev.LED_BLACKOUT, deck=0, payload={}, source="test"))
+        self.assertTrue(sm2.led_status_provider()["emergency_blackout"])
+
+        # 3. rejected (unknown-target) blackout must NOT dim
+        adapter3 = _DimAdapter()
+        sm3 = _make_sm(director=_StubLEDLookDirector(enabled=True), adapter=adapter3)
+        sm3._handle_event(BridgeEvent(
+            kind=Ev.LED_BLACKOUT, deck=0,
+            payload={"target": "missing_strip"}, source="test"))
+        self.assertEqual(adapter3.dim_calls, 0)
+        self.assertIn("unknown_target", sm3.led_status_provider()["last_error"])
+
     def test_disabled_led_layer_is_inert_and_status_visible(self) -> None:
         director = _StubLEDLookDirector(enabled=True)
         adapter = _StubLEDAdapter()
