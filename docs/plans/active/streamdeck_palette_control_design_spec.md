@@ -85,7 +85,10 @@ windows during scripted tracks; lasers stay fully authored (see laser doc Part A
   `tools/led_pad_web.py:528-529` (`set_palette`/`lock`) on its **own local preview engine instance**,
   not the runtime engine.
 - **Exactly 5 palettes today**, string-named — *confirmed*. `config/led_look_director.json`
-  `/color_engine/palettes` = `blue_cyan, deep_ocean, indigo, violet, crimson` (all `white: 0.0`).
+  `/color_engine/palettes` = `blue_cyan, deep_ocean, indigo, violet, crimson` (historical note: all
+  carried `white: 0.0` at the time this was written; AWR-152 2026-07-08 deleted the `Palette.white`
+  blend field entirely — dead knob, every palette shipped 0.0 in practice — so the key is now
+  ignored wherever it still appears in an un-mirrored config).
   Identity = the string key into `config.palettes`; enumerated at `led_color_engine.py:283`
   (insertion order). No `white` palette exists.
 - **Manual-only exclusion already works via weights** — *confirmed* (was open item 3, now closed).
@@ -586,9 +589,12 @@ F1 implemented surface:
 - Generic MIDI input (per-device bindings, kind dispatch): `soundswitch_midi_input.py:259,280,
   346-374`; pack binding load `soundswitch_pack_loader.py:40-51,358-368`.
 - Event + command rails: `models.py:147-154,235-269`; `runtime_status.py:413-447`.
-- White sources context: `led_color_engine.py:33-38` (white_chance out of scope), `_blend_white`
-  :105, reserved slot-5 :609,664; cue-mandated white effects `govee_frame_renderer.py`
-  (`drop_white_aggressive`:505, `post_drop_white_shatter`:515, `buildup_white_*`:874-953).
+- White sources context: `led_color_engine.py:33-38` (white_chance out of scope; AWR-152
+  2026-07-08 deleted the `Palette.white`/`_blend_white` blend entirely — every palette shipped
+  `white: 0.0` in practice), reserved slot-5 :609,664 (v1 hardcoded pure white, untouched; v2 slot 5
+  is now a per-zone `ZoneRampConfig.slot5_white` tint, `led_identity_v2.py:derive_dressing`); cue-
+  mandated white effects `govee_frame_renderer.py` (`drop_white_aggressive`:505,
+  `post_drop_white_shatter`:515, `buildup_white_*`:874-953).
 - Scripted-mode LED gating (mechanism): `led_look_director.py:174-187`,
   `led_dispatch_policy.py:83-143`.
 - Drop presentation inputs: Smart-Drop selection `smart_phrasing.py:601-617`; drop-lifecycle

@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: fce1169
-last_verified_date: 2026-07-04
+last_verified_commit: 50578b3
+last_verified_date: 2026-07-08
 validation_scope: software-only; Stream Deck palette control config software-tested
 ---
 
@@ -81,6 +81,11 @@ Config:
 - LED `scripted_mode` is an optional top-level object with `default_role` and `role_map`. Source/default roles exclude `utility`, but `utility` is accepted as a destination meaning the configured blackout bank. Absent config maps scripted groove/drop/post-drop to `utility`; a present partial map falls back to `default_role`.
 - M2.5 slotized generic LED looks such as `rt_groove_chase`, `rt_post_drop_chase`, Patch E1 nebula looks, Patch E2 `rt_post_drop_center_comet`, and Patch E3 `rt_twinkle` are additive config entries. Patch F moves legacy color-suffix looks out of the tracked example `default` bank into `legacy_color_suffix` storage while keeping their look definitions intact.
 - Local ignored `config/led_look_director.json` can legitimately lag the tracked example; mirror Patch F to live config only with explicit operator approval and a loader check.
+- LED `color_engine.v2.zones.*.slot5_white` (AWR-152) is an optional per-zone RGB list (3 ints,
+  0-255); absent defaults to pure white `(255, 255, 255)`, malformed fails closed with an error and
+  disables only the v2 sub-block. It replaces the removed `ZoneRampConfig.white` key (parsed,
+  never consumed) and the v1 `Palette.white` blend knob (every palette shipped `white: 0.0`); both
+  legacy `white` keys are now silently ignored wherever they still appear (no allowlist rejection).
 - Laser scene `fallback_scene` values must name an existing scene, and `cooldown_beats` must be
   non-negative when present. Legacy `pre_drop_scene` personality keys are ignored, not accepted as
   current schema. `post_drop_cycle_beats` is reserved for future post-drop laser behavior.

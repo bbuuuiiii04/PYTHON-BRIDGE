@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 944bc83
-last_verified_date: 2026-07-03
+last_verified_commit: 50578b3
+last_verified_date: 2026-07-08
 validation_scope: software-only
 ---
 
@@ -112,7 +112,11 @@ reviewed deployment/hardware gate.
 - `color_engine.palette_control`, when enabled, defines the Stream Deck device, zero-based MIDI
   channel, palette notes, and control notes. `laser_solo_note` is accepted/reserved for a later
   package; Package 2 binds palette pads, lock, LED mute, laser mute, and Rainbow.
-- M2.5 slot cues always resolve six slot colors; slot 5 is reserved pure white.
+- M2.5 slot cues always resolve six slot colors; slot 5 is reserved pure white (v1 path).
+- `color_engine.v2.zones.*.slot5_white` (AWR-152) is an optional per-zone RGB tint for v2's slot 5
+  accent (3 ints 0-255; absent defaults to pure white). It replaces the removed `ZoneRampConfig.white`
+  and the v1 `Palette.white` blend knob, both dead (every palette shipped `white: 0.0`). Legacy
+  `white` keys still present in an un-mirrored config are ignored, not rejected.
 - Point or mono palette selections can make slots 0-4 one solid RGB for any slot cue, including realtime chase/comet/twinkle cues. `random_with_mono_chance` can opt individual looks into probabilistic solid slots 0-4 without changing shipped behavior when its chance map is empty or zero.
 - In the tracked LED example, Patch F keeps generic slot looks in `banks.default` and stores legacy color-suffix realtime looks in `banks.legacy_color_suffix`. The director selects `banks.default`; the legacy bank is preservation storage unless future code explicitly selects it.
 - Do not mirror Patch F into ignored live LED config without explicit operator approval, because live config may be behind the tracked example and is hardware-adjacent.
