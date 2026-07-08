@@ -838,6 +838,7 @@ class SlotFiveWhiteKnobTests(unittest.TestCase):
 
     def test_slot5_white_defaults_when_absent(self) -> None:
         cfg = _example_config()
+        del cfg["color_engine"]["v2"]["zones"]["GLACIER"]["slot5_white"]
         result = load_led_look_director_config_from_dict(cfg)
         self.assertTrue(result.available, msg=result.errors)
         self.assertEqual(
@@ -854,11 +855,26 @@ class SlotFiveWhiteKnobTests(unittest.TestCase):
 
     def test_legacy_white_keys_ignored_in_zones_and_palettes(self) -> None:
         cfg = _example_config()
-        self.assertIn("white", cfg["color_engine"]["v2"]["zones"]["GLACIER"])
-        self.assertIn("white", cfg["color_engine"]["palettes"]["blue_cyan"])
+        # AWR-152 T5 removed legacy "white" from the example config; simulate an
+        # un-mirrored live config that still carries it and prove it's ignored.
+        cfg["color_engine"]["v2"]["zones"]["GLACIER"]["white"] = 0.08
+        cfg["color_engine"]["palettes"]["blue_cyan"]["white"] = 0.0
         result = load_led_look_director_config_from_dict(cfg)
         self.assertTrue(result.available, msg=result.errors)
         self.assertEqual(result.errors, ())
+
+    def test_example_config_moves_bright_white_chase_to_buildup(self) -> None:
+        cfg = _example_config()
+        result = load_led_look_director_config_from_dict(cfg)
+        self.assertTrue(result.available, msg=result.errors)
+        self.assertIn(
+            "groove_diy_bright_white_chase",
+            result.config.banks["default"].buildup,
+        )
+        self.assertNotIn(
+            "groove_diy_bright_white_chase",
+            result.config.banks["default"].groove,
+        )
 
 
 if __name__ == "__main__":
