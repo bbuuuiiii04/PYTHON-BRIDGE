@@ -98,6 +98,18 @@ Starter tag set proposed (his words shortened, editable): **Banger, Chill, Eupho
 First tiny step handed to him: open panel → make a "Vibe" category → add the 5 tags → tag 3–4 known tracks →
 click a tag to watch the list filter. Stopping point: confirm the filter works + flag any weird step.
 
+## SESSION 1 CLOSE (2026-07-08) — ended early, Brandon frustrated
+He ended with "this was no help." Honest read: the session became "you have to tag your own tracks," which
+reads as the exact willpower-marathon he came to escape. Lots of explanation, ONE shipped win, no near-zero-effort
+payoff delivered in-session.
+- **Shipped & kept:** Forgotten intelligent playlist (DJ play count = 0, 131 tracks, self-maintaining). Real, his.
+- **Left mid-build:** MyTag vibe-family setup (right-click in My Tag area → Create My Tag). Not finished.
+- **Filed for him:** automation proposal at `docs/plans/active/music_library_automation_ideas.md` (get a tool to
+  PROPOSE tags so he confirms instead of grinding).
+- **LEAD DIFFERENTLY NEXT TIME:** do NOT reopen with "go tag tracks." Open with a done-for-him result (run the
+  automation alignment probe first) or a payoff he gets for ~zero effort. He wants the SYSTEM to do the remembering,
+  not to be handed a tagging chore. Show, don't assign.
+
 ## Boundaries
 - No rekordbox DB writes; Brandon clicks in the UI, guided step by tiny step.
 - Automation ideas (auto-tagging from spectral profiles, forgotten-gems surfacing tool) → write to
