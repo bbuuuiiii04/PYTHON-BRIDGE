@@ -63,7 +63,6 @@ class LEDLook:
 class Palette:
     """A named palette entry in the color engine library (§7a)."""
     range: Tuple[str, str] = ("blue", "cyan")
-    white: float = 0.0
     spread: float = 0.10
     weight: float = 1.0
     dwell: Optional[int] = None  # None → use global palette_dwell_tracks
@@ -76,7 +75,7 @@ class Palette:
 class ZoneRampConfig:
     base_ramp: tuple[RGB, RGB, RGB]
     accent_ramp: tuple[RGB, RGB]
-    white: float = 0.0
+    slot5_white: RGB = (255, 255, 255)
     hue_span: float = 0.06
 
 
