@@ -306,6 +306,42 @@ class PlanAndTickIntegrationTests(unittest.TestCase):
         self.assertEqual(sm._drop_presentation_last_actions.reason, "leds_only_personality")
         self.assertEqual(sm._drop_presentation_window._window_end_beat, original_end)
 
+    def test_label_rearm_with_active_drop_still_set_does_not_reenter_window(self) -> None:
+        # AWR-143: the live-reachable leak the sibling test misses. Post-AWR-140
+        # the Laser Director emits reason="drop_crossing" at the capped 2nd-chorus
+        # LABEL re-arm, so impact_now arrives True -- but smart_post_drop_active
+        # keeps active_drop_beat pinned at the TRUE drop (32.0) for post_drop_beats,
+        # so eval_beat would exact-match a real decision and re-enter the window.
+        # The gate (impact_now AND smart_drop_crossing) must suppress that: no
+        # re-entry, no ~192-beat extension, verdict does not re-fire this tick.
+        sm, d = self._sm_with_plan(drops=(32.0, 96.0))
+        sm._drop_presentation_session.opening_tracks_counted = 3
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(abs_beat=32.0, active_drop_beat=32.0, smart_drop_crossing=True),
+            impact_now=True,
+        )
+        original_end = sm._drop_presentation_window._window_end_beat
+
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(
+                abs_beat=56.0,
+                active_drop_beat=32.0,  # still the TRUE drop, unchanged (post-drop hold)
+                smart_drop_crossing=False,
+                current_phrase_is_chorus=True,
+                phrase_start_crossing=True,
+                smart_post_drop_active=True,
+            ),
+            impact_now=True,
+        )
+
+        # Window did not re-enter or extend, and the presentation verdict did not
+        # re-fire for this tick -- the held first-drop state simply continues.
+        self.assertEqual(sm._drop_presentation_window._window_end_beat, original_end)
+        self.assertEqual(sm._drop_presentation_last_actions.presentation, LEDS_ONLY)
+        self.assertEqual(sm._drop_presentation_last_actions.reason, "leds_only_personality")
+
     def test_runway_less_hotcue_tag_still_opens_window(self) -> None:
         sm, d = self._sm_with_plan(
             drops=(64.0,),
