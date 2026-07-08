@@ -3040,5 +3040,73 @@ class LEDStateManagerTests(unittest.TestCase):
         )
 
 
+def _solo_drop_sp() -> SmartPhrasingState:
+    """A chorus phrase-start crossing off an 'up' predecessor — the anchor that
+    resolves role='drop' ~0.6 s before the smart-drop marker (RC4 flash window)."""
+    return SmartPhrasingState(
+        abs_beat=64.0,
+        current_phrase_label="chorus",
+        current_phrase_is_chorus=True,
+        current_phrase_start_beat=64.0,
+        phrase_start_crossing=True,
+        previous_phrase_label="up",
+        beats_into_phrase=0.0,
+    )
+
+
+class LEDSoloPredarkHoldTests(unittest.TestCase):
+    """RC4 (AWR-144): on a pending Laser Solo drop, the LED drop-look anchor must
+    hold the current look instead of flashing a bright drop look before the
+    marker's solo blackout owner is set. Lasers/solo length untouched (LED-only)."""
+
+    def _armed_solo_sm(self, pending):
+        director = _AutomationLEDLookDirector()
+        adapter = _StubLEDAdapter()
+        sm = _make_sm(director=director, adapter=adapter)
+        _ready_led_active_deck(sm, 1)
+        sm._deck[1].load_gen = 11
+        sm._drop_presentation_last_pending = pending
+        return sm, adapter
+
+    def test_solo_pending_drop_look_is_suppressed_and_held(self) -> None:
+        sm, adapter = self._armed_solo_sm((LASERS_ONLY, "solo_learned", 64.0))
+
+        sm._dispatch_led_automation(active=1, d=sm._deck[1], sp_state=_solo_drop_sp())
+
+        # No drop look reaches the device — the current look is held through the gap.
+        self.assertEqual(adapter.trigger_calls, [])
+        self.assertEqual(sm._led_automation_gate_reason, "solo_predark_hold")
+        self.assertEqual(
+            sm.led_status_provider()["automation_gate_reason"], "solo_predark_hold"
+        )
+
+    def test_non_solo_drop_look_dispatched_unchanged(self) -> None:
+        sm, adapter = self._armed_solo_sm((LEDS_PLUS_LASERS, "both_finale", 64.0))
+
+        sm._dispatch_led_automation(active=1, d=sm._deck[1], sp_state=_solo_drop_sp())
+
+        self.assertEqual(len(adapter.trigger_calls), 1)
+        self.assertEqual(adapter.trigger_calls[0].role, "drop")
+
+    def test_disabled_drop_presentation_is_a_noop(self) -> None:
+        sm, adapter = self._armed_solo_sm((None, "", None))
+
+        sm._dispatch_led_automation(active=1, d=sm._deck[1], sp_state=_solo_drop_sp())
+
+        self.assertEqual(len(adapter.trigger_calls), 1)
+        self.assertEqual(adapter.trigger_calls[0].role, "drop")
+
+    def test_post_marker_blackout_owner_still_masks_everything(self) -> None:
+        # After the marker, drop_presentation sets a blackout owner. That mask must
+        # still own the darkness and pre-empt the RC4 hold (pre-existing behavior).
+        sm, adapter = self._armed_solo_sm((LASERS_ONLY, "solo_learned", 64.0))
+        sm._led_blackout_owners.add("drop_spotlight")
+
+        sm._dispatch_led_automation(active=1, d=sm._deck[1], sp_state=_solo_drop_sp())
+
+        self.assertEqual(adapter.trigger_calls, [])
+        self.assertEqual(sm._led_automation_gate_reason, "emergency_blackout")
+
+
 if __name__ == "__main__":
     unittest.main()
