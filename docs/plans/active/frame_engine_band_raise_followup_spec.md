@@ -28,17 +28,17 @@ Execute tasks **in order, one commit per task**. File:lines verified at HEAD `e7
    operator cannot see whether setpriority/NSActivity even succeeded in production.
 3. [confirmed] The mechanism that demotes long-running faceless processes remains [unknown]
    (AWR-146 Part A.1: darwin-bg alone explains 20.5 fps, not 33; ~33 ≈ every second 16.7 ms
-   sleep overshooting to ~30 ms suggests timer coalescing in an intermediate band). This spec
-   therefore does NOT bet on naming the mechanism: it makes the band state VISIBLE, re-asserts
-   the cheap lever continuously, and gives the frame loop a timing backstop that works in ANY
-   band at bounded CPU cost.
+   sleep overshooting to ~30 ms suggests timer coalescing in an intermediate band). This spec's
+   shipping round (Tasks 1-2) does NOT bet on naming the mechanism: it makes the band state
+   VISIBLE and re-asserts the cheap lever continuously; NAMING the mechanism is Phase B's job,
+   and the fix is Phase C's.
 4. [confirmed] The runner already accepts an injected `sleep_fn`
-   (`govee_realtime_runner.py:60,79`), so a precision-sleep backstop needs ZERO runner changes —
-   the child owns the sleep function.
+   (`govee_realtime_runner.py:60,79`), so any future timing lever can be injected without
+   runner changes — the child owns the sleep function. (Context for Phase C; nothing ships here.)
 5. [confirmed, operator live 2026-07-08 evening — post coast-fix + AWR-148 restart] Scan
    GIL-holds are down to ~30 ms and the blackout cycling is gone; live fps under load is
    **15-19 with child CPU at 1.4%** — the loop is nowhere near compute-bound, so the 16.7 ms
-   sleep is stretching ~3-4×. Pure sleep-stretch: exactly the failure mode Task 3 attacks.
+   sleep is stretching ~3-4×. Pure sleep-stretch: the demotion mechanism Phase B must name.
 
 ## Part B - Tasks (implement exactly, in order)
 
@@ -52,8 +52,7 @@ Execute tasks **in order, one commit per task**. File:lines verified at HEAD `e7
 - Behavior that must not change: every AWR-146 protocol message and fail-dark path; the anchor
   coast fix (`aa8fe2f`); heartbeat cadence; the `os._exit(0)` exit discipline.
 - Error handling: band syscalls that fail report False/None in the heartbeat — never raise out
-  of the host loop; the precision sleep must be arithmetically bounded (never spin more than
-  `PRECISE_SPIN_MAX_S` per frame).
+  of the host loop.
 
 ### Task 1 - `govee_frame_engine.py`: band state into every heartbeat
 
@@ -62,8 +61,7 @@ Execute tasks **in order, one commit per task**. File:lines verified at HEAD `e7
    [assumed] returns 0 when non-bg — verify the live value semantics with one manual run on
    this machine and record it in the test comments).
 2. Store the report in a module/host field; `_send_heartbeat` adds flattened scalars:
-   `"band_setpriority": bool`, `"band_nsactivity": bool`, `"band_darwin_prio": int|None`,
-   `"sleep_mode": str` (Task 3). Re-read `getpriority` at each heartbeat (cheap syscall) so a
+   `"band_setpriority": bool`, `"band_nsactivity": bool`, `"band_darwin_prio": int|None`. Re-read `getpriority` at each heartbeat (cheap syscall) so a
    post-start demotion becomes visible as a changing number.
 3. Re-assert the raise each heartbeat: call `libc.setpriority(4, 0, 0)` (cheap, idempotent,
    heals a post-start demotion); log at INFO only when the getpriority reading CHANGES
@@ -79,11 +77,20 @@ Execute tasks **in order, one commit per task**. File:lines verified at HEAD `e7
    `band_nsactivity` report False — the operator must be able to see a failed raise in the
    jsonl, not just the watcher terminal.
 3. `led_dispatch_policy.py` `_sanitize_led_adapter_status` realtime key tuple gains
-   `"band_setpriority"`, `"band_nsactivity"`, `"band_darwin_prio"`, `"sleep_mode"`.
+   `"band_setpriority"`, `"band_nsactivity"`, `"band_darwin_prio"`.
 
-### Task 3 - `govee_frame_engine.py`: adaptive precision sleep (works in any band)
+### Task 3 - DROPPED (operator doctrine 2026-07-08: root-cause fixes only)
 
-The mechanism-independent backstop: when the frame loop is being starved by sleep overshoot,
+The adaptive precision sleep was a mechanism-independent BANDAGE — it would have masked the
+demotion instead of removing it, at a permanent CPU tax and with a new mode to reason about.
+The operator's standing doctrine (recorded 2026-07-08: "every fix needs to be a genuine root
+cause fix, not just a quick bandage; if the fix is large and monumental, so be it") drops it.
+Do not implement anything below in this section; it is retained only so the wall-clock-spin-cap
+amendment and the reasoning are on the record if a bounded backstop is ever explicitly
+re-approved.
+
+<details>
+The dropped design: when the frame loop is being starved by sleep overshoot,
 switch the runner's sleep to a two-stage precise mode at bounded CPU cost.
 
 1. Pure function `plan_precise_sleep(remaining_s: float, coarse_margin_s: float) ->
@@ -108,34 +115,52 @@ switch the runner's sleep to a two-stage precise mode at bounded CPU cost.
    24% of one core in slices — acceptable as a degraded-only backstop on this machine; it
    self-disarms after 10 clean heartbeats.
 
-### Escalation path (executive amendment 2 — DESIGN-ONLY NOTE, do not implement)
+</details>
 
-If precise mode does not hold >= 50 fps on the next live mix, the named next lever is the macOS
-**thread time-constraint policy**: `thread_policy_set(THREAD_TIME_CONSTRAINT_POLICY)` via ctypes
-on the frame thread — the mach primitive audio apps use for guaranteed scheduling. The frame
-loop's duty cycle is tiny (~0.5 ms of work per 16.7 ms period), so a time-constraint declaration
-is safe here. Recorded so the escalation is a named plan, not a rediscovery; it requires a fresh
-spec + executive release before any implementation.
+## Phase B - Root-cause investigation (THE core deliverable; separate dispatch after Tasks 1-2)
+
+Identify the ACTUAL demotion mechanism. All experiments are OFFLINE with throwaway test children
+(dry-run transport, own socketpairs, spawned by a standalone harness) — NEVER the live bridge,
+and full-compute experiments run only when the operator is not mixing.
+
+1. Baseline matrix: spawn the identical dry-run child (a) from an interactive login shell, (b)
+   from a chain mimicking the real launch path (menubar → watcher shell → python → child), (c)
+   detached (`start_new_session=True` / setsid), (d) with spawn-attribute variations worth
+   testing after reading the evidence. For each: measured fps (the Task 1 heartbeat now carries
+   it) + `launchctl procinfo <pid>` (coalition membership, role, darwin role, clamps) +
+   `getpriority(PRIO_DARWIN_PROCESS)` + thread QoS readback.
+2. Diff the fast case against the slow case until ONE variable flips fps 15-19 → ~60. Candidate
+   suspects to confirm or eliminate, not assume: coalition inheritance from the menubar/watcher
+   chain, App Nap on the coalition, darwin role clamp, timer-coalescing tier.
+3. **Deliverable: a findings report to the executive naming the mechanism with the flip
+   experiment as proof — BEFORE any Phase C implementation (hard review gate).**
+
+## Phase C - The true fix (design-gated; do not start until the executive reviews Phase B)
+
+Whatever Phase B names, the fix lands at the right layer: correct scheduling placement at spawn
+(e.g. detached session / coalition escape / spawn attributes) and/or the macOS **thread
+time-constraint policy** (`thread_policy_set(THREAD_TIME_CONSTRAINT_POLICY)` via ctypes on the
+frame thread — the mach primitive audio apps use; the frame loop's duty cycle is tiny, ~0.5 ms
+of work per 16.7 ms period, so a time-constraint contract is safe here), properly parameterized
+(period/computation/constraint from the configured fps) and tested. Large is acceptable; right
+layer is mandatory.
 
 ## Part C - Invariants That MUST Still Hold (live safety)
 
 - All AWR-146 fail-dark paths, message handling, and the anchor coast (`aa8fe2f`) byte-identical.
 - The heartbeat never blocks or raises out of the host loop; band syscall failures degrade to
   False/None values, not exceptions.
-- The precision sleep is bounded (≤4 ms slicing per frame), degraded-triggered only,
-  self-disarming, and visible (`sleep_mode` in status) — never a silent CPU tax.
+- No timing-behavior change ships in this round (Task 3 dropped by doctrine): frames, sleeps,
+  and the runner are byte-identical; only observability is added.
 - No runner, protocol-message, or client-command changes; the IPC surface is unchanged except
   new scalar fields inside the existing `hb` payload (decode-compatible both directions).
 
 ## Part D - Tests
 
-Pure (`tests/test_govee_frame_engine.py`): heartbeat carries the four new scalars; getpriority
+Pure (`tests/test_govee_frame_engine.py`): heartbeat carries the new band scalars; getpriority
 re-read/re-assert called per heartbeat (fake libc seam — factor the ctypes calls behind a small
-module-level function the test monkeypatches); `plan_precise_sleep` arithmetic incl. the spin
-cap and sub-margin remainders; **the wall-clock spin cap: with a fake clock where each requested
-0.5 ms slice consumes 3 ms of wall time, the slice loop exits within `PRECISE_SPIN_MAX_S` of
-wall time (executive amendment 1)**; mode switches at exactly 3 degraded / 10 clean heartbeats
-(fake clock); the adaptive closure calls plain sleep in normal mode. Client: new fields pass through
+module-level function the test monkeypatches). (Task 3 tests dropped with Task 3; `sleep_mode`
+is not shipped.) Client: new fields pass through
 `status()` with safe defaults pre-heartbeat; the first-heartbeat INFO log fires once per spawn
 (fake bridge_log seam or log_changed key assertion). Policy: whitelist passes the four keys.
 Integration (`tests/test_govee_frame_engine_integration.py`, CI-skipped): the real child's first
@@ -157,14 +182,11 @@ commit — green except the 5 known environmental reds.
 
 ## When You Finish
 
-Plain-language operator summary: the frame engine's status now shows not just its speed but
-WHY — whether each of the priority levers actually took hold, as numbers in the normal status
-output instead of a line lost in the watcher terminal; and if macOS still slows it down anyway,
-it now notices within ~3 seconds and switches itself to a more precise (slightly more
-CPU-hungry) timing mode until the speed recovers, then switches back. What this does NOT do:
-change any look, blackout, or timing behavior — it is instrumentation plus a self-healing
-backstop, and the real proof is the fps number on his next mix. The summary must also name the
-escalation plan in plain words: if the precise mode still cannot hold at least 50 fps live,
-the next step is asking macOS for the same guaranteed-scheduling treatment audio apps get for
-their sound threads (time-constraint policy) — already scoped as a design note, needing only
-the go-ahead.
+Plain-language operator summary (Tasks 1-2 round): the frame engine's status now shows not just
+its speed but WHY — whether each of the priority levers actually took hold, as numbers in the
+normal status output instead of a line lost in the watcher terminal, refreshed every second.
+This round deliberately changes NO timing behavior — per the root-cause doctrine, it is the
+instrumentation that lets the investigation phase name the real slowdown mechanism, after which
+the true fix (correct scheduling placement at spawn, and/or the guaranteed-scheduling contract
+audio apps use for their sound threads) gets designed against evidence and reviewed before it
+ships.
