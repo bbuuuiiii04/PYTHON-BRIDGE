@@ -372,6 +372,7 @@ def build_report(tracks: list[dict[str, str]], cid_playlists: dict[str, set[str]
     counts = Counter()
     extract_failed: list[str] = []
     all_records: list[dict[str, Any]] = []
+    ident_saturation: list[dict[str, Any]] = []
 
     for t in tracks:
         counts["scope"] += 1
@@ -420,6 +421,13 @@ def build_report(tracks: list[dict[str, str]], cid_playlists: dict[str, set[str]
         for s in member:
             lowmid_rate_track[s].append((rate, t["title"]))
 
+        # counterexample (v): identity axis saturated at exactly 0.0 or 1.0
+        axes = spectral_profile.identity_axes(v4)
+        sat = {k: v for k, v in axes.items() if v in (0.0, 1.0)}
+        if sat:
+            ident_saturation.append({"title": t["title"], "playlists": pls, "saturated": sat,
+                                     "axes": axes})
+
         # metric 6 identity stability (by_genre only)
         if in_bg and v4.n_beats >= 6:
             eo = _identity_even_odd(v4)
@@ -441,12 +449,14 @@ def build_report(tracks: list[dict[str, str]], cid_playlists: dict[str, set[str]
         counts, extract_failed, sub_beats, full_beats, growl_flat_beats,
         onset_mh_beats, loud_ref, bass_duty_track, lowmid_rate_track,
         ident_even, ident_odd, drops_by_split, playlist_family, all_records,
+        ident_saturation,
     )
 
 
 def _assemble(counts, extract_failed, sub_beats, full_beats, growl_flat_beats,
               onset_mh_beats, loud_ref, bass_duty_track, lowmid_rate_track,
-              ident_even, ident_odd, drops_by_split, playlist_family, all_records):
+              ident_even, ident_odd, drops_by_split, playlist_family, all_records,
+              ident_saturation):
     metrics: dict[str, Any] = {}
 
     def split_map(fn):
@@ -567,7 +577,7 @@ def _assemble(counts, extract_failed, sub_beats, full_beats, growl_flat_beats,
                 "top10": [{"title": t, "rate": round(r, 4)} for r, t in top]}
     metrics["12_lowmid_pulse"] = split_map(m12)
 
-    counterexamples = _counterexamples(all_records)
+    counterexamples = _counterexamples(all_records, ident_saturation)
 
     return {
         "counts": dict(counts),
@@ -581,7 +591,8 @@ def _assemble(counts, extract_failed, sub_beats, full_beats, growl_flat_beats,
 DEEP_GROOVE_UKG = {"DEEP HOUSE", "GROOVE HOUSE", "UKG"}
 
 
-def _counterexamples(records: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+def _counterexamples(records: list[dict[str, Any]],
+                     ident_saturation: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     def brief(r, extra=None):
         out = {"title": r["title"], "drop_beat": r["drop_beat"], "playlists": r["playlists"],
                "family": r["family"], "violence": r["violence"], "tier": r["tier"]}
@@ -591,29 +602,22 @@ def _counterexamples(records: list[dict[str, Any]]) -> dict[str, list[dict[str, 
 
     ce: dict[str, list[dict[str, Any]]] = {}
     # (i) NEUTRAL with violence >= 0.698
-    ce["neutral_high_violence"] = [
+    ce["i_neutral_high_violence"] = [
         brief(r) for r in sorted(records, key=lambda r: -r["violence"])
         if r["family"] == "NEUTRAL" and r["violence"] >= 0.698][:10]
     # (ii) tier-3 in deep/groove/UKG
-    ce["tier3_in_groovy_house"] = [
+    ce["ii_tier3_in_groovy_house"] = [
         brief(r, {"lift": r["lift"]}) for r in sorted(records, key=lambda r: -r["violence"])
         if r["tier"] == 3 and DEEP_GROOVE_UKG.intersection(r["playlists"])][:10]
-    # (iii) blackout runs with raw_gap >= 40 (cap distortion)
-    ce["blackout_rawgap_ge40"] = [
+    # (iii) blackout runs with raw_gap >= 40 (cap distortion size)
+    ce["iii_blackout_rawgap_ge40"] = [
         brief(r, {"raw_gap": r["raw_gap"], "dark_beats": r["darkness"].get("dark_beats")})
         for r in sorted(records, key=lambda r: -r["raw_gap"])
         if r["darkness"]["kind"] == "blackout" and r["raw_gap"] >= 40][:10]
-    # (iv) busy-kill near-misses (duty 0.80-0.90) — reconstruct duty from the scan
-    near = []
-    for r in records:
-        pass  # duty band computed in the record pass below
-    ce["busy_kill_near_miss"] = _near_miss_records(records)[:10]
-    # (v) identity axis at exact 0.0 or 1.0 (saturation) — from drop b_rate is wrong axis;
-    # saturation is a per-track identity property, surfaced separately in metric 7 notes.
-    ce["saturated_bass_forward_windows"] = [
-        brief(r, {"bass_forward": r["bass_forward"], "b_rate": r["b_rate"]})
-        for r in records
-        if r["bass_forward"] and set(r["bass_forward"]) in ({"B"}, {"K"})][:10]
+    # (iv) busy-kill near-misses (run bass_duty 0.80-0.90)
+    ce["iv_busy_kill_near_miss"] = _near_miss_records(records)[:10]
+    # (v) tracks with any identity axis saturated at exactly 0.0 or 1.0
+    ce["v_identity_saturation"] = ident_saturation[:10]
     return ce
 
 
@@ -669,8 +673,11 @@ def render_markdown(report: dict[str, Any]) -> str:
 
     L.append("\n## Counterexamples\n")
     for name, rows in report["counterexamples"].items():
-        L.append(f"- **{name}** ({len(rows)}): " + "; ".join(
-            f"{r.get('title','?')}@{r.get('drop_beat','?')}" for r in rows[:10]) or f"- {name}: none")
+        def label(r):
+            t = r.get("title", "?")
+            return f"{t}@{r['drop_beat']}" if "drop_beat" in r else t
+        body = "; ".join(label(r) for r in rows[:10]) if rows else "none"
+        L.append(f"- **{name}** ({len(rows)}): {body}")
     return "\n".join(L) + "\n"
 
 
