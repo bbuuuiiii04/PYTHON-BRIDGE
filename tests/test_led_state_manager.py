@@ -3584,5 +3584,29 @@ class LEDSoloPredarkHoldTests(unittest.TestCase):
         self.assertEqual(sm._led_automation_gate_reason, "emergency_blackout")
 
 
+class LedDiyEligiblePredicateTests(unittest.TestCase):
+    """AWR-152 T6: DIY color-tag filtering is stale under v2 (frozen v1 palette)."""
+
+    def test_returns_none_when_v2_latch_truthy(self) -> None:
+        engine = _IdentityColorEngine()
+        sm = _make_sm(led_color_engine=engine)
+        sm._led_v2_latch = True
+        self.assertIsNone(sm._led_diy_eligible_predicate())
+
+    def test_returns_engine_predicate_when_v2_latch_falsy(self) -> None:
+        engine = _IdentityColorEngine()
+        sm = _make_sm(led_color_engine=engine)
+        sm._led_v2_latch = False
+        self.assertEqual(sm._led_diy_eligible_predicate(), engine.diy_eligible)
+
+    def test_v2_latched_automation_tick_passes_no_diy_filter(self) -> None:
+        # A v2-latched automation tick must not filter cloud looks by color
+        # tag: the predicate is None, so every banked look rotates evenly.
+        sm, _engine, _runner, _owner = _make_realtime_color_sm()
+        director = sm._led_look_director
+        self.assertTrue(director.tick_calls)
+        self.assertIsNone(director.tick_calls[-1].diy_eligible)
+
+
 if __name__ == "__main__":
     unittest.main()
