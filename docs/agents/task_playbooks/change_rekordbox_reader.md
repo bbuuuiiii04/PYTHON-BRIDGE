@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 74febec
-last_verified_date: 2026-06-17
+last_verified_commit: 4a827f7
+last_verified_date: 2026-07-08
 validation_scope: software-only
 ---
 
@@ -40,6 +40,11 @@ Implementation notes:
 - For active-deck authority support, keep direct master freshness, invalidation,
   raw Deck C/D no-aliasing, concrete mixer invalid reasons, and transport
   fail-closed behavior covered by focused tests.
+- The deck-2 playhead scans share the vectorized numeric pre-filters
+  `_i32_moving_candidates` / `_i32_static_candidates` (numpy fast path + a pure
+  fallback that yields the GIL). If you touch those filters, keep candidate
+  values/order/logs identical and re-run the byte-identical oracle check in
+  `tests/test_rb_memory_scans.py`; numpy must stay a lazy optional import.
 
 Required tests:
 - Run the targeted tests listed in the subsystem card.

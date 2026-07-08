@@ -85,6 +85,9 @@ Config:
 
 Tests:
 - search `tests/` for Rekordbox reader, offset, live BPM, and memory-reader tests
+- `tests/test_rb_memory_scans.py` proves the deck-2 scan pre-filters are
+  byte-identical across numpy / pure fallback / old-loop oracle and that both
+  paths yield the GIL (pure seams only — no mach, no live process)
 - if no direct hardware/process test exists, mark live behavior unvalidated in repo evidence
 
 Change contract:
