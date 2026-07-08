@@ -3,6 +3,7 @@ from __future__ import annotations
 import atexit
 import hashlib
 import json
+import logging
 import os
 import threading
 import time
@@ -19,6 +20,8 @@ from ..govee_realtime_runner import EffectSpec, GoveeRealtimeRunner
 from ..govee_realtime_transport import GoveeRealtimeDryRunTransport, GoveeRealtimeTransport
 from ..led_models import BeatAnchor, LEDConfig
 from ..runtime_status import COMMANDS_PATH, STATUS_PATH
+
+log = logging.getLogger("led_pad_playback")
 
 
 def stable_seed(value: str) -> int:
@@ -273,6 +276,17 @@ class PadPlayback:
         self.tick()
         if counter % 8 == 7:
             self._ownership.poll_owned()
+            # Yield to the bridge: an already-running pad playback checks ownership
+            # only inside play(), so it would otherwise stream forever as a second
+            # writer once the bridge comes alive (ghost comet + flicker). If we are
+            # playing and NOT in a deliberate pad takeover, and a fresh bridge status
+            # says the bridge owns the strip, bow out. "pad_owned" (legit takeover)
+            # and "free" (bridge down — pad is the only writer) both keep playing.
+            if self._clock.playing and self._ownership.state != "pad_owned":
+                if self._ownership.refresh() == "bridge_owned":
+                    self.stop()
+                    self._ownership.last_warning = "auto_stopped_bridge_active"
+                    log.info("[PAD] auto-stopped playback: bridge owns the strip")
         return counter + 1
 
     def request_takeover(self) -> None:
