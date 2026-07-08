@@ -89,6 +89,15 @@ laser.
 - AWR-138 window re-entry + AWR-139 true-drop presentation gating unchanged.
 - No RNG, no tick-path I/O; scripted exemptions unchanged.
 
+> **Addendum 2026-07-07 (AWR-143):** the "a label re-arm is NOT a presentation impact" invariant
+> above is now ENFORCED, not merely assumed. The AWR-140 adversarial review found that the restored
+> 2nd-chorus label re-arm makes the Laser Director emit `reason="drop_crossing"` without a real
+> smart-drop marker, which `state_manager.py:_drop_presentation_tick` was trusting as a presentation
+> impact (re-entering/extending the presentation window). AWR-143 adds a one-line gate
+> (`impact_now = bool(impact_now and sp_state.smart_drop_crossing)`) so only a genuine smart-drop
+> marker counts as a presentation impact. The AWR-140 drop LOOK / role behavior here is unchanged.
+> See `docs/plans/active/drop_presentation_label_rearm_leak_fix_spec.md`.
+
 ## Part D — Tests
 Task 3; pure in-memory.
 

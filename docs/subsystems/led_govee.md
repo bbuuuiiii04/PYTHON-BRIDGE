@@ -201,7 +201,13 @@ Drop presentation policy (Package 3, AWR-119, 2026-07-04):
   drop windows so laser base suppression follows the real drop/post-drop role end, and only later
   true-drop impacts (runway > 0.0, or manual Solo / hot-cue override) inside an open window assert
   their own presentation and re-stamp the cap. Runway-less markers keep laser/LED look cycling but
-  cannot re-roll the section's fixture split. The 192-beat `drop_window_cap_beats` default is only
+  cannot re-roll the section's fixture split. AWR-143 (2026-07-07) gates the presentation impact in
+  `_drop_presentation_tick` on `sp_state.smart_drop_crossing`
+  (`impact_now = bool(impact_now and sp_state.smart_drop_crossing)`): post-AWR-140 the Laser
+  Director emits `reason="drop_crossing"` for the capped 2nd-chorus LABEL re-arm without a real
+  smart-drop marker, and without the gate that re-arm re-entered/extended the presentation window,
+  breaking AWR-139's per-true-drop invariant. The AWR-140 drop LOOK / LED drop-impact gating is
+  unchanged. The 192-beat `drop_window_cap_beats` default is only
   a stuck-role backstop. A `lasers_only` solo that re-enters mid-window skips the LED pre-dark
   countdown and fires at impact. SOFTWARE-VALIDATED
   ONLY / HARDWARE-UNVALIDATED.
