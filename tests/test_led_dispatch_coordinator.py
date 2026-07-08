@@ -352,6 +352,13 @@ class LEDDispatchCoordinatorTests(unittest.TestCase):
         coordinator.restore_brightness()
         self.assertEqual(runner.brightness_requests, [100])
 
+    def test_blackout_brightness_requests_zero(self) -> None:
+        """AWR-146 Task 6: blackout_brightness() asks the runner for LAN 0 —
+        darkens even when the runner is inactive (cloud look showing)."""
+        coordinator, adapter, runner, owner = self._coordinator()
+        coordinator.blackout_brightness()
+        self.assertEqual(runner.brightness_requests, [0])
+
     # ── WI-8 status counters ──────────────────────────────────────────────────
 
     def test_wi8_status_includes_observability_counters(self) -> None:

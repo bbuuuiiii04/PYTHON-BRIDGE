@@ -628,6 +628,7 @@ contracts:
       - section_map
     inspect:
       - docs/research/spectral_audio_analysis_redesign.md
+      - docs/research/spectral_calibration_expansion_2026_07_08.md
       - docs/subsystems/core_bridge.md
     tests:
       - python3 -m unittest discover tests
