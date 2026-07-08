@@ -93,6 +93,9 @@ class RecordingRunner:
     def request_activate_assert(self) -> None:
         self.calls.append("request_activate_assert")
 
+    def request_keepalive_yield(self) -> None:
+        self.calls.append("request_keepalive_yield")
+
     def request_brightness(self, value: int) -> None:
         self.calls.append(f"request_brightness:{value}")
 
@@ -238,6 +241,14 @@ class FrameEngineHostTests(unittest.TestCase):
         self.assertTrue(host.handle_message({"t": "bogus"}))
         # shutdown returns False
         self.assertFalse(host.handle_message({"t": "shutdown"}))
+
+    def test_4b_keepalive_yield_maps_to_runner(self) -> None:
+        """AWR-150 (a): the keepalive_yield IPC message calls runner.request_keepalive_yield."""
+        runner = RecordingRunner()
+        host = FrameEngineHost(HostFakeConn(), transport_factory=lambda i: None)
+        host._runner = runner
+        self.assertTrue(host.handle_message({"t": "keepalive_yield"}))
+        self.assertEqual(runner.calls, ["request_keepalive_yield"])
 
     def _real_runner_host(self, transport, clk):
         def rf(tr, rnd, *, segments, fps, grace_s, on_thread_start):
@@ -537,6 +548,43 @@ class GoveeFrameEngineClientTests(unittest.TestCase):
         # Draining on the client tick preserves command order on the wire.
         c._tick(clk[0])
         self.assertEqual(conn.types(), ["set_desired", "fire_trigger", "activate_assert"])
+
+    def test_9b_keepalive_yield_enqueues_and_reaches_wire(self) -> None:
+        """AWR-150 (b): request_keepalive_yield does zero caller-thread I/O and the
+        message reaches the child on the next client tick."""
+        clk = [100.0]
+        sp = Spawner()
+        c = _make_client(sp, clk)
+        c._tick(clk[0])  # spawn child #0
+        conn = sp.conns[0]
+        conn.sent.clear()
+        c.request_keepalive_yield()
+        self.assertEqual(conn.sent, [])          # zero I/O on the caller thread
+        c._tick(clk[0])                          # drain
+        self.assertIn("keepalive_yield", conn.types())
+
+    def test_10c_keepalive_yield_not_replayed_after_respawn(self) -> None:
+        """AWR-150 (c): a fresh child re-asserting razer is the safe direction, so the
+        keepalive yield is NEVER replayed on respawn (no mirror state, and the outbox
+        is cleared on respawn)."""
+        clk = [100.0]
+        sp = Spawner()
+        c = _make_client(sp, clk)
+        c._tick(clk[0])              # spawn #0
+        c.set_desired(_spec())       # a mid-look intent that DOES replay
+        c.request_keepalive_yield()  # the yield — must NOT replay
+        c._tick(clk[0])              # drain both onto #0
+        self.assertIn("keepalive_yield", sp.conns[0].types())  # reached the live child
+        sp.conns[0].eof()
+        c._tick(clk[0])              # detect EOF
+        clk[0] += 1.0
+        c._tick(clk[0])              # kill + schedule respawn (backoff)
+        clk[0] += 1.0
+        c._tick(clk[0])              # respawn #1 + replay
+        # The fresh child gets the look replayed but NOT the keepalive yield.
+        self.assertEqual(sp.conns[1].types(), ["init", "set_desired", "activate_assert"])
+        self.assertNotIn("keepalive_yield", sp.conns[1].types())
+        self.assertEqual(c._respawn_count, 1)
 
     def test_10_respawn_replays_intent(self) -> None:
         def scenario(setup):

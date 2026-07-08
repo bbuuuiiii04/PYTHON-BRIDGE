@@ -747,6 +747,54 @@ class GoveeRealtimeRunnerTests(unittest.TestCase):
         runner._tick_once(_anchor(1003.0), 1003.0)  # >2 s, yield gone -> keepalive fires
         self.assertEqual(transport.calls.count("activate"), 2)
 
+    def test_keepalive_yield_cancel_by_set_desired_lets_keepalive_fire(self) -> None:
+        clock, transport, runner = self._active_yield_runner()
+        runner.request_keepalive_yield()
+        # Same spec -> no reconfigure/activate; set_desired only cancels the yield.
+        runner.set_desired(EffectSpec("solid", {"color": [1, 2, 3]}, 1, 1000.0))
+        runner._tick_once(_anchor(1003.0), 1003.0)  # >2 s, yield gone -> keepalive fires
+        self.assertEqual(transport.calls.count("activate"), 2)
+
+    def test_keepalive_yield_cancel_by_activate_assert_lets_keepalive_fire(self) -> None:
+        clock, transport, runner = self._active_yield_runner()
+        runner.request_keepalive_yield()
+        runner.request_activate_assert()  # cancels the yield + queues an on-demand assert
+        runner._tick_once(_anchor(1000.5), 1000.5)  # on-demand assert fires (activate #2)
+        self.assertEqual(transport.calls.count("activate"), 2)
+        # >2 s since that assert: the keepalive resumes (would stay at 2 if still yielding).
+        runner._tick_once(_anchor(1003.0), 1003.0)
+        self.assertEqual(transport.calls.count("activate"), 3)
+
+    def test_keepalive_resumes_after_emergency_stop_and_recovery(self) -> None:
+        clock, transport, runner = self._active_yield_runner()  # active, activate #1
+        runner.request_keepalive_yield()
+        runner.emergency_stop()  # cancels the yield + latches emergency
+        runner._tick_once(_anchor(1001.0), 1001.0)  # emergency teardown -> inactive
+        runner.set_desired(EffectSpec("solid", {"color": [1, 2, 3]}, 1, 1000.0))  # re-arm
+        runner._tick_once(_anchor(1002.0), 1002.0)  # re-activate (activate #2)
+        runner._tick_once(_anchor(1005.0), 1005.0)  # >2 s -> keepalive fires (activate #3)
+        self.assertEqual(transport.calls.count("activate"), 3)
+
+    def test_keepalive_resumes_after_force_deactivate_and_recovery(self) -> None:
+        clock, transport, runner = self._active_yield_runner()
+        runner.request_keepalive_yield()
+        runner.force_deactivate()  # cancels the yield + handoff teardown
+        runner._tick_once(_anchor(1001.0), 1001.0)  # handoff teardown -> inactive
+        self.assertIn("deactivate", transport.calls)
+        runner.set_desired(EffectSpec("solid", {"color": [1, 2, 3]}, 1, 1000.0))  # re-arm
+        runner._tick_once(_anchor(1002.0), 1002.0)  # re-activate (activate #2)
+        runner._tick_once(_anchor(1005.0), 1005.0)  # >2 s -> keepalive fires (activate #3)
+        self.assertEqual(transport.calls.count("activate"), 3)
+
+    def test_active_yield_does_not_suppress_emergency_teardown(self) -> None:
+        clock, transport, runner = self._active_yield_runner()
+        runner.request_keepalive_yield()  # a yield is active...
+        transport.calls.clear()
+        runner.emergency_stop()  # ...but a blackout must still tear down
+        runner._tick_once(_anchor(1001.0), 1001.0)
+        self.assertIn("blackout", transport.calls)
+        self.assertIn("deactivate", transport.calls)
+
     def test_keepalive_yield_does_not_block_brightness_drain(self) -> None:
         clock, transport, runner = self._active_yield_runner()
         runner.request_keepalive_yield()
