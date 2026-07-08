@@ -36,8 +36,10 @@ Spec references:
 
 NOTE: White accents as a *standalone random event* (a separate white_chance knob
 that spontaneously fires white on any cue) are OUT OF M1 SCOPE — §7 defines no
-such config field, and inventing it would add unsolicited config.  The per-palette
-`white` field blends the resolved p→RGB toward (255,255,255); that IS implemented.
+such config field, and inventing it would add unsolicited config. The per-palette
+`white` blend knob (AWR-152) was removed: every palette shipped `white: 0.0` in
+practice, so the identity blend was dead weight. Slot 5's white accent is now a
+per-zone tint (`ZoneRampConfig.slot5_white`, resolved in led_identity_v2.py).
 A future §8 operator-surface feature could add white accent triggering via a
 separate config key in M3+.
 """
@@ -115,15 +117,6 @@ def _p_to_rgb(
                 max(0, min(255, b)),
             )
     return rgbs[-1]
-
-
-def _blend_white(rgb: tuple[int, int, int], white: float) -> tuple[int, int, int]:
-    """Lerp rgb toward (255,255,255) by white amount ∈ [0,1]."""
-    w = max(0.0, min(1.0, white))
-    r = int(round(rgb[0] + w * (255 - rgb[0])))
-    g = int(round(rgb[1] + w * (255 - rgb[1])))
-    b = int(round(rgb[2] + w * (255 - rgb[2])))
-    return (r, g, b)
 
 
 def _hue_to_rgb(hue: float) -> tuple[int, int, int]:
@@ -673,7 +666,6 @@ class LedColorEngine:
         p = max(0.0, min(1.0, p))
 
         rgb = _p_to_rgb(p, self._config.scale_stops, self._stop_positions)
-        rgb = _blend_white(rgb, palette.white)
 
         result: dict[str, Any] = {"color": rgb}
         self._last_emitted_rgb = tuple(int(v) for v in rgb)
@@ -683,9 +675,7 @@ class LedColorEngine:
             p_low = max(0.0, min(1.0, focus_lo))
             p_high = max(0.0, min(1.0, focus_hi))
             rgb_a = _p_to_rgb(p_low, self._config.scale_stops, self._stop_positions)
-            rgb_a = _blend_white(rgb_a, palette.white)
             rgb_b = _p_to_rgb(p_high, self._config.scale_stops, self._stop_positions)
-            rgb_b = _blend_white(rgb_b, palette.white)
             result["color_a"] = rgb_a
             result["color_b"] = rgb_b
 
@@ -798,9 +788,8 @@ class LedColorEngine:
                     p = focus_lo + t * (focus_hi - focus_lo)
                 p = max(0.0, min(1.0, p))
                 rgb = _p_to_rgb(p, self._config.scale_stops, self._stop_positions)
-                rgb = _blend_white(rgb, palette.white)
                 slots.append(rgb)
-    
+
             # Reserved white slot (pure white, not blended, not palette-derived).
             slots.append((255, 255, 255))
         elif strategy == "random_with_replacement":
@@ -812,7 +801,6 @@ class LedColorEngine:
                 p = fill_rng.uniform(focus_lo, focus_hi)
                 p = max(0.0, min(1.0, p))
                 rgb = _p_to_rgb(p, self._config.scale_stops, self._stop_positions)
-                rgb = _blend_white(rgb, palette.white)
                 slots.append(rgb)
             slots.append((255, 255, 255))
         elif strategy == "random_with_mono_chance":
@@ -829,7 +817,6 @@ class LedColorEngine:
                 p = mono_rng.uniform(focus_lo, focus_hi)
                 p = max(0.0, min(1.0, p))
                 rgb = _p_to_rgb(p, self._config.scale_stops, self._stop_positions)
-                rgb = _blend_white(rgb, palette.white)
                 for _ in range(5):
                     slots.append(rgb)
                 slots.append((255, 255, 255))
@@ -842,7 +829,6 @@ class LedColorEngine:
                     p = fill_rng.uniform(focus_lo, focus_hi)
                     p = max(0.0, min(1.0, p))
                     rgb = _p_to_rgb(p, self._config.scale_stops, self._stop_positions)
-                    rgb = _blend_white(rgb, palette.white)
                     slots.append(rgb)
                 slots.append((255, 255, 255))
 
@@ -1182,7 +1168,7 @@ class LedColorEngine:
         if self._v2_reset_until is not None and self._v2_now < self._v2_reset_until:
             dim = self._v2_cfg.palate_reset_dim if self._v2_cfg else 1.0
             neutral = self._v2_neutral_dressing() or dressing
-            slots = [self._scale_rgb(rgb, dim) for rgb in neutral.slot_rgbs[:5]] + [(255, 255, 255)]
+            slots = [self._scale_rgb(rgb, dim) for rgb in neutral.slot_rgbs]
         result: dict[str, Any] = {"slot_colors": slots}
         self._v2_apply_fade_fields(result, role, slots=True)
         return result

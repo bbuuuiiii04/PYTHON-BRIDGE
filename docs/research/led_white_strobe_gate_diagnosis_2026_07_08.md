@@ -75,7 +75,14 @@ rows are pure sampling math.
 
 ## 3. Fix direction (for the follow-up spec — NOT implemented, NOT specced this round)
 
-Frame-rate/stall-aware gate, two composable parts:
+**BINDING DESIGN INPUT (operator taste ruling, 2026-07-08 pad session, do not
+re-litigate): strobes are TIME-BASED (real Hz), not beat/BPM-subdivided — a
+strobe must feel identical at 140 and 160 BPM.** The AWR-153 gate therefore
+runs on a wall-clock Hz rate (hz + duty knobs), not `beat % subdivision`.
+Verified in Template Lab the same session: the Hz-clock lab strobes measure
+the same flashes-per-second at 128 and 90 BPM.
+
+Frame-rate/stall-aware gate, two composable parts (now in Hz terms):
 
 1. **Runner injects frame timing:** the runner knows its real cadence; inject
    `render_fps` (or beats-per-frame) into effect params per frame — the same

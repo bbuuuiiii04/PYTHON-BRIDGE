@@ -30,7 +30,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from rb_ss_bridge_v2.led_color_engine import (  # noqa: E402
     LedColorEngine,
     _p_to_rgb,
-    _blend_white,
     _scale_stop_positions,
 )
 from rb_ss_bridge_v2.led_identity_v2 import content_hash  # noqa: E402
@@ -53,7 +52,6 @@ _DEFAULT_SCALE_STOPS = {
 _DEFAULT_PALETTES = {
     "blue_cyan": Palette(
         range=("cyan", "blue"),
-        white=0.0,
         spread=0.10,
         weight=14.0,
         dwell=4,
@@ -61,34 +59,29 @@ _DEFAULT_PALETTES = {
     ),
     "red": Palette(
         range=("red", "red"),
-        white=0.0,
         spread=0.10,
         weight=9.0,
         dwell=6,
     ),
     "green": Palette(
         range=("green", "green"),
-        white=0.0,
         spread=0.08,
         weight=4.0,
         dwell=5,
     ),
     "red_white": Palette(
         range=("red", "red"),
-        white=0.4,
         spread=0.10,
         weight=3.0,
     ),
     "cyan_blue_purple": Palette(
         range=("cyan", "purple"),
-        white=0.0,
         spread=0.22,
         weight=3.0,
         focus_modes={"mono": 2.0, "lean": 3.0, "full": 3.0},
     ),
     "purple_pink_white": Palette(
         range=("purple", "magenta"),
-        white=0.5,
         spread=0.15,
         weight=1.0,
     ),
@@ -335,20 +328,6 @@ class TestPToRgb(unittest.TestCase):
                     is_oy,
                     msg=f"{pal_name} p={p:.3f} → RGB({r},{g},{b}) orange/yellow"
                 )
-
-
-class TestBlendWhite(unittest.TestCase):
-    def test_zero_white_unchanged(self) -> None:
-        self.assertEqual(_blend_white((0, 0, 255), 0.0), (0, 0, 255))
-
-    def test_full_white(self) -> None:
-        self.assertEqual(_blend_white((0, 0, 255), 1.0), (255, 255, 255))
-
-    def test_half_white(self) -> None:
-        r, g, b = _blend_white((0, 0, 0), 0.5)
-        self.assertIn(r, (127, 128))
-        self.assertIn(g, (127, 128))
-        self.assertIn(b, (127, 128))
 
 
 # ---------------------------------------------------------------------------
@@ -705,7 +684,6 @@ class TestFocus(unittest.TestCase):
         mono_pal = {
             "blue_cyan": Palette(
                 range=("cyan", "blue"),
-                white=0.0,
                 spread=0.0,  # no extra spread
                 weight=1.0,
                 focus_modes={"mono": 1.0},  # only mono
@@ -737,7 +715,6 @@ class TestFocus(unittest.TestCase):
         full_pal = {
             "cyan_blue_purple": Palette(
                 range=("cyan", "purple"),
-                white=0.0,
                 spread=0.0,
                 weight=1.0,
                 focus_modes={"full": 1.0},  # only full
@@ -818,26 +795,6 @@ class TestResolveColor(unittest.TestCase):
         self.assertNotIn("color_a", result)
         self.assertNotIn("color_b", result)
 
-    def test_white_palette_blends_toward_white(self) -> None:
-        """red_white palette (white=0.4) → color should be noticeably whitened."""
-        white_pal = {
-            "red_white": Palette(
-                range=("red", "red"),
-                white=0.4,
-                spread=0.0,
-                weight=1.0,
-            ),
-        }
-        cfg = _make_config(palettes=white_pal, drama_by_role=False)
-        e = LedColorEngine(cfg, set_seed=42)
-        _dispatch(e, load_gen=1)
-        result = _color(e)
-        r, g, b = result["color"]
-        # red=(255,0,0) blended 40% toward white → g,b > 0
-        # g ≈ 0 + 0.4*(255-0) = 102
-        self.assertGreater(g, 50, "White blend should raise green channel")
-        self.assertGreater(b, 50, "White blend should raise blue channel")
-
     def test_resolve_color_deterministic(self) -> None:
         """Same seed + same call sequence → same color every time."""
         def run(seed: int) -> Any:
@@ -856,7 +813,6 @@ class TestResolveColor(unittest.TestCase):
         wide_pal = {
             "cyan_blue_purple": Palette(
                 range=("cyan", "purple"),
-                white=0.0,
                 spread=0.15,
                 weight=1.0,
                 focus_modes={"full": 1.0},  # always full range
@@ -941,7 +897,7 @@ class TestDiyEligible(unittest.TestCase):
         """A stop-tagged look is eligible only if its stop falls in palette interval ± spread."""
         # Force engine to blue_cyan palette
         blue_cyan_only = {
-            "blue_cyan": Palette(range=("cyan", "blue"), white=0.0, spread=0.10, weight=1.0),
+            "blue_cyan": Palette(range=("cyan", "blue"), spread=0.10, weight=1.0),
         }
         cfg = _make_config(
             palettes=blue_cyan_only,
@@ -964,7 +920,6 @@ class TestDiyEligible(unittest.TestCase):
         purple_pal = {
             "cyan_blue_purple": Palette(
                 range=("cyan", "purple"),
-                white=0.0,
                 spread=0.05,
                 weight=1.0,
             ),
@@ -1295,12 +1250,12 @@ class TestIdentityV2Timing(unittest.TestCase):
         self.assertIsNotNone(neutral)
         expected = [
             e._scale_rgb(rgb, e._v2_cfg.palate_reset_dim)
-            for rgb in neutral.slot_rgbs[:5]
-        ] + [(255, 255, 255)]
+            for rgb in neutral.slot_rgbs
+        ]
         active_dimmed = [
             e._scale_rgb(rgb, e._v2_cfg.palate_reset_dim)
-            for rgb in e._v2_active_dressing().slot_rgbs[:5]
-        ] + [(255, 255, 255)]
+            for rgb in e._v2_active_dressing().slot_rgbs
+        ]
         slots = e.resolve_slot_colors(
             role="groove",
             section_id="s1",

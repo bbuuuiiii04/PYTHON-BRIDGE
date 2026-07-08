@@ -196,7 +196,6 @@ class TestPaletteDataclass(unittest.TestCase):
     def test_palette_defaults(self) -> None:
         p = Palette()
         self.assertEqual(p.range, ("blue", "cyan"))
-        self.assertEqual(p.white, 0.0)
         self.assertEqual(p.spread, 0.10)
         self.assertEqual(p.weight, 1.0)
         self.assertIsNone(p.dwell)
@@ -205,21 +204,19 @@ class TestPaletteDataclass(unittest.TestCase):
     def test_palette_with_values(self) -> None:
         p = Palette(
             range=("cyan", "blue"),
-            white=0.4,
             spread=0.15,
             weight=3.0,
             dwell=5,
             focus_modes={"mono": 2.0, "full": 1.0},
         )
         self.assertEqual(p.range, ("cyan", "blue"))
-        self.assertEqual(p.white, 0.4)
         self.assertEqual(p.dwell, 5)
         self.assertEqual(p.focus_modes["mono"], 2.0)
 
     def test_palette_is_frozen(self) -> None:
         p = Palette()
         with self.assertRaises(Exception):
-            p.white = 0.5  # type: ignore[misc]
+            p.spread = 0.5  # type: ignore[misc]
 
 
 class TestColorEngineConfigDataclass(unittest.TestCase):
@@ -783,14 +780,6 @@ class TestColorEngineInvalidDoesNotDisableLED(unittest.TestCase):
         block["palettes"]["blue_cyan"]["weight"] = -1
         cfg_data["color_engine"] = block
         self._assert_engine_off_led_up(cfg_data, "negative weight")
-
-    def test_white_out_of_range_engine_off_led_up(self) -> None:
-        """palette white > 1 → engine None, LED available."""
-        cfg_data = _base_config()
-        block = _valid_color_engine_block()
-        block["palettes"]["blue_cyan"]["white"] = 1.5
-        cfg_data["color_engine"] = block
-        self._assert_engine_off_led_up(cfg_data, "white > 1")
 
     def test_big_shift_chance_out_of_range(self) -> None:
         """big_shift_chance > 1 → engine None, LED available."""
