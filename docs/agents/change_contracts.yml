@@ -115,6 +115,7 @@ contracts:
       - govee_frame_renderer.py
       - govee_owner_state.py
       - govee_lan_discovery.py
+      - govee_frame_engine.py
       - beat_sync_engine.py
       - led_identity_v2.py
       - tools/calibrate_identity_v2.py
@@ -135,6 +136,7 @@ contracts:
       - GoveeRealtimeRunner
       - GoveeRealtimeTransport
       - GoveeFrameRenderer
+      - FrameEngineHost
       - BeatSyncEngine
       - LedIdentityV2
       - IdentityStore
