@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: measured
-last_verified_commit: 179c95c
+last_verified_commit: 3399231
 last_verified_date: 2026-07-08
-validation_scope: offline corpus analysis only, no behavior change — recomputes the v4 spectral calibration + F2 rule-pack claims on the refreshed whole-library cache; no calibration constant changed, no runtime/hardware action, no listening validation
+validation_scope: offline corpus analysis plus the operator listening pass (7/7 answered 2026-07-08, §6b) — recomputes the v4 spectral calibration + F2 rule-pack claims on the refreshed whole-library cache; no calibration constant changed, no runtime/hardware action; darkness-pack level-term finding is F2-spec input only, not implemented
 ---
 
 # AWR-147 Phase 1 — Spectral calibration expansion: corpus refresh + calibration report
@@ -158,6 +158,22 @@ Everything else (family classifier order, violence arithmetic, tier cuts, tolera
 - **new-split is small (10 tracks / 80 drops).** Its numbers are a drift *smoke test*, not calibration evidence.
 - **No calibration constant was changed.** Phase 1 measures; tuning (e.g. the metric-4 onset threshold now sitting at p90, the metric-6 grit axis grazing its gate floor, the metric-10 abort-count reproduction) is the manager's separate decision.
 - **3 orphan cache entries** (714 on disk, 711 mapped) are noise, not analyzed.
+
+## 6b. Operator listening pass — 7/7 answered (2026-07-08, same day; verdicts verbatim-in-substance, measurements confirmed this session)
+
+The 7-track boundary sheet came back. Ear verdicts against the measured reads:
+
+1. **Sticky x Rich Baby Daddy (OK JAYE! Edit) @196** (NEUTRAL, violence 0.898): operator calls the song itself neutral — strong syncopated bass, submissive high rattle. **NEUTRAL family read VALIDATED**; high violence + NEUTRAL is not a defect class. Counterexample list (i) is defanged as an automatic tuning target.
+2. **WHICH ONE @4** (HOUSE T3 at track start): "kinda — it's just an intro; UKG is not that insane vs dubstep/hard techno/trap." **Tier-3 overshoot datapoint**: corpus-absolute violence can max out on a loud punchy UKG intro. F2 spec should consider runway/track-start damping (cf. AWR-139's true-drop runway rule for lasers) and/or family-relative aggression. One label — direction, not a pin.
+3. **Hide and Seek (VERDES VIP) @272** (capped-16 blackout): "warrants like a literal 1 beat blackout" — light percussive pattern still playing. **REJECTED at 16 beats.** Measured: window [256,272) full_db med 10.4 (lift **−6.4** vs ref 16.9), onsets_mh 1.81/beat, run duty 0.22.
+4. **Wanna Go Dancin' @224** (5-beat blackout, duty 0.80 busy near-miss): "wouldn't black out — LED getting ready to explode, balloon inflating until the drop." **REJECTED entirely**; the correct treatment is the F2 landing build (squeeze/swell), which the design already has — the darkness decision mis-routed it. Measured: lift **−4.9**, duty 0.80.
+5. **Can't Say Nah @128** bass-forward alternation: "sounds about right." **Ear-CONFIRMED.**
+6. **Hollaback Girl (Tavatli Remix)**: no verdict possible — busy-pulse seasoning has no visual yet ("dark heavy tech house, borderline house techno"). `lowmid_pulse` stays experimental; scrub gate remains open until a consumer renders something.
+7. **Cirez D — On Off (Kapuchon Edit) @478**: "yeah — festival heavy tech house borderline techno." Non-COMET read accepted; the 146-BPM COMET gate stands.
+
+**The load-bearing finding (#3 + #4, cross-checked against the approved anchors):** the darkness pack's emptiness notion (sub-only gone + bass-duty busy test) over-darkens stretches where the full band is still loud. Relative full-band level separates ALL four ear-labeled cases monotonically — approved blackouts: ILL@109 lift −14.0, CSN@352 lift −8.3; rejected: Hide and Seek −6.4, Wanna Go Dancin' −4.9 (window med(full_db) − loudness_ref_db; confirmed, measured this session). Onset density does NOT separate (ILL's approved window carries 2.17 onsets/beat — rolls riding the vacuum): a percussion/onset term is the WRONG fix; a relative-level term is the right shape. **REQUIRED F2-spec input:** add a window-level term to the darkness decision (e.g. full blackout only when lift ≤ ~−8; shortened/flick above), pin the exact boundary and grading there — 4 labels are direction, not a calibration; the boundary sits in a thin margin (−8.3 approved vs −6.4 rejected), so gather 2–3 more labels at spec time if cheap. No analysis-layer change needed: every input is already in the cached series (`full_db`, `loudness_ref_db`).
+
+**Net for this lane:** analysis layer measured everything faithfully (operator descriptions match the vectors); zero `SPECTRAL_V4_CALIBRATION` changes remain the right call. All rule changes land in the F2 consumer spec, not in `spectral_profile.py`.
 
 ## 7. Re-run
 
