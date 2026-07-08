@@ -39,6 +39,14 @@ Terminal, Python, and launchd before any live use.
    launchctl unload ~/Library/LaunchAgents/com.bbui.bridge-menubar.plist
    ```
 
+   AWR-151 (2026-07-08): every one of these plists (and any future re-enable of
+   `com.bbui.ss-bridge-watcher.plist.disabled`) MUST keep `ProcessType` set to
+   `Interactive` and an interpreter at the repo floor (Python 3.10+). launchd
+   throttles the whole coalition of a ProcessType-less agent (flip-proven 28.1 vs
+   60.0 fps), and the old `/usr/bin/python3` (3.9) crashes on the repo's 3.10+
+   syntax at the first restart. After any plist edit or move, verify with
+   `python3 tools/check_launch_agents.py` (machine-local advisory check).
+
 ## 3. Move And Rewire
 
 1. Move the repo folder to the chosen location.

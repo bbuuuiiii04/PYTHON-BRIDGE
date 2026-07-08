@@ -93,10 +93,23 @@ Frame engine child process (AWR-146, 2026-07-08; implemented, software-tested, h
   re-resolution run on the client's own thread.
 - Scheduling band + fps self-report. The child raises its macOS scheduling band on startup
   (`setpriority` clear-darwin-bg + an `NSActivity` latency-critical assertion + frame-thread
-  `QOS_CLASS_USER_INTERACTIVE` via the runner's new `on_thread_start` hook); which lever actually
-  defeats the faceless-process demotion is unknown, so the child self-measures `achieved_fps` every
-  heartbeat instead of assuming. `engine_alive`, `achieved_fps`, `respawn_count`, and `fps_degraded`
+  `QOS_CLASS_USER_INTERACTIVE` via the runner's new `on_thread_start` hook); the child
+  self-measures `achieved_fps` every heartbeat instead of assuming any lever worked (the demotion
+  mechanism was later root-caused — see the AWR-151 Phase B/C bullet below). `engine_alive`, `achieved_fps`, `respawn_count`, and `fps_degraded`
   are exposed through the runtime status surface (`led_dispatch_policy._sanitize_led_adapter_status`).
+- Scheduling-band ROOT CAUSE + machine fix (AWR-151 Phase B/C, 2026-07-08; flip-proven 28.1 vs
+  60.0 fps): launchd throttles the whole coalition of any LaunchAgent whose plist omits
+  `ProcessType` — all three lighting agents (`com.bbui.bridge-menubar` = the whole bridge tree
+  including this child, `com.bbui.led-pad`, `com.bbui.laser-pad`) did. No in-process lever
+  escapes a coalition throttle, and `getpriority` reads 0 throughout — which is why the levers
+  "succeeded" while doing nothing. Fix deployed to machine config 2026-07-08:
+  `ProcessType=Interactive` in all three plists plus the disabled watcher plist; agents
+  re-bootstrapped (pads verified spawn type `interactive (4)` and serving; menubar bounced with
+  the bridge down). `tools/check_launch_agents.py` is the machine-local advisory guard; it also
+  enforces the Python 3.10+ interpreter floor after the pads' pinned `/usr/bin/python3` (3.9)
+  crashed on `dataclass(slots=True)` at first restart. Expected live: ~60 fps steady via the
+  heartbeat self-report on the next mix. Reserve levers (named, NOT implemented): thread
+  time-constraint policy; launchd timer-coalescing opt-out.
 - Scheduling-band self-report (AWR-151 Tasks 1-2, 2026-07-08; implemented, software-tested,
   hardware-unvalidated). Which lever actually takes hold in production was invisible — the startup band
   line went only to child stderr (the watcher terminal), never the jsonl or status surface. Now
