@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: dd48a3c
-last_verified_date: 2026-07-04
+last_verified_commit: b660dcb
+last_verified_date: 2026-07-08
 validation_scope: software-only; LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (lab_update/lab_switch/lab_preview), QR same-network access, pad editor unset-param-defaults, Stream Deck palette control Package 2 plus AWR-121 gesture v2, drop presentation policy Package 3, LED idle/pause ambient fix, and LED pad queued-color restore software-tested, hardware-unvalidated
 ---
 
@@ -30,6 +30,36 @@ Audit P3 (2026-07-03):
 - Realtime-to-cloud handoff no longer calls Govee realtime transport blackout/deactivate from the
   StateManager push-loop caller; the runner thread now performs that teardown before another frame
   is sent.
+
+Razer keepalive + blackout backstop + dispatch retry + pad mutual exclusion (AWR-145, 2026-07-08; implemented, software-tested, hardware-unvalidated):
+- Razer keepalive replaces the WI-6 cloud-suspect reconcile. A cloud DIY scene silently knocks the
+  strip out of razer mode, after which realtime frames (including blackout) are ignored.
+  `GoveeRealtimeRunner` now re-asserts `activate()` on demand — `request_activate_assert()` set by
+  every realtime takeover and every tactical blackout in `led_dispatch_coordinator.py` — and,
+  while streaming, unconditionally every `RAZER_KEEPALIVE_S = 2.0` s on the runner thread, so a
+  knockout or a lost activate heals within ~2 s. `note_cloud_dispatch`, the reconcile fields, and
+  `RBSS_LED_RT_RECONCILE` are gone; `status()` reports `razer_assert_count` (was `rt_reconcile_count`).
+  The unused `rate_limits.rt_reconcile_window_s/interval_s` config fields remain inert in `led_models.py`.
+- Any-mode brightness backstop. `GoveeRealtimeRunner.request_brightness(value)` sends a LAN JSON
+  brightness command on 2 consecutive ticks (idempotent against a lost UDP packet); it darkens or
+  restores the strip even while a cloud scene plays. Pure-emergency/operator teardown now sends
+  `set_brightness(0)` before blackout+deactivate (fails dark). The cloud handoff path is untouched —
+  cloud looks never dim. The tactical pre-drop blackout re-asserts razer but does NOT dim (a drop
+  look follows within a few beats). When the operator blackout clears, the policy calls the
+  coordinator's `restore_brightness()` (brightness 100), duck-typed so a cloud-only adapter no-ops.
+- Latch-on-accept dispatch retry. The policy latches the role_key before the coordinator outcome is
+  known, so a dispatch the coordinator rejected (e.g. the min-dwell gate) was never re-sent until
+  the role_key string changed (live-observed as drop looks "not cycling"). A rejected automation or
+  idle decision is now cached and re-sent with the SAME decision — no director re-tick, so cursors,
+  shuffle bags, and paired post-drops do not advance — every `LED_DISPATCH_RETRY_S = 0.35` s until
+  accepted, the role_key changes, or `LED_DISPATCH_RETRY_MAX = 8` attempts run out. Both retry slots
+  clear at every deck switch, track load, blackout, manual override, and gate transition
+  (`_led_clear_dispatch_retries`) so a stale retry never fires across a mode change.
+- Pad mutual exclusion. `tools/led_pad_playback.py`: an already-running pad playback checked
+  ownership only inside `play()`, so it kept streaming as a second writer once the bridge came alive
+  (live-observed ghost comet + flicker). `_poll_once` now, on the same every-8th-tick cadence,
+  auto-stops a playing pad that is not in a deliberate `pad_owned` takeover when a fresh bridge
+  status reports `bridge_owned`; `pad_owned` and `free`/stale/absent bridge status both keep playing.
 
 Audit P5 (2026-07-03):
 - LED dispatch policy now lives in `led_dispatch_policy.py` as `LEDDispatchPolicyMixin`, mixed into
