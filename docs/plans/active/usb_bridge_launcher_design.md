@@ -1,16 +1,19 @@
 ---
 doc_status: current
 truth_level: spec
-last_verified_commit: 8abccdf
-last_verified_date: 2026-07-04
+last_verified_commit: 9ead100
+last_verified_date: 2026-07-09
 validation_scope: >
   Design spec for a macOS-only self-contained USB bridge launcher (PyInstaller bundle +
   menubar with temporary/permanent install). Software-design only — no code, no build, no
   hardware run. Windows is deferred (out of scope). The memory-read authorization *mechanism*
-  is the separate reader spec's job; this design only *invokes* that step. Code claims verified
-  against HEAD and labelled confirmed/assumed/unknown.
-work_status: parked — operator 2026-07-04: the final project, resumes after bridge refinement completes; re-verify all code claims at pickup
-relates_to: cross_platform_portability_plan.md
+  is the separate reader spec's job; this design only *invokes* that step. All code claims
+  re-verified against HEAD 9ead100 at the 2026-07-09 paper-phase pickup and labelled
+  confirmed/assumed/unknown; the five days of drift since 8abccdf are folded in (AWR-149
+  env-flag removal, AWR-125 log-surface move, AWR-151 launchd ProcessType, AWR-146
+  frame-engine child process, watcher manual-mode unification).
+work_status: paper phase active (operator re-raise 2026-07-09) — implementation stays parked behind the executive gate (F2/F4 landed + operator live-tuning, phantom-load leak fix, Codex routing decision); this doc, the track-identity design, and the M1 Codex spec are the paper deliverables
+relates_to: cross_platform_portability_plan.md, track_identity_move_invariance_design.md
 ---
 
 # USB Bridge Launcher — design spec (macOS-only)
@@ -21,12 +24,13 @@ independently: this session's adversarial review at `8abccdf` (env-list, process
 watcher-scope, eject-flow, PyInstaller-version findings) AND the parallel Fable design review
 (AWR-123, `docs/plans/active/usb_bridge_launcher_fable_review.md`, verdict PASS WITH REQUIRED
 FIXES — its P1 fixes F1-F4 are folded in below; its repo claims were independently re-verified
-at HEAD before adoption; its F5-F12 are Codex-plan content). Next step after this spec is a
-Milestone-1-only Codex implementation spec — target path
-`docs/plans/active/usb_bridge_launcher_m1_codex_spec.md`, **not yet authored** (the session
-that added this pointer was descoped before writing it; see
-`docs/prompts/active/usb_launcher_design_changes_handoff.md`). Milestones 2-4 get specced after M1's
-unknowns resolve.
+at HEAD before adoption; its F5-F12 are Codex-plan content). Re-verified in full at `9ead100`
+(2026-07-09 paper-phase pickup): every code claim re-checked against current code; the deltas
+are folded in below (§2(a) env change, §2(b)/§6 frame-engine child, §4 log surface +
+ProcessType, §5 port-map correction). The Milestone-1-only Codex implementation spec now
+exists at `docs/plans/active/usb_bridge_launcher_m1_codex_spec.md` (authored 2026-07-09 in
+the same paper phase; implementation gates on the executive). Milestones 2-4 get specced
+after M1's unknowns resolve.
 
 ## 1. Goal
 
@@ -46,6 +50,17 @@ runtime is bundled on the stick. The **full** bridge runs, not a stripped-down s
   wiring; Enttec DMX output (pyserial — an undeclared dependency, AWR-124 R5) joins the §2(b)
   bundle-parity surface. Re-scope §2(b)/§5 at pickup; AWR-107's pending live hardware run becomes
   a pickup dependency of this bundle.
+
+**Open operator decisions (flagged at the 2026-07-09 pickup — NOT adopted; do not fold
+silently):** three AWR-123 Part 2 adopt labels are still the operator's to make:
+- **Idea 1 — Guest-first:** ship v1 with no first-run mode question and defer permanent mode
+  (M3's whole launchd/uninstall surface) until a House Mac exists. This design keeps both
+  modes on paper; the M1 spec is valid under either answer (M1 touches neither mode).
+- **Idea 8 — $0 stable-TCC-identity experiment:** sign with a free personal-team Apple
+  Development cert instead of `-s -`, timeboxed inside M1. Carried in the M1 spec as an
+  operator-gated optional task, not a dependency.
+- **Idea 9 — "Test the lights" replay demo:** adopt-later; rides the portability plan's
+  Phase-2 `ReplaySource`. In no current milestone.
 
 ## 2. "Operates normally" — the acceptance bar
 
