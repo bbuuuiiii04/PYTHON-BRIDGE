@@ -49,12 +49,32 @@ Kickoff: `docs/prompts/active/qaminors_kickoff_2026_07_09.md`. ZERO runtime cont
   reconcile becomes PENDING-EXECUTIVE-WINDOW in its report. Manager adversarial review
   must also stay scoped; the full-suite reconcile happens in the executive's batch
   window.
-- [ ] Build complete (5 commits, one per finding; D2-F1 LAST + droppable).
-- [ ] Manager adversarial review at this desk: re-run new tests, read every diff,
-  re-check each finding's original repro, diff commit stats vs spec file fence,
-  full suite reconcile BY NAME (expect the 10 named in spec Part E item 3).
-- [ ] Executive gate at superman3 (explicit D2-F1 ruling — droppable by reverting the
-  last commit). Report the laser_color_engine baseline divergence there too.
+- [x] Build complete (lane claude11, ~51 min): commits `8a90796` (T1 D4-F3), `80ebb81`
+  (T2 D4-F1), `56118cd` (T3 D4-F2 tests), `28b37c7` (T4 D4-F4), `3b513dd` (T5 D2-F1
+  docs); T3/T4/T5 CODE swept into concurrent auto-sync commits (D2-F1 code in
+  `32b64b7`) — content-at-HEAD verified complete. Lane blocked nothing, invented
+  nothing, reported honestly incl. its own Task-2 bare-commit mistake.
+- [x] Manager adversarial review at this desk — **PASS with incident notes** (content
+  correct; incidents are commit-attribution/process): every diff read line-by-line
+  against the spec; all five fixes re-derived at HEAD (export single-read call-site
+  audit; govee gate residual-reference audit + ok_for_scenes unaffected; semaphore +
+  stale-skip placement; all three trims placed exactly; D2-F1 wiring = early level
+  deactivation with `entry.drop_beat`, ==0 edge preserved, gating mirrors the window
+  helper). Scoped test runs at THIS desk, all green: test_govee_manual_trigger 4,
+  test_soundswitch_pack 79, test_led_state_manager 129,
+  test_state_manager_drop_presentation 45, test_led_color_engine 85,
+  test_lighting_moments_v2 43, test_smart_phrasing 74 (= 459). Hard checks 3/3 pass.
+  Full-suite reconcile: PENDING-EXECUTIVE-WINDOW (fleet throttle).
+- [x] CFX lane's fake fix verified LANDED at my desk: test_laser_color_engine 28/28 OK
+  in isolation — the 5 divergence errors are RESOLVED; expected full-suite red set is
+  back to the 5 named environmental.
+- INCIDENTS for the gate: (a) T2 `80ebb81` bare-commit sweep, pushed — carried the
+  Template Lab lane's WIP `govee_frame_renderer.py` + test and other lanes' docs;
+  my fence files' content verified; the owning lane should be told its WIP landed.
+  (b) D2-F1 single-revert drop NOT available (code swept into `32b64b7`); drop
+  procedure = mechanical revert patch of 3 small hunks (25+8+12 lines) + its tests +
+  the led_govee.md paragraph — I stage it on ruling.
+- [ ] Executive gate at superman3 (explicit D2-F1 ruling) — REQUESTED.
 - [ ] Registry row updated to round outcome; completion signal
   `touch /tmp/rbss_lane_signals/qaminors.QAMINORS.done` + sentinel.
 
