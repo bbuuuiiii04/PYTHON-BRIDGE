@@ -127,6 +127,10 @@ class F2Config:
     flick_ms: int = 200                       # D§4.1-6 TUNE-LIVE
     impact_burndown_enabled: bool = False     # AWR-162 (C) ships disabled
     impact_burndown_ease_beats: int = 8
+    # AWR-170 (D.2): lasers black out this many beats before every chorus phrase
+    # start. ABSENT ⇒ 0 ⇒ feature fully off (the mirror rule — no key = today's
+    # behavior); the example config ships 4.
+    pre_chorus_laser_beats: int = 0
 
     @classmethod
     def from_dict(cls, data: Any) -> "F2Config":
@@ -157,6 +161,7 @@ class F2Config:
             flick_ms=_f2_int(src.get("flick_ms"), 200),
             impact_burndown_enabled=bool(bd.get("enabled", False)),
             impact_burndown_ease_beats=_f2_int(bd.get("ease_beats"), 8),
+            pre_chorus_laser_beats=max(0, _f2_int(src.get("pre_chorus_laser_beats"), 0)),
         )
 
 

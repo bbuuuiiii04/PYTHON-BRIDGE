@@ -396,7 +396,8 @@
     "impact_burndown": {
       "enabled": false,
       "ease_beats": 8
-    }
+    },
+    "pre_chorus_laser_beats": 4
   },
   "f4": {
     "enabled": true,

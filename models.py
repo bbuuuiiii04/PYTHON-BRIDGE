@@ -213,6 +213,10 @@ class OutputState:
     drop_rearm_beat: int = 0
     breakdown_active: bool = False
     breakdown_restore_beat: int = 0
+    # AWR-170 (D.2): True while the "pre_chorus" laser blackout mask is held, so the
+    # owner is released on the marker crossing AND any leaked exit (scrub/loop/skip)
+    # — the AWR-154 latched-dark guard. Reset paths clear it alongside breakdown.
+    pre_chorus_active: bool = False
     phrase_anchor_last_beat: int = -1
     # Origin beat for the 32-beat MIDI re-fire counter (Piece 2). -1 = no phrase
     # marker seen yet on this track → fall back to the absolute 32-beat grid.

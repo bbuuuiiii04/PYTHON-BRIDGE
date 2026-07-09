@@ -778,6 +778,8 @@ class StateManager(LEDDispatchPolicyMixin):
         self._f2_config = _f2_cfg
         self._f2_enabled = _f2_cfg.enabled
         self._f2_drop_look_routing = _f2_cfg.drop_look_routing
+        # AWR-170 (D.2): pre-chorus laser blackout length. 0 (absent key) ⇒ off.
+        self._sp_pre_chorus_beats = _f2_cfg.pre_chorus_laser_beats
         # F4 (LIGHTING ENGINE v2 texture seasoning) master switch, from the `/f4`
         # config block. Absent block ⇒ disabled ⇒ byte-identical to F2-only (kill
         # test). Consumer-only: nothing here schedules/darkens/types — F4 seasons
@@ -4894,6 +4896,17 @@ class StateManager(LEDDispatchPolicyMixin):
         return lighting_moments_v2.transition_window_for(
             getattr(d.meta, "f2_plan", None), abs_beat, smart_drop_beats, default)
 
+    def _f2_pre_chorus_beats(self, d) -> float:
+        """AWR-170 (D.2) pre-chorus laser blackout length for this deck. 0 (feature
+        off) unless F2 is on, an f2 plan exists, and the track is NOT scripted (v2
+        stands down). 0 ⇒ smart_phrasing arms no pre_chorus flags ⇒ byte-identical
+        to pre-AWR-170 (the mirror rule: an un-mirrored live config has no key ⇒ 0)."""
+        if not self._f2_enabled or getattr(d, "scripted_id", 0):
+            return 0.0
+        if getattr(d.meta, "f2_plan", None) is None:
+            return 0.0
+        return float(self._sp_pre_chorus_beats)
+
     def _update_smart_phrasing_state(
         self,
         active: int,
@@ -4939,6 +4952,7 @@ class StateManager(LEDDispatchPolicyMixin):
                 self._sp_transition_window),
             phrase_anchor_last_beat=self._os.phrase_anchor_last_beat,
             phrase_anchor_period_beats=PHRASE_ANCHOR_BEATS,
+            pre_chorus_beats=self._f2_pre_chorus_beats(d),
         )
         _sp_result = self._smart_phrasing_engine.update(_sp_snapshot)
         _sp_diag = _sp_result.diagnostics[0] if _sp_result.diagnostics else None
@@ -5161,6 +5175,7 @@ class StateManager(LEDDispatchPolicyMixin):
         os.drop_rearm_beat = 0
         os.breakdown_active = False
         os.breakdown_restore_beat = 0
+        os.pre_chorus_active = False    # AWR-170 (D.2): clear the mask latch too
         os.phrase_anchor_last_beat = -1
         os.midi_refire_origin_beat = -1
         self._pending_phrase_marker = False

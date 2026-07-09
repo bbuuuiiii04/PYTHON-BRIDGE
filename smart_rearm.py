@@ -90,6 +90,10 @@ class SmartRearmCoordinator:
             breakdown_fired = self._breakdown(active_deck, sp_state, ctx)
         if ctx.phrase_anchor_enabled:
             phrase_anchor_fired = self._phrase_anchor(active_deck, sp_state, ctx)
+        # AWR-170 (D.2): independent laser blackout overlay before every chorus.
+        # Self-gated by the sp_state flags (0 beats config ⇒ no flags ⇒ no-op), so
+        # no ctx enable is needed; it coexists with the drop/breakdown owners.
+        self._pre_chorus(active_deck, sp_state, ctx)
 
         return SmartRearmTickResult(
             drop=drop,
@@ -297,6 +301,32 @@ class SmartRearmCoordinator:
             os.breakdown_active = True
             os.breakdown_restore_beat = int(sp_state.breakdown_restore_beat)
         return False
+
+    def _pre_chorus(
+        self,
+        active: int,
+        sp_state: SmartPhrasingState,
+        ctx: SmartRearmContext,
+    ) -> None:
+        """AWR-170 (D.2): hold the "pre_chorus" blackout mask for the window before
+        each chorus marker; release on the marker crossing OR any leaked exit.
+
+        Mirrors the breakdown mask owner (:244/:274/:289) but as an INDEPENDENT
+        overlay — it never gates on drop_cut_armed/breakdown_active, so a chorus
+        that lands inside a breakdown or F2 transition window simply adds a second
+        mask owner (the set holds both; releasing one leaves the other, no early
+        un-dark). Releasing on `not pre_chorus_window_active` covers BOTH the clean
+        marker crossing and a scrub/loop/skip out of the window — the AWR-154
+        latched-dark guard. Reset paths clear os.pre_chorus_active + the mask set.
+        """
+        os = self._output_state_ref()
+        if os.pre_chorus_active:
+            if not sp_state.pre_chorus_window_active:
+                self._release_blackout_mask("pre_chorus")
+                os.pre_chorus_active = False
+        elif sp_state.pre_chorus_mask_should_arm:
+            self._hold_blackout_mask("pre_chorus")
+            os.pre_chorus_active = True
 
     def _phrase_anchor(
         self,

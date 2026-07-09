@@ -42,6 +42,9 @@ class SmartPhrasingSnapshot:
     transition_window_beats: float
     phrase_anchor_last_beat: int = -1
     phrase_anchor_period_beats: int = 64
+    # AWR-170 (D.2): laser blackout beats before every chorus phrase start. 0 ⇒
+    # feature off (no arm flags ever); the caller gates F2-off/scripted/no-plan to 0.
+    pre_chorus_beats: float = 0.0
 
 @dataclass(frozen=True)
 class SmartPhrasingState:
@@ -72,6 +75,10 @@ class SmartPhrasingState:
     transition_mask_should_clear: bool = False
     transition_window_active: bool = False
     transition_mask_arm_latched: bool = False
+    # AWR-170 (D.2) pre-chorus laser blackout window (mask owner "pre_chorus").
+    pre_chorus_window_active: bool = False
+    pre_chorus_mask_should_arm: bool = False
+    pre_chorus_mask_should_clear: bool = False
     phrase_anchor_requested: bool = False
     phrase_anchor_preclear_requested: bool = False
     phrase_anchor_rearm_requested: bool = False
@@ -108,6 +115,7 @@ class _EngineScratch:
     transition_window_active: bool
     transition_window_arm_suppressed: bool
     blackout_arm_latched: bool
+    pre_chorus_window_active: bool
 
     @classmethod
     def from_engine(cls, engine: "SmartPhrasingEngine") -> "_EngineScratch":
@@ -117,6 +125,7 @@ class _EngineScratch:
             transition_window_active=engine._transition_window_active,
             transition_window_arm_suppressed=engine._transition_window_arm_suppressed,
             blackout_arm_latched=engine._blackout_arm_latched,
+            pre_chorus_window_active=engine._pre_chorus_window_active,
         )
 
     def apply_to_engine(self, engine: "SmartPhrasingEngine") -> None:
@@ -125,6 +134,7 @@ class _EngineScratch:
         engine._transition_window_active = self.transition_window_active
         engine._transition_window_arm_suppressed = self.transition_window_arm_suppressed
         engine._blackout_arm_latched = self.blackout_arm_latched
+        engine._pre_chorus_window_active = self.pre_chorus_window_active
 
 
 class SmartPhrasingEngine:
@@ -138,6 +148,7 @@ class SmartPhrasingEngine:
         self._transition_window_arm_suppressed: bool = False
         self._smart_drop_window_active: bool = False
         self._blackout_arm_latched: bool = False
+        self._pre_chorus_window_active: bool = False
 
     def reset(self, reason: str) -> SmartPhrasingState:
         self._previous_abs_beat = None
@@ -149,6 +160,7 @@ class SmartPhrasingEngine:
         self._transition_window_arm_suppressed = False
         self._smart_drop_window_active = False
         self._blackout_arm_latched = False
+        self._pre_chorus_window_active = False
 
         return self._default_state(reason)
 
@@ -168,6 +180,7 @@ class SmartPhrasingEngine:
         self._blackout_arm_latched = False
         self._transition_window_active = False
         self._transition_window_arm_suppressed = False
+        self._pre_chorus_window_active = False
 
     def _default_state(self, reason: str) -> SmartPhrasingState:
         return SmartPhrasingState(reason=reason)
@@ -430,6 +443,34 @@ class SmartPhrasingEngine:
 
         scratch.transition_window_active = new_transition_window_active
 
+        # 8b. Pre-chorus laser blackout intent (AWR-170 D.2). Chorus phrase starts
+        # are the RAW anlz-drop markers (uncollapsed — the AWR-131 collapse only
+        # merged drop DECISIONS), so a chorus mid-drop-section that F2's per-drop
+        # window never darkens still gets its own pre-chorus laser breath. Window =
+        # the pre_chorus_beats before the next chorus marker at/after the playhead;
+        # releases exactly at the marker. pre_chorus_beats==0 ⇒ no window ever
+        # (byte-identical to pre-AWR-170; the caller gates F2-off/scripted to 0).
+        pre_chorus_window_active = False
+        if snapshot.pre_chorus_beats > 0:
+            next_chorus_marker: Optional[float] = None
+            for seg in snapshot.phrase_segments:
+                if seg.label == "chorus" and seg.start_beat > abs_beat:
+                    if next_chorus_marker is None or seg.start_beat < next_chorus_marker:
+                        next_chorus_marker = seg.start_beat
+            if next_chorus_marker is not None:
+                beats_to_next_chorus_marker = next_chorus_marker - abs_beat
+                pre_chorus_window_active = (
+                    0 < beats_to_next_chorus_marker <= snapshot.pre_chorus_beats
+                )
+
+        pre_chorus_mask_should_arm = (
+            pre_chorus_window_active and not scratch.pre_chorus_window_active
+        )
+        pre_chorus_mask_should_clear = (
+            scratch.pre_chorus_window_active and not pre_chorus_window_active
+        )
+        scratch.pre_chorus_window_active = pre_chorus_window_active
+
         # 9. Periodic phrase-anchor intents (pure function of snapshot state).
         phrase_anchor_preclear_requested = False
         phrase_anchor_rearm_requested = False
@@ -473,6 +514,9 @@ class SmartPhrasingEngine:
             transition_mask_should_clear=transition_mask_should_clear,
             transition_window_active=new_transition_window_active,
             transition_mask_arm_latched=scratch.blackout_arm_latched,
+            pre_chorus_window_active=pre_chorus_window_active,
+            pre_chorus_mask_should_arm=pre_chorus_mask_should_arm,
+            pre_chorus_mask_should_clear=pre_chorus_mask_should_clear,
             phrase_anchor_requested=phrase_anchor_requested,
             phrase_anchor_preclear_requested=phrase_anchor_preclear_requested,
             phrase_anchor_rearm_requested=phrase_anchor_rearm_requested,
