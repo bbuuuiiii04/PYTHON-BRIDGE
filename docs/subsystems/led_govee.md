@@ -672,6 +672,16 @@ LIGHTING ENGINE v2 F4 texture layer (AWR-164, 2026-07-09):
   (only realtime looks render it), and F2 never wired a section-rung floor — the simmer "upgrade" seasons
   the selected floor look's params rather than driving a rung-2→rung-4 renderer. Live-tuning is the
   operator gate. No bridge/hardware validation was performed.
+- F2 early darkness release (AWR-179 D2-F1, OLC-B): a blackout drop whose sub floor returns early
+  carries an `abort_at` beat in its plan. `lighting_moments_v2.transition_release_for` turns that into
+  a beats-before-drop release bound, plumbed through `StateManager._f2_transition_release_beats` into
+  `SmartPhrasingSnapshot.transition_release_beats`. Once the drop is within that many beats, the pre-drop
+  dark window deactivates early and the existing falling-edge `transition_mask_should_clear` releases the
+  mask — up to ~3 fewer dark beats, so the room re-lights EARLY (fail-open direction, never darker; the
+  window START is unchanged and the drop-crossing clear backstop is untouched). It rides F2's existing
+  enable surface (no new config key): F2-off, scripted, no-plan, and no-abort all resolve to a 0.0 bound,
+  which is byte-identical to before. Software-tested (`tests/test_lighting_moments_v2.py`,
+  `tests/test_smart_phrasing.py`); no bridge/hardware validation.
 
 Drop presentation policy (Package 3, AWR-119, 2026-07-04):
 - The implemented behavior authority is `docs/architecture/drop_presentation_authority.md`; the
