@@ -797,6 +797,11 @@ class StateManager(LEDDispatchPolicyMixin):
         # Absent/malformed block ⇒ disabled ⇒ the overlay never renders (kill test).
         self._cfx_sweep_config = load_cfx_sweep_config()
         self._stop  = threading.Event()
+        # AWR-179 D4-F2: cap concurrent ANLZ extractions. A rapid multi-track
+        # cache-miss storm would otherwise spawn N simultaneous ~16 s
+        # extractions and contend for CPU/scheduler. Acquired only inside the
+        # worker body (spawn stays non-blocking; the push loop never touches it).
+        self._anlz_extract_gate = threading.BoundedSemaphore(2)
         self._mixer_authority_enabled = bool(mixer_authority_enabled)
 
         # Per-deck state (written only by this thread after start())

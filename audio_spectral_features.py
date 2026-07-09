@@ -83,6 +83,8 @@ class SpectralFeaturesV4:
     ``scalars``: threshold-free per-track summary scalars only.
     ``growl_band_frames``: frame-rate harmonic 60-500 Hz dB envelope
     (future modulation derivations run from cache, never re-extraction).
+    ``growl_centroid_frames``: frame-rate spectral centroid (Hz) of that same
+    harmonic growl band — WHERE the growl tone sits, not just how loud (AWR-176).
     """
 
     sr: int
@@ -104,6 +106,11 @@ class SpectralFeaturesV4:
     sub4: Mapping[str, tuple[tuple[float, ...], ...]]
     growl_band_frames: tuple[float, ...]
     scalars: Mapping[str, float]
+    # frame-rate spectral centroid (Hz) of the harmonic growl band (60-500 Hz);
+    # same frame clock as growl_band_frames. () on pre-AWR-176 cache entries —
+    # absent reads as no signal. Near-silent frames read ~0.0 Hz by the power
+    # floor; the derived layer's level gate excludes them.
+    growl_centroid_frames: tuple[float, ...] = ()
 
 
 V4_SERIES_KEYS = (
@@ -351,6 +358,11 @@ def _extract_v4_measurements(
     series["growl_band_db"] = per_beat_db(growl_power)
     sub4["growl_band"] = per_beat_sub4_db(growl_power)
     growl_band_frames = tuple(r1(v) for v in db(growl_power))
+    g_lo, g_hi = BAND_RANGES["growl_band"]
+    g_mask = (freqs >= g_lo) & (freqs < g_hi)
+    Hg = H[g_mask, :]
+    growl_centroid = (freqs[g_mask] @ Hg) / np.maximum(Hg.sum(axis=0), _DB_FLOOR_POWER)
+    growl_centroid_frames = tuple(r1(v) for v in growl_centroid)
     series["sustain_mid_db"] = per_beat_db(lin_band_power(H, *BAND_RANGES["sustain_mid"]))
     series["sustain_high_db"] = per_beat_db(lin_band_power(H, *BAND_RANGES["sustain_high"]))
 
@@ -432,6 +444,7 @@ def _extract_v4_measurements(
         sub4=sub4,
         growl_band_frames=growl_band_frames,
         scalars=scalars,
+        growl_centroid_frames=growl_centroid_frames,
     )
 
 

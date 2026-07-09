@@ -49,9 +49,11 @@ validation_scope: >
   length-check ordering in `_features_v4_from_payload`, sweep skip condition
   inversion, any touch of existing calibration keys / V4_*_KEYS /
   compat block, tests touching the REAL cache dir, unspecced fold-ins.
-- [ ] Full suite repo-root at MY desk, reconciled by name (five baseline +
-  laser-5-in-flux + flappers isolated-if-red).
-- [ ] Three hard checks at my desk.
+- [ ] Full suite repo-root: **PENDING-EXECUTIVE-WINDOW (fleet throttle
+  ~16:0x — operator live-mixing, load 29/8 cores; executive batches full
+  suites at his breaks; throttle relayed to p1impl in-session and stamped
+  into its dispatch brief).** Scoped/targeted tests only until the window.
+- [ ] Three hard checks at my desk (cheap, allowed under throttle).
 - [ ] Close-out report to executive (superman3 gates) + staged sweep command
   + signal P1BUILD.
 

@@ -67,8 +67,13 @@ EXPLICIT paths (never `git add -a`, never `-A`).
    tests.test_spectral_cache tests.test_audio_spectral_features
    tests.test_lighting_moments_v2 tests.test_growl_centroid` (the first four
    prove no regression in neighbors you did not touch).
-4. FULL suite from REPO ROOT (`python3 -m unittest discover tests`),
-   reconciled BY NAME. Expected reds — names, not counts:
+4. **SUSPENDED BY FLEET THROTTLE (executive order mid-round, relayed to the
+   lane in-session): the operator is live-mixing; NO full-suite or CPU-heavy
+   runs. Mark this item PENDING-EXECUTIVE-WINDOW in the report — the
+   executive batches full suites at the operator's breaks.** When the window
+   opens, the requirement is: FULL suite from REPO ROOT
+   (`python3 -m unittest discover tests`), reconciled BY NAME. Expected reds —
+   names, not counts:
    - `test_drop_slot_color_smoke_and_snap` (error)
    - `test_export_pack_parity_self_heal` (both fails)
    - `test_ddj_slots_8_16_17_24_exact_ch1_ch19`

@@ -38,6 +38,17 @@ Kickoff: `docs/prompts/active/qaminors_kickoff_2026_07_09.md`. ZERO runtime cont
   `dispatch_lane.sh` (model pin verified by script), paste-chip check clean.
   Signals: `/tmp/rbss_lane_signals/claude11.QM179.done|.blocked`. One watcher armed
   (signal-file-first).
+- [x] Executive confirmations (superman3, mid-build): AWR-179 is ours (the RT round
+  renumbered to AWR-180); the 5 `LaserColorStateManagerHoldTests` errors reproduced at
+  the executive desk and are ROUTED TO THE FILTER LANE (test-only; red until their fix
+  lands — reconcile suite claims accordingly); the unclassified doc is classified via
+  the AWR-180 row.
+- [x] FLEET THROTTLE (executive, operator live-mixing, load 29/8 cores): NO full-suite
+  runs or CPU-heavy sweeps from this workstream until the executive opens a window.
+  Relayed to claude11: per-task scoped tests continue; Part E item 3 full-suite
+  reconcile becomes PENDING-EXECUTIVE-WINDOW in its report. Manager adversarial review
+  must also stay scoped; the full-suite reconcile happens in the executive's batch
+  window.
 - [ ] Build complete (5 commits, one per finding; D2-F1 LAST + droppable).
 - [ ] Manager adversarial review at this desk: re-run new tests, read every diff,
   re-check each finding's original repro, diff commit stats vs spec file fence,
