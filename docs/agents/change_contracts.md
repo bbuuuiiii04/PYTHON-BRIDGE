@@ -317,6 +317,9 @@ Forbidden assumptions:
 - One Rekordbox version does not imply another version works.
 - macOS Mach reader logic does not imply Windows/Linux support.
 - Offset discovery success must be documented with version evidence before support claims change.
+- CFX FILTER reads are lighting/status tracking only; they never feed active-deck
+  authority, and a failed or invalid CFX read must never invalidate the
+  mixer-authority snapshot.
 
 ## SoundSwitch output changes
 

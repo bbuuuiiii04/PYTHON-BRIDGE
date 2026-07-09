@@ -464,6 +464,7 @@ contracts:
     forbidden_assumptions:
       - one Rekordbox version does not imply broad version support
       - macOS memory reader logic does not imply Windows/Linux support
+      - CFX FILTER reads are lighting/status tracking only; they never feed active-deck authority, and a failed or invalid CFX read must never invalidate the mixer-authority snapshot
 
   soundswitch_output:
     code_globs:
