@@ -1590,9 +1590,9 @@ def _slot_drop_center_burst(beat: float, local_t: float, frame_index: int,
     burst_idx = int((cue_beat % 8.0) * 2.0)
     is_accent = (burst_idx % 4) == 3
 
+    # AWR-161: removed the even-pixels-only gate -- it left gaps every other
+    # pixel on the 60-segment strip. Every pixel inside the pulse now renders.
     for idx in range(max(0, int(segments))):
-        if idx % 2 != 0:
-            continue
         dist_from_center = abs(idx - center)
         intensity = max(0.0, 1.0 - abs(dist_from_center - current_dist) / pulse_width)
         if intensity <= 0.0:

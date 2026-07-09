@@ -95,11 +95,22 @@ class PatchDTests(unittest.TestCase):
         comet = self._drop_chase(8.0, segments=36, frame_index=0)
         self.assertTrue(_used_slots(comet) & set(range(5)))
 
-    def test_center_burst_preserves_even_pixels_only(self) -> None:
+    def test_center_burst_covers_every_pixel_not_just_even(self) -> None:
+        """AWR-161: removed the even-pixels-only gate -- it left gaps every
+        other pixel on the 60-segment strip. Odd-index pixels must now light
+        up somewhere across the sweep, same as even-index pixels."""
+        odd_lit = False
+        even_lit = False
         for tick in range(320):
             field = self._center_burst(tick / 40.0, segments=36)
-            for idx in range(1, len(field), 2):
-                self.assertTrue(all(value == 0.0 for value in field[idx]))
+            for idx, row in enumerate(field):
+                if any(value > 0.0 for value in row):
+                    if idx % 2 == 0:
+                        even_lit = True
+                    else:
+                        odd_lit = True
+        self.assertTrue(even_lit)
+        self.assertTrue(odd_lit)
 
     def test_center_burst_main_and_accent_band_split(self) -> None:
         # AWR-156 knob #4: the intra-burst hue sweep died -- a burst is now
