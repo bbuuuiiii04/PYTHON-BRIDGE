@@ -67,6 +67,22 @@ def _run_menubar() -> int:
     return 0
 
 
+def _run_replay_session(path: str) -> int:
+    """Test the Lights: run the bridge fed by a recorded session, not live decks.
+
+    Fails closed on the live-safety guards (Rekordbox running / no session file)
+    with a plain-language message before any bridge starts.
+    """
+    from rb_ss_bridge_v2 import replay_event_source
+
+    problem = replay_event_source.replay_preflight(path)
+    if problem is not None:
+        sys.stderr.write(f"Test the Lights: {problem}\n")
+        return 1
+    os.environ["RBSS_REPLAY_SESSION"] = path
+    return _run_bridge()
+
+
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if not args:
@@ -79,6 +95,11 @@ def main(argv: list[str] | None = None) -> int:
         return _run_bridge()
     if mode == "--run-streamdeck":
         return _run_streamdeck()
+    if mode == "--replay-session":
+        if len(args) < 2 or not args[1]:
+            sys.stderr.write("usb_launcher: --replay-session needs a session file path\n")
+            return 2
+        return _run_replay_session(args[1])
 
     # Fail closed and surface — never a silent success-shaped fallback.
     sys.stderr.write(f"usb_launcher: unknown mode {mode!r}\n")

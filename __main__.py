@@ -1640,6 +1640,13 @@ def main() -> None:
     command_reader.start()
     status_writer.start()
 
+    # Test-the-Lights replay: when RBSS_REPLAY_SESSION is set (the launcher /
+    # menubar set it only after the live-safety guards pass), drive the running
+    # StateManager from a recorded session instead of the inert (no-Rekordbox)
+    # readers. Additive + off by default -- see replay_event_source.py.
+    from . import replay_event_source
+    replay_event_source.maybe_start_from_env(event_queue, pos_cache, live_bpm)
+
 
     # OSC listener (scripted arm triggers)
     start_osc_listener(

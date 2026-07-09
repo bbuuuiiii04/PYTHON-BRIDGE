@@ -233,6 +233,39 @@ class TestTrackPlan(unittest.TestCase):
         self.assertIn("drops=2", plan.summary())
 
 
+class TestF2Config(unittest.TestCase):
+    """Task 5: the /f2 config block — absent ⇒ off (kill test), fail-closed."""
+
+    def test_absent_or_empty_is_disabled(self):
+        from rb_ss_bridge_v2.led_models import F2Config
+        self.assertFalse(F2Config.from_dict(None).enabled)     # absent block
+        self.assertFalse(F2Config.from_dict({}).enabled)
+        self.assertFalse(F2Config.from_dict("garbage").enabled)
+
+    def test_routing_str_tier_keys_coerced_to_int(self):
+        from rb_ss_bridge_v2.led_models import F2Config
+        c = F2Config.from_dict({"enabled": True,
+                                "drop_look_routing": {"WALL": {"2": ["a", "b"], "3": ["c"]}}})
+        self.assertTrue(c.enabled)
+        self.assertEqual(c.drop_look_routing["WALL"][2], ("a", "b"))
+        self.assertEqual(c.drop_look_routing["WALL"][3], ("c",))
+
+    def test_junk_ignored_and_burndown_defaults(self):
+        from rb_ss_bridge_v2.led_models import F2Config
+        c = F2Config.from_dict({"enabled": True, "bogus": 1,
+                                "drop_look_routing": {"X": "notdict"},
+                                "impact_burndown": {"enabled": True, "ease_beats": 12}})
+        self.assertEqual(c.drop_look_routing, {})              # bad cell dropped
+        self.assertTrue(c.impact_burndown_enabled)
+        self.assertEqual(c.impact_burndown_ease_beats, 12)
+
+    def test_example_config_ships_enabled(self):
+        from rb_ss_bridge_v2.led_config import load_f2_config
+        ex = load_f2_config(str(Path(__file__).resolve().parents[1]
+                                / "config" / "led_look_director.example.json"))
+        self.assertTrue(ex.enabled)
+
+
 class TestLaserEnergyGate(unittest.TestCase):
     """AWR-162 (A): tier → laser energy mapping + the plan_track energy gate."""
 

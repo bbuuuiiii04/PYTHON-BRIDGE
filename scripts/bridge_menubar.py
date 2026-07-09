@@ -833,6 +833,7 @@ class BridgeMenuBar(NSObject):
         self.menu.addItem_(NSMenuItem.separatorItem())
         self.validation_item = self._add_action("Run Health Check", "runValidation:")
         self.record_session_item = self._add_action("Record Session: Off", "toggleRecordSession:")
+        self.test_lights_item = self._add_action("Test the Lights…", "testLights:")
         self.map_lasers_item = self._add_action("Laser Pad…", "mapLasers:")
         self.led_pad_item = self._add_action("LED Pad…", "openLedPad:")
         # TEMPORARY (v2 rollout): remove after v2 color identity is the default operator surface.
