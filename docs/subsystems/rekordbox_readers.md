@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: e43edff
-last_verified_date: 2026-07-08
-validation_scope: software-only plus Rekordbox 7.2.11 passive mixer RE evidence routing; AWR-157 deck-2 chain freshness gating software-tested; hardware-output unvalidated
+last_verified_commit: 67b7d66
+last_verified_date: 2026-07-09
+validation_scope: software-only plus Rekordbox 7.2.11 passive mixer RE evidence routing; AWR-157 deck-2 chain freshness gating software-tested; AWR-160 phantom track-load stability gate software-tested; hardware-output unvalidated
 ---
 
 # Rekordbox Readers
@@ -98,6 +98,25 @@ Runtime flow:
   within 10s of the deck starting to play, with raw/prev_raw/the hint value, to
   tell a real pause apart from a frozen-while-playing field from one live
   session — diagnostic only, no dispatch behavior change.
+- AWR-160 phantom track-load stability gate (`rb_state_reader.py:_tick_deck`):
+  a candidate track title must read identically for `_LOAD_STABLE_TICKS = 3`
+  consecutive deck ticks, and differ from the currently emitted track, before
+  `ANLZ_PATH` + `TRACK_LOADED` fire (ANLZ_PATH still first, same tick). This
+  is a stability window, not a playing/position requirement — a track that
+  loads and is never played still emits once stable (the FEIN case). Browse-
+  cursor bleed (library browsing surfacing as a stream of fake loads while the
+  position path correctly reads the deck empty — up to 168 phantom loads in
+  one mix, one deck-2 burst cycling 9 fake "tracks" in ~2 s) rarely holds one
+  title across 3 ticks and is discarded before it ever reaches emission. Once
+  a title is already confirmed, a late-resolving ANLZ path may still catch up
+  on its own (unaffected by a transient read failure during the stability
+  window). Every discarded pre-stability candidate emits one throttled DEBUG
+  line (`[RBSR] phantom-load-suppressed`) carrying the discarded title/ticks
+  and the ANLZ read available in scope, plus an edge-triggered INFO summary
+  at most once per 60 s (`[RBSR] phantom-storm`) so a storm is visible in
+  normal logs without turning DEBUG on. Unload/track-change recognition for
+  an already-confirmed track is unchanged and immediate — the gate delays
+  recognition of a new candidate, it never suppresses a stable state.
 
 Config:
 - `config.py`
@@ -116,6 +135,16 @@ Tests:
   stale, deck 1 is provably untouched, and both new log lines are
   edge-triggered rather than per-tick. Pure seams via a fake-memory `RBSession`
   — no mach, no live process.
+- `tests/test_rb_state_reader.py` (`TickEventTests`) proves the AWR-160
+  stability gate: a churning browse storm (a new title every tick) emits
+  nothing and logs phantom-suppressed/phantom-storm; a stable load emits
+  exactly one ANLZ_PATH+TRACK_LOADED pair in order after 3 ticks; a track
+  that loads and is never played still emits (the FEIN case); a title that
+  changes again before stabilizing only lets the later one emit; unload
+  after a stable load behaves as before; deck 1 and deck 2 gate
+  symmetrically; a stable load never re-emits on later unchanged ticks.
+  Pure seams via the existing fake mach-read backend — no mach, no live
+  process.
 - if no direct hardware/process test exists, mark live behavior unvalidated in repo evidence
 
 Change contract:

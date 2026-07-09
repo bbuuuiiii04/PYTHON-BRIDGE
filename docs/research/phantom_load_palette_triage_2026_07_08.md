@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: measured
-last_verified_commit: 46fd9fb
+last_verified_commit: 67b7d66
 last_verified_date: 2026-07-09
-validation_scope: read-only triage of the 2026-07-08 evening mix logs (~/Library/Logs/rb_ss_bridge/, sessions 18:22 / 19:40 / 20:31 / 21:50) cross-checked against current code (state_manager.py, filepath_resolver.py, led_identity_v2.py). Every count was computed from the JSONL logs, commands cited inline. No runtime/hardware action; the LED v2 identity store is EXONERATED; the defect is upstream in the Rekordbox reader's load-emission path. Fix direction named, not implemented — not implementation-authorizing.
+validation_scope: read-only triage of the 2026-07-08 evening mix logs (~/Library/Logs/rb_ss_bridge/, sessions 18:22 / 19:40 / 20:31 / 21:50) cross-checked against current code (state_manager.py, filepath_resolver.py, led_identity_v2.py). Every count was computed from the JSONL logs, commands cited inline. No runtime/hardware action; the LED v2 identity store is EXONERATED; the defect is upstream in the Rekordbox reader's load-emission path. Fix direction named here; implemented and software-tested as AWR-160 (see Status below) — this doc remains the historical triage evidence, not the implementation record.
 ---
 
 # Phantom-load palette flicker — read-only triage (2026-07-08 mix)
@@ -145,5 +145,15 @@ this finding).
 
 ---
 
-**Status.** Analysis only. Nothing changed, the running bridge was not touched, no
-implementation authorized.
+**Status.** AWR-160 (2026-07-09 overnight) closed the "stability gate, not a
+readiness requirement" fix direction from this triage: `rb_state_reader.py:_tick_deck`
+now requires a candidate track title to read identically for 3 consecutive
+ticks before `TRACK_LOADED`/`ANLZ_PATH` fire, software-tested including the
+FEIN load-never-played case this triage flagged as a risk of a readiness-based
+gate. The named unknown above (which memory read leaks the browse cursor) is
+still open — it was not pinned, only fingerprinted: every discarded
+pre-stability candidate now logs a throttled DEBUG line and an edge-triggered
+INFO storm summary carrying the leaking read's fields, for a future pass to
+pin the exact offset/pointer without another live triage. See
+`docs/status/active_work_registry.md` (AWR-160) for implementation status;
+operator's next mix is the live-verification gate.

@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: e43edff
-last_verified_date: 2026-07-08
+last_verified_commit: 67b7d66
+last_verified_date: 2026-07-09
 validation_scope: software-only
 ---
 
@@ -53,11 +53,23 @@ Implementation notes:
   `chain_ok` is exactly `chain_snap is not None`, no freshness check. If you
   touch the freshness gate, re-verify the exact-5-ticks boundary and the
   deck-1-untouched invariant in `tests/test_rb_memory_chain.py`.
+- (AWR-160) Track-load emission in `_tick_deck` is gated by a stability
+  window, not readiness: a candidate title must read identically for
+  `_LOAD_STABLE_TICKS = 3` consecutive ticks, and differ from the currently
+  emitted track, before `ANLZ_PATH` + `TRACK_LOADED` fire (ANLZ_PATH still
+  first, same tick). This is deliberate — a track that loads and is never
+  played must still emit (the FEIN case); do not turn this into a playing/
+  position requirement. Discarded pre-stability candidates log a throttled
+  DEBUG line and an edge-triggered 60s INFO storm summary
+  (`_note_candidate_discarded`). If you touch this gate, re-verify the
+  browse-storm-emits-nothing, FEIN-still-emits, and deck-1/2-symmetry cases
+  in `tests/test_rb_state_reader.py`.
 
 Required tests:
 - Run the targeted tests listed in the subsystem card.
 - For ANLZ/track-load ordering or cache changes, include `tests/test_rb_state_reader.py` coverage for
-  transient ANLZ read failures and recovery.
+  transient ANLZ read failures and recovery, and the AWR-160 stability gate
+  (browse storm, FEIN never-played, deck-1/2 symmetry).
 - Run `python -m unittest discover tests` when practical for cross-subsystem changes.
 - Run docs checks for docs changes.
 

@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 96923d3
-last_verified_date: 2026-07-08
-validation_scope: software-validated only plus Rekordbox 7.2.11 passive mixer RE evidence routing; AWR-157 blank-role hold + reader freshness software-tested; hardware-unvalidated in repo evidence
+last_verified_commit: 67b7d66
+last_verified_date: 2026-07-09
+validation_scope: software-validated only plus Rekordbox 7.2.11 passive mixer RE evidence routing; AWR-157 blank-role hold + reader freshness software-tested; AWR-160 phantom track-load stability gate software-tested; hardware-unvalidated in repo evidence
 ---
 
 
@@ -19,7 +19,7 @@ they add no new hardware or compatibility support claim.
 | Version | Status | Evidence | Notes |
 | --- | --- | --- | --- |
 | My current local version | local-setup-operational | operator-local knowledge, not yet captured as repo validation | Exact version must be recorded. |
-| Rekordbox 7.2.11 | code-referenced; local mixer RE-proven for Deck 1/2 upfader and LOW/BASS chains; mixer active-deck authority software-tested | `rb_memory.py` comments reference `get-task-allow` confirmation; `docs/research/rekordbox_mixer_active_deck_re_evidence.md` records static plus passive process-memory proof; unit/integration tests cover the resolver/reader/status paths, including direct-master refresh/invalidation, raw Deck C/D no-aliasing, and ANLZ read-failure cache recovery; the deck-2 playhead scans are numpy-vectorized with a GIL-yielding pure fallback (AWR-148), candidate results byte-identical (`tests/test_rb_memory_scans.py`); deck-2 live_pos chain health is now freshness-gated (AWR-157), `tests/test_rb_memory_chain.py` | This is not broad 7.x support, and it is not live or hardware validation. Named mixer offsets are accepted only when all required labels are present; unknown/anonymous lines fail closed for authority. |
+| Rekordbox 7.2.11 | code-referenced; local mixer RE-proven for Deck 1/2 upfader and LOW/BASS chains; mixer active-deck authority software-tested | `rb_memory.py` comments reference `get-task-allow` confirmation; `docs/research/rekordbox_mixer_active_deck_re_evidence.md` records static plus passive process-memory proof; unit/integration tests cover the resolver/reader/status paths, including direct-master refresh/invalidation, raw Deck C/D no-aliasing, and ANLZ read-failure cache recovery; the deck-2 playhead scans are numpy-vectorized with a GIL-yielding pure fallback (AWR-148), candidate results byte-identical (`tests/test_rb_memory_scans.py`); deck-2 live_pos chain health is now freshness-gated (AWR-157), `tests/test_rb_memory_chain.py`; the load-emission path now requires a 3-consecutive-tick stability window before a track load is trusted (AWR-160), suppressing browse-cursor phantom loads while still emitting a load-never-played track, `tests/test_rb_state_reader.py` | This is not broad 7.x support, and it is not live or hardware validation. Named mixer offsets are accepted only when all required labels are present; unknown/anonymous lines fail closed for authority. |
 | Other Rekordbox 7.x | unknown | no matrix evidence | Offset validation required. |
 | Rekordbox 6.x | unknown | app path fallback exists, but support is not proven | Do not claim support. |
 | Future versions | unknown/unsupported until validated | none | Offsets may break. |

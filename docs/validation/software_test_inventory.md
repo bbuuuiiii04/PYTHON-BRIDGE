@@ -129,6 +129,25 @@ Hardware behavior still needs manual validation logs.
 contract-globbed tooling under `tools/`, literal/star glob behavior, and the
 `docs/data/*.yaml` implementation-data exception.
 
+## Rekordbox Track-Load Stability Gate (AWR-160)
+
+- `tests/test_rb_state_reader.py` (`TickEventTests`) covers the phantom
+  track-load stability gate in `_tick_deck`: a churning browse storm (a new
+  title every tick, sub-`_LOAD_STABLE_TICKS` churn) emits zero TRACK_LOADED/
+  ANLZ_PATH events and logs a throttled DEBUG phantom-load-suppressed line
+  plus an edge-triggered INFO phantom-storm summary; a stable new track
+  emits exactly one ANLZ_PATH+TRACK_LOADED pair, ANLZ_PATH first, after
+  `_LOAD_STABLE_TICKS = 3` identical reads; a track that loads and is never
+  played still emits (the FEIN case — stability alone gates, not playing/
+  position); a title that changes again before stabilizing lets only the
+  later title emit; unload after a stable load, and reloading the same
+  title afterward, behave as before the gate; deck 1 and deck 2 gate
+  symmetrically; a stable load never re-emits on later unchanged ticks; and
+  a transient ANLZ read failure during the stability window does not block
+  title confirmation, with a late-resolving ANLZ path still catching up on
+  its own once the title is already confirmed. Pure seams via the existing
+  fake mach-read backend — no mach, no live process.
+
 ## Rekordbox Mixer Active-Deck Authority
 
 The active-deck authority implementation is covered by focused software tests:
