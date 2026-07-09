@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: field-proven
-last_verified_commit: e46c66c
+last_verified_commit: 967ea15
 last_verified_date: 2026-07-09
 validation_scope: >
   The multi-agent organization workflow that ran the 2026-07-08/09 overnight program
@@ -62,9 +62,16 @@ loss, compaction, and seat handoffs; paraphrases do not.
 4. **Operator** activates (config apply, bridge start, live gate). Software-tested
    is never "done" — the operator's live pass is the final gate, always.
 
-Field results 2026-07-09: the chain caught 3 suite-red misattributions, a pad-server
-crash, 5 stale tests, a wrong-file spec cite, an unspecced fold-in, and a
-self-reported false-positive — every one before ship. This is why the chain exists.
+Field results 2026-07-09 (written records: `docs/prompts/active/
+led_manager_state_2026_07_09.md` + the AWR-172 registry row): the chain caught
+3 suite-red misattributions (two lanes mislabeling 8 extra reds as pre-existing/
+another round's; a third timeline attribution refuted as load-flake by the QA
+refuter), a pad-server import-crash (`led_pad_controls.py:194`, caught before any
+pad restart), 5 stale strobe tests re-pinned to the new Hz contract instead of
+deleted, a spec seam cite re-verified at HEAD before dispatch, an unspecced
+fold-in (AWR-160, verified in review), and a hand-built-repro false positive
+(D2-F3, killed by the refuter) — every one before ship. This is why the chain
+exists.
 
 ## 4. Suite-baseline discipline (the #1 source of false alarms)
 
@@ -202,15 +209,34 @@ below VERIFIED against the local codex-cli 0.142.5 install on 2026-07-09:
   docs/agents/multi_agent_org_workflow.md, then the newest codex_resume_state doc,
   then take the watch." Repo `.claude/skills/*/SKILL.md` files are readable as
   standalone docs when routed explicitly.
-- **Hooks:** codex-cli 0.142.5 supports hooks in the CLAUDE CODE SCHEMA (JSON
-  `{"hooks": {...}}` files registered with per-hook trust hashes in
-  `~/.codex/config.toml [hooks.state]`; observed live via a plugin shipping
-  `claude-codex-hooks.json` with SessionStart/UserPromptSubmit/SubagentStart).
-  The repo ships `tools/agents/claude-codex-hooks.json` mirroring the Claude-side
-  footgun guard (PreToolUse → `guard_footguns.sh`, same script both stacks) —
-  registration path + PreToolUse-under-Codex support must be verified before it
-  is relied on; until then AGENTS.md rules are the Codex-side enforcement, and
-  Codex's own `approval_policy`/`sandbox_mode` config is the native gating layer.
+- **Hooks (verified live at this desk, codex-cli 0.142.5, 2026-07-09):** Codex
+  consumes hooks in the CLAUDE CODE SCHEMA via plugins, and the repo IS the
+  plugin: `.claude-plugin/marketplace.json` (marketplace `rbss`) +
+  `tools/agents/.claude-plugin/plugin.json` (plugin `rbss-agent-hooks`) wrap
+  `tools/agents/claude-codex-hooks.json` (PreToolUse → `guard_footguns.sh`, the
+  same script the Claude side runs). Register once:
+  `codex plugin marketplace add /Users/bbui/rb_ss_bridge_v2` then
+  `codex plugin add rbss-agent-hooks@rbss` — DONE + trusted on the operator's
+  machine 2026-07-09. Hooks are inert until trusted ONCE in the codex TUI (boot
+  `codex` → hooks review panel → press `t`); trust hashes land in
+  `~/.codex/config.toml [hooks.state]` keyed `plugin@marketplace:file:event:i:j`
+  (the hash is an internal normalization — hand-forging it was tried and does
+  not work; use the TUI). PROVEN: PreToolUse is a first-class 0.142.5 event
+  (listed in the review panel, flips Installed→Active on trust), and a trusted
+  plugin hook EXECUTES with Claude-schema JSON on stdin (a session_start marker
+  hook fired end-to-end; input fields byte-compatible with Claude Code's).
+  Codex-only traps, both hit live: the parser REJECTS unknown top-level JSON
+  fields (a `_comment` key broke the whole file — keep hooks JSON schema-pure),
+  and after editing a hooks file the plugin cache stays stale until
+  `codex plugin remove` + `codex plugin add`. NOT YET PROVEN (model quota
+  returns Jul 11 18:28): pre_tool_use firing on a real tool call, and exit-2
+  actually blocking the tool. Retest then, from a scratch dir:
+  `codex exec 'Run exactly: git clean -nf'` → expect `hook: PreToolUse` in the
+  transcript and the guard's BLOCKED message instead of execution. Until that
+  passes, AGENTS.md rules + Codex's `approval_policy`/`sandbox_mode` remain the
+  Codex-side enforcement. The repo hook is matcher-less on purpose: Codex's
+  internal shell-tool name is unverified, and the guard already no-ops on tool
+  calls without a command field.
 - Seat harness for orchestrator/implementer-tier models (drift compensation):
   `docs/agents/opus_seat_harness.md` — written from Opus evidence, applies to any
   non-frontier seat model including GPT build seats.

@@ -1,0 +1,6 @@
+{
+  "name": "rbss-agent-hooks",
+  "version": "1.0.0",
+  "description": "rb_ss_bridge_v2 footgun guard hooks (PreToolUse -> guard_footguns.sh via absolute repo path, so guard logic tracks repo HEAD, not the plugin-cache copy).",
+  "hooks": "./claude-codex-hooks.json"
+}

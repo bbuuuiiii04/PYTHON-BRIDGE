@@ -1,0 +1,12 @@
+{
+  "name": "rbss",
+  "description": "rb_ss_bridge_v2 agent-org tooling marketplace: registers the repo footgun-guard hooks with any CLI that consumes Claude-schema plugins (codex-cli 0.142.5 verified 2026-07-09).",
+  "owner": {"name": "rb_ss_bridge_v2"},
+  "plugins": [
+    {
+      "name": "rbss-agent-hooks",
+      "description": "PreToolUse footgun guard (git clean -f*, raw bridge launches) — same guard script as the Claude-side hook.",
+      "source": "./tools/agents"
+    }
+  ]
+}

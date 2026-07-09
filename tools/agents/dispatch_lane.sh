@@ -29,6 +29,14 @@ if tmux has-session -t "$SESSION" 2>/dev/null; then
      && ! echo "$LASTPROMPT" | grep -qE '^[❯›] +/[a-z-]+ *$'; then
     echo "ABORT: typed text at $SESSION prompt — hands off"; exit 1
   fi
+  # Reused session: stale context bleeds into the new task (2026-07-09 field
+  # lesson: /clear per task). Claude gets /clear here; Codex has no verified
+  # in-session equivalent — warn so the dispatcher decides.
+  if [[ "$AGENT" == "codex" ]]; then
+    echo "REUSED-SESSION-NO-CLEAR $SESSION (codex: no verified in-session clear — kill+respawn the session if the previous task's context must not bleed)"
+  else
+    tmux send-keys -t "$SESSION" '/clear' Enter; sleep 3
+  fi
 else
   tmux new-session -d -s "$SESSION" -c "$REPO"
   sleep 1
@@ -48,7 +56,15 @@ else
   if ! tmux capture-pane -p -t "$SESSION" -S -12 | grep -qi "set model to.*$MODEL"; then
     echo "MODEL-PIN-FAILED $SESSION -> $MODEL (verify manually; task NOT sent)"; exit 1
   fi
-  tmux send-keys -t "$SESSION" "/effort $EFFORT" Enter; sleep 3
+  tmux send-keys -t "$SESSION" "/effort $EFFORT" Enter
+  # /effort renders a picker that EATS a paste landing while it is open
+  # (field bug 2026-07-09: task text vanished, lane sat idle). Wait for the
+  # ack line before pasting; proceed after 12s either way — the paste-retry
+  # loop below is the backstop.
+  for i in 1 2 3 4; do
+    sleep 3
+    tmux capture-pane -p -t "$SESSION" -S -12 | grep -qi 'set effort level' && break
+  done
 fi
 
 TMP=$(mktemp)
@@ -67,8 +83,24 @@ for i in 1 2 3 4 5; do
     break
   fi
 done
-rm -f "$TMP"
 sleep 2
+if ! tmux capture-pane -p -t "$SESSION" -S -40 | grep -q 'COMPLETION SIGNAL'; then
+  # One re-paste: a transient UI element (picker, dialog) can eat the first
+  # paste entirely — observed live 2026-07-09.
+  tmux paste-buffer -t "$SESSION"
+  sleep 1
+  tmux send-keys -t "$SESSION" Enter
+  for i in 1 2 3 4 5; do
+    sleep 3
+    if tmux capture-pane -p -t "$SESSION" -S -6 | grep -q '\[Pasted text'; then
+      tmux send-keys -t "$SESSION" Enter
+    else
+      break
+    fi
+  done
+  sleep 2
+fi
+rm -f "$TMP"
 if tmux capture-pane -p -t "$SESSION" -S -40 | grep -q 'COMPLETION SIGNAL'; then
   echo "DISPATCHED $SESSION ($MODEL/$EFFORT, tag=$TAG, signal=$SIG/$SESSION.$TAG.*)"
 else
