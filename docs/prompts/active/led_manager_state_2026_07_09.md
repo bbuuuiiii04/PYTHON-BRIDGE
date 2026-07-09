@@ -96,6 +96,12 @@ manager. New dispatches pin the model explicitly and VERIFY on-screen
 
 ## In-head nuance (the expensive lessons)
 
+- **Watchers must detect IDLE, not just sentinels** (executive save #2:
+  claude4 idled 17 min at an orchestrator checkpoint awaiting ack —
+  sentinel-only watchers are blind to it). Pattern: hash consecutive pane
+  captures; 3 identical = idle-suspect = investigate. Dispatches must
+  PRE-AUTHORIZE checkpoint continuation ("do not pause for acknowledgment
+  between tasks").
 - **Sentinel watchers false-positive on echoed dispatch text.** Guards that
   work: exact-line regex `^[^A-Za-z0-9]*TAG-DONE[[:space:]]*$` + skip while
   "print exactly" visible in pane + git-side commit-count gates. My own
