@@ -109,6 +109,11 @@ track's peak. 1 bar = 4 beats ≈ 1.90 s at this tempo.
   PLAN GAP: the operator's word is "blackout", the plan's darkness kind there is
   balloon-shrink. Relayed to the executive as a possible behavior verdict (this lane
   changes nothing).
+- **resolved (same evening):** AWR-184 (`788a358`) added a deep-sub-void blackout
+  rung; re-measured through the live seams at `1e8ac71`: b192 now reads **blackout 8**
+  ("sub voided 6 beats (< −10.0 dB) with the growl band dark (min −4.3 < 5.0) into
+  the drop") — 8 beats = his exact "2 bar" count. Software-verified only; the room
+  going black is proven at his next mix.
 - **systems:** f2, led, laser
 
 ### UT-4 · 2:02 breakdown
@@ -147,6 +152,10 @@ track's peak. 1 bar = 4 beats ≈ 1.90 s at this tempo.
   is again balloon-shrink ("melodic build", perc 0.28 < 0.35) — NOT blackout.
 - **classification:** AGREES (musical cut measured at 1-bar scale) — same flagged
   PLAN GAP as UT-3 (balloon vs his "blackout"); relayed together.
+- **resolved (same evening):** AWR-184 (`788a358`): b384 re-measured at `1e8ac71`
+  reads **blackout 4** ("sub voided 2 beats (< −10.0 dB) with the growl band dark
+  (min −4.4 < 5.0) into the drop") — 4 beats = his exact "1 bar" count.
+  Software-verified only; room proof = next mix.
 - **systems:** f2, led, laser
 
 ### UT-7 · 3:02.5 final drop — eighth-note rattle
