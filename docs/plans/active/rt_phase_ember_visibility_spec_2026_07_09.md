@@ -231,6 +231,51 @@ Executive diagnosis, verified at HEAD against `lighting_moments_v2.py`:
   this branch is executive-routed to AWR-180 batch 2 — coordinate with haze,
   don't double-own the ladder constants.
 
+### Part H2 — big-rung perc-alive guard (ladder; verified diagnosis)
+
+Operator verdicts (three now): Shiny 3:12 warrants 2b (16b fired); Sexy 1:27 16b
+NOT warranted ("heavy loud snare filled buildup"; earlier verdict: 4 or 2).
+Diagnosis VERIFIED at HEAD: `tolerant_scan` (`lighting_moments_v2.py:278-299`)
+detects "collapse" from `sub_db < GONE_SUB_DB` ONLY — snare rolls carry no sub, so
+a pounding build reads as a long collapse — and the 16-rung branch
+(`:431, grade=='hard' and raw_gap >= COLLAPSE_GAP`) has no perc guard (executive
+measured perc_full 0.30-0.46 through Sexy's build window; 16 fired anyway).
+Rule shape: big blackout rungs require ACTUAL QUIET — add a perc-alive guard to
+the 16 rung (perc_build above a threshold ⇒ demote to the short hard-drop
+emphasis); pounding builds stay lit. Additive constants only; rung lengths and the
+threshold are desk-calibrated; corpus regression gate same as Part H (zero
+decision changes outside snare-heavy-build cases); acceptance pins = Sexy 1:27
+and Shiny 3:12 drop to small rungs, Killa 513-521 still gets the Part-H full
+blackout (true silence has perc_build ~0 — the two rules compose).
+
+### Part I — laser runway gate (batch-2 buildable) + character doctrine
+
+Operator pre-play verdicts with executive data verification:
+- RUNWAY FACTOR (buildable now): a drop with NO bridge-defined buildup marker
+  before it earns NO lasers. Kills all four complaints in one rule: Shiny 0:29
+  (beat 63, first buildup=128) and Sexy 0:14/0:21/0:29 (beats ~31/47/63, all
+  pre-first-buildup).
+- CHARACTER FACTOR (post-P1, recorded): Sexy 1:27 (WALL T2, buildup present)
+  still earns NO lasers by ear (snare build, no growl); 3:38 growl earns them.
+  Multi-factor doctrine stands: tier AND runway AND character.
+- POSITIVE PINS — do not regress: Shiny 1:58 lasers ("GREAT find, exactly what I
+  had in mind") and Shiny 3:12 lasers ("also great"). Any laser-gate change must
+  keep both firing.
+
+### Parked (log only, do not build)
+
+- "Specific laser cues for certain melodic track elements" (operator idea at
+  Shiny 3:12) — stems/P1-era consumer.
+
+### Open anomaly (needs a run-down, not yet a claim)
+
+- 2026-07-09 ~17:19: `rt_drop_firework_explosion` fired; the `paired_post_drop`
+  that followed was `rt_post_drop_white_shatter`, though live `drop_pairs` maps
+  the explosion to `rt_post_drop_firework_remnants` (which fired 29 s later).
+  A `[RGB] adapter-rejected look=rt_post_drop_firework_remnants` WARNING sits ~1
+  min earlier. Question: does adapter rejection reroute pairing, and why was the
+  adapter rejecting? Correlate before touching anything.
+
 ## Round protocol
 
 1. Implement Bug 1 now; Bug 2 after the flavor verdict lands in this spec.
