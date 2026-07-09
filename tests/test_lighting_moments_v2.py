@@ -443,5 +443,50 @@ class TestBalloonBoundary(unittest.TestCase):
         self.assertEqual(self._ladder(0.60).kind, "blackout")  # drums driving
 
 
+class TestTrueSilenceBranch(unittest.TestCase):
+    """Part H (AWR-180 batch 2): a genuine FULL-band silence blacks the whole span
+    from the silence onset to the drop, checked BEFORE the stop/balloon split.
+    Named acceptance = Killa (Original Mix) 513-521."""
+
+    def _killa(self):
+        # full_db collapses -4.6/-14/-23/-30/-36.7 over beats 513-517 (sub gone),
+        # sub flickers back 518-520, WALL T3 drop at 521.
+        v4 = mk_v4(n=528, ref=16.0, full_db=[10.0] * 528)
+        collapse = [-4.6, -14.0, -23.0, -30.0, -36.7]
+        for k, b in enumerate(range(513, 518)):
+            v4.series["sub_db"][b] = 1.0          # sub gone across the collapse
+            v4.series["full_db"][b] = collapse[k]
+        return v4
+
+    def test_killa_full_span_blackout_from_silence_onset(self):
+        r = M.darkness_ladder(self._killa(), 521, "WALL", buildup_beat=505)
+        self.assertEqual(r.kind, "blackout")
+        self.assertEqual(r.window, (513, 521))    # silence onset → drop
+        self.assertEqual(r.beats, 8)              # RAW span 521-513, NOT quantized
+        self.assertIsNone(r.abort_at)             # no early release across the span
+        self.assertTrue(r.cap_inputs.get("silence"))
+
+    def test_residual_audibility_still_stops(self):
+        # Percussion done but the band is still audible (full 12, lift -4): the
+        # silence floor is nowhere near, so the stop branch fires unchanged → 8.
+        n = 48
+        drop = n - 4
+        v4 = mk_v4(n=n, perc_full=[0.10] * n, full_db=[12.0] * n)
+        gone_run(v4, drop, 8)
+        r = M.darkness_ladder(v4, drop, "HOUSE", buildup_beat=drop - 16)
+        self.assertEqual((r.kind, r.beats), ("blackout", 8))
+        self.assertFalse(r.cap_inputs.get("silence"))
+
+    def test_melodic_swell_still_balloons(self):
+        # Melodic swell (full 2, perc 0.16): audible enough to clear the silence
+        # floor, so the balloon branch still wins.
+        n = 48
+        drop = n - 4
+        v4 = mk_v4(n=n, perc_full=[0.16] * n, full_db=[2.0] * n)
+        gone_run(v4, drop, 16)
+        r = M.darkness_ladder(v4, drop, "HOUSE", buildup_beat=drop - 16)
+        self.assertEqual(r.kind, "balloon")
+
+
 if __name__ == "__main__":
     unittest.main()

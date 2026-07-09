@@ -112,6 +112,15 @@ STOP_PERC_MAX = 0.15         # med(perc_full[window]) <= this
 STOP_LIFT_FLOOR = -10.0      # AND med(full_db[window]) >= ref - 10 (still audible)
 STOP_WIDTH = 16
 
+# --- True silence (Part H, AWR-180 batch 2) — ADDITIVE, desk-calibrated ---
+# An ABSOLUTE full-band floor (raw full_db, not ref-relative). When the whole band
+# — not just the sub — sits below this across the sub-gone run, the collapse is
+# genuine silence (Killa (Original Mix) 513-521), NOT an audible stop (STOP_LIFT_FLOOR
+# is ref-relative and sits far higher) and NOT a melodic balloon swell. Checked
+# BEFORE the stop/balloon split; blacks the whole span from the silence onset to the
+# drop. Sits well below any audible section; only a deep collapse trips it.
+SILENCE_FLOOR_DB = -20.0
+
 # --- Relative dip (D§4.1 step 5, TUNE-LIVE) ---
 DIP_SCORE_FIRE = 4.0
 DIP_SUB_ASSIST = 0.25
@@ -410,6 +419,28 @@ def darkness_ladder(v4: SpectralFeaturesV4, drop: int, family: str,
     lo = _build_window(drop, buildup_beat, run_start)
     perc_build, lift_build = _build_medians(v4, lo, drop)
     grade = family_grade(family)
+
+    # 0) TRUE SILENCE (Part H) — the FULL band, not just the sub, has collapsed
+    #    below an absolute floor across the sub-gone run. This is genuine quiet
+    #    (Killa 513-521), not an audible stop and not a melodic balloon swell, so
+    #    it is checked FIRST and blacks the WHOLE measured span from the silence
+    #    onset to the drop: RAW span (drop - run_start), un-quantized, un-shrunk,
+    #    with no early abort (the span stays dark even where the sub flickers back
+    #    before the drop). The old stop/balloon split quantized DOWN and anchored
+    #    (drop - beats, drop), leaving the front of the silence lit.
+    full_run = v4.series["full_db"][run_start:e + 1]
+    full_med = _median(full_run)
+    if full_run and full_med < SILENCE_FLOOR_DB:
+        beats = drop - run_start
+        return DarknessDecision(
+            "blackout", beats, (run_start, drop), None,
+            {"raw_gap": raw_gap, "bass_duty": round(bass_duty, 3),
+             "perc_build": round(perc_build, 3), "grade": grade, "stop": False,
+             "silence": True, "full_med": round(full_med, 2)},
+            f"true-silence blackout {beats}: full band med {full_med:.1f} dB "
+            f"< {SILENCE_FLOOR_DB} across the collapse "
+            f"(silence onset {run_start} → drop {drop})")
+
     # A true stop = percussion done AND still audible (vocals/effects). This
     # audibility floor is what tells a stop (→ 8) from a melodic swell (→ balloon).
     stop = perc_build <= STOP_PERC_MAX and lift_build >= STOP_LIFT_FLOOR
