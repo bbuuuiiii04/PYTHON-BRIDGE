@@ -20,7 +20,16 @@ task) / OPUS tmux orchestrators / SONNET grind subagents — NEVER Fable below
 manager. New dispatches pin the model explicitly and VERIFY on-screen
 ("Set model to Opus 4.8" + banner) BEFORE task text.
 
-## Immediate state — NIGHT ENDGAME (~06:2x): board CLEAN at five-red
+## FINAL — BOARD CERTIFIED, PROGRAM CLOSED (~06:4x)
+
+**Executive certification at `c1402a6`: 3745 / exactly the named five reds
+in their ORIGINAL shapes, flapper quiet, bridge 0, checks green. Night
+program CLOSED; morning report written at superman3's desk with this
+brief's inputs. THIS LANE = MORNING-STANDBY.** Anything after this point is
+a new assignment, not the overnight program. Activation remains: operator
+menubar start; rollback = the 04:41 backup.
+
+## Historical: night endgame (~06:2x): board CLEAN at five-red
 
 - **AWR-171 (D3-F1 ship-blocker, QA-found): FIXED + GATED** — idle-no-audible
   now mirrors _do_stop's drop-window release (state_manager.py:2127); QA
