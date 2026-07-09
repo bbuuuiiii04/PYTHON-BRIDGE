@@ -84,6 +84,9 @@ rig, so you can watch the lights respond with Rekordbox closed.
 
 - **Record a session first:** menubar → **Record Session** during a real set. It
   writes `/tmp/rbss-session-<stamp>.jsonl`. Test the Lights plays the newest one.
+- **Sessions live in `/tmp` and vanish on reboot** — `/tmp/rbss-session-*.jsonl`
+  is cleared by macOS across restarts, so re-record after a reboot. A durable
+  canned demo session that rides the stick is M2 scope, not M1.
 - **Live-safety (fail closed):** replay refuses to start while **Rekordbox is
   running** (it must not run against live decks) and refuses if **no session has
   been recorded yet** — both show a plain message, neither starts the bridge.

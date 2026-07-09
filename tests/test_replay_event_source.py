@@ -136,16 +136,38 @@ class PreflightTests(unittest.TestCase):
 
 
 class MaybeStartFromEnvTests(unittest.TestCase):
+    @staticmethod
+    def _replay_thread_running() -> bool:
+        import threading
+
+        return any(t.name == "test-lights-replay" for t in threading.enumerate())
+
     def test_unset_env_starts_nothing(self) -> None:
         os.environ.pop(res.REPLAY_SESSION_ENV, None)
         self.assertIsNone(res.maybe_start_from_env(_Queue(), _PosCache(), _LiveBpm()))
 
-    def test_bad_path_fails_closed_raising(self) -> None:
+    def test_rekordbox_present_starts_no_thread(self) -> None:
+        # F1 live-safety: a stray RBSS_REPLAY_SESSION on a bridge with Rekordbox
+        # running must NOT start the pump (two drivers racing). Even a valid,
+        # existing session path is refused because Rekordbox is up.
         from unittest import mock
 
-        with mock.patch.dict(os.environ, {res.REPLAY_SESSION_ENV: "/no/such/session.jsonl"}):
-            with self.assertRaises(Exception):
-                res.maybe_start_from_env(_Queue(), _PosCache(), _LiveBpm())
+        with mock.patch.dict(os.environ, {res.REPLAY_SESSION_ENV: __file__}), \
+             mock.patch.object(res, "_rekordbox_pid", return_value=4242):
+            result = res.maybe_start_from_env(_Queue(), _PosCache(), _LiveBpm())
+        self.assertIsNone(result)
+        self.assertFalse(self._replay_thread_running())
+
+    def test_missing_file_starts_no_thread(self) -> None:
+        # Bad/missing path fails closed to None (no crash) via the preflight,
+        # not by raising -- so a stray env var can't blow up a normal bridge start.
+        from unittest import mock
+
+        with mock.patch.dict(os.environ, {res.REPLAY_SESSION_ENV: "/no/such/session.jsonl"}), \
+             mock.patch.object(res, "_rekordbox_pid", return_value=None):
+            result = res.maybe_start_from_env(_Queue(), _PosCache(), _LiveBpm())
+        self.assertIsNone(result)
+        self.assertFalse(self._replay_thread_running())
 
 
 if __name__ == "__main__":
