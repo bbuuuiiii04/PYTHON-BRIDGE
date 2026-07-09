@@ -6,6 +6,11 @@ beatgrid through the same ``read_anlz_drops`` the runtime uses, extracts the
 v4 analysis, and writes v4 cache entries. Never touches v3 entries, the
 Rekordbox DB, ANLZ files, or audio files.
 
+Backfill-aware skip: an entry counts as "cached" only when it already carries
+the growl_centroid_frames field (AWR-176). Pre-AWR-176 v4 entries still parse
+(tolerant read) but lack that field, so an ordinary re-run re-extracts and
+overwrites exactly them — the standard sweep IS the backfill run.
+
 Run under caffeinate so the machine cannot sleep mid-sweep:
 
     caffeinate -i python3 tools/spectral_sweep.py --jobs 2
@@ -78,7 +83,8 @@ def _sweep_one(track: dict[str, str]) -> tuple[str, str, float]:
     if ctx is None or len(ctx.beatgrid_times_ms) < 2:
         return ("no_grid", track["title"], time.perf_counter() - started)
     grid = list(ctx.beatgrid_times_ms)
-    if spectral_cache.get_cached_v4(track["filepath"], grid) is not None:
+    cached = spectral_cache.get_cached_v4(track["filepath"], grid)
+    if cached is not None and cached.growl_centroid_frames:
         return ("cached", track["title"], time.perf_counter() - started)
     features = extract_spectral_features_v4(track["filepath"], grid)
     if features is None:

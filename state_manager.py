@@ -2721,6 +2721,13 @@ class StateManager(LEDDispatchPolicyMixin):
         self._drop_presentation_last_load_gen[active] = d.load_gen
         self._drop_presentation_last_active_deck = active
 
+        # AWR-179 D4-F4: drop the dead prior-gen damper key on every track
+        # change. Keys are written only for the audible active deck, so each
+        # deck has at most one live key; this keeps the dict bounded instead of
+        # accumulating one entry per track over a multi-hour set.
+        if track_changed:
+            self._drop_presentation_audible_start_beat.pop((active, previous_load_gen), None)
+
         if self._drop_presentation_armed_key is not None and (track_changed or active_deck_changed):
             # AWR-159 Task 5: the arm's key match already auto-invalidates
             # (armed = self._drop_presentation_armed_key == track_key would

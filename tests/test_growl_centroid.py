@@ -278,5 +278,46 @@ class GrowlCentroidCacheTests(unittest.TestCase):
         self.assertEqual(cached, feats)
 
 
+class GrowlCentroidSweepSkipTests(unittest.TestCase):
+    """Part D item 10 — the backfill-aware skip decision (no subprocess)."""
+
+    TRACK = {"anlz_abs": "/x/a.DAT", "title": "t", "filepath": "/x/a.wav"}
+    GRID = [0.0, 500.0, 1000.0]
+
+    def _run(self, cached):
+        from types import SimpleNamespace
+        from rb_ss_bridge_v2.tools.spectral_sweep import _sweep_one
+
+        ctx = SimpleNamespace(waveform_context=SimpleNamespace(beatgrid_times_ms=self.GRID))
+        extracted = _v4(growl_band_frames=(1.0,), growl_centroid_frames=(9.0,), n_beats=2)
+        with patch("os.path.isfile", return_value=True), \
+             patch("rb_ss_bridge_v2.anlz_reader.read_anlz_drops", return_value=ctx), \
+             patch("rb_ss_bridge_v2.spectral_cache.get_cached_v4", return_value=cached), \
+             patch("rb_ss_bridge_v2.audio_spectral_features.extract_spectral_features_v4",
+                   return_value=extracted) as ex, \
+             patch("rb_ss_bridge_v2.spectral_cache.put_cached_v4") as put:
+            status = _sweep_one(dict(self.TRACK))[0]
+        return status, ex, put
+
+    def test_entry_with_field_is_skipped(self) -> None:
+        have = _v4(growl_band_frames=(1.0,), growl_centroid_frames=(120.0,), n_beats=2)
+        status, ex, put = self._run(have)
+        self.assertEqual(status, "cached")
+        ex.assert_not_called()
+        put.assert_not_called()
+
+    def test_legacy_entry_without_field_is_backfilled(self) -> None:
+        legacy = _v4(growl_band_frames=(1.0,), growl_centroid_frames=(), n_beats=2)
+        status, ex, put = self._run(legacy)
+        self.assertEqual(status, "ok")  # re-extracted despite parsing fine
+        ex.assert_called_once()
+        put.assert_called_once()
+
+    def test_absent_entry_is_extracted(self) -> None:
+        status, ex, put = self._run(None)
+        self.assertEqual(status, "ok")
+        ex.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()
