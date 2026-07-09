@@ -102,15 +102,24 @@ class PatchDTests(unittest.TestCase):
                 self.assertTrue(all(value == 0.0 for value in field[idx]))
 
     def test_center_burst_main_and_accent_band_split(self) -> None:
+        # AWR-156 knob #4: the intra-burst hue sweep died -- a burst is now
+        # ONE fixed slot for its whole pulse (main: burst_idx % 3 in slots
+        # 0-2; accent: 2 + burst_idx % 3 in slots 2-4), not an intensity-swept
+        # gradient. Sweep a wide beat range and bucket by is_accent (mirrors
+        # the renderer's own burst_idx % 4 == 3 rule) so the assertions stay
+        # independent of any particular hand-picked beat.
         main_slots: set[int] = set()
-        for beat in (0.0, 0.125, 0.25, 0.375, 1.0, 1.125):
-            main_slots.update(_used_slots(self._center_burst(beat, segments=36)))
+        accent_slots: set[int] = set()
+        for tick in range(320):
+            beat = tick / 40.0
+            used = _used_slots(self._center_burst(beat, segments=36))
+            burst_idx = int((beat % 8.0) * 2.0)
+            if burst_idx % 4 == 3:
+                accent_slots.update(used)
+            else:
+                main_slots.update(used)
         self.assertTrue({0, 1, 2}.issubset(main_slots))
         self.assertFalse(main_slots & {3, 4, 5})
-
-        accent_slots: set[int] = set()
-        for beat in (1.5, 1.625, 1.75, 1.875):
-            accent_slots.update(_used_slots(self._center_burst(beat, segments=36)))
         self.assertTrue({2, 3, 4}.issubset(accent_slots))
         self.assertFalse(accent_slots & {0, 1, 5})
 
@@ -140,6 +149,21 @@ class PatchDTests(unittest.TestCase):
 
     def test_tracked_and_live_configs_validate(self) -> None:
         root = Path(__file__).resolve().parents[1]
+        # AWR-156: rt_drop_chase got a role-scoped width param (knob #9) and
+        # moved drop -> post_drop (bank recast, knob f) in the TRACKED example
+        # config only; the live config is gitignored/read-only and renders
+        # identically to today until the operator mirrors it in.
+        # rt_drop_center_burst is untouched by both changes.
+        expected_by_rel = {
+            "config/led_look_director.example.json": {
+                "rt_drop_chase": ({"width": 4}, "post_drop"),
+                "rt_drop_center_burst": ({}, "drop"),
+            },
+            "config/led_look_director.json": {
+                "rt_drop_chase": ({}, "drop"),
+                "rt_drop_center_burst": ({}, "drop"),
+            },
+        }
         for rel in ("config/led_look_director.example.json", "config/led_look_director.json"):
             cfg_path = root / rel
             if not cfg_path.exists():
@@ -148,14 +172,14 @@ class PatchDTests(unittest.TestCase):
                 continue
             result = load_led_look_director_config(str(cfg_path))
             self.assertEqual(tuple(result.errors), (), f"{rel}: {result.errors}")
-            for name in ("rt_drop_chase", "rt_drop_center_burst"):
+            for name, (params, role) in expected_by_rel[rel].items():
                 self.assertIn(name, result.config.looks)
                 look = result.config.looks[name]
                 self.assertEqual(look.scene_ref, name)
                 self.assertEqual(look.color_source, "engine")
-                self.assertEqual(look.params, {})
+                self.assertEqual(look.params, params, msg=f"{rel}:{name}")
                 self.assertEqual(look.safety_class, "drop")
-                self.assertIn(name, result.config.banks["default"].drop)
+                self.assertIn(name, getattr(result.config.banks["default"], role), msg=f"{rel}:{name}")
 
     def test_drop_slot_color_smoke_and_snap(self) -> None:
         root = Path(__file__).resolve().parents[1]

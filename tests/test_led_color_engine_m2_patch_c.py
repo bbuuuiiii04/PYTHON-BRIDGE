@@ -83,6 +83,13 @@ class PatchCTests(unittest.TestCase):
 
     def test_tracked_and_live_configs_validate(self) -> None:
         root = Path(__file__).resolve().parents[1]
+        # AWR-156 knob #9 added a role-scoped width param to the TRACKED
+        # example config only; the live config is gitignored/read-only and
+        # renders identically to today until the operator mirrors it in.
+        expected_params_by_rel = {
+            "config/led_look_director.example.json": {"width": 4},
+            "config/led_look_director.json": {},
+        }
         for rel in ("config/led_look_director.example.json", "config/led_look_director.json"):
             cfg_path = root / rel
             if not cfg_path.exists():
@@ -95,8 +102,7 @@ class PatchCTests(unittest.TestCase):
             look = result.config.looks["rt_post_drop_chase"]
             self.assertEqual(look.scene_ref, "rt_post_drop_chase")
             self.assertEqual(look.color_source, "engine")
-            # AWR-156 knob #9: role-scoped width (was {}).
-            self.assertEqual(look.params, {"width": 4})
+            self.assertEqual(look.params, expected_params_by_rel[rel], msg=rel)
             self.assertIn("rt_post_drop_chase", result.config.banks["default"].post_drop)
 
     def test_live_config_slot_color_smoke(self) -> None:
