@@ -47,7 +47,7 @@ class ApplyGentleDropRoutingTests(unittest.TestCase):
         routing = data["f2"]["drop_look_routing"]
         self.assertEqual(sorted(routing), sorted(m.FAMILIES))
         for fam in m.FAMILIES:
-            self.assertEqual(routing[fam]["1"], m.LEGACY_8)   # tier1 = legacy (quartet strobe -> dropped)
+            self.assertEqual(routing[fam]["1"], m.LEGACY_8 + m.SOFT_QUARTET)  # tier1 = legacy + colorways
             self.assertEqual(routing[fam]["2"], modern)       # tier2 = modern
             self.assertEqual(routing[fam]["3"], modern)       # tier3 = modern
 
@@ -69,11 +69,23 @@ class ApplyGentleDropRoutingTests(unittest.TestCase):
             before_f2_other,
         )
 
-    def test_gentle_quartet_included_when_non_strobe(self):
-        data, _ = _fixture(quartet_strobe=False)
+    def test_gentle_quartet_included_by_name_regardless_of_strobe(self):
+        # allow_strobe is a permission flag, not character — the colorways go in
+        # tier 1 by name even though the fixture marks them allow_strobe=true.
+        data, _ = _fixture(quartet_strobe=True)
         m.apply(data)
         tier1 = data["f2"]["drop_look_routing"]["WALL"]["1"]
         self.assertEqual(tier1, m.LEGACY_8 + m.SOFT_QUARTET)
+
+    def test_gentle_quartet_drops_absent_names(self):
+        data, _ = _fixture()
+        del data["looks"]["rt_drop_chase_red"]   # absent from looks{} -> dropped
+        m.apply(data)
+        tier1 = data["f2"]["drop_look_routing"]["WALL"]["1"]
+        self.assertEqual(
+            tier1,
+            m.LEGACY_8 + ["rt_drop_chase_blue", "rt_drop_chase_cyan", "rt_drop_chase_green"],
+        )
 
     def test_build_target_stable_when_bank_already_has_legacy(self):
         # If the bank arrives WITH legacy (e.g. example config / second config),

@@ -8,8 +8,8 @@ Two edits, and ONLY these two keys:
      surgically removed in an earlier mirror). Legacy first, then the existing
      modern looks, no duplicates.
   2. f2.drop_look_routing — write the full family x tier table:
-       tier 1 (WALL/COMET/HOUSE/NEUTRAL) = 8 legacy chases + any soft rt chase
-         quartet member that EXISTS with allow_strobe false (gentle, no strobe);
+       tier 1 (WALL/COMET/HOUSE/NEUTRAL) = 8 legacy chases + the soft rt chase
+         colorways (rt_drop_chase_{blue,cyan,red,green}) that EXIST in looks{};
        tier 2 + tier 3 = the current modern drop bank (unchanged rotation).
 
 Because drop_look_routing NARROWS the bank fail-open (an empty intersection keeps
@@ -50,10 +50,9 @@ LEGACY_8 = [
     "drop_diy_rainbow_sparkle",
 ]
 
-# The soft rt chase quartet — included in tier 1 only where they exist AND are
-# non-strobe. As of this writing all four carry allow_strobe=true in both the
-# live and example configs, so the filter drops them and tier 1 = the 8 legacy.
-# Flip their allow_strobe to false and re-run to fold them in.
+# The soft rt chase colorways — the gentle chase class. Included in tier 1 BY NAME
+# (allow_strobe is a permission flag, not the look's character), dropping only
+# names that are absent from looks{}.
 SOFT_QUARTET = [
     "rt_drop_chase_blue",
     "rt_drop_chase_cyan",
@@ -81,12 +80,11 @@ def _current_drop_bank(data: dict) -> list:
 
 
 def _gentle_quartet(data: dict) -> list:
-    """Quartet members that exist with allow_strobe false (config default False)."""
+    """The soft rt chase colorways for tier 1, BY NAME — allow_strobe is a
+    permission flag, not the look's character. Drops only names absent from
+    looks{}."""
     looks = _looks(data)
-    return [
-        q for q in SOFT_QUARTET
-        if q in looks and not bool(looks[q].get("allow_strobe", False))
-    ]
+    return [q for q in SOFT_QUARTET if q in looks]
 
 
 def build_target(data: dict) -> tuple[list, dict]:
