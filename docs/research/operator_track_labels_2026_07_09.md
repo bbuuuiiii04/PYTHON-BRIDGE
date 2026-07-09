@@ -184,3 +184,94 @@ track's peak. 1 bar = 4 beats ≈ 1.90 s at this tempo.
 - **classification:** BEHAVIOR VERDICT (not a perception gap) — recorded verbatim and
   relayed to the executive seat; no config/code/laser change from this lane.
 - **systems:** laser
+
+---
+
+## Review batch B1 — operator verdicts on machine-picked AWR-184 edge cases
+
+Mode switch (operator-approved ~18:35): the lane sweeps the library offline for
+moments where the system is most likely wrong, the operator verdicts them. Sweep
+evidence: 707 tracks scanned through live `build_track_plan` at `1e8ac71`; the
+AWR-184 deep-sub-void rung fires on 104 drops / 80 tracks (bo4=46, bo8=34, bo16=24;
+void lengths 2–64 beats). Executive ruling on the results: all three suspect classes
+cleared by ear, NO AWR-186; misread evidence below hands to the successor.
+
+### B1-1 · Ray Volpe - Laserbeam (TiDo Edit) · 0:12 · intro firing, 1-bar blackout
+
+- **his words:** "it's fine, hardly a drop since there's no bridge defined buildup
+  runway"
+- **classification:** PARTIAL — behavior ACCEPTED as-is; the underlying ANLZ drop
+  marker is not a real drop to his ear (marker quality, not rule defect).
+- **systems:** f2, led
+
+### B1-2 · ESSE - Work It x Dom Dolla - Take It (Bellevue Rework) · 0:15 · intro, 4-bar blackout (bo16)
+
+- **his words:** "same scenario, rekordbox labels it as a drop but it's not really,
+  just has bass coming in for the intro. fine how it is"
+- **classification:** PARTIAL — behavior ACCEPTED as-is; same marker-quality root
+  note as B1-1. The feared blackout-during-blend class is BENIGN per his ear.
+- **systems:** f2, led
+
+### B1-3 · House x Pressure — Matroda · 2:42.5 · breakdown-tail bo16 (64-beat void)
+
+- **his words:** "yeah that's fine. could even warrant a 32 beat blackout. ur
+  question is too ambiguous"
+- **classification:** AGREES — long-void bo16 is right, and the cap may be RAISABLE
+  (32-beat blackout named as acceptable there): a cap-raise datum, not a defect.
+  Meta: batch questions must state exactly when black starts/ends (his ambiguity
+  flag; tightened for future batches).
+- **systems:** f2, led
+
+### B1-4 · Scary Monsters and Nice Sprites (Levex Remix) · 1:12.7 · FIRST TRUE MISREAD
+
+- **his words:** "yes 1 bar blackout is right, but tier 3 wall is wayy to aggressive
+  for this track. probably more like a tier one wall. also what's the visual
+  difference between wall tiers. this track reads as a bass house track"
+- **measured:** drop b160 @1:12.7 WALL T3, violence 0.753 — a local spike (the
+  track's other WALL drops sit T2 at 0.62–0.66); blackout 4 via deep-sub-void (sub
+  voided 2 beats, growl min −15.1). Track identity: zone GLACIER (aggression 0.37,
+  luminance 0.42, distortion 0.50), 132 BPM.
+- **classification:** blackout AGREES; tier MISREAD — his ear: ~T1 wall, bass-house
+  track; the scorer put its violence at 0.753/T3. First MISREAD of the session;
+  tier-scorer evidence (F2/AWR-163 lineage), successor batch per executive ruling.
+- **systems:** f2, led
+
+### B1-5 · REWIND — Ray Volpe, Sullivan King · 0:52 · INPUT DEFECT, operator-fixed live
+
+- **his words:** "track analysis for this was wrong and had the beatgrid misaligned
+  by 2 beats. just fixed it. this track is probably one the most aggressive and hard
+  hitting tracks in my library. this has a 4 bar blackout. wall tier 3"
+- **his words (follow-up, 19:45):** "not even joking rewind is an absolute fucking
+  monster of a track and rips people heads off. i expect full energy throughout
+  every drop when playing that track" — intensity expectation: FULL ENERGY at every
+  drop; treat as the acceptance bar for the post-re-analysis re-measure.
+- **event:** he corrected the Rekordbox beatgrid mid-review (2-beat misalignment).
+  The v4 cache key is the beatgrid fingerprint, so the old entry is orphaned; this
+  lane re-extracted on the fixed grid via the system's own at-load path
+  (`extract_spectral_features_v4` + `put_cached_v4`, atomic write — the same thing
+  the overnight sweep would do; disclosed, not hidden). Old-grid plan read T1 WALL
+  bo4 at 0:52 — vs his declaration WALL T3 + 4-bar blackout.
+- **classification:** MISREAD on the old grid, root cause = input defect (beatgrid),
+  NOT the scorer; post-fix re-measure = successor's first check (one command,
+  tooling in the handoff).
+- **post-fix re-read (19:44):** fixed grid = 497 beats, v4 re-extracted + cached OK —
+  but the ANLZ carries **0 drop markers** right now (Rekordbox drops phrase data on a
+  grid edit until re-analysis completes). Until markers return, the bridge has NO F2
+  plan for this track: no drop presentation, no blackout, on one of his hardest
+  tracks. LIVE NOTE for the operator: let Rekordbox finish (or re-analyze the track)
+  before playing it in a mix; successor re-measures after markers return.
+- **systems:** f2, led, stems (grid fixes invalidate caches library-wide — pipeline
+  note)
+
+---
+
+## Session 1 close (19:45 hard save)
+
+14 primary entries across 3 fully-labeled tracks + 5 machine-picked review verdicts:
+AGREES 5 · PARTIAL 5 · BLIND 1 · MISREAD 2 · BEHAVIOR VERDICT 1. Shipped from
+labels tonight: AWR-184 (deep-sub-void blackout rung; both Utopia pins verified
+through live seams) + blast-radius sweep clearing all three suspect classes (NO
+AWR-186 needed). Successor batch (executive-pinned in handoff FINAL-STATE):
+Scary Monsters tier misread · REWIND post-grid-fix re-measure · 32-beat cap-raise
+datum · ANLZ intro-marker quality note. Protocol (sweep → operator verdicts →
+bounded round) is the standing shape for label batches under the successor.
