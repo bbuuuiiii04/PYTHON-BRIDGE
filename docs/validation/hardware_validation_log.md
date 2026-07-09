@@ -74,6 +74,19 @@ menubar start (the first start since this round landed) plus his next mix are th
 validation gate — both for whether a blank-role blackout still recurs and for whether the deck-2
 fallback actually re-engages on a real freeze.
 
+LED round 3: Hz-gate migration + rainbow/firework promotions + center-burst fix (AWR-161,
+2026-07-09): no hardware, Govee, or room-visible validation was performed. The ten migrated
+strobe gates, the `rainbow_ordered` and `drop_firework_explosion` promotions (the latter passed its
+software contrast gate at 101/255, not a room-visible check), and the center-burst pixel fix are all
+software-tested only. The bridge was DOWN for the entire round (operator-sanctioned overnight
+delegate lane, parallel Track C) — no bridge start, no live-config edit, and nothing touching the
+strip was performed at any point. The live, gitignored `config/led_look_director.json` was not
+touched or mirrored; the tracked example gains `hz`/`duty` on 18 effect names plus the two new
+looks (`rt_rainbow_drop`/`rt_rainbow_post_drop`, `rt_drop_firework_explosion`). The operator's config
+mirror + menubar restart + next mix are the remaining validation gate — whether the migrated strobes
+read the same at any BPM, whether the rainbow pair and firework explosion look right in the room, and
+whether the center-burst gap is actually gone on the physical 60-segment strip.
+
 The current exporter/importer evidence boundary is **SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED**.
 
 The pinned SoundSwitch 2.10.3 project/pack tooling, immutable loader/player,
@@ -128,6 +141,7 @@ Rollback notes:
 | pending | Govee/LED idle-pause ambient (AWR-133) | pending | current StateManager LED automation and Govee realtime path; live LED config not inspected | pausing or fading both decks to no-audible idle should dispatch the ambient look; realtime ambient should stay alive through `[RGB] idle-freewheel-start`; if idle-grace teardown occurs, `[RGB] deactivate reason=idle_grace blackout_sent=1` should precede a dark strip instead of a leftover bright DIY scene | pending | pending | software-tested only; no bridge restart, live Govee output, or visual hardware validation performed. Firmware fallback remains hardware-assumed until an operator pause validates the room-visible result |
 | pending | Govee/LED health reporting (AWR-136) | pending | current Govee cloud sender/adapter; live LED config not inspected | If a configured mirror strip stops accepting frames, one `[RGB] mirror-send-degraded ...` warning should appear and recovery should produce one `[RGB] mirror-send-recovered ...` info line; after a cloud circuit-breaker blip, a later successful send should leave LED status non-degraded unless another fault exists | pending | pending | software-tested only (`tests/test_govee_runtime_sender.py`, `tests/test_govee_scene_adapter.py`); no bridge restart, live Govee output, or visual hardware validation performed |
 | pending | LED round 2: strobe-gate rebuild + accepted-look promotion (AWR-156) | pending | `govee_frame_renderer.py`/`govee_realtime_runner.py` at `e28ce6c`; example config only, live LED config not mirrored | after the operator mirrors the example config's new looks/widths/bank-recast/rename and restarts: the white drop strobe should flash at a steady dialed rate at any BPM with no hold/stutter; the 7 colorway strobes should join the drop rotation at their dialed rates/colors (`strobe_red_white` side B white unless vetoed); the balloon buildup, palette heartbeat groove, and firework remnants should read as real looks in their roles; comets should render as one solid palette color per spawn, no rainbow-smear; drop/post-drop comets should look fatter (width 4), grooves slightly fatter (width 2.5, veto-able); the two sparkle chases should read in the post-drop slot under their new names; firework bursts should read pure white, nebula comets should read the zone-tinted white | pending | pending | software-tested only (`tests/test_govee_frame_renderer.py`, `tests/test_govee_realtime_runner.py`, `tests/test_led_config.py`, `tests/test_led_pad_controls.py`); no bridge restart, live-config edit, or strip-touching action was performed while implementing this |
+| pending | LED round 3: Hz-gate migration + rainbow/firework promotions + center-burst fix (AWR-161) | pending | `govee_frame_renderer.py` at `abd3e0c`; example config only, live LED config not mirrored | after the operator mirrors the example config's new looks and hz/duty knobs and restarts: the ten migrated strobes should flash at their dialed rate steadily at any BPM (same feel as before at the current BPM, since defaults match the accepted feel); the rainbow drop look should sweep an ordered spectrum with the beat-locked fast travel, the rainbow post-drop look should keep its slower legacy pace; the firework explosion should show a bright hit resolving down to a warm background with visible amber/white sparks (not stuck full-bright/invisible-sparks like the pre-fix lab defect); the center-burst pulse should light every pixel across the strip with no every-other-pixel gap | pending | pending | software-tested only (`tests/test_govee_frame_renderer.py`, `tests/test_led_color_engine_m2_patch_d.py`); no bridge restart, live-config edit, or strip-touching action was performed while implementing this |
 
 ## Validation records
 
