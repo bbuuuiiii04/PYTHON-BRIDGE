@@ -12,7 +12,7 @@ validation_scope: >
   on this Mac 2026-07-09.
 ---
 
-# Audio spectral analysis upgrade — audit, five proposals, one recommendation (AWR-165)
+# Audio spectral analysis upgrade — audit, five proposals, one recommendation (AWR-166)
 
 **Operator ask (verbatim):** "audit and review the audio spectral analysis and determine
 if it should be kept as is, or if we could genuinely benefit from changing it to something
@@ -358,7 +358,7 @@ data we already have) are nearly free and can ride along with any future round.
 
 ## Bookkeeping
 
-- Registry row: AWR-165 (this audit), `docs/status/active_work_registry.md`.
+- Registry row: AWR-166 (this audit), `docs/status/active_work_registry.md`.
 - Doc index row: this file, RESEARCH / AUDIT.
 - Hard checks: `check_docs_metadata.py`, `check_agent_contracts.py`, `check_docs_drift.py`
   — run green before commit.
