@@ -4944,8 +4944,9 @@ class StateManager(LEDDispatchPolicyMixin):
             cfg is None
             or not cfg.enabled
             or active_deck not in (1, 2)
-            or self._led_blackout_active()      # blackout/emergency/solo/drop owners win
-            or self._os.breakdown_active        # F2 breakdown / pre-chorus dark window wins
+            or self._led_blackout_active()               # blackout/emergency/solo/drop owners win
+            or self._os.breakdown_active                 # F2 smart-breakdown sections own their frames
+            or bool(self._led_smart_drop_blackout_key)   # smart-drop pre-drop tactical blackout wins
         ):
             self._led_cfx_prev_mix = 0.0
             self._led_cfx_sweep = None

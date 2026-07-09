@@ -790,9 +790,12 @@ Runtime flow:
   frame-engine child applies `scale(lerp(px, cfx_rgb, cfx_mix), cfx_dim)` per
   pixel on the composed-playback frame only. Wire fields are `.get`-defaulted on
   both sides so a frozen/old frame-engine child stays neutral (frozen-child
-  skew). Blackout, emergency, and F2 drop-darkness structurally win — the overlay
-  is forced inert at the dispatch gate AND the child's blank/idle/emergency paths
-  never run the overlay. Ships `cfx_sweep.enabled: false`; the bloom threshold
+  skew). Three darkness signals force the overlay inert at the dispatch gate
+  (`_compute_led_cfx_sweep`): blackout/emergency owners (`_led_blackout_active()`),
+  F2 smart-breakdown sections (`_os.breakdown_active`), and the smart-drop pre-drop
+  tactical blackout (`_led_smart_drop_blackout_key`) — and the child's
+  blank/idle/emergency paths never run the overlay either, so darkness wins both
+  structurally and at the gate. Ships `cfx_sweep.enabled: false`; the bloom threshold
   and ramps stay `pending desk calibration` (Part F of the AWR-173 spec).
 
 Config:

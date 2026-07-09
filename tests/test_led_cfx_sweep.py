@@ -108,13 +108,15 @@ def _snapshot(readings, updated_at: float) -> CfxFilterSnapshot:
     return CfxFilterSnapshot(valid=True, deck=readings, updated_at=updated_at, reason="ok")
 
 
-def _sm_ns(cfg, snapshot, *, blackout=False, breakdown=False, darkest=(10, 0, 40)):
+def _sm_ns(cfg, snapshot, *, blackout=False, breakdown=False, darkest=(10, 0, 40),
+           smart_drop_blackout=""):
     return SimpleNamespace(
         _cfx_sweep_config=cfg,
         _cfx_snapshot=snapshot,
         _led_blackout_active=(lambda: blackout),
         _os=SimpleNamespace(breakdown_active=breakdown),
         _led_color_engine=SimpleNamespace(v2_darkest_rgb=(lambda: darkest)),
+        _led_smart_drop_blackout_key=smart_drop_blackout,
         _led_cfx_prev_mix=0.0,
         _led_cfx_last_mono=0.0,
         _led_cfx_sweep="unset",
@@ -156,6 +158,27 @@ class DispatchGatingTests(unittest.TestCase):
         now = 100.0
         ns = _sm_ns(CFG, self._engaged_snapshot(now), breakdown=True)
         self.assertIsNone(_compute(ns, 1, now))
+
+    def test_smart_drop_tactical_blackout_is_inert_and_resets_mix(self) -> None:
+        # HIGH review fix: the pre-drop tactical blackout sets NO blackout owner and
+        # NO breakdown flag, yet the room is meant to be pure black. A non-empty
+        # _led_smart_drop_blackout_key must force the sweep inert AND reset prev_mix,
+        # or the dark-hue flood re-lights F2's intended-black drop moment.
+        now = 100.0
+        ns = _sm_ns(CFG, self._engaged_snapshot(now), smart_drop_blackout="d1@480.0")
+        ns._led_cfx_last_mono = now - 1.0
+        ns._led_cfx_prev_mix = 0.7            # mid-flood when the blackout fires
+        self.assertIsNone(_compute(ns, 1, now))
+        self.assertEqual(ns._led_cfx_prev_mix, 0.0)   # reset so it resumes from neutral
+
+    def test_sweep_resumes_when_tactical_blackout_clears(self) -> None:
+        # Key cleared (== "") on the same engaged input: the sweep floods again.
+        now = 100.0
+        ns = _sm_ns(CFG, self._engaged_snapshot(now), smart_drop_blackout="")
+        ns._led_cfx_last_mono = now - 1.0
+        out = _compute(ns, 1, now)
+        self.assertIsNotNone(out)
+        self.assertGreater(out[0], 0.0)       # resumes from neutral (prev_mix 0 -> floods)
 
     def test_v2_off_no_dressing_is_inert(self) -> None:
         now = 100.0

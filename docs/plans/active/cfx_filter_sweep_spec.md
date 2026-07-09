@@ -266,9 +266,10 @@ def cfx_sweep_envelope(knob_norm, prev_mix, dt_s, cfg) -> tuple[float, float]:
   returning `self._v2_active_dressing().slot_rgbs[0]` (None when v2 off / no dressing) —
   call it from the LED tick thread only, same thread the engine is driven from today;
 - force the stored tuple to None (inert) when ANY of: feature disabled, blackout /
-  emergency active (`led_dispatch_policy.py:1163` gate state), an F2 darkness moment owns
-  the frame (`led_dispatch_policy.py:1304-1313` holds), v2 dressing None, snapshot
-  stale/missing/invalid for the active deck, active deck not in (1, 2).
+  emergency active (`_led_blackout_active()`), an F2 smart-breakdown section owns the
+  frame (`_os.breakdown_active`), the smart-drop pre-drop tactical blackout is held
+  (`_led_smart_drop_blackout_key` non-empty — it sets no blackout owner), v2 dressing
+  None, snapshot stale/missing/invalid for the active deck, active deck not in (1, 2).
 
 **Anchor extension** — `BeatAnchor` (`led_models.py:405-413`) gains
 `cfx_mix: float = 0.0`, `cfx_dim: float = 1.0`,
@@ -314,7 +315,13 @@ freewheel branch (`:444-451`) always sends neutral. `_anchor_to_wire`
 - Blackout and emergency masks always win: the overlay is forced inert at the dispatch
   gate AND structurally bypassed on the child's blank/emergency paths. Held Static
   Override, scripted arms/clears, autoloop, BPM/beat sends: untouched.
-- F2 darkness moments own their frames; the overlay is inert while they hold.
+- The dispatch gate (`_compute_led_cfx_sweep`) forces the overlay inert on all three
+  darkness signals so the room stays black when it is meant to: blackout/emergency
+  owners (`_led_blackout_active()`), F2 smart-breakdown sections
+  (`_os.breakdown_active`), and the smart-drop pre-drop tactical blackout
+  (`_led_smart_drop_blackout_key` — it sets no blackout owner and rides the permitted
+  compose path on the child, so the gate is the only place it is caught). F2 darkness
+  moments own their frames; the overlay is inert while they hold.
 - `RBStateReader._tick_deck` still enqueues `ANLZ_PATH` before `TRACK_LOADED`; no change
   to any `_tick_deck` logic.
 - Fail toward today: RB version ≠ 7.2.11, v2 identity off, feature flag off, stale/invalid
@@ -414,6 +421,10 @@ Step 0 happens BEFORE trusting any LED behavior; the bridge is not needed for st
    `python3 -m rb_ss_bridge_v2`); verify exactly one process
    (`pgrep -f rb_ss_bridge_v2 | wc -l` == 1). Ride the knob: flood speed
    (`flood_ramp_ms`), return feel (`release_ramp_ms`), bottom brightness (`dim_floor`).
+   Also watch the hard-snap transient: `dim` tracks the knob instantly while the flood
+   ramps over `flood_ramp_ms`, so snapping straight to full briefly dims (~250 ms) before
+   the dark-hue flood arrives. Judge it by ear — if you dislike the momentary dip, the
+   `flood_ramp_ms` / `dim_floor` knobs are the fix.
    Each adjustment = edit live config + menubar restart + single-process check.
 4. **Safety spot-checks at the desk:** trigger a blackout mid-sweep (masks must win);
    sweep during a drop's dark moment (F2 owns it); sweep counterclockwise (nothing);
