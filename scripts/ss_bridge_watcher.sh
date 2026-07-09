@@ -144,29 +144,24 @@ start_bridge() {
         fi
         echo "Laser Director config: $LASER_CONFIG_PATH"
         echo "Laser Director mode: enabled=true dry_run=false"
-        exec env \
-            RBSS_GOVEE_REALTIME=1 \
-            RBSS_LIVE_BPM_FOLLOW=1 \
-            RBSS_ANLZ_DIRECT=1 \
-            RBSS_POS_CHAIN_DIRECT=1 \
-            RBSS_POS_CHAIN_SKIP_OBJC=1 \
-            RBSS_MASTER_SEED_DIRECT=1 \
-            RBSS_MASTER_DIRECT=1 \
-            RBSS_PLAY_DIRECT=1 \
-            RBSS_TRACK_LOAD_DIRECT=1 \
-            RBSS_SCRIPTED_DIRECT=1 \
-            RBSS_SCRIPTED_SHOWFILE_DIRECT=1 \
-            RBSS_SMART_REARM_EXPERIMENT=1 \
-            RBSS_SMART_DROP=1 \
-            RBSS_SMART_BREAKDOWN=1 \
-            RBSS_LED_PHRASE_MONOTONIC=1 \
-            RBSS_LED_MIN_DWELL=1 \
-            RBSS_LED_CANCEL_PENDING=1 \
-            RBSS_LED_RT_RECONCILE=1 \
-            RBSS_LED_TRANSPORT_COOLDOWN=0 \
-            RBSS_LASER_CONFIG="$LASER_CONFIG_PATH" \
-            $TRUTH_ENV \
-            "$PYTHON" -m rb_ss_bridge_v2
+        # Single source of truth: build the 19 RBSS_* launch flags + the laser
+        # config path from launch_profile.py (the SAME module the USB bundle
+        # reads), so the watcher and the bundle can never drift. Fail CLOSED --
+        # if the profile can't load, refuse to start rather than launch a bridge
+        # with a partial/empty env (that would silently run a different show
+        # than every past set).
+        if ! profile_exports="$("$PYTHON" - "$LASER_CONFIG_PATH" <<'PY'
+import shlex, sys
+from rb_ss_bridge_v2.launch_profile import bridge_env
+for key, value in bridge_env(sys.argv[1]).items():
+    print(f"export {key}={shlex.quote(value)}")
+PY
+)" || [ -z "$profile_exports" ]; then
+            echo "FATAL: launch_profile.py did not load; refusing to start the bridge with a partial env" >&2
+            exit 1
+        fi
+        eval "$profile_exports"
+        exec env $TRUTH_ENV "$PYTHON" -m rb_ss_bridge_v2
     ) >> "$LOG_FILE" 2>&1 &
     BRIDGE_PID=$!
     BRIDGE_MANAGED=1
