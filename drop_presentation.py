@@ -250,6 +250,7 @@ def plan_track(
     tagged_beats: Sequence[float],
     learned_keys: Sequence[float],
     config: DropPresentationConfig,
+    laser_tiers: Optional[dict[float, str]] = None,
 ) -> TrackPlan:
     """Per true drop: the pure track-structure classification (authority doc's
     tiers 3/4/8/9 inputs). Deterministic — identical inputs always produce an
@@ -305,12 +306,22 @@ def plan_track(
 
     decisions = []
     for beat in drops:
+        # AWR-162 (A): energy-gated activation. When per-drop tiers are available,
+        # the energy tier replaces the personality-ranked laser_ratio selection:
+        # 'small' (NEUTRAL/thin) → LEDS_ONLY (lasers silent), every other tier →
+        # LEDS_PLUS_LASERS. Tier-less tracks keep today's ratio ranking exactly
+        # (byte-identical fallback). Finale/hotcue/learned/manual precedence is
+        # unchanged — those are decided in resolve_presentation above this tail.
+        if laser_tiers is not None:
+            presentation = LEDS_ONLY if laser_tiers.get(beat) == "small" else LEDS_PLUS_LASERS
+        else:
+            presentation = LEDS_PLUS_LASERS if beat in laser_set else LEDS_ONLY
         decisions.append(DropDecision(
             beat=beat,
             tagged=beat in matched_tags,
             learned=beat in matched_learned,
             is_finale=(beat == last_drop),
-            personality_presentation=(LEDS_PLUS_LASERS if beat in laser_set else LEDS_ONLY),
+            personality_presentation=presentation,
             runway=runways[beat],
         ))
 

@@ -258,6 +258,20 @@ def tier_name(tier: int) -> str:
     return {1: "standard", 2: "intense", 3: "monster"}.get(tier, "standard")
 
 
+def laser_tier(family: str, tier: int) -> str:
+    """AWR-162 A.10 per-drop laser energy tier: NEUTRAL (thin) → 'small' (lasers
+    silent); T1 → 'standard'; T2 → 'intense'; T3 → 'monster'.
+
+    *** FLAGGED ONE-LINE OPERATOR VETO (exec ruling condition 5): NEUTRAL → small
+    silences lasers on ~27% of corpus drops. Kept because it fails toward fewer
+    unwanted laser fires; the operator's one line flips NEUTRAL to fire like a
+    standard drop. This is the ENERGY-gated default he approved, extended to the
+    NEUTRAL typing outcome he never ruled on. ***"""
+    if family == "NEUTRAL":
+        return "small"
+    return tier_name(tier)
+
+
 # --------------------------------------------------------------------------- #
 # Gone-run scan / dip / true-stop (D§4.1 inputs; C§6f true-stop)              #
 # --------------------------------------------------------------------------- #

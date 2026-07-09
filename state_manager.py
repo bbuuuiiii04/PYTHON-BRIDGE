@@ -2572,6 +2572,7 @@ class StateManager(LEDDispatchPolicyMixin):
         self._drop_presentation_plan = plan_track(
             drop_beats, phrase_roles, tag_beats, learned_beats,
             self._drop_presentation_config,
+            laser_tiers=self._f2_laser_tiers(d, drop_beats),
         )
         self._drop_presentation_plan_deck = deck
         self._drop_presentation_plan_load_gen = load_gen
@@ -4819,6 +4820,23 @@ class StateManager(LEDDispatchPolicyMixin):
                     bf.elapsed(shadow.suggested_elapsed_ms),
                     shadow.confidence,
                 )
+
+    def _f2_laser_tiers(self, d, drop_beats):
+        """AWR-162 (A): {drop_beat: energy tier} from the F2 plan for these drops,
+        or None when F2 off / no plan ⇒ legacy laser_ratio selection, byte-identical
+        (kill test). small (NEUTRAL/thin) → lasers silent; else lasers fire."""
+        if not self._f2_enabled:
+            return None
+        plan = getattr(d.meta, "f2_plan", None)
+        if plan is None:
+            return None
+        out = {}
+        for beat in drop_beats:
+            entry = plan.for_drop(beat)
+            if entry is not None:
+                out[beat] = lighting_moments_v2.laser_tier(
+                    entry.decision.family, entry.decision.tier)
+        return out or None
 
     def _f2_transition_window_beats(self, d, abs_beat, smart_drop_beats, default):
         """F2 pre-drop dark-window length for the next drop (Task 3.1). F2 off ⇒
