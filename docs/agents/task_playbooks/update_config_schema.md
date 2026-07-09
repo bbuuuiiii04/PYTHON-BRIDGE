@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 944bc83
-last_verified_date: 2026-07-03
+last_verified_commit: e28ce6c
+last_verified_date: 2026-07-08
 validation_scope: software-only
 ---
 
@@ -48,6 +48,13 @@ Implementation notes:
 - For Laser scene schema changes, keep `fallback_scene` references validated against known scenes and
   `cooldown_beats` non-negative. Treat leftover `pre_drop_scene` personality keys as deprecated
   load-compat only unless a new operator decision reintroduces them.
+- A LOOK-NAME rename (the config dict key + every bank list entry + any `drop_pairs` reference) is a
+  different operation from a renderer `scene_ref` rename — the two need not move together (AWR-156
+  T6.4: `rt_drop_chase`/`rt_drop_nebula` were renamed as look names to
+  `rt_post_drop_remnant_chase`/`_nebula` while their `scene_ref` stayed exactly `rt_drop_chase`/
+  `rt_drop_nebula`, since `SLOT_EFFECTS`/`REALTIME_EFFECT_NAMES`/`REALTIME_EFFECT_PARAM_KEYS` are all
+  keyed by `scene_ref`, not look name). Grep every test file for the OLD look name, not just the
+  config — regression-lock tests frequently assume `look.scene_ref == look_name`.
 
 Required tests:
 - Run the targeted tests listed in the subsystem card.

@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 56c5f90
-last_verified_date: 2026-07-03
+last_verified_commit: e28ce6c
+last_verified_date: 2026-07-08
 validation_scope: software-only
 ---
 
@@ -66,6 +66,19 @@ Implementation notes:
 - For LIGHTING ENGINE v2 identity work, preserve the v1-off compatibility gate, keep identity-store
   disk writes on writer/helper threads (never the 200 Hz push loop), route Stream Deck/runtime
   mutations through `BridgeEvent`s, and update the palette authority/design docs plus AWR-128.
+- When registering a new realtime effect (`_EFFECTS` or `SLOT_EFFECTS` in `govee_frame_renderer.py`),
+  `led_pad_controls.py` has a MODULE-LEVEL completeness assertion (`RENDER_GROUPS` must union to
+  exactly `REALTIME_EFFECT_NAMES`) that raises on import if a new name isn't slotted into a
+  `RENDER_GROUPS` tuple — this breaks `tests/test_led_pad_controls.py`/`tests/test_led_pad_lab.py`/
+  `tests/test_led_pad_service.py` at collection time, not just at a normal assertion failure. Every new
+  static param key also needs a `CONTROL_META` entry (`test_every_allowlisted_key_has_metadata`
+  requires `set(CONTROL_META) == union(REALTIME_EFFECT_PARAM_KEYS.values())`), and if its renderer
+  fallback differs by scene_ref, a `PARAM_DEFAULT_OVERRIDES` entry (both audited against exact
+  `params.get("key", literal)` source strings in `tests/test_led_pad_controls.py` — see AWR-156).
+  Also check the older `tests/test_led_color_engine_m2_patch_*.py`/`phase*.py` regression-lock files
+  for frozen `SLOT_EFFECTS`-set/bank-membership/`drop_pairs`/look-params assertions that a bank
+  recast, rename, or new registration can break — they are not named in this playbook's required
+  test list but do need updating in the same change (AWR-156 touched all of them).
 
 Required tests:
 - Run the targeted tests listed in the subsystem card.

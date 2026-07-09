@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 50578b3
+last_verified_commit: e28ce6c
 last_verified_date: 2026-07-08
 validation_scope: software-only
 ---
@@ -116,7 +116,17 @@ reviewed deployment/hardware gate.
 - `color_engine.v2.zones.*.slot5_white` (AWR-152) is an optional per-zone RGB tint for v2's slot 5
   accent (3 ints 0-255; absent defaults to pure white). It replaces the removed `ZoneRampConfig.white`
   and the v1 `Palette.white` blend knob, both dead (every palette shipped `white: 0.0`). Legacy
-  `white` keys still present in an un-mirrored config are ignored, not rejected.
+  `white` keys still present in an un-mirrored config are ignored, not rejected. AWR-156 Task 9
+  (2026-07-08) narrowed WHERE this tint is read: it now applies only to nebula-comet slot-5 writes
+  (`rt_drop_nebula`/`rt_post_drop_nebula`) and the `rt_post_drop_firework_remnants` dimming
+  background; `post_drop_firework_chase`'s slot 5 always renders literal pure white regardless of
+  this config value (`BAKED_WHITE_SLOT5_EFFECTS` in `govee_frame_renderer.py`).
+- AWR-156 (2026-07-08) adds 7 colorway strobe looks (`rt_drop_strobe_*`, `hz`/`duty`/`color_a`/
+  `color_b` params) and 3 promoted looks (`rt_buildup_balloon_comet`, `rt_groove_heartbeat`,
+  `rt_post_drop_firework_remnants`) to the tracked example; see `docs/subsystems/config.md` for the
+  full param/rename/bank-move list. `width` is now a real renderer param on `rt_groove_chase`/
+  `rt_groove_nebula`/`rt_post_drop_center_comet` (was allowlisted but silently unread before this
+  round).
 - Point or mono palette selections can make slots 0-4 one solid RGB for any slot cue, including realtime chase/comet/twinkle cues. `random_with_mono_chance` can opt individual looks into probabilistic solid slots 0-4 without changing shipped behavior when its chance map is empty or zero.
 - In the tracked LED example, Patch F keeps generic slot looks in `banks.default` and stores legacy color-suffix realtime looks in `banks.legacy_color_suffix`. The director selects `banks.default`; the legacy bank is preservation storage unless future code explicitly selects it.
 - Do not mirror Patch F into ignored live LED config without explicit operator approval, because live config may be behind the tracked example and is hardware-adjacent.

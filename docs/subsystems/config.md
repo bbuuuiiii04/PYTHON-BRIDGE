@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 50578b3
+last_verified_commit: e28ce6c
 last_verified_date: 2026-07-08
 validation_scope: software-only; Stream Deck palette control config software-tested
 ---
@@ -81,6 +81,17 @@ Config:
 - LED `scripted_mode` is an optional top-level object with `default_role` and `role_map`. Source/default roles exclude `utility`, but `utility` is accepted as a destination meaning the configured blackout bank. Absent config maps scripted groove/drop/post-drop to `utility`; a present partial map falls back to `default_role`.
 - M2.5 slotized generic LED looks such as `rt_groove_chase`, `rt_post_drop_chase`, Patch E1 nebula looks, Patch E2 `rt_post_drop_center_comet`, and Patch E3 `rt_twinkle` are additive config entries. Patch F moves legacy color-suffix looks out of the tracked example `default` bank into `legacy_color_suffix` storage while keeping their look definitions intact.
 - Local ignored `config/led_look_director.json` can legitimately lag the tracked example; mirror Patch F to live config only with explicit operator approval and a loader check.
+- AWR-156 (2026-07-08) adds to the tracked example: 7 colorway strobe looks (`rt_drop_strobe_blue`/
+  `_cyan`/`_green`/`_red`/`_red_white`/`_blue_cyan`/`_cyan_white`, `scene_ref: drop_strobe_colorway`,
+  `color_source: baked`), and 3 promoted looks (`rt_buildup_balloon_comet`, `rt_groove_heartbeat`,
+  `rt_post_drop_firework_remnants`). `width` is now a genuinely-read renderer param on
+  `rt_groove_chase`/`rt_groove_nebula`/`rt_post_drop_center_comet` (previously allowlisted via
+  `_SYNC_PARAM_KEYS` but silently ignored by the renderer; a config `width` value on those three had
+  no effect before this round). `rt_drop_chase`/`rt_drop_nebula` were renamed to
+  `rt_post_drop_remnant_chase`/`rt_post_drop_remnant_nebula` and moved from `banks.default.drop` to
+  `banks.default.post_drop` (their `drop_pairs` entries deleted); renderer `scene_ref` for both is
+  unchanged. Local ignored `config/led_look_director.json` was not touched by this round — mirror
+  with explicit operator approval, same as Patch F.
 - LED `color_engine.v2.zones.*.slot5_white` (AWR-152) is an optional per-zone RGB list (3 ints,
   0-255); absent defaults to pure white `(255, 255, 255)`, malformed fails closed with an error and
   disables only the v2 sub-block. It replaces the removed `ZoneRampConfig.white` key (parsed,
