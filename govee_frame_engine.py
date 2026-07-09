@@ -132,6 +132,17 @@ def _get_darwin_prio() -> int | None:
     return int(val)
 
 
+def _parse_cfx_rgb(raw: Any) -> tuple[int, int, int] | None:
+    """AWR-173: coerce a wire cfx_rgb ([r,g,b] or null) to a clamped RGB tuple or
+    None. Anything malformed -> None (neutral), never raises."""
+    if not isinstance(raw, (list, tuple)) or len(raw) != 3:
+        return None
+    try:
+        return tuple(max(0, min(255, int(v))) for v in raw)  # type: ignore[return-value]
+    except (TypeError, ValueError):
+        return None
+
+
 def raise_scheduling_band() -> dict:
     report: dict = {"setpriority": False, "nsactivity": False, "darwin_prio": None}
     # PRIO_DARWIN_PROCESS=4: clear any darwin background band on this process,
@@ -232,6 +243,11 @@ class FrameEngineHost:
                 captured_monotonic=float(a["captured_monotonic"]),
                 playing=bool(a["playing"]),
                 permitted=bool(a["permitted"]),
+                # AWR-173: read with .get defaults so an OLD parent (no cfx fields)
+                # can't KeyError this parse. Missing fields -> neutral (no overlay).
+                cfx_mix=float(a.get("cfx_mix", 0.0)),
+                cfx_dim=float(a.get("cfx_dim", 1.0)),
+                cfx_rgb=_parse_cfx_rgb(a.get("cfx_rgb")),
             )
             with self._anchor_lock:
                 self._anchor = anchor

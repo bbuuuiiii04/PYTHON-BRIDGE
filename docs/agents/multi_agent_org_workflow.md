@@ -182,19 +182,36 @@ Full invariants: `docs/architecture/runtime_invariants.md`, AGENTS.md §6.
 
 ## 10. Replicating this org on Codex (or any other agent CLI)
 
-Nothing above is Claude-specific except the skill wrapper. The mapping:
+Nothing above is Claude-specific except the skill wrapper. The mapping — mechanics
+below VERIFIED against the local codex-cli 0.142.5 install on 2026-07-09:
 - Seats = tmux sessions running the agent CLI. The signal-file protocol, dispatch/
   watch scripts, written-artifact rule, review chain, and baseline discipline are
-  byte-identical.
-- Model tiering maps to whatever tiers exist (e.g. strongest reasoning model at
-  executive/manager seats, faster/cheaper models at orchestrator/implementer).
-  The invariant is the SHAPE: judgment at the top, throughput at the bottom,
+  byte-identical. `watch_lane.sh` needs zero changes for Codex lanes.
+- **Dispatch:** `tools/agents/dispatch_lane.sh SESSION MODEL EFFORT MSGFILE TAG codex`
+  — the 6th arg selects the agent. Codex lanes pin model+effort as LAUNCH FLAGS
+  (`codex -m MODEL -c model_reasoning_effort="EFFORT"`); there is no in-session
+  acknowledgment line to verify, so the dispatch prints VERIFY-MODEL-MANUALLY —
+  eyeball the TUI status line before trusting the tier.
+- Model tiering maps to whatever tiers exist (strongest reasoning model at
+  executive/manager seats, faster/cheaper at orchestrator/implementer). The
+  invariant is the SHAPE: judgment at the top, throughput at the bottom,
   independent verification at every hop.
-- Codex reads this doc + AGENTS.md as standalone files (no skill autoload): a Codex
-  executive session's kickstart = "read AGENTS.md, then
-  docs/agents/multi_agent_org_workflow.md, then the current resume-state doc, then
-  take the watch."
+- **Skills → docs:** Codex has no skill autoload; it reads AGENTS.md natively
+  (plus a global `~/.codex/AGENTS.md`) and follows its routing to these docs. A
+  Codex executive kickstart = "read AGENTS.md, then
+  docs/agents/multi_agent_org_workflow.md, then the newest codex_resume_state doc,
+  then take the watch." Repo `.claude/skills/*/SKILL.md` files are readable as
+  standalone docs when routed explicitly.
+- **Hooks:** codex-cli 0.142.5 supports hooks in the CLAUDE CODE SCHEMA (JSON
+  `{"hooks": {...}}` files registered with per-hook trust hashes in
+  `~/.codex/config.toml [hooks.state]`; observed live via a plugin shipping
+  `claude-codex-hooks.json` with SessionStart/UserPromptSubmit/SubagentStart).
+  The repo ships `tools/agents/claude-codex-hooks.json` mirroring the Claude-side
+  footgun guard (PreToolUse → `guard_footguns.sh`, same script both stacks) —
+  registration path + PreToolUse-under-Codex support must be verified before it
+  is relied on; until then AGENTS.md rules are the Codex-side enforcement, and
+  Codex's own `approval_policy`/`sandbox_mode` config is the native gating layer.
 - Seat harness for orchestrator/implementer-tier models (drift compensation):
-  `docs/agents/opus_seat_harness.md` — written for Opus, applies to any
-  non-frontier seat model.
+  `docs/agents/opus_seat_harness.md` — written from Opus evidence, applies to any
+  non-frontier seat model including GPT build seats.
 - Current program state for resuming: `docs/agents/codex_resume_state_2026_07_09.md`.

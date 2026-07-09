@@ -420,6 +420,14 @@
     ],
     "simmer_seasoning": {"sparkle_density": 0.08, "sparkle_size": 1.2}
   },
+  "cfx_sweep": {
+    "enabled": false,
+    "engage_deadband": 0.02,
+    "bloom_threshold_norm": 0.75,
+    "flood_ramp_ms": 250.0,
+    "release_ramp_ms": 400.0,
+    "dim_floor": 0.08
+  },
   "targets": {
     "room_perimeter": {
       "label": "Bui light test",

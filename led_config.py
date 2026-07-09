@@ -18,6 +18,7 @@ from .govee_frame_renderer import (
     REALTIME_STROBE_EFFECTS,
 )
 from .led_models import (
+    CfxSweepConfig,
     ColorEngineConfig,
     F2Config,
     F4Config,
@@ -179,6 +180,22 @@ def load_f4_config(path: str | None = None) -> F4Config:
         return F4Config()
     block = data.get("f4") if isinstance(data, dict) else None
     return F4Config.from_dict(block)
+
+
+def load_cfx_sweep_config(path: str | None = None) -> CfxSweepConfig:
+    """Read the top-level `/cfx_sweep` block (AWR-173 CFX filter-sweep LED overlay)
+    from the same config file, independent of the main LED validation pipeline.
+    Absent block / missing file / bad JSON / out-of-range values ⇒ CfxSweepConfig()
+    with enabled False (the overlay never renders — kill test). Never raises."""
+    resolved = _resolve_path(path)
+    if resolved is None:
+        return CfxSweepConfig()
+    try:
+        data = json.loads(Path(resolved).read_text(encoding="utf-8"))
+    except Exception:
+        return CfxSweepConfig()
+    block = data.get("cfx_sweep") if isinstance(data, dict) else None
+    return CfxSweepConfig.from_dict(block)
 
 
 def _resolve_path(explicit: str | None) -> Path | None:

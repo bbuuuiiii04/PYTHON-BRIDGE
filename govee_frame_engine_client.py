@@ -495,6 +495,7 @@ def _spec_to_wire(spec: EffectSpec) -> dict:
 
 
 def _anchor_to_wire(anchor: Any) -> dict:
+    # AWR-173: cfx_* are additive; a child without Task 7 simply ignores them.
     return {
         "deck": anchor.deck,
         "abs_beat_pos": anchor.abs_beat_pos,
@@ -502,4 +503,7 @@ def _anchor_to_wire(anchor: Any) -> dict:
         "captured_monotonic": anchor.captured_monotonic,
         "playing": anchor.playing,
         "permitted": anchor.permitted,
+        "cfx_mix": anchor.cfx_mix,
+        "cfx_dim": anchor.cfx_dim,
+        "cfx_rgb": list(anchor.cfx_rgb) if anchor.cfx_rgb is not None else None,
     }

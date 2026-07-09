@@ -1278,6 +1278,16 @@ class LedColorEngine:
             return self._v2_dressing.get(self._v2_current_deck)
         return None
 
+    def v2_darkest_rgb(self) -> tuple[int, int, int] | None:
+        """AWR-173: the track's darkest v2 base hue (slot 0 = base ramp low end),
+        or None when v2 identity is off / no active dressing. Read-only; call from
+        the LED tick thread only (same thread the engine is driven from today)."""
+        dressing = self._v2_active_dressing()
+        if dressing is None or not dressing.slot_rgbs:
+            return None
+        r, g, b = dressing.slot_rgbs[0]
+        return (int(r), int(g), int(b))
+
     def _v2_install_default(self, deck: int, load_gen: int, key: str) -> None:
         if self._v2_cfg is None:
             return

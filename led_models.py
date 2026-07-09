@@ -226,6 +226,47 @@ class F4Config:
         )
 
 
+@dataclass(frozen=True)
+class CfxSweepConfig:
+    """AWR-173 CFX filter-sweep LED overlay config (`/cfx_sweep` block). Absent or
+    malformed block ⇒ enabled False ⇒ the overlay never renders (kill test). The
+    bloom threshold and ramps are DESK-CALIBRATED (Part F) — the shipped values are
+    placeholders. Any out-of-range value fails the WHOLE block back to disabled."""
+    enabled: bool = False              # kill switch; example config ships false
+    engage_deadband: float = 0.02      # knob must exceed 0.5 + this to do ANYTHING
+    bloom_threshold_norm: float = 0.75 # DESK-CALIBRATED (Part F); placeholder until then
+    flood_ramp_ms: float = 250.0       # TUNE-LIVE: "quick but not instant" flood-in
+    release_ramp_ms: float = 400.0     # TUNE-LIVE: flood-out when knob returns to 12
+    dim_floor: float = 0.08            # brightness at knob = 1.0 (never fully black)
+
+    @classmethod
+    def from_dict(cls, data: Any) -> "CfxSweepConfig":
+        if not isinstance(data, dict):
+            return cls()
+        try:
+            cfg = cls(
+                enabled=bool(data.get("enabled", False)),
+                engage_deadband=float(data.get("engage_deadband", 0.02)),
+                bloom_threshold_norm=float(data.get("bloom_threshold_norm", 0.75)),
+                flood_ramp_ms=float(data.get("flood_ramp_ms", 250.0)),
+                release_ramp_ms=float(data.get("release_ramp_ms", 400.0)),
+                dim_floor=float(data.get("dim_floor", 0.08)),
+            )
+        except (TypeError, ValueError):
+            return cls()
+        return cfg if cfg._ranges_ok() else cls()
+
+    def _ranges_ok(self) -> bool:
+        return (
+            0.0 <= self.engage_deadband < 0.5
+            and 0.0 < self.bloom_threshold_norm < 1.0
+            and (0.5 + self.engage_deadband) < self.bloom_threshold_norm
+            and self.flood_ramp_ms > 0.0
+            and self.release_ramp_ms > 0.0
+            and 0.0 <= self.dim_floor < 1.0
+        )
+
+
 # Canonical default scale stops (6 stops from §7/§15.5).
 _DEFAULT_SCALE_STOPS: Dict[str, Tuple[int, int, int]] = {
     "green":   (0, 255, 0),
@@ -410,6 +451,12 @@ class BeatAnchor:
     captured_monotonic: float
     playing: bool
     permitted: bool
+    # AWR-173: CFX filter-sweep overlay, applied in frame space by the child.
+    # Neutral defaults so an OLD parent (no cfx wire fields) and any version-skewed
+    # FROZEN child both keep working — missing fields simply mean "no overlay".
+    cfx_mix: float = 0.0
+    cfx_dim: float = 1.0
+    cfx_rgb: tuple[int, int, int] | None = None
 
 
 @dataclass(frozen=True)

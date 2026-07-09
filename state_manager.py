@@ -812,6 +812,9 @@ class StateManager(LEDDispatchPolicyMixin):
             updated_at=0.0,
             reason="missing_offsets",
         )
+        # AWR-173: latest CFX snapshot (tracking-only; never feeds authority). None
+        # until the reader publishes one — i.e. always None off RB 7.2.11.
+        self._cfx_snapshot: CfxFilterSnapshot | None = None
         self._active_deck_resolver_state = ResolverState()
 
         # Arm debounce: (track_id, deck) → last arm time
@@ -1193,6 +1196,25 @@ class StateManager(LEDDispatchPolicyMixin):
             }
             for num, reading in self._mixer_snapshot.deck.items()
         }
+        # AWR-173: read-only CFX diagnostics (tracking-only; not authority). None
+        # off RB 7.2.11 / with the feature inert — surfaced so the desk session can
+        # see exactly what the bridge reads from the filter knob.
+        cfx_snap = self._cfx_snapshot
+        cfx_age = (
+            now - cfx_snap.updated_at
+            if cfx_snap is not None and cfx_snap.updated_at > 0.0
+            else None
+        )
+        cfx_decks = {
+            str(num): {
+                "valid": r.valid,
+                "filter_norm": r.filter_norm,
+                "selected_effect_id": r.selected_effect_id,
+                "unit_channel": r.unit_channel,
+                "reason": r.reason,
+            }
+            for num, r in (cfx_snap.deck.items() if cfx_snap is not None else ())
+        }
         rb_master_age = (
             now - os.rb_master_deck_updated_at
             if os.rb_master_deck_updated_at > 0.0
@@ -1222,6 +1244,14 @@ class StateManager(LEDDispatchPolicyMixin):
                 "updated_at": self._mixer_snapshot.updated_at,
                 "age_s": mixer_age,
                 "deck": mixer_decks,
+            },
+            "cfx": {
+                "present": cfx_snap is not None,
+                "enabled": bool(getattr(self._cfx_sweep_config, "enabled", False)),
+                "reason": cfx_snap.reason if cfx_snap is not None else "no_snapshot",
+                "updated_at": cfx_snap.updated_at if cfx_snap is not None else 0.0,
+                "age_s": cfx_age,
+                "deck": cfx_decks,
             },
             "lighting_mode": os.lighting_mode,
             "lighting_desired": os.lighting_desired,
@@ -1373,6 +1403,13 @@ class StateManager(LEDDispatchPolicyMixin):
             if isinstance(snapshot, MixerAuthoritySnapshot):
                 self._mixer_snapshot = snapshot
                 self._rerun_active_deck_resolver("mixer_state")
+
+        elif ev.kind == Ev.CFX_STATE:
+            # AWR-173: store only. Tracking-only — NO resolver rerun, NO output-state
+            # flags, NO status coupling. CFX never feeds active-deck authority.
+            snapshot = ev.payload.get("snapshot")
+            if isinstance(snapshot, CfxFilterSnapshot):
+                self._cfx_snapshot = snapshot
 
         elif ev.kind == Ev.MASTER_CHANGED:
             if self._mixer_authority_enabled and ev.source == "rb_state":
@@ -2108,6 +2145,9 @@ class StateManager(LEDDispatchPolicyMixin):
         self._os.last_armed_filepath = ""
         self._led_rt_permitted = False
         self._led_rt_beat = None
+        self._led_cfx_sweep = None
+        self._led_cfx_prev_mix = 0.0
+        self._led_cfx_last_mono = 0.0
         self._led_last_auto_role_key = ""
         self._led_last_idle_role_key = ""
         self._led_smart_drop_blackout_key = ""
@@ -4386,6 +4426,10 @@ class StateManager(LEDDispatchPolicyMixin):
             float(now),
             bool(d.playing),
         )
+        # AWR-173: recompute the CFX filter-sweep overlay for this active deck. Pure
+        # in-memory work (no I/O); it stores an atomic tuple the anchor provider
+        # attaches. Inert whenever any darkness owner holds or the feature is off.
+        self._compute_led_cfx_sweep(active, now)
 
         # Arm guard recomputed here so it reflects any arm fired by _update_lighting.
         arm_guard = (now - os.last_arm_mono) < ARM_GUARD_S
@@ -4883,6 +4927,49 @@ class StateManager(LEDDispatchPolicyMixin):
                     bf.elapsed(shadow.suggested_elapsed_ms),
                     shadow.confidence,
                 )
+
+    def _compute_led_cfx_sweep(self, active_deck: int, now: float) -> None:
+        """AWR-173: compute the atomic CFX filter-sweep overlay tuple
+        (mix, dim, flood_rgb, captured_monotonic) for the CURRENT active deck, or
+        None (inert). Fail closed toward today: the feature being off, ANY darkness
+        owner holding, v2 identity off, or a stale/invalid CFX reading each render
+        it inert, so the room looks exactly as it does today. Called on the push
+        loop; pure in-memory work (no I/O)."""
+        prev_mono = self._led_cfx_last_mono
+        self._led_cfx_last_mono = now
+        dt_s = (now - prev_mono) if prev_mono > 0.0 else 0.0
+
+        cfg = getattr(self, "_cfx_sweep_config", None)
+        if (
+            cfg is None
+            or not cfg.enabled
+            or active_deck not in (1, 2)
+            or self._led_blackout_active()      # blackout/emergency/solo/drop owners win
+            or self._os.breakdown_active        # F2 breakdown / pre-chorus dark window wins
+        ):
+            self._led_cfx_prev_mix = 0.0
+            self._led_cfx_sweep = None
+            return
+
+        engine = self._led_color_engine
+        rgb = engine.v2_darkest_rgb() if engine is not None else None
+        if rgb is None:                          # v2 identity off / no active dressing
+            self._led_cfx_prev_mix = 0.0
+            self._led_cfx_sweep = None
+            return
+
+        snap = self._cfx_snapshot
+        reading = None
+        if snap is not None and (now - snap.updated_at) <= CFX_STALE_AFTER_S:
+            reading = snap.deck.get(active_deck)
+        if reading is None or not reading.valid:
+            self._led_cfx_prev_mix = 0.0
+            self._led_cfx_sweep = None
+            return
+
+        mix, dim = cfx_sweep_envelope(reading.filter_norm, self._led_cfx_prev_mix, dt_s, cfg)
+        self._led_cfx_prev_mix = mix
+        self._led_cfx_sweep = None if (mix <= 0.0 and dim >= 1.0) else (mix, dim, rgb, now)
 
     def _f2_laser_tiers(self, d, drop_beats):
         """AWR-162 (A): {drop_beat: energy tier} from the F2 plan for these drops,

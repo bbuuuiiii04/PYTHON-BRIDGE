@@ -1,0 +1,18 @@
+{
+  "_comment": "Codex-compatible hooks file (Claude Code hooks schema — codex-cli 0.142.5 consumes this format via its claude-codex hooks layer with per-hook trust hashes in ~/.codex/config.toml [hooks.state]). Mirrors the repo's Claude-side PreToolUse guard so the two banned footguns (git clean -f*, raw bridge launches) are blocked mechanically under Codex too. Registration path + PreToolUse event support under Codex are verified by the legacy lane before this is relied on — until then AGENTS.md rules are the Codex-side enforcement.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/bbui/rb_ss_bridge_v2/tools/agents/guard_footguns.sh",
+            "timeout": 10,
+            "statusMessage": "Checking repo footgun rules..."
+          }
+        ]
+      }
+    ]
+  }
+}

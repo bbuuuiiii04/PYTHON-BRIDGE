@@ -20,7 +20,7 @@ from . import lighting_moments_v2
 from .config import LED_BACKSTEP_SEEK_BEATS
 from .drop_presentation import LASERS_ONLY
 from .govee_frame_renderer import REALTIME_EFFECT_PARAM_KEYS, SLOT_EFFECTS, MAX_SLOTS
-from .led_models import BeatAnchor, LEDContext
+from .led_models import BeatAnchor, CfxSweepConfig, LEDContext
 from .models import Ev
 from .smart_phrasing import SmartPhrasingState
 
@@ -39,6 +39,57 @@ LED_DEFAULT_POST_DROP_CYCLE_BEATS = 32.0
 LED_HOLD_RELEASE_BEATS = 1.0
 LED_IDLE_FREEWHEEL_BPM = 120.0
 LED_HOLD_BACKSTOP_BEATS = 16.0
+
+# CFX overlay anchor freshness: a stored sweep tuple older than this (s) is
+# neutralized at the anchor provider even if a tick failed to refresh it.
+CFX_ANCHOR_DEAD_S = 0.5
+
+
+def cfx_sweep_envelope(
+    knob_norm: float,
+    prev_mix: float,
+    dt_s: float,
+    cfg: CfxSweepConfig,
+) -> tuple[float, float]:
+    """AWR-173 CFX filter-sweep envelope. Returns (mix, dim). Low-to-high ONLY.
+
+    Pure — no I/O, no time reads; the caller passes dt_s. Robust to dt_s == 0,
+    out-of-range / NaN knob, and knob jitter at exactly 0.5.
+
+    mix (0..1): how strongly the track's darkest hue floods in.
+      knob <= 0.5 + engage_deadband -> ramps toward 0 over release_ramp_ms
+      knob >  0.5 + engage_deadband -> ramps toward 1 over flood_ramp_ms
+    dim (dim_floor..1): brightness scale, a CONTINUOUS function of knob position
+    (dims going up past the bloom threshold, refills coming back down):
+      knob <= bloom_threshold_norm  -> 1.0 (no dimming)
+      knob >  bloom_threshold_norm  -> 1 - (knob-thr)/(1-thr) * (1 - dim_floor)
+
+    Counterclockwise (knob < 0.5) is identical to neutral — the operator's final
+    ruling, not a default: mix decays to 0, dim stays 1.0.
+    """
+    knob = knob_norm if knob_norm == knob_norm else 0.5          # NaN -> neutral
+    knob = 0.0 if knob < 0.0 else (1.0 if knob > 1.0 else knob)
+    prev = prev_mix if prev_mix == prev_mix else 0.0
+    prev = 0.0 if prev < 0.0 else (1.0 if prev > 1.0 else prev)
+    dt = dt_s if (dt_s == dt_s and dt_s > 0.0) else 0.0
+
+    if knob > (0.5 + cfg.engage_deadband):
+        ramp = cfg.flood_ramp_ms
+        step = (dt * 1000.0 / ramp) if ramp > 0.0 else 1.0
+        mix = min(1.0, prev + step)
+    else:
+        ramp = cfg.release_ramp_ms
+        step = (dt * 1000.0 / ramp) if ramp > 0.0 else 1.0
+        mix = max(0.0, prev - step)
+
+    thr = cfg.bloom_threshold_norm
+    if knob <= thr or thr >= 1.0:
+        dim = 1.0
+    else:
+        frac = (knob - thr) / (1.0 - thr)
+        frac = 0.0 if frac < 0.0 else (1.0 if frac > 1.0 else frac)
+        dim = 1.0 - frac * (1.0 - cfg.dim_floor)
+    return mix, dim
 
 # F4 (AWR-164) bass-forward sparkle grain (D§5.1): the fraction of B (sustained-
 # bass) beats in a HOUSE growl-bar drop's B/K mask scales sparkle density between
@@ -163,6 +214,12 @@ class LEDDispatchPolicyMixin:
         self._led_hold_started_beat: Optional[float] = None
         self._led_rt_permitted = False
         self._led_rt_beat: tuple[int, float, float, float, bool] | None = None
+        # AWR-173: CFX filter-sweep overlay, computed once per playing tick and
+        # attached to the pumped anchor. (mix, dim, flood_rgb, captured_monotonic).
+        # None = inert (the room renders exactly as it does today).
+        self._led_cfx_sweep: tuple[float, float, tuple[int, int, int], float] | None = None
+        self._led_cfx_prev_mix: float = 0.0
+        self._led_cfx_last_mono: float = 0.0
         self._led_idle_freewheel_since: Optional[float] = None
         self._led_color_engine_status: dict[str, Any] = {
             "available": bool(led_color_engine is not None),
@@ -454,6 +511,13 @@ class LEDDispatchPolicyMixin:
         deck, abs_beat_pos, bpm, captured_monotonic, playing = self._led_rt_beat
         if not playing or bpm <= 0.0:
             return None
+        # AWR-173: attach the CFX overlay ONLY here (real playback), and neutralize
+        # a stored tuple older than CFX_ANCHOR_DEAD_S so a stalled push tick can't
+        # keep the room flooded. The idle-freewheel branch above always stays neutral.
+        cfx_mix, cfx_dim, cfx_rgb = 0.0, 1.0, None
+        sweep = self._led_cfx_sweep
+        if sweep is not None and (time.monotonic() - sweep[3]) <= CFX_ANCHOR_DEAD_S:
+            cfx_mix, cfx_dim, cfx_rgb = sweep[0], sweep[1], sweep[2]
         return BeatAnchor(
             deck=deck,
             abs_beat_pos=abs_beat_pos,
@@ -461,6 +525,9 @@ class LEDDispatchPolicyMixin:
             captured_monotonic=captured_monotonic,
             playing=playing,
             permitted=True,
+            cfx_mix=cfx_mix,
+            cfx_dim=cfx_dim,
+            cfx_rgb=cfx_rgb,
         )
 
     def _sanitize_led_adapter_status(self, raw_status: Any) -> dict[str, Any]:

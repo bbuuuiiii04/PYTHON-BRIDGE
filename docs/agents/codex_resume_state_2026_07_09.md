@@ -14,13 +14,20 @@ validation_scope: >
 
 # Codex resume state — 2026-07-09 (the Fable → Codex transfer)
 
-**How to boot a Codex executive seat:** new tmux session → Codex CLI → kickstart:
-"Read AGENTS.md fully, then docs/agents/multi_agent_org_workflow.md, then this doc,
-then `git log --oneline -30` + docs/status/active_work_registry.md to catch anything
-newer, then take the executive watch. The operator talks only to you." IMPORTANT:
-the Claude project-memory store does NOT load for Codex — everything transferable
-lives in repo docs; this doc is the state pointer. Codex quota window resumes
-**Jul 11 18:28**.
+**How to boot a Codex executive seat** (mechanics verified vs codex-cli 0.142.5,
+2026-07-09): new tmux session in the repo → `codex -m <model> -c
+model_reasoning_effort="xhigh"` (the operator's config.toml already defaults to
+xhigh + full trust for this repo) → kickstart: "Read AGENTS.md fully, then
+docs/agents/multi_agent_org_workflow.md (§10 = your stack's mechanics), then this
+doc, then `git log --oneline -30` + docs/status/active_work_registry.md to catch
+anything newer, then take the executive watch. The operator talks only to you."
+Worker lanes: `tools/agents/dispatch_lane.sh SESSION MODEL EFFORT MSGFILE TAG codex`;
+`watch_lane.sh` unchanged. Footgun guard for Codex: `tools/agents/
+claude-codex-hooks.json` (Claude-schema hooks, which codex 0.142.5 consumes —
+registration + PreToolUse support pending the legacy lane's verification; AGENTS.md
+rules are the enforcement meanwhile). IMPORTANT: the Claude project-memory store
+does NOT load for Codex — everything transferable lives in repo docs; this doc is
+the state pointer. Codex quota window resumes **Jul 11 18:28**.
 
 ## The night before this handoff (context in one paragraph)
 2026-07-08/09 overnight: F2 (per-drop family/tier/darkness plans, AWR-163), F4

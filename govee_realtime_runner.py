@@ -14,6 +14,8 @@ from .govee_frame_renderer import (
     default_beat_division,
     is_comet_effect,
     resolve_fade,
+    _lerp,
+    _scale,
 )
 from .led_models import BeatAnchor
 from .bridge_fmt import log_changed, log_throttled
@@ -29,6 +31,27 @@ _COLOR_SIG_KEYS = frozenset({
 })
 
 RGB = tuple[int, int, int]
+
+
+def _apply_cfx_overlay(frame: list[RGB], anchor: BeatAnchor) -> list[RGB]:
+    """AWR-173: blend the darkest-hue flood and dim the result, per pixel, using
+    the overlay carried on the anchor. No-op (returns the frame unchanged) unless
+    cfx_mix > 0 or cfx_dim < 1, so the common case costs nothing. Reuses the
+    renderer's _lerp / _scale (integer, clamped 0..255)."""
+    mix = anchor.cfx_mix
+    dim = anchor.cfx_dim
+    rgb = anchor.cfx_rgb
+    if mix <= 0.0 and dim >= 1.0:
+        return frame
+    out: list[RGB] = []
+    for px in frame:
+        if rgb is not None and mix > 0.0:
+            px = _lerp(px, rgb, mix)
+        if dim < 1.0:
+            px = _scale(px, dim)
+        out.append(px)
+    return out
+
 
 # A cloud DIY scene silently knocks the strip out of razer mode; while streaming,
 # re-assert razer this often so a knockout (or a single lost activate) heals in <=2 s.
@@ -411,6 +434,10 @@ class GoveeRealtimeRunner:
 
         instances = self._engine.on_tick(abs_pos, float(now), float(anchor.bpm))
         frame = self._compose_frame(spec, instances, abs_pos=abs_pos, anchor_beat=self._color_applied_abs_beat)
+        # AWR-173: apply the CFX filter-sweep overlay ONLY on this composed-playback
+        # frame, after compose and before the transport send. The blank/idle/
+        # emergency paths never reach here, so blackout wins by construction.
+        frame = _apply_cfx_overlay(frame, anchor)
 
         if self._emergency.is_set():
             self._emergency_teardown()

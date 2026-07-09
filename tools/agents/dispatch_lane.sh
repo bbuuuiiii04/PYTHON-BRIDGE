@@ -1,14 +1,20 @@
 #!/bin/bash
-# dispatch_lane.sh SESSION MODEL EFFORT MSGFILE TAG
+# dispatch_lane.sh SESSION MODEL EFFORT MSGFILE TAG [AGENT]
 # The standard lane-dispatch ritual, automated end to end (2026-07-09 overnight
 # lessons): hands-off typed-text check, create/boot if missing, pin BOTH model
 # and effort explicitly (they save as global defaults — never rely on
 # inheritance), verify the model pin on-screen BEFORE task text, paste the
 # message with the mandatory sentinel-FILE instruction appended, clear the
 # unsubmitted-paste trap, and verify submission.
+# AGENT = claude (default) | codex. Codex lanes pin model+effort as LAUNCH FLAGS
+# (codex -m MODEL -c model_reasoning_effort=EFFORT — verified codex-cli 0.142.5)
+# because flags-at-boot are deterministic where in-session commands are not; the
+# on-screen pin verification is Claude-only (Codex TUI has no "set model to"
+# acknowledgment line — dispatch prints VERIFY-MODEL-MANUALLY instead).
+# The signal-file completion contract is identical for both agents.
 # ponytail: fixed sleeps; tune per machine if flaky.
 set -u
-SESSION=$1; MODEL=$2; EFFORT=$3; MSGFILE=$4; TAG=$5
+SESSION=$1; MODEL=$2; EFFORT=$3; MSGFILE=$4; TAG=$5; AGENT=${6:-claude}
 REPO=/Users/bbui/rb_ss_bridge_v2
 SIG=/tmp/rbss_lane_signals; mkdir -p "$SIG"
 rm -f "$SIG/$SESSION.$TAG.done" "$SIG/$SESSION.$TAG.blocked"
@@ -17,23 +23,33 @@ if tmux has-session -t "$SESSION" 2>/dev/null; then
   # hands-off: abort if a human sits mid-thought at the prompt. Only the LAST
   # prompt line counts (older ❯ lines are transcript echoes), and a bare
   # slash-command echo like "/clear" is not typed text (2026-07-09 field bug).
-  LASTPROMPT=$(tmux capture-pane -p -t "$SESSION" -S -5 | grep '^❯' | tail -1)
-  if [[ -n "$LASTPROMPT" ]] && echo "$LASTPROMPT" | grep -qE '^❯ +[^ ]' \
-     && ! echo "$LASTPROMPT" | grep -qE '^❯ +/[a-z-]+ *$'; then
+  # prompt char: ❯ = claude, › = codex TUI
+  LASTPROMPT=$(tmux capture-pane -p -t "$SESSION" -S -5 | grep -E '^[❯›]' | tail -1)
+  if [[ -n "$LASTPROMPT" ]] && echo "$LASTPROMPT" | grep -qE '^[❯›] +[^ ]' \
+     && ! echo "$LASTPROMPT" | grep -qE '^[❯›] +/[a-z-]+ *$'; then
     echo "ABORT: typed text at $SESSION prompt — hands off"; exit 1
   fi
 else
   tmux new-session -d -s "$SESSION" -c "$REPO"
   sleep 1
-  tmux send-keys -t "$SESSION" 'claude' Enter
+  if [[ "$AGENT" == "codex" ]]; then
+    tmux send-keys -t "$SESSION" "command codex -m $MODEL -c model_reasoning_effort=\"$EFFORT\"" Enter
+  else
+    tmux send-keys -t "$SESSION" 'claude' Enter
+  fi
   sleep 10
 fi
 
-tmux send-keys -t "$SESSION" "/model $MODEL" Enter; sleep 4
-if ! tmux capture-pane -p -t "$SESSION" -S -12 | grep -qi "set model to.*$MODEL"; then
-  echo "MODEL-PIN-FAILED $SESSION -> $MODEL (verify manually; task NOT sent)"; exit 1
+if [[ "$AGENT" == "codex" ]]; then
+  # Pins were launch flags; no in-session pin commands, no ack line to grep.
+  echo "VERIFY-MODEL-MANUALLY $SESSION (codex lane: pins are launch flags -m $MODEL / effort $EFFORT)"
+else
+  tmux send-keys -t "$SESSION" "/model $MODEL" Enter; sleep 4
+  if ! tmux capture-pane -p -t "$SESSION" -S -12 | grep -qi "set model to.*$MODEL"; then
+    echo "MODEL-PIN-FAILED $SESSION -> $MODEL (verify manually; task NOT sent)"; exit 1
+  fi
+  tmux send-keys -t "$SESSION" "/effort $EFFORT" Enter; sleep 3
 fi
-tmux send-keys -t "$SESSION" "/effort $EFFORT" Enter; sleep 3
 
 TMP=$(mktemp)
 cat "$MSGFILE" > "$TMP"
