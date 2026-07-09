@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: b87745a
+last_verified_commit: c030540
 last_verified_date: 2026-07-09
 validation_scope: >
   USB bridge launcher Milestone-1 runbook. Build/sign/DMG commands verified on the
@@ -109,10 +109,6 @@ the watcher will log adopt/start churn. One bridge at a time.
   copy + LaunchAgent + `StartOnMount` + Uninstall) are M2/M3. `launch_agent_plist.py`
   can *render* an Interactive LaunchAgent plist, but nothing installs/loads it.
 - **Foreign-Mac** anything (the memory grant, permission cascade) — M4.
-- **Frame-engine frozen re-exec fix** — the client-side spawn
-  (`govee_frame_engine_client.py`) still uses the source-run `sys.executable -m …`
-  form; under the frozen binary that spawn needs a `--run-frame-engine` re-exec. The
-  launcher side is ready; the fenced client edit is gated on F4 (pending).
 - **Dev-only watcher features** not carried into the bundle: the
   `RBSS_BRIDGE_TRUTH=1` Art-Net truth-check and the `WATCHER_NO_LOOP` test hook.
 
