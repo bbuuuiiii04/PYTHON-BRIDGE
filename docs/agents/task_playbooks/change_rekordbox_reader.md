@@ -64,6 +64,16 @@ Implementation notes:
   (`_note_candidate_discarded`). If you touch this gate, re-verify the
   browse-storm-emits-nothing, FEIN-still-emits, and deck-1/2-symmetry cases
   in `tests/test_rb_state_reader.py`.
+- (AWR-173) CFX FILTER tracking is **tracking/status only** and MUST stay
+  isolated from mixer/active-deck authority. `_tick_cfx` reads its own chains,
+  publishes `Ev.CFX_STATE`/`CfxFilterSnapshot`, and must NEVER: join
+  `_tick_mixer`'s reads tuple, enter `_authoritative_kinds`, or trigger a resolver
+  rerun. The `_tick_mixer` whole-snapshot invalidation (any failed read ⇒ mixer
+  invalid) is the trap CFX avoids by living in its own tick/event/snapshot. CFX
+  chains are 7.2.11-only; keep every other version `None` so the feature is inert.
+  If you touch this, re-verify the isolation pin
+  (`tests/test_rb_state_reader.py`, `CfxTickTests.test_isolation_broken_cfx_keeps_mixer_valid`)
+  and the CFX/mixer parser-independence cases in `tests/test_rb_offsets.py`.
 
 Required tests:
 - Run the targeted tests listed in the subsystem card.

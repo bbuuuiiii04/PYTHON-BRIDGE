@@ -182,6 +182,40 @@ This is software validation only. It does not validate live Rekordbox behavior,
 loaded-track play/stop survival, SoundSwitch, laser, LED/Govee, DMX, MIDI,
 Enttec, or hardware-visible output.
 
+## CFX Filter-Sweep LED Overlay (AWR-173)
+
+The CFX FILTER tracking read and the LED filter-sweep overlay are covered by
+pure software tests (mach/live/socket-free):
+
+- `tests/test_rb_offsets.py` covers the CFX 7.2.11 chain group (exact chains),
+  the other-versions-are-None inertness, and CFX/mixer group independence in both
+  directions (a malformed CFX group never disables a healthy mixer group and vice
+  versa), plus anonymous-trailing-line rejection with CFX present.
+- `tests/test_rb_state_reader.py::CfxTickTests` covers valid CFX readings, the
+  `wrong_effect` / `unit_channel_mismatch` / `non_finite` / `out_of_range` /
+  `unreadable` reasons, per-deck independence (deck 1 valid while deck 2 is
+  unreadable), `Ev.CFX_STATE` never entering `_authoritative_kinds`, and the
+  **isolation pin**: broken CFX chains + healthy mixer chains leave
+  `MixerAuthoritySnapshot.valid == True`.
+- `tests/test_led_cfx_sweep.py` covers the pure `cfx_sweep_envelope`
+  (counterclockwise/neutral produce exactly `(0.0, 1.0)`; flood/release ramps at
+  `flood_ramp_ms`/`release_ramp_ms`; continuous monotonic dim past the bloom
+  threshold hitting `dim_floor` at knob=1.0; boundary continuity; dt=0 / NaN /
+  out-of-range safety), dispatch gating (feature-off, blackout, F2-darkness hold,
+  v2-off, stale snapshot, invalid active-deck reading, and active_deck 0 each
+  force the stored tuple inert), the anchor provider (freewheel always neutral,
+  fresh tuple attached, a tuple older than 0.5 s neutralized), the frame-engine
+  child overlay (`_parse_cfx_rgb`, wire round-trip, frozen-child skew defaults,
+  `scale(lerp(px, rgb, mix), dim)` parity, runner permitted-path applies vs
+  emergency-path emits no overlay frame), and the config loader (absent/malformed
+  disabled; range validation rejects `bloom_threshold_norm <= 0.5 +
+  engage_deadband` and out-of-range values).
+
+This is software validation only. The direction mapping (`param0 > 0.5` =
+clockwise) and the bloom threshold + ramps are pending the operator's desk
+calibration (Part F of the AWR-173 spec); no bridge restart, process-memory
+sampling, or hardware-visible output was performed.
+
 ## LED Phrase-Aware Active-Content Hold
 
 `tests/test_led_state_manager.py` covers the StateManager-only LED hold that is

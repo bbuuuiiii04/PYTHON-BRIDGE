@@ -23,6 +23,12 @@ Purpose:
   `docs/research/rekordbox_mixer_active_deck_re_evidence.md`,
   `docs/plans/active/rekordbox_mixer_active_deck_re_spec.md`, and
   `docs/architecture/active_deck_authority.md`.
+- Read the CFX FILTER knob (param0 + selected-effect-id + unit-channel) for
+  decks 1/2 as **tracking/status only** (AWR-173, RB 7.2.11 chains only,
+  `implemented` / `software-tested` / `hardware-unvalidated`). This is the first
+  runtime consumer of the mixer RE evidence and drives the LED filter-sweep
+  overlay in `led_govee`. It is fully isolated from mixer authority (see the
+  isolation rule below) and inert on every other RB version by construction.
 
 Authoritative code:
 - `rb_memory.py`
@@ -31,6 +37,7 @@ Authoritative code:
 - `live_bpm.py`
 - `probe_live_bpm.py`
 - `probe_deck2.py`
+- `probe_cfx_filter.py` (AWR-173 passive CFX desk-calibration probe)
 
 Key symbols:
 - `RBMemoryReader`
@@ -39,6 +46,8 @@ Key symbols:
 - `LiveBPMService`
 - `MixerAuthoritySnapshot`
 - `MixerDeckReading`
+- `CfxDeckReading`
+- `CfxFilterSnapshot`
 - offset-table constants and probes
 
 Runtime flow:
@@ -167,3 +176,18 @@ Known risks:
   `out_of_range` invalid reasons
 - letting Decks 3/4, CFX FILTER, mid/high EQ, crossfader, gain/trim, mute, FX,
   or real audio loudness become active-deck authority inputs
+
+CFX FILTER tracking (AWR-173) — the isolation rule:
+- `_tick_cfx` (`rb_state_reader.py`) reads the CFX FILTER param0 (`0..1` f32),
+  selected-effect-id (`0` == FILTER), and unit-channel (`== deck-1`) for decks
+  1/2 and publishes a frozen `CfxFilterSnapshot` via `Ev.CFX_STATE`. Per-deck
+  validity is deliberate (deck 1 keeps working when deck 2 is unreadable).
+- `Ev.CFX_STATE` is **never** in `_authoritative_kinds`, `CFX_STATE` never enters
+  `_tick_mixer`'s reads tuple, and `StateManager` only STORES the snapshot (no
+  resolver rerun). A dead/garbage CFX chain with healthy mixer chains must leave
+  `MixerAuthoritySnapshot.valid == True` — pinned by
+  `tests/test_rb_state_reader.py` (`CfxTickTests.test_isolation_broken_cfx_keeps_mixer_valid`).
+  The `_tick_mixer` whole-snapshot invalidation (any read fails ⇒ mixer invalid)
+  is exactly the trap CFX must never join.
+- CFX chains exist for RB 7.2.11 only; every other version leaves the six fields
+  `None`, so `_tick_cfx` emits nothing and the feature is inert.

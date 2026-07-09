@@ -1399,5 +1399,146 @@ class HealthTransitionTests(unittest.TestCase):
         self.assertIn("queue full", records[0].getMessage())
 
 
+def _offsets_with_cfx() -> RBOffsetVersion:
+    import dataclasses
+
+    def chain(*nums: int) -> ChainEntry:
+        return ChainEntry(hops=nums[:-1], final_off=nums[-1])
+
+    # Distinct FIRST hop per chain so FakeMem.install_chain doesn't collide on a
+    # shared hop address (the mixer chains do the same, 0x5000/0x5008/...).
+    return dataclasses.replace(
+        _make_offsets(),
+        cfx_deck1_filter_param0=chain(0x6000, 0x0),
+        cfx_deck1_selected_id=chain(0x6010, 0x0),
+        cfx_deck1_unit_channel=chain(0x6020, 0x0),
+        cfx_deck2_filter_param0=chain(0x6100, 0x0),
+        cfx_deck2_selected_id=chain(0x6110, 0x0),
+        cfx_deck2_unit_channel=chain(0x6120, 0x0),
+    )
+
+
+class CfxTickTests(unittest.TestCase):
+    """AWR-173: _tick_cfx publishes a CfxFilterSnapshot; tracking-only, isolated
+    from mixer authority."""
+
+    def setUp(self) -> None:
+        bridge_fmt.reset_rate_state()
+        self.mem = FakeMem()
+        self.offs = _offsets_with_cfx()
+        self.base = 0x100000000
+        self.q: queue.Queue = queue.Queue()
+        self.auth_q: queue.Queue = queue.Queue()
+        self._patches = [
+            mock.patch.object(mod, "_read_bytes", side_effect=self.mem.read_bytes),
+            mock.patch.object(mod, "_task_for_pid", return_value=0xCAFE),
+            mock.patch.object(mod, "get_rb_pid", return_value=12345),
+            mock.patch.object(mod, "_get_vmmap_output", return_value=""),
+            mock.patch.object(mod, "_base_from_vmmap", return_value=self.base),
+        ]
+        for p in self._patches:
+            p.start()
+        self.addCleanup(lambda: [p.stop() for p in self._patches])
+        # master + per-deck nulls so the tick body is reachable.
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
+        for d in range(4):
+            self.mem.install_chain(self.base, self.offs.bpm_per_deck[d], payload=struct.pack("<f", 0.0))
+            self.mem.install_chain(self.base, self.offs.live_pos_per_deck[d], payload=(0).to_bytes(8, "little"))
+            self.mem.install_chain(self.base, self.offs.track_info_per_deck[d], payload=b"")
+
+    def _install_cfx(self, deck, *, param0=0.5, selected_id=0, unit_channel=None):
+        if unit_channel is None:
+            unit_channel = deck - 1
+        param_ch = self.offs.cfx_deck1_filter_param0 if deck == 1 else self.offs.cfx_deck2_filter_param0
+        id_ch = self.offs.cfx_deck1_selected_id if deck == 1 else self.offs.cfx_deck2_selected_id
+        unit_ch = self.offs.cfx_deck1_unit_channel if deck == 1 else self.offs.cfx_deck2_unit_channel
+        self.mem.install_chain(self.base, param_ch, payload=struct.pack("<f", param0))
+        self.mem.install_chain(self.base, id_ch, payload=struct.pack("<i", selected_id))
+        self.mem.install_chain(self.base, unit_ch, payload=struct.pack("<i", unit_channel))
+
+    def _reader(self, **kw):
+        return mod.RBStateReader(
+            self.q, self.offs,
+            authoritative_queue=self.auth_q,
+            drop_unrouted_events=True,
+            rb_pid=12345, base_addr=self.base,
+            clock=lambda: 10.0,
+            **kw,
+        )
+
+    def _cfx_snap(self, reader):
+        reader._tick(0xCAFE, self.base)
+        events = [e for e in _drain(self.auth_q) if e.kind == Ev.CFX_STATE]
+        self.assertEqual(len(events), 1)
+        return events[0].payload["snapshot"]
+
+    def test_cfx_state_never_authoritative(self) -> None:
+        reader = self._reader(authoritative_kinds={Ev.MIXER_STATE})
+        self.assertNotIn(Ev.CFX_STATE, reader._authoritative_kinds)
+
+    def test_valid_reading(self) -> None:
+        self._install_cfx(1, param0=0.732, selected_id=0, unit_channel=0)
+        self._install_cfx(2, param0=0.4, selected_id=0, unit_channel=1)
+        snap = self._cfx_snap(self._reader())
+        self.assertTrue(snap.valid)
+        self.assertTrue(snap.deck[1].valid)
+        self.assertEqual(snap.deck[1].reason, "ok")
+        self.assertAlmostEqual(snap.deck[1].filter_norm, 0.732, places=5)
+        self.assertTrue(snap.deck[2].valid)
+
+    def test_wrong_effect(self) -> None:
+        self._install_cfx(1, selected_id=7)  # not FILTER
+        self._install_cfx(2)
+        snap = self._cfx_snap(self._reader())
+        self.assertFalse(snap.deck[1].valid)
+        self.assertEqual(snap.deck[1].reason, "wrong_effect")
+
+    def test_unit_channel_mismatch(self) -> None:
+        self._install_cfx(1, selected_id=0, unit_channel=1)  # deck 1 expects 0
+        self._install_cfx(2)
+        snap = self._cfx_snap(self._reader())
+        self.assertFalse(snap.deck[1].valid)
+        self.assertEqual(snap.deck[1].reason, "unit_channel_mismatch")
+
+    def test_non_finite_and_out_of_range(self) -> None:
+        for bad, reason in ((float("nan"), "non_finite"), (1.5, "out_of_range")):
+            self._install_cfx(1, param0=bad, selected_id=0, unit_channel=0)
+            self._install_cfx(2)
+            snap = self._cfx_snap(self._reader())
+            self.assertFalse(snap.deck[1].valid)
+            self.assertEqual(snap.deck[1].reason, reason)
+
+    def test_per_deck_independence(self) -> None:
+        # Deck 1 valid; deck 2 chains unreadable (leaves not installed).
+        self._install_cfx(1, param0=0.9, selected_id=0, unit_channel=0)
+        snap = self._cfx_snap(self._reader())
+        self.assertTrue(snap.deck[1].valid)
+        self.assertFalse(snap.deck[2].valid)
+        self.assertEqual(snap.deck[2].reason, "unreadable")
+
+    def test_isolation_broken_cfx_keeps_mixer_valid(self) -> None:
+        # The pin: broken CFX chains + healthy mixer chains ⇒ MIXER_STATE valid.
+        mixer_reader = mod.RBStateReader(
+            self.q, self.offs,
+            authoritative_queue=self.auth_q,
+            authoritative_kinds={Ev.MASTER_CHANGED, Ev.MIXER_STATE},
+            drop_unrouted_events=True,
+            rb_pid=12345, base_addr=self.base,
+            clock=lambda: 10.0,
+        )
+        # Healthy mixer reads.
+        self.mem.install_chain(self.base, self.offs.mixer_deck1_upfader_raw, payload=struct.pack("<f", 512.0))
+        self.mem.install_chain(self.base, self.offs.mixer_deck2_upfader_raw, payload=struct.pack("<f", 0.0))
+        self.mem.install_chain(self.base, self.offs.mixer_deck1_low_raw, payload=struct.pack("<f", 128.0))
+        self.mem.install_chain(self.base, self.offs.mixer_deck2_low_raw, payload=struct.pack("<f", 128.0))
+        # CFX left broken (no leaves installed) -> unreadable.
+        mixer_reader._tick(0xCAFE, self.base)
+        events = _drain(self.auth_q)
+        mixer_snap = [e for e in events if e.kind == Ev.MIXER_STATE][0].payload["snapshot"]
+        cfx_snap = [e for e in events if e.kind == Ev.CFX_STATE][0].payload["snapshot"]
+        self.assertTrue(mixer_snap.valid)            # mixer authority untouched
+        self.assertFalse(cfx_snap.deck[1].valid)     # cfx independently invalid
+
+
 if __name__ == "__main__":
     unittest.main()

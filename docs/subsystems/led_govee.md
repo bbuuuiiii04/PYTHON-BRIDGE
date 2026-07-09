@@ -767,6 +767,7 @@ Key symbols:
 - `GoveeRealtimeRunner`
 - `GoveeRealtimeTransport`
 - `BeatSyncEngine`
+- `CfxSweepConfig`
 
 Runtime flow:
 - inputs: phrase/role state, runtime LED commands, LED config, color engine state, beat/BPM state
@@ -777,6 +778,22 @@ Runtime flow:
   laser use; `tests/test_drop_lifecycle.py` parity-checks that seam without
   routing LED output through the new module.
 - Active content changes now arm a phrase-aware LED hold in `StateManager`: a nonzero active-deck switch or active-deck track replacement keeps the previously shown look if the incoming track is more than `1.0` beat into its current phrase, then releases at the next phrase crossing. If the incoming track is already within the first beat of a phrase, it changes immediately. Missing phrase segments are bounded by the same hold's 16-beat / 8-second backstop; this is software-tested only and still needs operator visual sign-off.
+- CFX filter-sweep overlay (AWR-173, `implemented` / `software-tested` /
+  `hardware-unvalidated`): when the operator turns the CFX FILTER knob clockwise
+  from 12 o'clock (low→high only; counterclockwise does nothing), the strips
+  flood toward the track's darkest v2 hue (`LedColorEngine.v2_darkest_rgb()` =
+  `Dressing.slot_rgbs[0]`) and, past an ear-calibrated bloom threshold, dim
+  continuously with knob travel. The per-tick pure envelope
+  `cfx_sweep_envelope` (in `led_dispatch_policy.py`) returns `(mix, dim)`;
+  `StateManager._compute_led_cfx_sweep` stores an atomic tuple that
+  `get_active_beat_anchor` attaches to the ~20 ms `BeatAnchor` pump, and the
+  frame-engine child applies `scale(lerp(px, cfx_rgb, cfx_mix), cfx_dim)` per
+  pixel on the composed-playback frame only. Wire fields are `.get`-defaulted on
+  both sides so a frozen/old frame-engine child stays neutral (frozen-child
+  skew). Blackout, emergency, and F2 drop-darkness structurally win — the overlay
+  is forced inert at the dispatch gate AND the child's blank/idle/emergency paths
+  never run the overlay. Ships `cfx_sweep.enabled: false`; the bloom threshold
+  and ramps stay `pending desk calibration` (Part F of the AWR-173 spec).
 
 Config:
 - `config/led_look_director.example.json`
@@ -786,6 +803,11 @@ Config:
 - `color_engine.slot_fill_strategy_by_look` and `color_engine.slot_fill_strategy_by_role` are optional objects; values must be `gradient_even`, `random_with_replacement`, or `random_with_mono_chance`.
 - `color_engine.slot_mono_chance_by_look` is an optional object mapping look names to numeric probabilities in `[0, 1]`; it defaults to `{}` and only affects looks using `random_with_mono_chance`.
 - `color_engine.locked_palette_by_look` is an optional object mapping look names to existing palette names. Locked looks resolve color and slot-color injection from that palette's full p-interval without changing the color-engine journey palette, dwell, focus, or RNG state. (AWR-152: the per-palette `white` blend knob was removed — every palette shipped `white: 0.0` in practice, so `Palette` no longer has a `white` field.)
+- `cfx_sweep` is optional and default-off (AWR-173). Absent/malformed/out-of-range block ⇒ disabled
+  (`CfxSweepConfig()`), so an un-mirrored live config never floods. Fields: `enabled`,
+  `engage_deadband`, `bloom_threshold_norm` (desk-calibrated), `flood_ramp_ms`, `release_ramp_ms`,
+  `dim_floor`. Loader validates `0 < bloom_threshold_norm < 1`, `0.5 + engage_deadband <
+  bloom_threshold_norm`, ramps `> 0`, `0 <= dim_floor < 1`; any violation disables the whole block.
 - `color_engine.v2` is optional and default-off. When present and valid it defines v2 zone ramps,
   bass normalization anchors, the local identity store path, soft-flip, palate-reset, bloom, and
   motion/travel thresholds. The current tracked example/default `bass_norm` anchors are

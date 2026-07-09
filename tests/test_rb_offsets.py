@@ -100,6 +100,41 @@ class V7211ChainTests(unittest.TestCase):
             ChainEntry(hops=(0x04E16EE8, 0xA8, 0x458, 0, 0x2C8, 8, 0x460, 0x30), final_off=0x38),
         )
 
+    def test_named_cfx_chains(self) -> None:
+        # AWR-173: verbatim CFX FILTER chains, RE-proven for RB 7.2.11.
+        self.assertEqual(
+            self.v.cfx_deck1_filter_param0,
+            ChainEntry(hops=(0x04E16EE8, 0xA8, 0x458, 0, 0x2C8, 0, 0x480, 0, 0x1E0, 0, 0x88, 0), final_off=0xE8),
+        )
+        self.assertEqual(
+            self.v.cfx_deck2_filter_param0,
+            ChainEntry(hops=(0x04E16EE8, 0xA8, 0x458, 0, 0x2C8, 8, 0x480, 0, 0x1E0, 0, 0x88, 0), final_off=0xE8),
+        )
+        self.assertEqual(
+            self.v.cfx_deck1_selected_id,
+            ChainEntry(hops=(0x04E16EE8, 0xA8, 0x458, 0, 0x2C8, 0, 0x480, 0, 0x1E0, 0, 0x88, 0), final_off=0x70),
+        )
+        self.assertEqual(
+            self.v.cfx_deck2_selected_id,
+            ChainEntry(hops=(0x04E16EE8, 0xA8, 0x458, 0, 0x2C8, 8, 0x480, 0, 0x1E0, 0, 0x88, 0), final_off=0x70),
+        )
+        self.assertEqual(
+            self.v.cfx_deck1_unit_channel,
+            ChainEntry(hops=(0x04E16EE8, 0xA8, 0x458, 0, 0x2C8, 0, 0x480, 0, 0x1E0, 0), final_off=0xD0),
+        )
+        self.assertEqual(
+            self.v.cfx_deck2_unit_channel,
+            ChainEntry(hops=(0x04E16EE8, 0xA8, 0x458, 0, 0x2C8, 8, 0x480, 0, 0x1E0, 0), final_off=0xD0),
+        )
+
+    def test_other_versions_have_no_cfx_chains(self) -> None:
+        # Feature inert by construction off 7.2.11.
+        for ver in ("7.2.8", "7.2.10", "7.2.13", "7.2.14"):
+            v = load_offsets_for_version(ver)
+            assert v is not None
+            self.assertIsNone(v.cfx_deck1_filter_param0, msg=ver)
+            self.assertIsNone(v.cfx_deck2_unit_channel, msg=ver)
+
 
 _MINI = """\
 1.0.0
@@ -188,6 +223,69 @@ class ParserTests(unittest.TestCase):
         self.assertIsNone(v.mixer_deck1_upfader_raw)
         self.assertIsNone(v.mixer_deck2_upfader_raw)
         self.assertIn("unknown optional label", "\n".join(captured.output))
+
+
+_VALID_CFX = [
+    "CFX_D1_FILTER_PARAM0 1 2 3",
+    "CFX_D2_FILTER_PARAM0 1 2 3",
+    "CFX_D1_SELECTED_ID 1 2 4",
+    "CFX_D2_SELECTED_ID 1 2 4",
+    "CFX_D1_UNIT_CHANNEL 1 5",
+    "CFX_D2_UNIT_CHANNEL 1 5",
+]
+_VALID_MIXER = [
+    "MIXER_D1_UPFADER_RAW 1 10",
+    "MIXER_D2_UPFADER_RAW 2 10",
+    "MIXER_D1_LOW_RAW 3 10",
+    "MIXER_D2_LOW_RAW 4 10",
+]
+
+
+def _mini_with(lines: list[str]) -> str:
+    return _MINI.replace("\n\n\n", "\n" + "\n".join(lines + ["", "", ""]), 1)
+
+
+class CfxParserTests(unittest.TestCase):
+    """AWR-173: the CFX group parses independently of the mixer group; each fails
+    closed only on its OWN malformed lines."""
+
+    def test_valid_cfx_group_parses_to_six_chains(self) -> None:
+        v = parse_offsets(_mini_with(_VALID_CFX), deck_count=2)["1.0.0"]
+        self.assertEqual(v.cfx_deck1_filter_param0, ChainEntry(hops=(0x1, 0x2), final_off=0x3))
+        self.assertEqual(v.cfx_deck2_filter_param0, ChainEntry(hops=(0x1, 0x2), final_off=0x3))
+        self.assertEqual(v.cfx_deck1_selected_id, ChainEntry(hops=(0x1, 0x2), final_off=0x4))
+        self.assertEqual(v.cfx_deck2_selected_id, ChainEntry(hops=(0x1, 0x2), final_off=0x4))
+        self.assertEqual(v.cfx_deck1_unit_channel, ChainEntry(hops=(0x1,), final_off=0x5))
+        self.assertEqual(v.cfx_deck2_unit_channel, ChainEntry(hops=(0x1,), final_off=0x5))
+        # No mixer labels present -> mixer stays None (independent groups).
+        self.assertIsNone(v.mixer_deck1_upfader_raw)
+
+    def test_partial_cfx_group_fails_closed(self) -> None:
+        v = parse_offsets(_mini_with(_VALID_CFX[:3]), deck_count=2)["1.0.0"]
+        self.assertIsNone(v.cfx_deck1_filter_param0)
+        self.assertIsNone(v.cfx_deck1_unit_channel)
+
+    def test_duplicate_cfx_label_fails_closed(self) -> None:
+        v = parse_offsets(_mini_with(_VALID_CFX + ["CFX_D1_FILTER_PARAM0 9 9"]), deck_count=2)["1.0.0"]
+        self.assertIsNone(v.cfx_deck1_filter_param0)
+
+    def test_bad_cfx_group_does_not_disable_healthy_mixer(self) -> None:
+        # Valid mixer + malformed (partial) CFX: mixer parses, CFX all None.
+        v = parse_offsets(_mini_with(_VALID_MIXER + _VALID_CFX[:2]), deck_count=2)["1.0.0"]
+        self.assertEqual(v.mixer_deck1_upfader_raw, ChainEntry(hops=(0x1,), final_off=0x10))
+        self.assertIsNone(v.cfx_deck1_filter_param0)
+
+    def test_bad_mixer_group_does_not_disable_healthy_cfx(self) -> None:
+        # Malformed (partial) mixer + valid CFX: CFX parses, mixer all None.
+        v = parse_offsets(_mini_with(_VALID_MIXER[:2] + _VALID_CFX), deck_count=2)["1.0.0"]
+        self.assertIsNone(v.mixer_deck1_upfader_raw)
+        self.assertEqual(v.cfx_deck1_filter_param0, ChainEntry(hops=(0x1, 0x2), final_off=0x3))
+
+    def test_anonymous_trailing_chain_still_ignored_with_cfx(self) -> None:
+        with self.assertLogs("rb_offsets", level="WARNING") as captured:
+            v = parse_offsets(_mini_with(_VALID_CFX + ["AA BB CC"]), deck_count=2)["1.0.0"]
+        self.assertEqual(v.cfx_deck1_filter_param0, ChainEntry(hops=(0x1, 0x2), final_off=0x3))
+        self.assertIn("anonymous trailing chain", "\n".join(captured.output))
 
 
 class ChainEntryTests(unittest.TestCase):

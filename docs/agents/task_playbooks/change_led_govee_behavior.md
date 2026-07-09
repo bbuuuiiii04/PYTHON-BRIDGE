@@ -69,6 +69,20 @@ Implementation notes:
   queue/rate-limit behavior, and prove status healing in the sender/adapter
   tests.
 - For color-engine slot behavior, verify `resolve_slot_colors()` invariants and slot strategy config validation before updating setup/status docs.
+- (AWR-173) CFX filter-sweep overlay: the per-tick math is the pure module function
+  `cfx_sweep_envelope(knob, prev_mix, dt_s, cfg)` in `led_dispatch_policy.py` — keep it a pure seam
+  (no I/O, no time reads; caller passes `dt_s`) and test it directly. `StateManager._compute_led_cfx_sweep`
+  stores an atomic `(mix, dim, rgb, captured_monotonic)` tuple; `get_active_beat_anchor` attaches it to
+  the real-playback anchor (idle freewheel stays neutral) and neutralizes a tuple older than
+  `CFX_ANCHOR_DEAD_S`. The overlay MUST stay inert whenever any darkness owner holds
+  (`_led_blackout_active()` or `_os.breakdown_active`), when v2 identity is off, or when the active-deck
+  CFX reading is stale/invalid — fail closed toward today. The frame-engine child applies it as
+  `scale(lerp(px, cfx_rgb, cfx_mix), cfx_dim)` on the composed-playback frame ONLY; the blank/idle/
+  emergency paths must never run it. Wire fields are `.get`-defaulted on BOTH sides (`_anchor_to_wire`,
+  the child anchor parse) so a frozen/version-skewed frame-engine child stays neutral — never make a cfx
+  wire field required. `CfxSweepConfig` ships `enabled: false`; the bloom threshold + ramps stay
+  `pending desk calibration`. Prove the envelope, gating, anchor, child overlay, and config loader in
+  `tests/test_led_cfx_sweep.py`.
 - For M2.5 slotized cues, keep `SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED` language until operator hardware visual sign-off covers sparkle hue stability, center-burst band split, strobe gating, drop snap behavior, Patch E visual balance, Patch S probabilistic solid-color outcomes, and Patch F generic-default bank rotation.
 - `drop_lifecycle.py` is a pure flat-window parity seam used by laser policy. The live LED resolver remains in `StateManager`; do not redirect LED runtime through the shared resolver without a separate approved change.
 - For LIGHTING ENGINE v2 identity work, preserve the v1-off compatibility gate, keep identity-store
