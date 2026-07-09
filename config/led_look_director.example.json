@@ -909,7 +909,7 @@
       "backend": "realtime_razer",
       "params": {}
     },
-    "rt_drop_chase": {
+    "rt_post_drop_remnant_chase": {
       "target": "room_perimeter",
       "action": "realtime",
       "scene_ref": "rt_drop_chase",
@@ -1197,7 +1197,7 @@
         "width": 2.5
       }
     },
-    "rt_drop_nebula": {
+    "rt_post_drop_remnant_nebula": {
       "target": "room_perimeter",
       "action": "realtime",
       "scene_ref": "rt_drop_nebula",
@@ -1461,8 +1461,8 @@
         "rt_post_drop_freestyle_nebula",
         "rt_post_drop_center_comet",
         "rt_post_drop_firework_chase",
-        "rt_drop_chase",
-        "rt_drop_nebula",
+        "rt_post_drop_remnant_chase",
+        "rt_post_drop_remnant_nebula",
         "rt_post_drop_firework_remnants"
       ],
       "breakdown": [
