@@ -206,6 +206,10 @@ untouched for the current dev workflow.
 **3.3 Setup controller** — first-run detection (is there a permanent install / LaunchAgent on this
 Mac?) and the two install modes (§4). Purpose: manage where the app lives + its lifecycle. Depends on:
 filesystem, `launchd`, and the reader-spec's memory-grant step (invoked, not designed here).
+*Interim note (2026-07-09, AWR-122): stick-side `packaging/stick/install.command` + `purge.command`
+exist as the labeled Saturday interim (app + pre-warm only, manifest-scoped purge — runbook §Stick
+helpers); they are conveniences, not this controller. The M2 operator directive + decomposition:
+`docs/plans/active/usb_launcher_m2_operator_directive_2026_07_09.md`.*
 
 **3.4 Menubar UI** — extend the existing PyObjC app `scripts/bridge_menubar.py` (`confirmed`
 re-verified 2026-07-09: raw AppKit/`NSStatusBar`, not rumps; 1224 lines). Adds a Setup section
