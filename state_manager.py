@@ -3315,6 +3315,7 @@ class StateManager(LEDDispatchPolicyMixin):
         white_moment: bool,
         drop_phase: str | None,
         post_drop_progress: float | None,
+        tier: str | None = None,
     ) -> None:
         led_engine = self._led_color_engine
         laser_engine = self._laser_color_engine
@@ -3327,6 +3328,7 @@ class StateManager(LEDDispatchPolicyMixin):
                 white_moment=white_moment,
                 drop_phase=drop_phase,
                 post_drop_progress=post_drop_progress,
+                tier=tier,
             )
         except Exception:
             # Keep the previous held color if the LED color read fails.
@@ -3362,17 +3364,22 @@ class StateManager(LEDDispatchPolicyMixin):
             and all(isinstance(v, int) and not isinstance(v, bool) for v in live)
             else None
         )
+        role = self._laser_color_last_led_role()
+        # AWR-170 (B): the drop tier is part of the signature so back-to-back drops
+        # with the same LED color but different energy tiers still re-pick the chase
+        # division. Push-loop safe: one plan lookup, no recompute (see helper).
+        tier = self._laser_color_drop_tier(role, sp_state)
         sig = (
             tuple(rgb) if isinstance(rgb, (list, tuple)) and len(rgb) == 3 else (),
             color_state.get("palette"),
             bool(color_state.get("white_sand_active")),
             bool(color_state.get("rainbow_active")),
             live_bucket,
+            tier,
         )
         if sig == self._laser_color_led_sig:
             return
         self._laser_color_led_sig = sig
-        role = self._laser_color_last_led_role()
         post_drop = (
             self._laser_color_post_drop_progress(role, sp_state)
             if role is not None
@@ -3382,6 +3389,7 @@ class StateManager(LEDDispatchPolicyMixin):
             white_moment=self._laser_color_white_moment(),
             drop_phase=role,
             post_drop_progress=post_drop,
+            tier=tier,
         )
 
     def _bootstrap_laser_color_if_needed(self) -> None:
@@ -3410,6 +3418,7 @@ class StateManager(LEDDispatchPolicyMixin):
             white_moment=self._laser_color_white_moment(),
             drop_phase=role,
             post_drop_progress=post_drop,
+            tier=self._laser_color_drop_tier(role, sp_state),
         )
 
     def _laser_color_last_led_role(self) -> str | None:
@@ -3437,6 +3446,33 @@ class StateManager(LEDDispatchPolicyMixin):
             return None
         cycle = self._led_post_drop_cycle_beats()
         return max(0.0, min(1.0, (abs_beat - float(sp_state.active_drop_beat)) / cycle))
+
+    def _laser_color_drop_tier(
+        self, role: str | None, sp_state: SmartPhrasingState | None
+    ) -> str | None:
+        """AWR-170 (B) Task 3: the active drop's energy tier for the CH8 chase
+        DIVISION pick. None unless we're in a 'drop' role on a non-scripted deck
+        with an F2 plan that has an entry for the active drop. PUSH-LOOP SAFE: one
+        plan lookup (for_drop) + the pure laser_tier mapping — no I/O, no recompute
+        of the plan. Tier-less / F2-off / scripted ⇒ None ⇒ selector uses standard,
+        byte-identical to pre-AWR-170."""
+        if role != "drop" or sp_state is None or sp_state.active_drop_beat is None:
+            return None
+        if not self._f2_enabled:
+            return None
+        active = self._os.active_deck
+        if active not in (1, 2):
+            return None
+        d = self._deck[active]
+        if getattr(d, "scripted_id", 0):
+            return None
+        plan = getattr(d.meta, "f2_plan", None)
+        if plan is None:
+            return None
+        entry = plan.for_drop(float(sp_state.active_drop_beat))
+        if entry is None:
+            return None
+        return lighting_moments_v2.laser_tier(entry.decision.family, entry.decision.tier)
 
     def set_pack_runtime(self, runtime: PackRuntime) -> None:
         """Atomically publish a new pack runtime bundle (command thread → push loop).
@@ -4493,6 +4529,7 @@ class StateManager(LEDDispatchPolicyMixin):
                         white_moment=self._laser_color_white_moment(),
                         drop_phase=led_role,
                         post_drop_progress=self._laser_color_post_drop_progress(led_role, led_sp_state),
+                        tier=self._laser_color_drop_tier(led_role, led_sp_state),
                     )
         else:
             self._dispatch_led_idle_ambient(
