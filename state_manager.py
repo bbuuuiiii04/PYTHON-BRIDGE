@@ -588,6 +588,11 @@ class StateManager(LEDDispatchPolicyMixin):
         # LedPaletteControl's get_laser_solo pulls ("off" | "armed" | "active").
         self._drop_presentation_armed_key: Optional[tuple[int, int]] = None
         self._drop_presentation_solo_feedback: str = "off"
+        # One-tick request set by a pad press while a solo window is open
+        # (AWR-159 Task 1); _drop_presentation_tick consumes it into
+        # WindowInputs.manual_interaction=True the very next tick and clears it,
+        # regardless of that tick's impact_now value.
+        self._drop_presentation_manual_cancel: bool = False
         # Set by _drive_pack_output each tick: pack live AND the latest autoloop
         # base render had no diagnostic (Task 4 items 3-4's darkness-guard input).
         self._drop_presentation_base_live: bool = False
@@ -2570,6 +2575,7 @@ class StateManager(LEDDispatchPolicyMixin):
             self._drop_presentation_apply_actions(actions)
             self._drop_presentation_last_actions = actions
             self._drop_presentation_last_pending = (None, "", None)
+            self._drop_presentation_manual_cancel = False
             return
         # AWR-140 follow-up: the Laser Director now emits reason="drop_crossing" for the capped
         # 2nd-chorus LABEL re-arm too (armed_this_tick without a smart-drop marker). A label re-arm
@@ -2674,7 +2680,11 @@ class StateManager(LEDDispatchPolicyMixin):
             stopped=not d.playing,
             track_changed=track_changed,
             active_deck_changed=active_deck_changed,
+            manual_interaction=self._drop_presentation_manual_cancel,
         )
+        # One-tick request, consumed regardless of this tick's impact_now (a
+        # cancel is not an impact) -- AWR-159 Task 1.
+        self._drop_presentation_manual_cancel = False
         actions = self._drop_presentation_window.tick(
             inputs, pending_presentation=pending_presentation, pending_reason=pending_reason,
         )
@@ -2699,7 +2709,10 @@ class StateManager(LEDDispatchPolicyMixin):
                         self._drop_presentation_learned_store.to_dict()
                     )
             session.finalize_drop_observation(decision.runway, has_phrase_data=plan.has_phrase_data)
-            self._drop_presentation_update_solo_feedback()
+        # Recompute every tick (not just at impact): a cancel's fail-open, or
+        # the window ending naturally, must reach the pad without waiting for
+        # the next drop's impact tick or another press (AWR-159 Task 1).
+        self._drop_presentation_update_solo_feedback()
 
     def _drop_presentation_apply_actions(self, actions: WindowActions) -> None:
         """Apply this tick's WindowMachine output. Idempotent: safe to call
@@ -2754,6 +2767,7 @@ class StateManager(LEDDispatchPolicyMixin):
         self._drop_presentation_apply_actions(actions)
         self._drop_presentation_last_actions = actions
         self._drop_presentation_last_pending = (None, "", None)
+        self._drop_presentation_manual_cancel = False
 
     def _drop_presentation_update_solo_feedback(self) -> None:
         last_actions = self._drop_presentation_last_actions
@@ -2784,10 +2798,13 @@ class StateManager(LEDDispatchPolicyMixin):
                 self._led_palette_control.maybe_publish()
 
     def _drop_presentation_solo_pad_pressed(self) -> None:
-        """Ev.LASER_SOLO_PAD: arm / disarm / veto per the authority doc's Solo
-        Source Contracts. No-ops with no active deck; still allowed (and
-        arms) during a scripted track, which only affects an autoloop-mode
-        true drop later (authority doc §Scripted-Track Exemption)."""
+        """Ev.LASER_SOLO_PAD: arm / disarm / veto / cancel-active per the
+        authority doc's Solo Source Contracts. No-ops with no active deck;
+        still allowed (and arms) during a scripted track, which only affects
+        an autoloop-mode true drop later (authority doc §Scripted-Track
+        Exemption). Four states from the pad's perspective: arm (idle ->
+        armed), disarm (armed -> idle), veto (auto-tier pending -> idle), and
+        cancel (window open -> idle, AWR-159 Task 1)."""
         cfg = self._drop_presentation_config
         if not cfg.enabled:
             return
@@ -2797,6 +2814,17 @@ class StateManager(LEDDispatchPolicyMixin):
         d = self._deck[active]
         track_key = (active, d.load_gen)
         session = self._drop_presentation_session
+
+        if self._drop_presentation_solo_feedback == "active":
+            # A solo window is currently open (Govees dark). Request a
+            # one-tick fail-open instead of falling through to "arm the next
+            # drop", which used to leave the CURRENT dark window untouched.
+            self._drop_presentation_manual_cancel = True
+            bridge_log.perf(
+                "override", "[LASER] solo-cancelled by=pad",
+                data={"surface": "laser", "action": "solo_cancel"},
+            )
+            return
 
         if self._drop_presentation_armed_key == track_key:
             self._drop_presentation_armed_key = None

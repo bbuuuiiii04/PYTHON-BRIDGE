@@ -96,6 +96,7 @@ class TickEventTests(unittest.TestCase):
     """Single-tick event emission verified against a stubbed mach backend."""
 
     def setUp(self) -> None:
+        bridge_fmt.reset_rate_state()  # AWR-160 phantom-* throttle keys are global
         self.mem = FakeMem()
         self.offs = _make_offsets()
         self.base = 0x100000000
