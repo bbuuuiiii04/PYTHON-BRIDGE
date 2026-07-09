@@ -811,6 +811,35 @@ class SmartDropTests(unittest.TestCase):
         self.assertEqual(sm._deck[1].meta.anlz_drops, [32])
         self.assertEqual(sm._deck[1].meta.smart_drops, [32])
 
+    def test_f2_plan_attaches_when_second_read_has_identical_markers(self) -> None:
+        # Live 2026-07-09 regression: the fast anlz read lands first, then the
+        # spectral-aware re-read arrives with the SAME markers plus the f2_plan;
+        # markers_changed is False, and the plan must still attach.
+        sm = _manager({"RBSS_SMART_REARM_EXPERIMENT": "1"})
+        sm._deck[1].load_gen = 7
+        sm._deck[1].meta.beatgrid_times_ms = [i * 500.0 for i in range(100)]
+        plan = SimpleNamespace(summary=lambda: "plan")
+
+        sm._handle_event(BridgeEvent(Ev.ANLZ_DATA, 1, _anlz_payload([32])))
+        second = _anlz_payload([32], source="anlz_identity")
+        second["f2_plan"] = plan
+        sm._handle_event(BridgeEvent(Ev.ANLZ_DATA, 1, second))
+
+        self.assertIs(sm._deck[1].meta.f2_plan, plan)
+
+    def test_planless_read_does_not_clear_attached_f2_plan(self) -> None:
+        sm = _manager({"RBSS_SMART_REARM_EXPERIMENT": "1"})
+        sm._deck[1].load_gen = 7
+        sm._deck[1].meta.beatgrid_times_ms = [i * 500.0 for i in range(100)]
+        plan = SimpleNamespace(summary=lambda: "plan")
+
+        first = _anlz_payload([32], source="anlz_identity")
+        first["f2_plan"] = plan
+        sm._handle_event(BridgeEvent(Ev.ANLZ_DATA, 1, first))
+        sm._handle_event(BridgeEvent(Ev.ANLZ_DATA, 1, _anlz_payload([32])))
+
+        self.assertIs(sm._deck[1].meta.f2_plan, plan)
+
     def test_duplicate_anlz_data_does_not_relog_smart_transition_select(self) -> None:
         sm = _manager({"RBSS_SMART_REARM_EXPERIMENT": "1"})
         sm._deck[1].load_gen = 7
