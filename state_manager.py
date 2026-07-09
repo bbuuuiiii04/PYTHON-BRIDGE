@@ -773,6 +773,9 @@ class StateManager(LEDDispatchPolicyMixin):
         # F2 (LIGHTING ENGINE v2 moments) master switch. Wired to config in Task 5;
         # defaults OFF so every intermediate state is byte-identical to v1 (kill test).
         self._f2_enabled = False
+        # F2 drop_look_routing: {family: {tier: [look names]}}. Populated from
+        # config in Task 5; empty ⇒ drop looks keep today's rotation pick.
+        self._f2_drop_look_routing: dict = {}
         self._stop  = threading.Event()
         self._mixer_authority_enabled = bool(mixer_authority_enabled)
 

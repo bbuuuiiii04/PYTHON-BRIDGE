@@ -233,5 +233,34 @@ class TestTrackPlan(unittest.TestCase):
         self.assertIn("drops=2", plan.summary())
 
 
+class TestTransitionWindow(unittest.TestCase):
+    """Task 3.1: the pre-drop dark-window length override (LED+laser shared)."""
+
+    def _plan(self, kind, beats, drop_beat=32):
+        dark = M.DarknessDecision(kind, beats, (drop_beat - beats, drop_beat), None, {}, "x")
+        dec = M.DropDecision(drop_beat, "WALL", 0.7, 3, dark, "", "x")
+        entry = M.DropPlanEntry(drop_beat, dec, 0.5, 0)
+        return M.F2TrackPlan((entry,), "swell")
+
+    def test_blackout_uses_planned_length(self):
+        plan = self._plan("blackout", 16)
+        self.assertEqual(M.transition_window_for(plan, 20.0, [32], default=4.0), 16.0)
+
+    def test_perc_flick_is_one(self):
+        plan = self._plan("perc-flick", 1)
+        self.assertEqual(M.transition_window_for(plan, 31.0, [32], default=4.0), 1.0)
+
+    def test_balloon_and_snap_have_no_black_window(self):
+        for kind in ("balloon", "snap", "dip"):
+            plan = self._plan(kind, 8)
+            self.assertEqual(M.transition_window_for(plan, 20.0, [32], default=4.0), 0.0)
+
+    def test_no_plan_or_no_upcoming_returns_default(self):
+        self.assertEqual(M.transition_window_for(None, 20.0, [32], default=4.0), 4.0)
+        plan = self._plan("blackout", 16)
+        self.assertEqual(M.transition_window_for(plan, 40.0, [32], default=4.0), 4.0)  # drop passed
+        self.assertEqual(M.transition_window_for(plan, None, [32], default=4.0), 4.0)  # no beat
+
+
 if __name__ == "__main__":
     unittest.main()

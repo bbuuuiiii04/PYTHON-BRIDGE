@@ -1759,7 +1759,42 @@ class LEDDispatchPolicyMixin:
         engine = self._led_color_engine
         return engine.diy_eligible if (engine is not None and engine.enabled) else None
 
+    def _led_f2_drop_look_names(self) -> Any:
+        """F2 drop typing (Task 3.2): the preferred drop-look names for the CURRENT
+        drop's (family, tier), from the drop_look_routing table. None ⇒ no F2
+        routing (F2 off / no plan / empty table / unknown cell) ⇒ today's rotation
+        pick (kill-safe). Works with F1 off too (D§7 rule 4: families over v1
+        colors)."""
+        if not getattr(self, "_f2_enabled", False):
+            return None
+        routing = getattr(self, "_f2_drop_look_routing", None)
+        if not routing:
+            return None
+        sp = getattr(self, "_last_sp_state", None)
+        anchor = getattr(sp, "active_drop_beat", None) if sp is not None else None
+        if anchor is None:
+            return None
+        d = self._deck.get(getattr(self._os, "active_deck", 0))
+        plan = getattr(getattr(d, "meta", None), "f2_plan", None) if d is not None else None
+        entry = plan.for_drop(float(anchor)) if plan is not None else None
+        if entry is None:
+            return None
+        names = routing.get(entry.decision.family, {}).get(entry.decision.tier)
+        return set(names) if names else None
+
     def _led_look_preference_predicate(self) -> Any:
+        base = self._led_v2_look_preference_predicate()
+        f2_names = self._led_f2_drop_look_names()
+        if not f2_names:
+            return base
+        # Restrict the drop-look choice to the family×tier routing set; if none of
+        # them are eligible, commit_role returns None and the caller falls back to
+        # today's rotation (led_dispatch_policy.py: _led_drop_decision_for_anchor).
+        if base is None:
+            return lambda name: name in f2_names
+        return lambda name: name in f2_names and base(name)
+
+    def _led_v2_look_preference_predicate(self) -> Any:
         if not bool(getattr(self, "_led_v2_latch", False)):
             return None
         engine = self._led_color_engine
