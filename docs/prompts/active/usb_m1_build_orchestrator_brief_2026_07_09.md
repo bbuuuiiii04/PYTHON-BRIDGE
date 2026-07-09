@@ -96,6 +96,21 @@ hidden-imports list anyway (belt and suspenders). Verify `build/`, `dist/`, and 
 venv are gitignored before the first build; commit only source (spec files, scripts,
 plist templates).
 
+**A8 — DISK DISCIPLINE (executive advisory, binding): the operator Mac has only ~8.4 GB
+free.** Consequences:
+- The Apple Development cert CANNOT be minted tonight (Xcode needs ~40 GB): the signing
+  task's `security find-identity` check WILL come back empty — take the unsigned/ad-hoc
+  fallback immediately without waiting or retrying, and keep `packaging/sign.sh`
+  re-runnable for when the cert exists.
+- Keep PyInstaller/DMG artifacts lean (onedir, no debug symbols beyond defaults, one DMG);
+  delete intermediate staging (PyInstaller `build/`, temp DMG staging, any download
+  caches) as soon as each step finishes — not at the end.
+- Check `df -g /` (or `df -h /`) before AND after every build-producing step. **HARD
+  STOP: if free space drops below 4 GB at any check, stop everything, clean your own
+  artifacts, and report `M1-BLOCKED: disk` — never run the operator's disk to the floor.**
+- If Task 0 needs a second interpreter, prefer the smallest viable install (python.org
+  framework build, no full Xcode, no big toolchains).
+
 ## Execution order (respects the fence)
 
 1. Spec Task 1 — `usb_launcher` contract in `docs/agents/change_contracts.yml`
