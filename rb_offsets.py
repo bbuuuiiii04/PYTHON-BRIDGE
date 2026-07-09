@@ -109,6 +109,12 @@ MIXER_D1_UPFADER_RAW 04E16EE8 A8 458 0 2C8 0 470 30
 MIXER_D2_UPFADER_RAW 04E16EE8 A8 458 0 2C8 8 470 30
 MIXER_D1_LOW_RAW     04E16EE8 A8 458 0 2C8 0 460 30 38
 MIXER_D2_LOW_RAW     04E16EE8 A8 458 0 2C8 8 460 30 38
+CFX_D1_FILTER_PARAM0 04E16EE8 A8 458 0 2C8 0 480 0 1E0 0 88 0 E8
+CFX_D2_FILTER_PARAM0 04E16EE8 A8 458 0 2C8 8 480 0 1E0 0 88 0 E8
+CFX_D1_SELECTED_ID   04E16EE8 A8 458 0 2C8 0 480 0 1E0 0 88 0 70
+CFX_D2_SELECTED_ID   04E16EE8 A8 458 0 2C8 8 480 0 1E0 0 88 0 70
+CFX_D1_UNIT_CHANNEL  04E16EE8 A8 458 0 2C8 0 480 0 1E0 0 D0
+CFX_D2_UNIT_CHANNEL  04E16EE8 A8 458 0 2C8 8 480 0 1E0 0 D0
 
 
 7.2.10
@@ -181,6 +187,14 @@ class RBOffsetVersion:
     mixer_deck2_upfader_raw: Optional[ChainEntry] = None
     mixer_deck1_low_raw: Optional[ChainEntry] = None
     mixer_deck2_low_raw: Optional[ChainEntry] = None
+    # CFX FILTER tracking (AWR-173) — independent optional group, 7.2.11 only.
+    # Tracking-only: never feeds active-deck authority or mixer validity.
+    cfx_deck1_filter_param0: Optional[ChainEntry] = None
+    cfx_deck2_filter_param0: Optional[ChainEntry] = None
+    cfx_deck1_selected_id: Optional[ChainEntry] = None
+    cfx_deck2_selected_id: Optional[ChainEntry] = None
+    cfx_deck1_unit_channel: Optional[ChainEntry] = None
+    cfx_deck2_unit_channel: Optional[ChainEntry] = None
 
 
 # ── Parser ───────────────────────────────────────────────────────────────────
@@ -200,32 +214,55 @@ _REQUIRED_MIXER_LABELS = (
     "MIXER_D2_LOW_RAW",
 )
 
+# AWR-173: CFX FILTER tracking chains. A SEPARATE label group — a malformed CFX
+# group must never disable a healthy mixer group, and vice versa.
+_REQUIRED_CFX_LABELS = (
+    "CFX_D1_FILTER_PARAM0",
+    "CFX_D2_FILTER_PARAM0",
+    "CFX_D1_SELECTED_ID",
+    "CFX_D2_SELECTED_ID",
+    "CFX_D1_UNIT_CHANNEL",
+    "CFX_D2_UNIT_CHANNEL",
+)
 
-def _parse_optional_mixer_lines(
+
+def _parse_labeled_group(
     version: str,
     lines: list[str],
-) -> tuple[Optional[ChainEntry], Optional[ChainEntry], Optional[ChainEntry], Optional[ChainEntry]]:
+    required_labels: tuple[str, ...],
+    *,
+    group_name: str,
+    skip_labels: tuple[str, ...] = (),
+    warn_unknown: bool = True,
+) -> tuple[Optional[ChainEntry], ...]:
+    """Parse one named optional chain group, fail-closed to all-None. Groups are
+    independent: a group only fails on ITS OWN malformed/duplicate/partial lines.
+    ``skip_labels`` are a sibling group's labels (ignored silently). When
+    ``warn_unknown`` is False the sibling group owns the anonymous/unknown warnings,
+    so this group stays quiet on everything but its own labels."""
     parsed: dict[str, ChainEntry] = {}
-    bad_mixer = False
+    bad = False
     for line in lines:
         parts = line.split(maxsplit=1)
         label = parts[0] if parts else ""
-        if label in _REQUIRED_MIXER_LABELS:
+        if label in required_labels:
             if label in parsed:
-                log.warning("offsets: duplicate mixer label %s in version %s", label, version)
-                bad_mixer = True
+                log.warning("offsets: duplicate %s label %s in version %s", group_name, label, version)
+                bad = True
                 continue
             if len(parts) != 2:
-                log.warning("offsets: malformed mixer label %s in version %s", label, version)
-                bad_mixer = True
+                log.warning("offsets: malformed %s label %s in version %s", group_name, label, version)
+                bad = True
                 continue
             try:
                 parsed[label] = _parse_chain(parts[1])
             except ValueError:
-                log.warning("offsets: malformed mixer chain %s in version %s", label, version)
-                bad_mixer = True
+                log.warning("offsets: malformed %s chain %s in version %s", group_name, label, version)
+                bad = True
             continue
 
+        if label in skip_labels or not warn_unknown:
+            continue
         try:
             _parse_chain(line)
         except ValueError:
@@ -233,10 +270,33 @@ def _parse_optional_mixer_lines(
         else:
             log.warning("offsets: ignoring anonymous trailing chain in version %s", version)
 
-    if bad_mixer or (parsed and set(parsed) != set(_REQUIRED_MIXER_LABELS)):
-        log.warning("offsets: mixer authority disabled for version %s", version)
-        return (None, None, None, None)
-    return tuple(parsed.get(label) for label in _REQUIRED_MIXER_LABELS)  # type: ignore[return-value]
+    if bad or (parsed and set(parsed) != set(required_labels)):
+        log.warning("offsets: %s disabled for version %s", group_name, version)
+        return tuple(None for _ in required_labels)
+    return tuple(parsed.get(label) for label in required_labels)
+
+
+def _parse_optional_mixer_lines(
+    version: str,
+    lines: list[str],
+) -> tuple[Optional[ChainEntry], ...]:
+    return _parse_labeled_group(
+        version, lines, _REQUIRED_MIXER_LABELS,
+        group_name="mixer authority",
+        skip_labels=_REQUIRED_CFX_LABELS,
+        warn_unknown=True,
+    )
+
+
+def _parse_optional_cfx_lines(
+    version: str,
+    lines: list[str],
+) -> tuple[Optional[ChainEntry], ...]:
+    return _parse_labeled_group(
+        version, lines, _REQUIRED_CFX_LABELS,
+        group_name="cfx tracking",
+        warn_unknown=False,
+    )
 
 
 def parse_offsets(text: str, *, deck_count: int = 4) -> dict[str, RBOffsetVersion]:
@@ -276,7 +336,9 @@ def parse_offsets(text: str, *, deck_count: int = 4) -> dict[str, RBOffsetVersio
         livep  = tuple(per_deck[4 * d + 1] for d in range(deck_count))
         tinfo  = tuple(per_deck[4 * d + 2] for d in range(deck_count))
         anlz   = tuple(per_deck[4 * d + 3] for d in range(deck_count))
-        mixer = _parse_optional_mixer_lines(version, block[1 + expected_lines:])
+        trailing = block[1 + expected_lines:]
+        mixer = _parse_optional_mixer_lines(version, trailing)
+        cfx = _parse_optional_cfx_lines(version, trailing)
         out[version] = RBOffsetVersion(
             version=version,
             deck_count=deck_count,
@@ -289,6 +351,12 @@ def parse_offsets(text: str, *, deck_count: int = 4) -> dict[str, RBOffsetVersio
             mixer_deck2_upfader_raw=mixer[1],
             mixer_deck1_low_raw=mixer[2],
             mixer_deck2_low_raw=mixer[3],
+            cfx_deck1_filter_param0=cfx[0],
+            cfx_deck2_filter_param0=cfx[1],
+            cfx_deck1_selected_id=cfx[2],
+            cfx_deck2_selected_id=cfx[3],
+            cfx_deck1_unit_channel=cfx[4],
+            cfx_deck2_unit_channel=cfx[5],
         )
     return out
 

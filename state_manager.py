@@ -61,12 +61,15 @@ from .smart_phrasing import (
 )
 from .models import (
     ArmSequence, BridgeEvent, DeckState, Ev, MixerAuthoritySnapshot, OutputState,
-    PositionSnapshot, SmartDropEnergyShadow, TrackMetadata,
+    PositionSnapshot, SmartDropEnergyShadow, TrackMetadata, CfxFilterSnapshot,
 )
 from . import led_dispatch_policy as _led_dispatch_policy
-from .led_dispatch_policy import LEDDispatchPolicyMixin
+from .led_dispatch_policy import LEDDispatchPolicyMixin, cfx_sweep_envelope
 from .led_palette_control import LedPaletteControl, PaletteFeedbackWriter
-from .led_config import load_drop_presentation_config, load_f2_config, load_f4_config
+from .led_config import (
+    load_drop_presentation_config, load_f2_config, load_f4_config,
+    load_cfx_sweep_config,
+)
 from .led_identity_v2 import (
     IdentityStore,
     NORM_ANCHORS as LED_IDENTITY_NORM_ANCHORS,
@@ -179,6 +182,9 @@ _PACK_SCRUB_JUMP_MS = 400
 _PACK_SCRUB_HOLD_S = 0.6
 LIVE_BPM_FOLLOW_ENV = "RBSS_LIVE_BPM_FOLLOW"
 AUTOLOOP_MASTER_PHRASE_ARM_ENV = "RBSS_AUTOLOOP_MASTER_PHRASE_ARM"
+# AWR-173: CFX snapshot freshness window (mirrors MIXER_STALE_AFTER_S). A CFX
+# snapshot older than this is treated as absent by the LED overlay (fail closed).
+CFX_STALE_AFTER_S = 1.0
 SMART_DROP_ENV = "RBSS_SMART_DROP"
 SMART_BREAKDOWN_ENV = "RBSS_SMART_BREAKDOWN"
 PHRASE_ANCHOR_ENV = "RBSS_PHRASE_ANCHOR"
@@ -787,6 +793,9 @@ class StateManager(LEDDispatchPolicyMixin):
         _f4_cfg = load_f4_config()
         self._f4_config = _f4_cfg
         self._f4_enabled = _f4_cfg.enabled
+        # AWR-173: CFX filter-sweep LED overlay config, from the `/cfx_sweep` block.
+        # Absent/malformed block ⇒ disabled ⇒ the overlay never renders (kill test).
+        self._cfx_sweep_config = load_cfx_sweep_config()
         self._stop  = threading.Event()
         self._mixer_authority_enabled = bool(mixer_authority_enabled)
 

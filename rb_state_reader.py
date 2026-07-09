@@ -44,7 +44,10 @@ from typing import Callable, Optional
 
 from .config import MEM_POLL_HZ, RB_SCALE
 from .active_deck_resolver import RB_MASTER_STALE_AFTER_S, label_low, label_upfader
-from .models import BridgeEvent, Ev, MixerAuthoritySnapshot, MixerDeckReading
+from .models import (
+    BridgeEvent, Ev, MixerAuthoritySnapshot, MixerDeckReading,
+    CfxDeckReading, CfxFilterSnapshot,
+)
 from .rb_memory import (
     PositionCache,
     _base_from_vmmap,
@@ -285,6 +288,11 @@ class RBStateReader(threading.Thread):
 
         if self._mixer_authority_enabled:
             self._tick_mixer(task, base)
+
+        # AWR-173: CFX FILTER tracking is INDEPENDENT of mixer authority — gated
+        # only on its chains being present (7.2.11). Inert by construction on any
+        # version without CFX chains (no event at all). Never feeds authority.
+        self._tick_cfx(task, base)
 
         for d in range(offs.deck_count):
             self._tick_deck(task, base, d)
@@ -587,6 +595,66 @@ class RBStateReader(threading.Thread):
             low_label=label_low(low_norm),
         )
 
+    def _tick_cfx(self, task: int, base: int) -> None:
+        """AWR-173: publish a CfxFilterSnapshot for decks 1/2 from the CFX FILTER
+        chains. Tracking-only — it never enters _tick_mixer's reads, never touches
+        _authoritative_kinds, and never feeds active-deck authority. Inert by
+        construction (no event at all) on any RB version whose CFX chains are
+        absent, so the feature simply does not exist off 7.2.11."""
+        offs = self._offs
+        assert offs is not None
+        decks = (
+            (1, offs.cfx_deck1_filter_param0, offs.cfx_deck1_selected_id, offs.cfx_deck1_unit_channel),
+            (2, offs.cfx_deck2_filter_param0, offs.cfx_deck2_selected_id, offs.cfx_deck2_unit_channel),
+        )
+        if any(ch is None for _d, *chs in decks for ch in chs):
+            return  # CFX chains not present for this version — feature inert
+        now = self._clock()
+        readings = {
+            deck: self._cfx_reading(task, base, deck, param_ch, id_ch, unit_ch)  # type: ignore[arg-type]
+            for deck, param_ch, id_ch, unit_ch in decks
+        }
+        snapshot = CfxFilterSnapshot(valid=True, deck=readings, updated_at=now, reason="ok")
+        self._enqueue(BridgeEvent(Ev.CFX_STATE, 0, {"snapshot": snapshot}, "rb_state"))
+
+    def _cfx_reading(
+        self,
+        task: int,
+        base: int,
+        deck: int,
+        param_ch: ChainEntry,
+        id_ch: ChainEntry,
+        unit_ch: ChainEntry,
+    ) -> CfxDeckReading:
+        """Validate one deck's CFX read per the RE evidence: selected effect id
+        must be 0 (FILTER), unit channel must equal deck-1, param0 finite in 0..1.
+        Any failure carries a short reason and valid=False (fail closed)."""
+        filter_norm, param_reason = self._follow_finite_f32_result(
+            task, base, param_ch, minimum=0.0, maximum=1.0,
+        )
+        selected_id = self._follow_i32(task, base, id_ch)
+        unit_channel = self._follow_i32(task, base, unit_ch)
+
+        def reading(valid: bool, reason: str) -> CfxDeckReading:
+            return CfxDeckReading(
+                deck=deck,
+                filter_norm=filter_norm if filter_norm is not None else 0.0,
+                selected_effect_id=selected_id if selected_id is not None else -1,
+                unit_channel=unit_channel if unit_channel is not None else -1,
+                valid=valid,
+                reason=reason,
+            )
+
+        if selected_id is None or unit_channel is None:
+            return reading(False, "unreadable")
+        if selected_id != 0:
+            return reading(False, "wrong_effect")
+        if unit_channel != deck - 1:
+            return reading(False, "unit_channel_mismatch")
+        if filter_norm is None:
+            return reading(False, param_reason)  # unreadable | non_finite | out_of_range
+        return reading(True, "ok")
+
     def _reset_play_inference(self, d: int) -> None:
         self._last_pos_samples.pop(d, None)
         self._last_playing.pop(d, None)
@@ -704,7 +772,11 @@ class RBStateReader(threading.Thread):
 
     # ── Queue helper ─────────────────────────────────────────────────────────
     def _enqueue(self, ev: BridgeEvent) -> None:
-        if ev.kind in self._authoritative_kinds:
+        # AWR-173: CFX_STATE is consumed by StateManager (stored, never authority)
+        # but is deliberately NOT in _authoritative_kinds — that set gates mixer/
+        # master authority. Route it to the StateManager queue anyway so it isn't
+        # dropped by drop_unrouted_events, without ever touching authority logic.
+        if ev.kind in self._authoritative_kinds or ev.kind == Ev.CFX_STATE:
             target = self._authoritative_q or self._q
         elif self._drop_unrouted_events:
             return
@@ -804,6 +876,16 @@ class RBStateReader(threading.Thread):
         except OSError:
             return None
         return struct.unpack_from("<q", data)[0]
+
+    def _follow_i32(self, task: int, base: int, ch: ChainEntry) -> Optional[int]:
+        addr = self._follow_addr(task, base, ch)
+        if addr is None:
+            return None
+        try:
+            data = _read_bytes(task, addr, 4)
+        except OSError:
+            return None
+        return struct.unpack_from("<i", data)[0]
 
     def _follow_string(self, task: int, base: int, ch: ChainEntry, n: int) -> Optional[str]:
         """Read up to n bytes at the chain endpoint and decode as UTF-8 up to NUL."""

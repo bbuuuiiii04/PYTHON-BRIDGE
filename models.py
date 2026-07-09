@@ -140,6 +140,32 @@ class MixerAuthoritySnapshot:
 
 
 @dataclass(frozen=True)
+class CfxDeckReading:
+    """One deck's CFX FILTER read (AWR-173). Tracking-only — NEVER feeds active-deck
+    authority or mixer-snapshot validity."""
+    deck: int                 # bridge deck 1/2
+    filter_norm: float        # param0, already 0..1 per RE evidence
+    selected_effect_id: int   # 0 == FILTER
+    unit_channel: int         # must equal deck - 1
+    valid: bool               # id==0 and unit_channel==deck-1 and finite 0..1
+    reason: str               # "ok" | "unreadable" | "non_finite" | "out_of_range"
+                              # | "wrong_effect" | "unit_channel_mismatch"
+
+
+@dataclass(frozen=True)
+class CfxFilterSnapshot:
+    """Frozen CFX snapshot. Per-deck validity is deliberate (unlike the mixer
+    snapshot): deck 1's knob keeps working when deck 2's CFX unit is unreadable."""
+    valid: bool               # chains present and both decks attempted
+    deck: Mapping[int, CfxDeckReading]
+    updated_at: float
+    reason: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "deck", MappingProxyType(dict(self.deck)))
+
+
+@dataclass(frozen=True)
 class RBMasterState:
     deck: Optional[int]
     valid: bool
@@ -244,6 +270,7 @@ class ArmSequence:
 
 class Ev:
     MIXER_STATE       = "mixer_state"       # global, payload={snapshot: MixerAuthoritySnapshot}
+    CFX_STATE         = "cfx_state"         # global, payload={snapshot: CfxFilterSnapshot}; tracking-only, never authority
     MASTER_CHANGED    = "master_changed"    # deck = new master (1 or 2)
     LEGACY_ACTIVE_DECK = "legacy_active_deck" # deck = OSC/debug fallback active-deck request
     TRACK_LOADED      = "track_loaded"      # deck, payload={title: str, load_gen: int}
