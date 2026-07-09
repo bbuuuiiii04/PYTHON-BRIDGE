@@ -455,6 +455,9 @@ class RendererByteIdenticalTests(unittest.TestCase):
             "rt_drop_center_burst",
             "rt_post_drop_center_comet",
             "rt_twinkle",
+            # AWR-156: promoted accepted looks.
+            "rt_groove_heartbeat",
+            "rt_post_drop_firework_remnants",
         }
         self.assertEqual(set(SLOT_EFFECTS), expected)
         # The baked sand twinkle is a Frame effect, NOT a slot effect.

@@ -160,9 +160,16 @@ class SlotGrooveNebulaUnitTests(unittest.TestCase):
         )
 
     def test_slots_0_to_4_activated_over_sweep(self) -> None:
-        """A full beat sweep activates slots 0 through 4 (not just one slot)."""
+        """A long beat sweep activates slots 0 through 4 (not just one slot).
+
+        AWR-156 knob #4: the mashup died -- a spawn is now ONE fixed palette
+        slot for its whole loop_beats cycle (cycle = int(cue_beat/loop_beats),
+        slot = cycle % 5), not an intensity-swept gradient. The sweep window
+        widened from 8 beats to 40 beats (10 full loop_beats cycles) so all 5
+        cycle-derived slots still appear.
+        """
         used: set[int] = set()
-        for tick in range(200):
+        for tick in range(1000):
             beat = tick / 25.0
             field = _call_groove_nebula(beat, segments=60, frame_index=tick)
             used.update(_used_slots(field))
@@ -263,17 +270,19 @@ class PatchE1ConfigTests(unittest.TestCase):
         bank = result.config.banks.get("default")
         self.assertIsNotNone(bank)
         self.assertIn("rt_groove_nebula", bank.groove)
-        self.assertIn("rt_drop_nebula", bank.drop)
+        # AWR-156 bank recast (f): rt_drop_nebula moved drop -> post_drop
+        # ("current sparkling cues can play the role of the sparkling remnants").
+        self.assertIn("rt_drop_nebula", bank.post_drop)
+        self.assertNotIn("rt_drop_nebula", bank.drop)
         self.assertIn("rt_post_drop_nebula", bank.post_drop)
 
     def test_drop_nebula_pairs_to_post_drop_nebula(self) -> None:
+        # AWR-156 bank recast (f): a post_drop-role look never fires a pair,
+        # so rt_drop_nebula's drop_pairs entry was removed.
         result = self._load_config("config/led_look_director.example.json")
         self.assertTrue(result.available, f"config not available: {result.reason}")
         self.assertEqual(tuple(result.errors), ())
-        pair = result.config.drop_pairs.get("rt_drop_nebula")
-        self.assertIsNotNone(pair)
-        self.assertEqual(pair.post_drop, "rt_post_drop_nebula")
-        self.assertEqual(pair.duration_beats, 8.0)
+        self.assertIsNone(result.config.drop_pairs.get("rt_drop_nebula"))
 
 
 class PatchE1SlotSmokeTests(unittest.TestCase):
@@ -350,9 +359,10 @@ class PatchE1RegressionTests(unittest.TestCase):
             self.assertIn(key, SLOT_EFFECTS, f"{key} missing from SLOT_EFFECTS")
 
     def test_slot_effects_preserves_e1_entries_after_later_patches(self) -> None:
+        # AWR-156 added rt_groove_heartbeat + rt_post_drop_firework_remnants.
         self.assertEqual(
-            len(SLOT_EFFECTS), 14,
-            f"Expected 14 SLOT_EFFECTS after E3, got {len(SLOT_EFFECTS)}: "
+            len(SLOT_EFFECTS), 16,
+            f"Expected 16 SLOT_EFFECTS after AWR-156, got {len(SLOT_EFFECTS)}: "
             f"{sorted(SLOT_EFFECTS.keys())}"
         )
 

@@ -62,7 +62,8 @@ _MOVED_LEGACY_LOOKS = {
 }
 _EXPECTED_DEFAULT_GENERICS = {
     "groove": "rt_groove_chase",
-    "drop": "rt_drop_chase",
+    # AWR-156 bank recast (f): rt_drop_chase moved drop -> post_drop, so the
+    # "drop" role no longer has a generic chase representative.
     "post_drop": "rt_post_drop_chase",
     "ambient": "rt_twinkle",
 }
@@ -149,11 +150,14 @@ class PatchFBankCleanupTests(unittest.TestCase):
             self.assertEqual(result.config.looks[look_name].color_source, "engine")
 
     def test_drop_pairs_resolve_and_generic_chase_pair_exists(self) -> None:
+        # AWR-156 bank recast (f): rt_drop_chase moved to the post_drop bank,
+        # so it no longer fires a drop_pairs entry -- rt_drop_center_burst is
+        # the remaining generic (non-legacy-suffixed) drop pair.
         result = _load()
-        pair = result.config.drop_pairs.get("rt_drop_chase")
+        self.assertIsNone(result.config.drop_pairs.get("rt_drop_chase"))
+        pair = result.config.drop_pairs.get("rt_drop_center_burst")
         self.assertIsNotNone(pair)
-        self.assertEqual(pair.post_drop, "rt_post_drop_chase")
-        self.assertEqual(pair.duration_beats, 8.0)
+        self.assertEqual(pair.post_drop, "rt_post_drop_center_comet")
         for drop_name, drop_pair in result.config.drop_pairs.items():
             self.assertIn(drop_name, result.config.looks)
             self.assertIn(drop_pair.post_drop, result.config.looks)

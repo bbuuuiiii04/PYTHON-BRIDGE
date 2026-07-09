@@ -32,9 +32,14 @@ class PatchBTests(unittest.TestCase):
                 self.assertEqual(len(row), 6)  # Exactly 6 lanes
 
     def test_slots_0_to_4_receive_nonzero_intensity(self):
+        # AWR-156 knob #4: the mashup died -- a head is now ONE fixed palette
+        # slot for its whole loop_beats cycle (cycle = int(cue_beat/loop_beats),
+        # slots = cycle % 5 and (cycle + 2) % 5), not an intensity-swept
+        # gradient. The sweep window widened from 8 beats to 40 beats (10
+        # full loop_beats cycles) so all 5 cycle-derived slots still appear.
         segments = 30
         used_slots = set()
-        for beat in range(80):  # sweep across beats
+        for beat in range(400):  # sweep across beats
             field = _slot_groove_chase(
                 beat=beat / 10.0, local_t=0.0, frame_index=0,
                 params={}, segments=segments, seed=42
@@ -43,7 +48,7 @@ class PatchBTests(unittest.TestCase):
                 for slot_idx, intensity in enumerate(row):
                     if intensity > 0.0:
                         used_slots.add(slot_idx)
-        
+
         # We expect slots 0, 1, 2, 3, 4 to be used for the comet
         for expected_slot in range(5):
             self.assertIn(expected_slot, used_slots)
@@ -95,7 +100,8 @@ class PatchBTests(unittest.TestCase):
         look = res.config.looks["rt_groove_chase"]
         self.assertEqual(look.scene_ref, "rt_groove_chase")
         self.assertEqual(look.color_source, "engine")
-        self.assertEqual(look.params, {})
+        # AWR-156 knob #9: role-scoped width (was {}).
+        self.assertEqual(look.params, {"width": 2.5})
 
 if __name__ == "__main__":
     unittest.main()

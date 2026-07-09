@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified + log-corpus-grounded (read-only diagnosis, no code changed)
-last_verified_commit: a98927a
+last_verified_commit: f627853
 last_verified_date: 2026-07-08
-validation_scope: read-only forensic diagnosis of the deck-2 rekordbox reader across 20 session logs in ~/Library/Logs/rb_ss_bridge/ plus source verification of rb_memory.py / rb_state_reader.py / active_deck_resolver.py / led_dispatch_policy.py at commit a98927a; the bridge was DOWN during analysis. No runtime behavior changed, no code written. Names the mechanism and three instrumented-testable hypotheses; H2 is priority per operator testimony (both decks played the whole session incl. FEIN). Not implementation-authorizing.
+validation_scope: read-only forensic diagnosis of the deck-2 rekordbox reader across 20 session logs in ~/Library/Logs/rb_ss_bridge/ plus source verification of rb_memory.py / rb_state_reader.py / active_deck_resolver.py / led_dispatch_policy.py / scripts/ss_bridge_watcher.sh at commit f627853; the bridge was DOWN during analysis. No runtime behavior changed, no code written. Names the mechanism, three hypotheses (H1 rejected, H2 = core defect), and fix shapes. Operator correction 2026-07-08: the fallback (RBSS_POS_CHAIN_SKIP_OBJC) was turned off deliberately, not the deck; H1 (pause) is dead, H2 (chain field freezes on fresh deck-2 load) is the core defect. §10 fix shapes are direction, not an implementation authorization.
 ---
 
 # Deck-2 reader diagnosis — the "last-song LED blackout" root cause (2026-07-08)
@@ -25,11 +25,20 @@ be wrong — instrument anyway).
 
 ## 1. The one-line reframe
 
-**Deck 2 has a single working position source with a dead backup, and that
-source's "healthy" test passes on a frozen value.** When the one source froze on
-the FEIN load, both readers reported deck 2 paused, the active-deck resolver went
-idle, and the LEDs parked on the dim ambient idle look. This is **not** an LED
-bug and **not** a blackout latch — it is a rekordbox-reader fault.
+**Deck 2 was running on a single position source with its backup deliberately
+switched off, and that source's "healthy" test passes on a frozen value.** When
+the one source froze on the FEIN load, both readers reported deck 2 paused, the
+active-deck resolver went idle, and the LEDs parked on the dim ambient idle look.
+This is **not** an LED bug and **not** a blackout latch — it is a rekordbox-reader
+fault, and it is two things compounding: **(1)** the operator has the ObjC scan
+fallback turned off (`RBSS_POS_CHAIN_SKIP_OBJC=1`) to avoid the pre-AWR-148
+multi-second freezes, and **(2)** the chain's health check is freeze-blind, so a
+frozen chain never yields to re-engage the scan. The core defect underneath both
+is **(3)** the chain field itself freezing on a fresh deck-2 load (§8, H2).
+
+**Operator correction (2026-07-08):** "I turned it off" meant the **fallback**
+(the ObjC scan), not the deck. The deck was playing the whole session, FEIN
+included. That kills H1 (a genuine pause) and makes H2 the core defect.
 
 ---
 
@@ -84,17 +93,31 @@ the entire ObjC heap-scan resolution pipeline is skipped (`rb_memory.py:1310`,
 `_read_decks_chain_first` at `rb_memory.py:1392-1410`). **A frozen chain reads as
 healthy and turns off the very fallback meant to catch it.**
 
-### 3c. The ObjC fallback has been dead since Jul-8 afternoon **[confirmed]**
+`skip2` is only armed because the operator enabled the skip flag: the launcher
+sets `RBSS_POS_CHAIN_SKIP_OBJC=1` (`scripts/ss_bridge_watcher.sh:152`, alongside
+`RBSS_POS_CHAIN_DIRECT=1` at `:151`), and `_skip_objc_when_chain` requires
+`SKIP_OBJC=1 AND chain-direct AND offsets resolved` (`rb_memory.py:1201-1205`).
+So the fallback is **operator-configured off**, engaged only opportunistically on
+ticks where the chain itself misses (`skip2 = _skip_objc_when_chain AND
+_chain_ok_last[2]`, `rb_memory.py:1307`). A *frozen* chain never misses — it
+returns a value — so it never lets the fallback back in.
 
-Even when it *does* run, the ObjC deck-2 scan has not resolved deck 2 in recent
-sessions:
+### 3c. The ObjC fallback is off by config, and unproductive on the rare ticks it runs **[confirmed]**
+
+The 0-commit picture is **not** a pure bug — it is the operator skip flag (§3b)
+plus a scan that, on the rare chain-miss ticks it does engage, fails to validate:
 
 - Tonight (`bridge-20260708-203103.jsonl`): **11 resolution attempts, 0
-  validated, 0 committed.**
+  validated, 0 committed.** Those 11 attempts happened on chain-miss ticks (where
+  `skip2` briefly dropped to `False`); they were short windows that never
+  accumulated ≥4 advancing samples on the true field.
 - Zero `[RBMEM][D2COMMIT]` in every July-8 afternoon/evening session
   (`145239`, `153227`, `203103`). Only 2 commits exist across all 20 sessions.
 
-Why it fails even mid-track: stage **B** always finds a decoy pointer
+So "the fallback is dead" is really **operator-disabled skip + a scan starved by
+brief engagement windows + the freeze-blind `chain_ok` that never opens those
+windows when it matters** — three things compounding, not one broken scan. When
+the scan *does* run it also self-sabotages: stage **B** always finds a decoy pointer
 `ptr_b = (container − 0x270)[+0x78]` (`rb_memory.py:960-969`) that never
 validates; stage **C** is the zone scan (`rb_memory.py:972-984`); and the stage
 **D** heap scan that could find the *real* moving field is gated on
@@ -204,19 +227,24 @@ session's logs.
 
 ---
 
-## 8. The one thing logs cannot settle, and the operator testimony that resolves priority
+## 8. What froze, and why H1 is dead **[operator-testimony + confirmed]**
 
 Was the FEIN field frozen because **(a)** FEIN was genuinely paused, or **(b)**
 the offset chain read the *wrong field* for a freshly-loaded deck-2 track while
 audio actually played?
 
-- **Operator-testimony (2026-07-08):** both decks were playing the whole session,
-  **including FEIN**. This is first-hand evidence **against (a)** and tilts
-  priority to **(b) — wrong field on fresh load**. (Evidence beats memory, so H1
-  instrumentation still lands as the cheap confirm.)
-- Log support for (b): the 15:13 position wobble proves the chain/scan *can*
-  misreport deck-2 position during instability, and the dead ObjC fallback means
-  nothing would catch a wrong chain.
+**The operator correction settles it: (b).** His "I turned it off" referred to
+the **fallback** (`RBSS_POS_CHAIN_SKIP_OBJC`), not the deck. Both decks — FEIN
+included — were playing the whole session. So:
+
+- **(a) genuine pause is rejected.** H1 is dead; the original testimony (deck
+  playing) stands, now un-contradicted.
+- **(b) wrong field on fresh load is the core defect.** The chain returned a
+  frozen value for a *playing* FEIN, which by `playing = raw != prev_raw`
+  (`rb_memory.py:899`) reads as paused.
+- Log support for (b): the 15:13 position wobble (30.4 → 20.5 → 25.6 → 30.8)
+  proves the chain/scan *can* misreport deck-2 position during instability, and
+  with the fallback configured off nothing catches a wrong chain.
 
 ---
 
@@ -251,15 +279,12 @@ H1 as the cheap confirm that runs regardless.
   load-bearing — verify its `target_ms` tolerance does not exclude the true moving
   field (`rb_memory.py:315-316`).
 
-### H1 — FEIN was genuinely paused/previewed **[assumed low, per §8; run as the cheap confirm]**
-- *Instrument:* in `read_live_pos_chain` (`rb_memory.py:~899`), emit one INFO line
-  whenever deck-2 `playing` flips to False within N seconds of a load, carrying
-  `raw`, `prev_raw`, and — if rekordbox exposes a play-state byte at a known offset
-  — that flag too.
-- *Test:* load a track on deck 2 and don't play it → expect frozen chain + this
-  log; then play it → expect the chain advances. Distinguishes a real pause from a
-  frozen-while-playing field in one session. Runs regardless of H2's outcome
-  because operator memory, however confident, is still testimony.
+### H1 — FEIN was genuinely paused/previewed **[REJECTED]**
+Killed by the operator correction (§8): "turned it off" referred to the fallback,
+not the deck; FEIN was playing. No pause-detection instrumentation is needed. The
+chain-freshness log proposed here has been folded into H2's instrumentation
+(logging `raw`/`prev_raw` while the playing-hint says playing is exactly what
+distinguishes a wrong-field freeze), so nothing is lost by dropping H1.
 
 ---
 

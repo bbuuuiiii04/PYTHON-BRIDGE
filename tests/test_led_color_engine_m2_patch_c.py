@@ -95,7 +95,8 @@ class PatchCTests(unittest.TestCase):
             look = result.config.looks["rt_post_drop_chase"]
             self.assertEqual(look.scene_ref, "rt_post_drop_chase")
             self.assertEqual(look.color_source, "engine")
-            self.assertEqual(look.params, {})
+            # AWR-156 knob #9: role-scoped width (was {}).
+            self.assertEqual(look.params, {"width": 4})
             self.assertIn("rt_post_drop_chase", result.config.banks["default"].post_drop)
 
     def test_live_config_slot_color_smoke(self) -> None:

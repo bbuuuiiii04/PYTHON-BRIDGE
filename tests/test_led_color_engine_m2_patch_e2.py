@@ -131,7 +131,8 @@ class PatchE2ConfigTests(unittest.TestCase):
         self.assertEqual(look.color_source, "engine")
         self.assertTrue(look.allow_strobe)
         self.assertEqual(look.safety_class, "post_drop")
-        self.assertEqual(look.params, {})
+        # AWR-156 knob #9: role-scoped width (was {}).
+        self.assertEqual(look.params, {"width": 4})
         self.assertIn("rt_post_drop_center_comet", result.config.banks["default"].post_drop)
 
     def test_generic_center_burst_pairs_to_generic_center_comet(self) -> None:
@@ -184,6 +185,9 @@ class PatchE2RegistrationTests(unittest.TestCase):
             "post_drop_firework_chase",
             "breakdown_full_breathing",
             "breakdown_star_twinkle",
+            # AWR-156: promoted accepted looks.
+            "rt_groove_heartbeat",
+            "rt_post_drop_firework_remnants",
         }
         self.assertEqual(set(SLOT_EFFECTS), expected)
 
