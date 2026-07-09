@@ -1056,6 +1056,53 @@ class LEDDispatchPolicyMixin:
         plan = getattr(getattr(d, "meta", None), "f2_plan", None)
         return plan.for_drop(float(anchor)) if plan is not None else None
 
+    def _led_f4_active_plan_beat(self) -> tuple:
+        """(plan, current_playhead_beat) for F4 SECTION lookups (euphoric/simmer),
+        or (None, None) when F4 can't season: no sp state / no beat / scripted deck
+        / no plan. (Drops key off the drop anchor instead — see
+        `_led_f4_active_drop_entry`.)"""
+        sp = getattr(self, "_last_sp_state", None)
+        if sp is None:
+            return None, None
+        beat = self._led_abs_beat(sp)
+        if beat is None:
+            return None, None
+        d = self._deck.get(getattr(self._os, "active_deck", 0))
+        if d is None or getattr(d, "scripted_id", 0):
+            return None, None
+        plan = getattr(getattr(d, "meta", None), "f2_plan", None)
+        if plan is None:
+            return None, None
+        return plan, beat
+
+    def _led_f4_euphoric_bright(self) -> Any:
+        """The bright/white-end look set to prefer when the playhead is inside a
+        euphoric stretch (Task 3, D§5.5), or None. Selection WEIGHT only — it
+        ADDS a preference the director applies fail-open (never empties the bank,
+        never changes routing/family/tier). F4 off / no bright set / not euphoric /
+        scripted ⇒ None ⇒ no added preference."""
+        cfg = getattr(self, "_f4_config", None)
+        if (not getattr(self, "_f4_enabled", False) or cfg is None
+                or not cfg.euphoric_bright_looks):
+            return None
+        plan, beat = self._led_f4_active_plan_beat()
+        if plan is None or not plan.is_euphoric(beat):
+            return None
+        return set(cfg.euphoric_bright_looks)
+
+    def _led_f4_simmer_seasoning(self, cfg: Any) -> dict:
+        """Sparse-and-dim floor PARAMS when the playhead is inside a measured
+        simmer stretch (Task 3, D§5.4). F4 upgrades the quiet-section floor from
+        its default (the design's "rung 2 without simmer detection") toward the
+        sparse-dim treatment; without F4 nothing is merged. Params-only —
+        containment-safe."""
+        if not cfg.simmer_seasoning:
+            return {}
+        plan, beat = self._led_f4_active_plan_beat()
+        if plan is None or not plan.is_simmer(beat):
+            return {}
+        return dict(cfg.simmer_seasoning)
+
     def _led_f4_drop_seasoning(self, cfg: Any) -> dict:
         """The variant PARAMS for the current drop from its texture (Task 2). The
         family+texture key selects the config table cell; a HOUSE growl-bar drop's
@@ -1086,7 +1133,8 @@ class LEDDispatchPolicyMixin:
         cfg = getattr(self, "_f4_config", None)
         if cfg is None:
             return decision
-        season = self._led_f4_drop_seasoning(cfg) if role == "drop" else {}
+        season = (self._led_f4_drop_seasoning(cfg) if role == "drop"
+                  else self._led_f4_simmer_seasoning(cfg))
         if not season:
             return decision
         try:
@@ -1866,16 +1914,28 @@ class LEDDispatchPolicyMixin:
         return set(names) if names else None
 
     def _led_look_preference_predicate(self) -> Any:
+        # Compose (AND) the eligible look predicates: the v2 dressing filter, the
+        # F2 family×tier routing set, and the F4 euphoric bright-weight. Each term
+        # only NARROWS; the director applies the result fail-open (an empty
+        # preferred subset keeps the full bank), so no term can change routing/
+        # family/tier or empty a bank. With F4 off (bright is None) and F2's
+        # routing unchanged this is byte-identical to the prior base/f2_names
+        # composition — the F4 euphoric term is purely additive preference (D§5.5).
         base = self._led_v2_look_preference_predicate()
         f2_names = self._led_f2_drop_look_names()
-        if not f2_names:
-            return base
-        # Restrict the drop-look choice to the family×tier routing set; if none of
-        # them are eligible, commit_role returns None and the caller falls back to
-        # today's rotation (led_dispatch_policy.py: _led_drop_decision_for_anchor).
-        if base is None:
-            return lambda name: name in f2_names
-        return lambda name: name in f2_names and base(name)
+        bright = self._led_f4_euphoric_bright()
+        preds = []
+        if base is not None:
+            preds.append(base)
+        if f2_names:
+            preds.append(lambda name, s=f2_names: name in s)
+        if bright:
+            preds.append(lambda name, s=bright: name in s)
+        if not preds:
+            return None
+        if len(preds) == 1:
+            return preds[0]
+        return lambda name: all(p(name) for p in preds)
 
     def _led_v2_look_preference_predicate(self) -> Any:
         if not bool(getattr(self, "_led_v2_latch", False)):
