@@ -63,6 +63,29 @@ Everything is software-tested only; the operator's mixes are the live gate.
 | **Undecided operator items** | Pre-drop tease (8-beat chase crawl → snap at impact — no verdict ever given); veto list (strobe_red_white side B, groove width 2.5, NEUTRAL→small laser silence, balloon gray-zone 0.30–0.35); drop-echo theme-and-variation (the one surviving creative proposal) | Surface once each when relevant; never re-litigate decided items |
 | **Parked** | F3 blend (needs his one recorded practice session), SS-MIDI port-gone spam (Jul-7 regression), AWR-158 flaky-test hygiene, cloud-look retirement campaign, music library (his re-raise only), Govee DIY-look recreation (operator directive: deferred; when it runs, it runs under an Opus-4.8-class manager seat, never a top-tier lane) | Leave parked until he raises them |
 
+## Final evening session (superman4 watch, ~17:55–19:55 — last Fable hours)
+
+| What | State | Evidence / where |
+|---|---|---|
+| Bridge incident 17:48 | Bridge+watcher group-killed (sig-15, menubar-Stop signature); superman4 relaunched 18:00:30 and verified. RECONSTRUCTED-PROBABLE (not confirmed): operator menubar activity — a fresh bridge PID also appeared ~18:07 mid-freeze (menubar-restart pattern) | streamdeck.log 17:48:40 watcher_exit cascade; log timeline |
+| AWR-179 QA minors | CLOSED PASS: suite reconciled BY NAME (five env reds exactly, repo-root run); D2-F1 abort_at KEEP (executive line-read); 80ebb81 sweep = no-harm misattribution (content was ledtune's gated embers flavor-b) | registry row; qm179 build report; memory `project_qa_minors_round` |
+| patch_f × Part-C collision | The one extra suite red: rt_drop_chase quartet legitimately back in default bank (f0b40ba) vs patch_f moved-looks tripwire. Re-pinned as equality assert (1bdf18d, ledtune), executive-verified | tests/test_led_color_engine_m2_patch_f.py |
+| AWR-183 USB Saturday pass | DMG rebuilt from c030540 at 17:59 (116MB, app Signature=adhoc verified by mount), 65/65 packaging tests. Only gate = operator §2 parity run. OPEN OFFER: rebuild_stick.sh wrapper (his word) | dist/RBSS Bridge.dmg; registry row |
+| Labels→tuning protocol (AWR-182 directive) | OPERATOR-DIRECTED, authorized + ran: ~10-track label batches become tuning rounds via the normal chain; post-19:00 batches bank as Codex-ready briefs with his acceptance pins | labels relay 2026-07-09 evening (his words) |
+| AWR-184 deep sub-void blackout rung | BUILT (788a358, ledfix3/Opus) + docs (1e8ac71) + GATED (compressed chain: executive desk-gate; ledtune's review turn died to the 18:20–19:00 account rate-limit freeze — post-hoc review optional) + LIVE at the 19:05:52 bounce. Discriminator = sub void AND growl-band collapse (bass depth alone was a trap — Caramelle voids sub to −37 dB but growl sustains ~18 dB). Operator ear gate pending | lighting_moments_v2.py rung 0b; TestDeepSubVoidBlackout; led_govee.md paragraph |
+| AWR-175 F3 blend spec | Executive review PASSED AS BANKED (impl NOT authorized; 3 preconditions stand). Reads upfaders+LOW EQ only (no crossfader), ships OFF, brighten-only | docs/plans/active/f3_blend_spec.md |
+| Utopia laser verdict | "lasers warranted" at 3:02.5 final drop (the track's only T2, NEUTRAL melodic, white_share 0.66, ION) → multi-factor laser-gate evidence pile (post-P1 design) | docs/research/operator_track_labels_2026_07_09.md |
+| Session recordings | part1 423MB (morning→16:23), part2 5.3MB (18:02→18:07), part3 armed 19:06. KNOWN GAP: the record toggle dies at every restart and nobody notices — candidate root-cause item: auto-re-arm on boot while a session flag stands | local/sessions/ |
+| Retro | SKIPPED-BY-CLOCK at this close (the rate-limit freeze ate the window); next session's /retro takes this evening in scope | — |
+
+After-20:00 operator command list (also in his final chat report): P1 backfill sweep
+(`caffeinate -i python3 tools/spectral_sweep.py --jobs 2` from /Users/bbui; acceptance:
+Sexy 3:38 separates from its 7 siblings, capochino 1:01.7, Girl$ 1:16.1/2:25.6); optional
+stems labeling continuation; USB §2 parity run before Saturday; AWR-184 ear-check on
+Utopia (1:27 and 3:00 must read as real blackouts now); D1-F1 phantom-load stays
+DEFERRED on his word (offered twice, no answer — transfers deferred); pre-drop tease
+still has no verdict.
+
 ## Standing operator rulings that survive the transfer (his words, do not re-ask)
 - Filter feature: LOW-TO-HIGH sweeps only; counterclockwise does NOTHING (final).
 - Root-cause fixes only; interim mitigations only when labeled with root-cause work
