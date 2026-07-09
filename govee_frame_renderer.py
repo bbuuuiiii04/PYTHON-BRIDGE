@@ -1979,14 +1979,23 @@ def _slot_rt_groove_heartbeat(beat: float, local_t: float, frame_index: int,
     return field
 
 
+# Bug 2 (2026-07-09 live round): embers route ONLY to accent slots 3-4 + white
+# slot 5, never the base-ramp slots 0-2. In dark zones (DEEP_POOL base_ramp
+# starts near-black [5,10,60]) a base-ramp ember colorizes to single-digit RGB =
+# invisible; accent/white slots always clear the visibility floor. Zone-agnostic:
+# the slot convention (accents 3-4, white 5) holds for every palette.
+_EMBER_SLOTS: tuple[int, ...] = (3, 4, 5)
+
+
 def _ember_field(local_t: float, segments: int, seed: int, *,
-                 density: float, size: float, life_s: float, num_slots: int = 5) -> MotionField:
+                 density: float, size: float, life_s: float) -> MotionField:
     """AWR-156: time-based sparkle field (ported from the lab _ember_field —
     sparkles are continuous/time-based, never beat-tied; replaces the
     diagnosed ~17 Hz synchronized whole-field re-roll flicker). Each ember
     lives an independent cycle: sine fade-in/out over life_s seconds, a
     personal gap, a fresh position + slot each cycle. Writes into MotionField
-    slots 0..num_slots-1 (palette-fed, not baked colors)."""
+    accent slots 3-4 + white slot 5 only (_EMBER_SLOTS; palette-fed, not baked
+    colors) so embers stay visible in dark zones."""
     seg = max(0, int(segments))
     field = _empty_motion_field(seg)
     if seg == 0 or density <= 0.0:
@@ -2005,7 +2014,7 @@ def _ember_field(local_t: float, segments: int, seed: int, *,
         cycle_idx = int((t + phase) / period)
         cyc_rng = _rng(seed, "ember", k, cycle_idx)
         center = cyc_rng.uniform(0, seg)
-        slot = cyc_rng.randrange(max(1, num_slots))
+        slot = _EMBER_SLOTS[cyc_rng.randrange(len(_EMBER_SLOTS))]
         env = math.sin(math.pi * cycle_pos / life) * cyc_rng.uniform(0.6, 1.0)
         for idx in range(seg):
             w = max(0.0, 1.0 - (_distance_on_ring(idx, center, seg) / size))
@@ -2020,9 +2029,11 @@ def _slot_rt_post_drop_firework_remnants(beat: float, local_t: float, frame_inde
     post_drop_firework_remnants) — slot-5 zone-tinted white background
     dimming 1.0->0 over dim_beats; time-based embers (_ember_field) hold full
     until ember_hold_beats then decay linearly to 0 over ember_decay_beats
-    (accepted 8+2, done by beat 10). Embers write only slots 0-4; background
-    is the only slot-5 writer among this cue's own layers. Not a strobe
-    (embers fade on sine envelopes)."""
+    (accepted 8+2, done by beat 10). Bug 2 (2026-07-09): embers route only to
+    accent slots 3-4 + white slot 5 (never base-ramp slots 0-2), so they clear
+    the visibility floor in dark zones; slot 5 now carries the dimming
+    background PLUS white embers layered over it. Not a strobe (embers fade on
+    sine envelopes)."""
     seg = max(0, int(segments))
     cue_beat = _edm_beat(beat, params)
     dim_beats = max(0.5, float(params.get("dim_beats", 8.0)))
@@ -2044,7 +2055,7 @@ def _slot_rt_post_drop_firework_remnants(beat: float, local_t: float, frame_inde
     if ember_level > 0.0:
         embers = _ember_field(local_t, seg, seed, density=density, size=size, life_s=life_s)
         for idx in range(seg):
-            for slot in range(5):
+            for slot in _EMBER_SLOTS:
                 if embers[idx][slot] > 0.0:
                     field[idx][slot] = min(1.0, field[idx][slot] + embers[idx][slot] * ember_level)
     return field

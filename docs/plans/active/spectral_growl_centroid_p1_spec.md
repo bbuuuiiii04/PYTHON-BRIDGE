@@ -283,6 +283,13 @@ New `tests/test_growl_centroid.py` (or extend `test_spectral_profile.py` /
   Accept when the final counts show the previously-cached library re-extracted
   (`ok` ≈ entry count) and a re-run immediately after reports ≈ all `cached`.
   Record the cache MB delta against the +40-55 MB estimate.
+- [ ] **Operator live-labeled case (2026-07-09 live session, executive-measured):**
+  Sexy (Extended Mix) 3:38 is the ONLY drop the operator hears as "aggressive tech
+  house bass growl for 8 beats then tapering" — and every current v4 signal is FLAT
+  across all 8 of that track's drops (growl_band mean ~27.0 everywhere, bass/sub
+  sustain 1.00, measured at the executive desk). The new centroid-movement measure
+  must SEPARATE 3:38's post-drop window from the other seven, or the field does not
+  capture what he hears. This is the laser-gate-on-growl consumer's founding label.
 - [ ] **Named-track falsifiable check** (offline, after the sweep — the audit's
   acceptance): capochino's 1:01.7 window and Girl$ 1:16.1 / 2:25.6 show
   centroid movement at the heard wow rate where the level series is flat

@@ -122,6 +122,7 @@ contracts:
       - lighting_moments_v2.py
       - tools/calibrate_identity_v2.py
       - tools/led_pad_playback.py
+      - tools/govee_manual_trigger.py
       - config/led_look_director.example.json
       - streamdeck/streamdeck_midi.py
     key_symbols:

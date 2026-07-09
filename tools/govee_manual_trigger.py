@@ -201,7 +201,12 @@ def validate_provenance(
     if branch != repo_context["branch"]:
         errors.append("phase1_manifest_branch_mismatch")
     if commit != repo_context["commit"]:
-        errors.append("phase1_manifest_commit_mismatch")
+        # Auto-sync moves HEAD every turn, so a manifest captured well inside the
+        # freshness window will almost always differ from the current commit.
+        # Record the drift for visibility but do NOT gate on it (AWR-179 D4-F1,
+        # same rationale as the export tool's removed commit-equality guard);
+        # freshness + branch + artifact presence still fail closed below.
+        warnings.append("phase1_manifest_commit_drift")
 
     artifacts = manifest.get("artifacts_written")
     if not isinstance(artifacts, list):
@@ -291,7 +296,6 @@ def validate_provenance(
         and "devices_artifact_missing" not in errors
         and "devices_provenance_missing" not in errors
         and "phase1_manifest_branch_mismatch" not in errors
-        and "phase1_manifest_commit_mismatch" not in errors
         and "phase1_manifest_artifacts_missing" not in errors
         and "devices_generated_at_invalid" not in errors
         and "devices_source_command_unexpected" not in errors,

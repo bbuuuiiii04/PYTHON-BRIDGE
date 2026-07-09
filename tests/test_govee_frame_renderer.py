@@ -30,6 +30,7 @@ from rb_ss_bridge_v2.govee_frame_renderer import (  # noqa: E402
     _slot_rt_post_drop_firework_remnants,
     default_sync_mode,
     is_comet_effect,
+    universal_colorizer,
 )
 
 
@@ -1043,8 +1044,11 @@ class PostDropFireworkRemnantsTests(unittest.TestCase):
         return base
 
     def test_ember_full_at_or_before_hold_beats(self) -> None:
+        # At beat 8 (== hold_beats) the background has dimmed to 0, so every lit
+        # pixel is a pure ember. Flavor (b) routes embers to slots 3-5, so sum
+        # the full row (not just 0-4) to catch slot-5 white embers too.
         field = _slot_rt_post_drop_firework_remnants(8.0, 5.0, 0, self._params(), 20, 1)
-        ember_total = sum(sum(row[:5]) for row in field)
+        ember_total = sum(sum(row) for row in field)
         self.assertGreater(ember_total, 0.0)
 
     def test_ember_zero_by_beat_ten_point_five(self) -> None:
@@ -1058,11 +1062,48 @@ class PostDropFireworkRemnantsTests(unittest.TestCase):
         for row in field:
             self.assertAlmostEqual(row[5], 1.0, places=9)
 
-    def test_embers_only_write_slots_zero_through_four(self) -> None:
+    def test_embers_route_only_to_accent_and_white_slots(self) -> None:
+        # Bug 2 flavor (b): embers land only on accent slots 3-4 + white slot 5,
+        # never the near-black base-ramp slots 0-2. Verified across the field.
         field = _slot_rt_post_drop_firework_remnants(2.0, 1.5, 0, self._params(), 20, 1)
-        # background at beat 2 is 1 - 2/8 = 0.75, distinct from any ember contribution
         for row in field:
-            self.assertAlmostEqual(row[5], 0.75, places=9)
+            for slot in (0, 1, 2):
+                self.assertEqual(row[slot], 0.0)
+
+    def test_ember_luminance_clears_floor_in_deep_pool_dark_palette(self) -> None:
+        # Bug 2: DEEP_POOL-style dark palette -- base_ramp slots 0-2 near-black,
+        # accents 3-4, white slot 5. At beat 8 the background has dimmed to 0, so
+        # every lit pixel is a pure ember. Flavor (b) keeps embers on slots 3-5,
+        # so colorized embers clear a visibility floor; had one landed on slot 0
+        # ([5,10,60]) it would be single-digit RGB = invisible.
+        palette = [(5, 10, 60), (0, 40, 140), (0, 90, 140),
+                   (40, 0, 160), (0, 60, 200), (185, 215, 255)]
+        seg = 40
+        peak_luma = 0
+        saw_ember = False
+        for tick in range(400):
+            field = _slot_rt_post_drop_firework_remnants(
+                8.0, tick / 40.0, tick, self._params(), seg, 7)
+            for row in field:
+                for slot in (0, 1, 2):
+                    self.assertEqual(row[slot], 0.0)
+            for px in universal_colorizer(field, palette):
+                luma = max(px)
+                if luma > 0:
+                    saw_ember = True
+                    peak_luma = max(peak_luma, luma)
+        self.assertTrue(saw_ember, "no embers rendered across the sampled window")
+        self.assertGreaterEqual(peak_luma, 60, msg=f"peak ember luma {peak_luma}/255")
+
+    def test_ember_field_deterministic_same_seed(self) -> None:
+        # Determinism pin at the layer Bug 2 changed: same seed => same field.
+        a = _ember_field(1.5, 40, 42, density=0.35, size=1.0, life_s=0.8)
+        b = _ember_field(1.5, 40, 42, density=0.35, size=1.0, life_s=0.8)
+        self.assertEqual(a, b)
+        # And embers touch only accent + white slots, never base-ramp 0-2.
+        wrote = {slot for row in a for slot in range(6) if row[slot] > 0.0}
+        self.assertTrue(wrote, "no embers present in the field")
+        self.assertTrue(wrote <= {3, 4, 5}, msg=f"embers wrote slots {sorted(wrote)}")
 
     def test_deterministic_for_same_seed_and_local_t(self) -> None:
         a = _slot_rt_post_drop_firework_remnants(2.0, 1.5, 0, self._params(), 20, 7)
