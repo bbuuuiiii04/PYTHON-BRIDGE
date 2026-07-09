@@ -130,6 +130,18 @@ cell that names them silently no-op. The correct shape:
 - This part is LIVE-CONFIG content (gitignored): stage as an idempotent apply
   script + example-config mirror of the table shape; the executive applies at the
   batched restart. No live-config edit before that.
+- STATE UPDATE (verified 17:2x): the live `banks.default.drop` NOW holds 12 looks
+  with ZERO legacy diy — surgery already happened in an earlier mirror. Part C
+  must therefore RE-ADD the legacy 8 to the bank AND ship the full routing table
+  in the same change, or the gentle cells silently no-op (fail-open trap above).
+- CONCRETE DEFAULT (operator verdict + executive one-line-veto doctrine):
+  tier-1 cells for ALL four families (WALL/COMET/HOUSE/NEUTRAL) = the 8 legacy
+  diy chases + the soft rt chase looks (`rt_drop_chase_blue/cyan/red/green` where
+  they exist in `looks{}` with `allow_strobe` false — implementer verifies
+  existence, drops absent names). Tier-2 and tier-3 cells = exactly the current
+  12-look modern bank (routing narrows nothing there — selection behavior
+  unchanged). VETO LINE for the operator: "tier-1 gentle set = the 8 legacy
+  chases + the soft rt chase quartet — say the word to swap the set."
 
 ## Part D — firework mirrors the legacy sparkle half (design, desk-tuned)
 
