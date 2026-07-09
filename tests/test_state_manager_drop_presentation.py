@@ -1029,5 +1029,121 @@ class StopFailOpenReleaseTests(unittest.TestCase):
         self.assertFalse(sm._drop_presentation_led_dark_held)
 
 
+def _idle_deck(load_gen=3):
+    # Mirrors the QASD3 leak-repro deck shape: enough fields for the LASERS_ONLY
+    # solo tick and the idle-ambient dispatch to run.
+    return SimpleNamespace(
+        meta=SimpleNamespace(content_id="content-1", smart_drops=[64],
+                             bpm=128.0, filepath="x.mp3", f2_plan=None),
+        playing=True, load_gen=load_gen, scripted_id=0, elapsed_ms=30000,
+    )
+
+
+def _open_lasers_only_window(sm):
+    """Manual-arm a solo drop and cross it so the WindowMachine enters LASERS_ONLY
+    and latches the drop_spotlight LED blackout owner (same recipe as the QASD3
+    repro). Mutates the real _os in place -- never replaces it, so _do_stop still
+    finds a full OutputState."""
+    d = _idle_deck()
+    sm._deck = {1: d, 2: _idle_deck(load_gen=9)}
+    sm._os.active_deck = 1
+    sm._os.lighting_mode = "autoloop"
+    sm._last_audible_deck = 1
+    sm._drop_presentation_base_live = True
+    sm._drop_presentation_last_load_gen[1] = d.load_gen
+    sm._drop_presentation_last_active_deck = 1
+    sm._drop_presentation_armed_key = (1, d.load_gen)
+    sm._drop_presentation_tick(active=1, d=d, sp_state=_sp_state(), impact_now=True)
+    return d
+
+
+def _dp_release_state(sm) -> dict:
+    """The full drop-presentation surface the release helper is responsible for.
+    Compared as one blob (not hand-picked fields) so the idle and stop paths can
+    never silently drift apart again."""
+    la = sm._drop_presentation_last_actions
+    return {
+        "blackout_owners": frozenset(sm._led_blackout_owners),
+        "blackout_active": sm._led_blackout_active(),
+        "led_dark_held": sm._drop_presentation_led_dark_held,
+        "base_suppressed_held": sm._drop_presentation_base_suppressed_held,
+        "window_phase": sm._drop_presentation_window._phase,
+        "window_end_beat": sm._drop_presentation_window._window_end_beat,
+        "armed_key": sm._drop_presentation_armed_key,
+        "last_pending": sm._drop_presentation_last_pending,
+        "manual_cancel": sm._drop_presentation_manual_cancel,
+        "actions_presentation": None if la is None else la.presentation,
+        "actions_reason": None if la is None else la.reason,
+        "actions_base_suppressed": None if la is None else la.base_suppressed,
+    }
+
+
+class IdleNoAudibleReleasesDropWindowTests(unittest.TestCase):
+    """AWR-171 / D3-F1: _enter_idle_no_audible must release the drop-presentation
+    window exactly like _do_stop, so a resolver-to-0 mid-solo-window can't leave
+    the room latched dark (active_deck=0 early-returns _push_tick_inner forever)."""
+
+    def _sm(self):
+        sm = _make_sm()
+        _enable_drop_presentation(sm)
+        return sm
+
+    def test_idle_no_audible_release_matches_do_stop_twin(self) -> None:
+        # Two identical SMs with the same latched LASERS_ONLY window: one goes
+        # idle-no-audible, one stops. The release surface must be identical.
+        sm_idle = self._sm()
+        _open_lasers_only_window(sm_idle)
+        self.assertIn("drop_spotlight", sm_idle._led_blackout_owners,
+                      "setup failed: window did not latch the blackout owner")
+
+        sm_stop = self._sm()
+        _open_lasers_only_window(sm_stop)
+        self.assertIn("drop_spotlight", sm_stop._led_blackout_owners)
+
+        sm_idle._os.active_deck = 0
+        sm_idle._enter_idle_no_audible(reason="idle_no_audible")
+        sm_stop._do_stop(1, 0)
+
+        # Absolute state after the idle path...
+        self.assertEqual(sm_idle._led_blackout_owners, set())
+        self.assertFalse(sm_idle._drop_presentation_led_dark_held)
+        self.assertEqual(sm_idle._drop_presentation_window._phase, "idle")
+        self.assertIsNone(sm_idle._drop_presentation_armed_key)
+        # ...and equal to the _do_stop twin as one blob, not hand-picked fields.
+        self.assertEqual(_dp_release_state(sm_idle), _dp_release_state(sm_stop))
+
+    def test_idle_no_audible_release_is_noop_without_open_window(self) -> None:
+        # No window open: the release is idempotent -- a second idle entry must
+        # not change the (already-idle) drop-presentation state. Snapshot after
+        # the first call == after the second.
+        sm = self._sm()
+        sm._deck = {1: _idle_deck(), 2: _idle_deck(load_gen=9)}
+        sm._last_audible_deck = 1
+        sm._os.active_deck = 0
+        sm._enter_idle_no_audible(reason="idle_no_audible")
+        after_first = _dp_release_state(sm)
+        self.assertEqual(after_first["blackout_owners"], frozenset())
+        self.assertEqual(after_first["window_phase"], "idle")
+        self.assertFalse(after_first["led_dark_held"])
+        sm._enter_idle_no_audible(reason="idle_no_audible")
+        self.assertEqual(_dp_release_state(sm), after_first)
+
+    def test_disabled_policy_idle_entry_is_byte_identical(self) -> None:
+        # enabled:false -> the release helper's first guard returns immediately,
+        # so idle entry never touches the drop-presentation surface. A sentinel
+        # armed_key survives (only the release path would clear it here).
+        sm = self._sm()
+        _enable_drop_presentation(sm, enabled=False)
+        self.assertFalse(sm._drop_presentation_config.enabled)
+        sm._deck = {1: _idle_deck(), 2: _idle_deck(load_gen=9)}
+        sm._last_audible_deck = 1
+        sm._os.active_deck = 0
+        sm._drop_presentation_armed_key = ("sentinel",)
+        before = _dp_release_state(sm)
+        sm._enter_idle_no_audible(reason="idle_no_audible")
+        self.assertEqual(sm._drop_presentation_armed_key, ("sentinel",))
+        self.assertEqual(_dp_release_state(sm), before)
+
+
 if __name__ == "__main__":
     unittest.main()
