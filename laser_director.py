@@ -506,10 +506,13 @@ class LaserDirector:
         # Priority 9 + 10: gated drop lifecycle (mirror) OR the original ungated path.
         drop_lifecycle_mirror_on = self._drop_lifecycle_mirror
         # Part I laser runway gate: a NEW drop crossing whose beat has no bridge-
-        # defined buildup marker strictly before it earns no laser drop scene.
-        # Skipping the whole drop region means the lifecycle never arms, so the
-        # suppression holds for the entire window (no drop_cycle, no post_drop) and
-        # the laser falls through to the buildup / phrase-default branches below.
+        # defined buildup marker strictly before it earns no laser drop impact.
+        # Skipping the drop region here means the lifecycle never arms, so no fresh
+        # drop_crossing fires and the laser falls through to the buildup / phrase-
+        # default branches below. The drop / post_drop ROLE can still surface on
+        # later ticks from smart-phrasing state (post-drop window), but with the
+        # lifecycle unarmed nothing escalates to a new drop scene — those cycle
+        # decisions only re-fire the already-held scene on an autoloop tick.
         # Fail-open when the track has no buildup markers at all. LED drop looks are
         # unaffected — this is the laser director only.
         if self._laser_drop_runway_suppressed(ctx, sp, previous_abs_beat):

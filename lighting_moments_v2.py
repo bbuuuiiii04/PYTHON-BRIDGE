@@ -102,14 +102,20 @@ BALLOON_PERC_BOUNDARY = 0.35   # build-window perc_full < this → balloon-shrin
 COLLAPSE_GAP = 16              # a true collapse = a sub-only run this long. 16
                                # fires ONLY for hard family (WALL/COMET) over a
                                # collapse this deep; melodic/mainstage never 16.
-PERC_ALIVE_16 = 0.42         # Part H2 (AWR-180): a snare-driven build carries NO
+PERC_ALIVE_16 = 0.30         # Part H2 (AWR-180): a snare-driven build carries NO
                              # sub, so tolerant_scan reads it as a long collapse —
                              # but the percussion is still pounding. perc_build
                              # ABOVE this on the 16 rung demotes to the short (4)
                              # hard-drop emphasis: big blackouts require ACTUAL
-                             # quiet. Sits ABOVE the balloon split (a genuine
-                             # sub-gone collapse still shows some perc to clear it)
-                             # and BELOW a loud snare wall (Sexy ~0.44).
+                             # quiet. Measured bands (executive, AWR-180): a genuine
+                             # true collapse medians <=0.2 (and reaches a 16-beat
+                             # blackout via the Part H true-silence branch, not this
+                             # rung); a snare-wall build medians >=0.35 (Sexy 1:27
+                             # window [128,192) = 0.386). 0.30 sits cleanly between
+                             # them. NB: 0.30 is below BALLOON_PERC_BOUNDARY (0.35),
+                             # so every case that reaches this rung (perc>=0.35)
+                             # demotes — the rung's positive 16 is a calibration
+                             # knob that revives only if raised above 0.35.
                              # Desk-calibrated.
 BUSY_DUTY = 0.85              # bass_duty above this = drums driving the build
 DRIVING_PERC = 0.55          # OR build perc_full above this = driving → 4-black
