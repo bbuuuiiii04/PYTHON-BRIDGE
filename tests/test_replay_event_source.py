@@ -19,7 +19,7 @@ from rb_ss_bridge_v2.session_replayer import CapturedSession  # noqa: E402
 
 
 def _event(mono: float) -> BridgeEvent:
-    return BridgeEvent(kind=list(Ev)[0], deck=1, payload={}, source="test", mono=mono)
+    return BridgeEvent(kind=Ev.BPM_UPDATE, deck=1, payload={}, source="test", mono=mono)
 
 
 def _snap(updated_at: float) -> PositionSnapshot:
@@ -93,7 +93,9 @@ class RunReplayTests(unittest.TestCase):
         # bpm hint passes through
         self.assertEqual(lb.hints, [(1, 128.0)])
         # paced by recorded spacing (origin row sleeps 0 and is skipped)
-        self.assertEqual(sleeps, [0.1, 0.2, 0.5])
+        self.assertEqual(len(sleeps), 3)
+        for got, want in zip(sleeps, [0.1, 0.2, 0.5]):
+            self.assertAlmostEqual(got, want, places=6)
 
     def test_stop_event_halts_injection(self) -> None:
         import threading

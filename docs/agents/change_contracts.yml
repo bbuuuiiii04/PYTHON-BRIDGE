@@ -275,6 +275,7 @@ contracts:
     code_globs:
       - usb_launcher*.py
       - launch_profile*.py
+      - replay_event_source.py
       - packaging/**
       - scripts/ss_bridge_watcher.sh
     inspect:
