@@ -56,7 +56,7 @@ class FakeSession:
         self.read_deck_calls: list[int] = []
         self.chain_calls: list[int] = []
 
-    def read_live_pos_chain(self, deck, previous):
+    def read_live_pos_chain(self, deck, previous, *, playing_hint=None, recent_play_start=False):
         self.chain_calls.append(deck)
         r = self.chain_returns.get(deck)
         return r(previous) if callable(r) else r
@@ -65,6 +65,9 @@ class FakeSession:
         self.read_deck_calls.append(deck)
         r = self.deck_returns.get(deck)
         return r() if callable(r) else r
+
+    def chain_raw_fresh(self, deck):
+        return True
 
 
 def make_reader() -> mod.RBMemoryReader:

@@ -867,8 +867,18 @@ class RBSession:
         self,
         bridge_deck: int,
         previous: Optional[PositionSnapshot] = None,
+        *,
+        playing_hint: Optional[bool] = None,
+        recent_play_start: bool = False,
     ) -> Optional[PositionSnapshot]:
-        """Read a validated live_pos_per_deck chain as a PositionSnapshot."""
+        """Read a validated live_pos_per_deck chain as a PositionSnapshot.
+
+        ``playing_hint``/``recent_play_start`` are AWR-157 Q-B diagnostics
+        only (deck 2): when supplied, a playing→not-playing flip within 10s
+        of the deck starting to play logs one DEBUG line so a real pause can
+        be told apart from a frozen-while-playing field from one live
+        session. Never required, never behavior-affecting.
+        """
         if self.offsets is None:
             return None
         rb_idx = bridge_deck - 1
@@ -904,6 +914,19 @@ class RBSession:
         playing = bool(previous.playing) if previous is not None else False
         if prev_raw is not None:
             playing = raw != prev_raw
+        if (
+            bridge_deck == 2
+            and recent_play_start
+            and previous is not None
+            and previous.playing
+            and not playing
+        ):
+            log.debug(
+                "[RBMEM] deck=2 pause-vs-freeze raw=%d prev_raw=%s hint_playing=%s",
+                raw,
+                prev_raw if prev_raw is not None else "-",
+                playing_hint if playing_hint is not None else "-",
+            )
         if prev_raw is not None and raw == prev_raw:
             self._chain_raw_unchanged_ticks[bridge_deck] = (
                 self._chain_raw_unchanged_ticks.get(bridge_deck, 0) + 1
@@ -1235,6 +1258,9 @@ class RBMemoryReader(threading.Thread):
         self._d2_attempts:   int = 0
         self._d2_was_playing: bool = False
         self._d2_play_seen_at: float = 0.0
+        # AWR-157 Q-B: monotonic time deck 2 last started playing, for the
+        # pause-vs-freeze diagnostic window in read_live_pos_chain.
+        self._d2_play_started_at: float = 0.0
         # Measurement-only: time to committed deck-2 inner.
         self._d2_unresolved_since: float = 0.0
         self._d2_last_committed_inner: Optional[int] = None
@@ -1315,6 +1341,12 @@ class RBMemoryReader(threading.Thread):
         self._d2_was_playing = deck2_playing
         if deck2_playing:
             self._d2_play_seen_at = now_t
+        if d2_play_started:
+            self._d2_play_started_at = now_t
+        deck2_recent_play_start = (
+            self._d2_play_started_at > 0.0
+            and now_t - self._d2_play_started_at < 10.0
+        )
         deck2_recently_playing = (
             self._d2_play_seen_at > 0.0
             and now_t - self._d2_play_seen_at < _D2_PLAY_RECENT_S
@@ -1387,7 +1419,12 @@ class RBMemoryReader(threading.Thread):
             self._d2_unresolved_since = 0.0
 
         if self._skip_objc_when_chain:
-            self._read_decks_chain_first(s, now_t, deck2_playing_hint=deck2_playing)
+            self._read_decks_chain_first(
+                s,
+                now_t,
+                deck2_playing_hint=deck2_playing,
+                deck2_recent_play_start=deck2_recent_play_start,
+            )
             return
 
         for deck in (1, 2):
@@ -1399,7 +1436,12 @@ class RBMemoryReader(threading.Thread):
                     self._log_drift(deck, warn)
             if self._pos_chain_direct and self._offsets is not None:
                 previous = self._cache.get(deck)
-                chain_snap = s.read_live_pos_chain(deck, previous)
+                chain_snap = s.read_live_pos_chain(
+                    deck,
+                    previous,
+                    playing_hint=deck2_playing if deck == 2 else None,
+                    recent_play_start=deck2_recent_play_start if deck == 2 else False,
+                )
                 if chain_snap is not None:
                     self._cache.update(chain_snap)
                     if self._drift is not None:
@@ -1413,7 +1455,12 @@ class RBMemoryReader(threading.Thread):
             self._log_drift(deck, warn)
 
     def _read_decks_chain_first(
-        self, s: "RBSession", now_t: float, *, deck2_playing_hint: bool = False
+        self,
+        s: "RBSession",
+        now_t: float,
+        *,
+        deck2_playing_hint: bool = False,
+        deck2_recent_play_start: bool = False,
     ) -> None:
         """Skip-ObjC path: chain is authoritative; read_deck only as fallback.
 
@@ -1434,7 +1481,12 @@ class RBMemoryReader(threading.Thread):
         """
         for deck in (1, 2):
             previous = self._cache.get(deck)
-            chain_snap = s.read_live_pos_chain(deck, previous)
+            chain_snap = s.read_live_pos_chain(
+                deck,
+                previous,
+                playing_hint=deck2_playing_hint if deck == 2 else None,
+                recent_play_start=deck2_recent_play_start if deck == 2 else False,
+            )
             chain_ok = chain_snap is not None
             if deck == 2:
                 stale_now = chain_ok and deck2_playing_hint and not s.chain_raw_fresh(2)
@@ -1498,6 +1550,7 @@ class RBMemoryReader(threading.Thread):
             self._d2_attempts = 0
             self._d2_was_playing = False
             self._d2_play_seen_at = 0.0
+            self._d2_play_started_at = 0.0
             self._d2_unresolved_since = 0.0
             self._d2_last_committed_inner = None
             log.info(
