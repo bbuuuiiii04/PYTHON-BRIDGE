@@ -195,14 +195,51 @@ class SlotDropNebulaUnitTests(unittest.TestCase):
             self.assertEqual(len(row), MAX_SLOTS)
 
     def test_drop_nebula_strobe_gate_can_go_dark(self) -> None:
-        field = _call_drop_nebula(beat=0.0625, segments=60)
-        total = sum(sum(row) for row in field)
-        self.assertEqual(total, 0.0)
+        # AWR-161: the strobe gate migrated to the wall-clock Hz gate
+        # (_hz_strobe_on), driven by local_t not beat. Pin the real contract:
+        # across one full strobe period at the reference hz 6.0 / duty 0.3
+        # there must be BOTH lit frames and fully dark frames -- a strobe that
+        # never goes dark is the exact bug this guards.
+        cycle_s = 1.0 / 6.0
+        params = {"hz": 6.0, "duty": 0.3}
+        lit = dark = False
+        for i in range(48):
+            field = _slot_drop_nebula(
+                beat=0.0625,
+                local_t=cycle_s * i / 48.0,
+                frame_index=i,
+                params=params,
+                segments=60,
+                seed=42,
+            )
+            if sum(sum(row) for row in field) > 0.0:
+                lit = True
+            else:
+                dark = True
+        self.assertTrue(lit, "strobe never lit across a full period")
+        self.assertTrue(dark, "strobe never went dark across a full period")
 
     def test_post_drop_nebula_strobe_gate_can_go_dark(self) -> None:
-        field = _call_post_drop_nebula(beat=0.0625, segments=60)
-        total = sum(sum(row) for row in field)
-        self.assertEqual(total, 0.0)
+        # AWR-161: same Hz-gate contract as drop_nebula above -- sweep local_t
+        # across one full 1/6 s period and require both lit and dark frames.
+        cycle_s = 1.0 / 6.0
+        params = {"hz": 6.0, "duty": 0.3}
+        lit = dark = False
+        for i in range(48):
+            field = _slot_post_drop_nebula(
+                beat=0.0625,
+                local_t=cycle_s * i / 48.0,
+                frame_index=i,
+                params=params,
+                segments=60,
+                seed=42,
+            )
+            if sum(sum(row) for row in field) > 0.0:
+                lit = True
+            else:
+                dark = True
+        self.assertTrue(lit, "strobe never lit across a full period")
+        self.assertTrue(dark, "strobe never went dark across a full period")
 
     def test_drop_nebula_comet_phase_uses_palette_and_white_slots(self) -> None:
         field = _call_drop_nebula(beat=9.0, segments=60)

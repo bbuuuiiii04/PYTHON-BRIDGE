@@ -57,8 +57,31 @@ class PatchCTests(unittest.TestCase):
                 self.assertEqual(row[5], 0.0)
 
     def test_strobe_off_frames_are_dark(self) -> None:
-        field = self._field(beat=0.07, segments=20)
-        self.assertTrue(all(all(value == 0.0 for value in row) for row in field))
+        # AWR-161: the strobe gate migrated from a beat-parity gate to the
+        # wall-clock Hz gate (_hz_strobe_on), driven by local_t not beat.
+        # Pin the real contract: across one full strobe period at the
+        # reference hz 6.0 / duty 0.3 there must be BOTH lit frames and fully
+        # dark frames. A strobe that never goes dark is the exact bug class
+        # this guards, so sweep local_t over a whole 1/6 s cycle and prove
+        # both outcomes occur.
+        cycle_s = 1.0 / 6.0
+        params = {"hz": 6.0, "duty": 0.3}
+        lit = dark = False
+        for i in range(48):
+            field = _slot_post_drop_chase(
+                beat=0.07,
+                local_t=cycle_s * i / 48.0,
+                frame_index=i,
+                params=params,
+                segments=20,
+                seed=42,
+            )
+            if any(value > 0.0 for row in field for value in row):
+                lit = True
+            else:
+                dark = True
+        self.assertTrue(lit, "strobe never lit across a full period")
+        self.assertTrue(dark, "strobe never went dark across a full period")
 
     def test_rt_post_drop_chase_registrations(self) -> None:
         self.assertIn("rt_post_drop_chase", SLOT_EFFECTS)

@@ -95,8 +95,29 @@ class SlotPostDropCenterCometTests(unittest.TestCase):
                 self.assertEqual(len(row), MAX_SLOTS)
 
     def test_strobe_gate_can_go_dark(self) -> None:
-        field = _call_center_comet(beat=0.0625, segments=60)
-        self.assertEqual(sum(sum(row) for row in field), 0.0)
+        # AWR-161: the strobe gate migrated to the wall-clock Hz gate
+        # (_hz_strobe_on), driven by local_t not beat. Pin the real contract:
+        # across one full strobe period at the reference hz 6.0 / duty 0.3
+        # there must be BOTH lit frames and fully dark frames -- a strobe that
+        # never goes dark is the exact bug this guards.
+        cycle_s = 1.0 / 6.0
+        params = {"hz": 6.0, "duty": 0.3}
+        lit = dark = False
+        for i in range(48):
+            field = _slot_post_drop_center_comet(
+                beat=0.0625,
+                local_t=cycle_s * i / 48.0,
+                frame_index=i,
+                params=params,
+                segments=60,
+                seed=42,
+            )
+            if sum(sum(row) for row in field) > 0.0:
+                lit = True
+            else:
+                dark = True
+        self.assertTrue(lit, "strobe never lit across a full period")
+        self.assertTrue(dark, "strobe never went dark across a full period")
 
     def test_uses_slots_0_to_4_and_never_slot_5(self) -> None:
         used: set[int] = set()
