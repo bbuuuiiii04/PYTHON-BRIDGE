@@ -149,19 +149,21 @@ class PatchDTests(unittest.TestCase):
 
     def test_tracked_and_live_configs_validate(self) -> None:
         root = Path(__file__).resolve().parents[1]
-        # AWR-156: rt_drop_chase got a role-scoped width param (knob #9) and
-        # moved drop -> post_drop (bank recast, knob f) in the TRACKED example
-        # config only; the live config is gitignored/read-only and renders
-        # identically to today until the operator mirrors it in.
-        # rt_drop_center_burst is untouched by both changes.
+        # AWR-156: rt_drop_chase got a role-scoped width param (knob #9), and
+        # was renamed to rt_post_drop_remnant_chase + moved drop -> post_drop
+        # (bank recast, knob f, T6.4 amended to a rename) in the TRACKED
+        # example config only; the live config is gitignored/read-only and
+        # renders identically to today (old look name, old bank, no width)
+        # until the operator mirrors it in. scene_ref stays rt_drop_chase
+        # either way. rt_drop_center_burst is untouched by all of this.
         expected_by_rel = {
             "config/led_look_director.example.json": {
-                "rt_drop_chase": ({"width": 4}, "post_drop"),
-                "rt_drop_center_burst": ({}, "drop"),
+                "rt_post_drop_remnant_chase": ("rt_drop_chase", {"width": 4}, "post_drop"),
+                "rt_drop_center_burst": ("rt_drop_center_burst", {}, "drop"),
             },
             "config/led_look_director.json": {
-                "rt_drop_chase": ({}, "drop"),
-                "rt_drop_center_burst": ({}, "drop"),
+                "rt_drop_chase": ("rt_drop_chase", {}, "drop"),
+                "rt_drop_center_burst": ("rt_drop_center_burst", {}, "drop"),
             },
         }
         for rel in ("config/led_look_director.example.json", "config/led_look_director.json"):
@@ -172,10 +174,10 @@ class PatchDTests(unittest.TestCase):
                 continue
             result = load_led_look_director_config(str(cfg_path))
             self.assertEqual(tuple(result.errors), (), f"{rel}: {result.errors}")
-            for name, (params, role) in expected_by_rel[rel].items():
+            for name, (scene_ref, params, role) in expected_by_rel[rel].items():
                 self.assertIn(name, result.config.looks)
                 look = result.config.looks[name]
-                self.assertEqual(look.scene_ref, name)
+                self.assertEqual(look.scene_ref, scene_ref)
                 self.assertEqual(look.color_source, "engine")
                 self.assertEqual(look.params, params, msg=f"{rel}:{name}")
                 self.assertEqual(look.safety_class, "drop")

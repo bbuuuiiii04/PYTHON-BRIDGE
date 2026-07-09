@@ -236,15 +236,18 @@ class PatchE1ConfigTests(unittest.TestCase):
         self.assertEqual(look.safety_class, "groove")
 
     def test_rt_drop_nebula_look_example(self) -> None:
+        # AWR-156 T6.4 amendment: renamed to rt_post_drop_remnant_nebula
+        # (LOOK-name rename only; scene_ref stays rt_drop_nebula).
         result = self._load_config("config/led_look_director.example.json")
         self.assertTrue(result.available, f"config not available: {result.reason}")
         self.assertEqual(tuple(result.errors), ())
-        look = result.config.looks.get("rt_drop_nebula")
-        self.assertIsNotNone(look, "rt_drop_nebula missing from example config")
+        look = result.config.looks.get("rt_post_drop_remnant_nebula")
+        self.assertIsNotNone(look, "rt_post_drop_remnant_nebula missing from example config")
         self.assertEqual(look.scene_ref, "rt_drop_nebula")
         self.assertEqual(look.color_source, "engine")
         self.assertTrue(look.allow_strobe)
         self.assertEqual(look.safety_class, "drop")
+        self.assertIsNone(result.config.looks.get("rt_drop_nebula"))
 
     def test_rt_post_drop_nebula_look_example(self) -> None:
         result = self._load_config("config/led_look_director.example.json")
@@ -337,10 +340,16 @@ class PatchE1SlotSmokeTests(unittest.TestCase):
         """All Patch E1 look scene_refs must be registered in SLOT_EFFECTS."""
         result = self._load_config()
         self.assertTrue(result.available, f"config not available: {result.reason}")
-        for look_name in ("rt_groove_nebula", "rt_drop_nebula", "rt_post_drop_nebula"):
+        for look_name in ("rt_groove_nebula", "rt_post_drop_nebula"):
             scene_ref = result.config.looks[look_name].scene_ref
             self.assertEqual(scene_ref, look_name)
             self.assertIn(scene_ref, SLOT_EFFECTS)
+        # AWR-156 T6.4 amendment: rt_drop_nebula was renamed to
+        # rt_post_drop_remnant_nebula (LOOK-name rename only), so its
+        # scene_ref no longer matches its look name.
+        scene_ref = result.config.looks["rt_post_drop_remnant_nebula"].scene_ref
+        self.assertEqual(scene_ref, "rt_drop_nebula")
+        self.assertIn(scene_ref, SLOT_EFFECTS)
 
 
 class PatchE1RegressionTests(unittest.TestCase):
