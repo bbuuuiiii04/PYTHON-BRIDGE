@@ -1340,11 +1340,15 @@ def main() -> None:
             log.warning("[MAIN] queue-full  event=led-blackout")
             return False
 
-    def _led_clear_blackout() -> bool:
+    def _led_clear_blackout(reason: str | None = None) -> bool:
+        payload: dict[str, object] = {}
+        if reason:
+            payload["reason"] = reason
         try:
             event_queue.put_nowait(BridgeEvent(
                 kind=Ev.LED_CLEAR_BLACKOUT,
                 deck=0,
+                payload=payload,
                 source="runtime_command",
             ))
             return True

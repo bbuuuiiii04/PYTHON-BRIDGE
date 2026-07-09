@@ -262,7 +262,7 @@ class CommandReader(threading.Thread):
         led_set_enabled_callback: Optional[Callable[[bool], Any]] = None,
         led_scene_callback: Optional[Callable[[str, Optional[float], Optional[str]], Any]] = None,
         led_blackout_callback: Optional[Callable[[Optional[str], Optional[str]], Any]] = None,
-        led_clear_blackout_callback: Optional[Callable[[], Any]] = None,
+        led_clear_blackout_callback: Optional[Callable[[Optional[str]], Any]] = None,
         led_clear_scene_override_callback: Optional[Callable[[], Any]] = None,
         led_palette_callback: Optional[Callable[[str, Optional[str]], Any]] = None,
         record_session_toggle_callback: Optional[Callable[[Optional[str], bool], Any]] = None,
@@ -434,7 +434,11 @@ class CommandReader(threading.Thread):
             return
         if cmd == "led_clear_blackout":
             if self._led_clear_blackout_callback:
-                ok, detail = _invoke_callback(self._led_clear_blackout_callback)
+                reason_raw = command.get("reason")
+                reason = str(reason_raw) if reason_raw is not None else None
+                ok, detail = _invoke_callback(
+                    lambda: self._led_clear_blackout_callback(reason)
+                )
                 if not ok:
                     with self._lock:
                         self._last_error = f"led_clear_blackout callback failed: {detail}"
@@ -623,7 +627,17 @@ def parse_command(line: str) -> dict[str, Any]:
                 raise ValueError("led_blackout target must be a non-empty string")
             obj = dict(obj)
             obj["target"] = target.strip()
-    if cmd in {"led_clear_blackout", "led_clear_scene_override"}:
+    if cmd == "led_clear_blackout":
+        extra = set(obj.keys()) - {"cmd", "reason"}
+        if extra:
+            raise ValueError("led_clear_blackout has unknown fields")
+        reason = obj.get("reason")
+        if reason is not None:
+            if not isinstance(reason, str) or not reason.strip():
+                raise ValueError("led_clear_blackout reason must be a non-empty string")
+            obj = dict(obj)
+            obj["reason"] = reason.strip()
+    if cmd == "led_clear_scene_override":
         extra = set(obj.keys()) - {"cmd"}
         if extra:
             raise ValueError(f"{cmd} does not accept payload fields")

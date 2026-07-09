@@ -184,7 +184,7 @@ class OwnershipGate:
 
     def release(self) -> None:
         if self.state == "pad_owned":
-            self._appender({"cmd": "led_clear_blackout"})
+            self._appender({"cmd": "led_clear_blackout", "reason": "led_pad"})
         self.state = "free"
 
 
