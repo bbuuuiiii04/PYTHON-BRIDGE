@@ -232,3 +232,15 @@ SINCE-KICKSTART DELTAS (kickstart went ~21:05; you may have read docs older than
    awaits rename → re-fire → THEN payload export (order mandatory).
 
 Item 10 final HEAD = the commit that carries THIS addendum (git log -1). superman4 purged all Claude tmux sessions immediately after appending this; hold at the approval gate.
+
+11. RT DROP FIREWORK EXPLOSION (operator report 21:28, verbatim: "rt drop firework
+    explosion is visually incorrect" — no further detail; ASK HIM "incorrect how?"
+    at your first exchange). Context for the fix round: promoted by AWR-161 with a
+    measured contrast gate (ember contrast 101/255 vs required >=60, surge must
+    resolve to bg_hold, embers time-based per the AWR-153 sparkle ruling; tests in
+    test_govee_frame_renderer.py DropFireworkExplosionTests). Related-but-distinct:
+    the REMNANTS effect got the flavor-b ember-slot fix tonight (80ebb81, slots
+    3-4+5); the explosion itself renders baked pure white on slot 5
+    (BAKED_WHITE_SLOT5_EFFECTS, AWR-156 T9). His report may implicate the surge
+    shape, the baked white vs palette, ember colors, or coverage — do not guess;
+    get his answer, then route one bounded round.
