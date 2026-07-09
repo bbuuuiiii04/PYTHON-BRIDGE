@@ -211,6 +211,10 @@ class _FakeLEDColorEngine:
     def reset_fade_memory(self) -> None:
         pass
 
+    def v2_darkest_rgb(self) -> tuple[int, int, int] | None:
+        # AWR-173: mirrors LedColorEngine.v2_darkest_rgb — v2 off in this fake.
+        return None
+
 
 class LaserColorPassThroughTests(unittest.TestCase):
     def _run(self, scenario, snapshot=None):
