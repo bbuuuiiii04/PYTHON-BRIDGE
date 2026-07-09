@@ -78,8 +78,16 @@ Kickoff: `docs/prompts/active/qaminors_kickoff_2026_07_09.md`. ZERO runtime cont
   Bridge went down 17:48 (sig-15, source unknown, NOT this lane — zero runtime contact
   held throughout); superman4 relaunched + verified it 18:00. Executive runs ONE
   consolidated full suite at its desk ~18:30 — my reconcile rides that.
-- [ ] Executive gate at superman4 (explicit D2-F1 ruling) — package SENT ~18:05,
-  queued into its turn (paste chips cleared, submission verified).
+- [x] Executive gate at superman4 ~18:09 — **PASS-PENDING-SUITE**. D2-F1 ruled **KEEP**
+  (executive read the hunks at its desk: 0.0-on-every-path-but-blackout-with-abort
+  confirmed, F2-off/scripted gating confirmed, fail-open confirmed; matches the
+  operator's darkness-tracks-real-voids doctrine; no revert patch needed). `80ebb81`
+  ruled no-harm misattribution (the swept renderer content was ledtune's already-gated
+  embers flavor-b, live since the 16:25 bounce; ledger note only). Hard checks re-ran
+  3/3 green at the executive desk.
+- [ ] FINAL CLOSURE: executive's consolidated full suite ~18:25, reconciled BY NAME;
+  closure expected ~18:45. Lane PARKED per executive instruction. Completion signal
+  (`qaminors.QAMINORS.done` + sentinel) fires only on closure.
 - [ ] Registry row updated to round outcome; completion signal
   `touch /tmp/rbss_lane_signals/qaminors.QAMINORS.done` + sentinel.
 
