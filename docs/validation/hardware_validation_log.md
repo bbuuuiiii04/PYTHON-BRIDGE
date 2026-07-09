@@ -47,6 +47,14 @@ currently-running latched-dark process cannot be validated without a bridge rest
 explicitly out of scope for this pass. `led_dispatch_policy.py`'s owner-set discard logic was not
 touched — only the reason now reaches it.
 
+LED bare-clear fail-open (AWR-155, 2026-07-08): no hardware, Govee, or room-visible validation was
+performed; the code fix and its tests are software-only. Landed the same evening as AWR-154, with
+the bridge live and already restarted once for that round. `led_dispatch_policy.py`'s owner-set
+logic WAS touched this time (the no-reason branch now clears the whole set instead of discarding
+only `legacy`) but the change's actual effect on a running process cannot be validated without a
+further restart, which was explicitly out of scope for this pass — no restart, live-config edit, or
+strip-touching action was performed.
+
 The current exporter/importer evidence boundary is **SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED**.
 
 The pinned SoundSwitch 2.10.3 project/pack tooling, immutable loader/player,

@@ -466,7 +466,10 @@ points — do not implement from the older text above:
 - **Notes confirmed:** solo=60, rainbow=61 (C.1 was right; the impl spec's first draft had
   rainbow at 60 — fixed).
 - **LED blackout owner seam pinned:** owner SET in `led_dispatch_policy.py` (impl Task 2 item
-  4); web/legacy clear releases only its own hold (operator ruling).
+  4); web/legacy clear releases only its own hold (operator ruling). Superseded 2026-07-08 by
+  AWR-155: a bare (reasonless) `led_clear_blackout` is now operator authority and clears every
+  owner, not just its own hold; a *reasoned* clear (e.g. `reason=led_pad`) still releases only
+  that owner, matching this ruling's original intent for scoped/machine clears.
 - **Both mutes drop on pad-input loss** (operator ruling — LED mute mirrors the laser mute's
   overlay-trust release; C.8's implication that only automation can never clear stands).
 - **Laser mute needs `blackout_mask` toggle-interaction support in the adapter** (impl Task 4

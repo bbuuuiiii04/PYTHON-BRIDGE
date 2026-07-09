@@ -291,6 +291,28 @@ LED pad blackout unlatch fix (AWR-154, 2026-07-08; implemented, software-tested,
 - This is a code fix, not a runtime unlatch: it changes what the next bridge start will do. A
   process already latched dark from this defect needs a restart to pick up the fix — none was
   performed during this pass.
+- Superseded by AWR-155 below: "no clear-ALL-owners fail-open" and "led_dispatch_policy.py was not
+  touched" were both true for this round only. AWR-155 later added exactly that behavior.
+
+LED bare-clear fail-open (AWR-155, 2026-07-08; implemented, software-tested, hardware-unvalidated):
+- Executive-approved shape, landed the same day as AWR-154: a bare `led_clear_blackout` (no
+  `reason`) is now operator authority and clears every owner in `_led_blackout_owners`
+  (`led_dispatch_policy.py`) at once — `led_pad`, `drop_spotlight`, `legacy`, whatever is present —
+  instead of only ever discarding `legacy`. A reasoned clear is unchanged: it still discards exactly
+  the named owner, so the LED Pad and drop-presentation machine surfaces keep their own scoped
+  clears from AWR-154.
+- The no-reason branch snapshots the owner set, clears it, and emits one INFO outcome log
+  (`[RGB] blackout-clear-all owners=...`) naming what was cleared. This is a discrete per-command
+  log, not a per-tick one. `_led_emergency_blackout` is recomputed from the now-empty set, so the
+  existing `restore_brightness()` backstop fires exactly as it does for any other now-clear
+  transition.
+- Accepted, not guarded against: a bare operator clear during a lasers-only solo window also clears
+  `drop_spotlight` and lights the LEDs mid-solo. That is the intended override — operator authority
+  outranks the presentation window's hold, and the window's own later release discard is a safe
+  no-op against the (now empty) set.
+- Effect begins at the next bridge restart after the one this was written during (the bridge had
+  already been restarted once this evening for AWR-154 and was live when this landed); no restart,
+  live-config edit, or strip-touching action was performed while implementing it.
 
 LED hold starvation fix (2026-07-07):
 - Active-deck switches and active-deck track loads still protect against an
