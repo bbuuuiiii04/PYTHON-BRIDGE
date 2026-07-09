@@ -15,7 +15,7 @@ from rb_ss_bridge_v2.launch_agent_plist import (  # noqa: E402
     render_launch_agent,
     write_launch_agent,
 )
-from tools.check_launch_agents import check  # noqa: E402
+from rb_ss_bridge_v2.tools.check_launch_agents import check  # noqa: E402
 
 # A binary path whose name carries the marker check_launch_agents keys on, but
 # which does not exist (so its interpreter version-probe fails gracefully and is

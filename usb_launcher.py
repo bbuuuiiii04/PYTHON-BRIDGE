@@ -27,6 +27,47 @@ _REPO_ROOT = Path(__file__).resolve().parent
 if str(_REPO_ROOT.parent) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT.parent))
 
+# Where the operator's Govee secret lives (same path the watcher sources).
+GOVEE_ENV_PATH = Path.home() / "Library" / "Application Support" / "RBSS Bridge" / "govee.env"
+
+
+def _parse_env_file(text: str) -> dict[str, str]:
+    """Parse KEY=VAL lines from a dotenv-style file.
+
+    Tolerates ``export `` prefixes, ``#`` comments, blank lines, and surrounding
+    single/double quotes on the value. Pure -- the test seam.
+    """
+    out: dict[str, str] = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].lstrip()
+        if "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        if not key:
+            continue
+        out[key] = value.strip().strip('"').strip("'")
+    return out
+
+
+def _load_govee_env(env=None, path=GOVEE_ENV_PATH) -> None:
+    """Source govee.env (GOVEE_API_KEY etc.) into ``env``, existing keys winning.
+
+    The watcher sources this before launching; the bundle must too, or Govee
+    cloud is dead during a bundled/Test-the-Lights run. Missing file is a no-op.
+    """
+    target = os.environ if env is None else env
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except OSError:
+        return
+    for key, value in _parse_env_file(text).items():
+        target.setdefault(key, value)
+
 
 def _run_frame_engine(argv: list[str]) -> int:
     """Headless Govee frame-engine child. Dispatched BEFORE any AppKit import."""
@@ -41,6 +82,9 @@ def _run_bridge() -> int:
     from rb_ss_bridge_v2 import launch_profile
     from rb_ss_bridge_v2.__main__ import main as bridge_main
 
+    # Source govee.env first (the watcher does too) so GOVEE_API_KEY is present
+    # -- otherwise Govee cloud is dead in a bundled / Test-the-Lights run.
+    _load_govee_env()
     # Force the 19 launch flags (parity with the watcher, which hardcodes them),
     # honoring an operator RBSS_LASER_CONFIG override for the config path.
     laser_cfg = os.environ.get("RBSS_LASER_CONFIG") or str(

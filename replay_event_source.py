@@ -24,12 +24,15 @@ timeline/re-stamp/pacing and preflight logic only.
 from __future__ import annotations
 
 import dataclasses
+import logging
 import os
 import threading
 import time
 from typing import Callable, Optional
 
 from .session_replayer import CapturedSession
+
+log = logging.getLogger(__name__)
 
 REPLAY_SESSION_ENV = "RBSS_REPLAY_SESSION"
 
@@ -101,7 +104,20 @@ def maybe_start_from_env(event_queue, pos_cache, live_bpm) -> Optional[threading
     path = os.environ.get(REPLAY_SESSION_ENV)
     if not path:
         return None
-    session = CapturedSession.from_jsonl(path)  # raises on unreadable / bad schema
+    # Bridge-side live-safety gate. The launcher preflights too, but a STRAY
+    # RBSS_REPLAY_SESSION on a watcher/menubar-launched bridge (Rekordbox open,
+    # real readers live) would otherwise pump recorded events into a LIVE bridge
+    # -- two drivers racing, the exact forbidden case. Refuse here too: fail
+    # closed, log loudly, start no pump, never crash the bridge.
+    problem = replay_preflight(path)
+    if problem is not None:
+        log.error("[REPLAY] refusing %s=%s: %s", REPLAY_SESSION_ENV, path, problem)
+        return None
+    try:
+        session = CapturedSession.from_jsonl(path)
+    except Exception as exc:
+        log.error("[REPLAY] could not load session %s: %r -- not starting replay", path, exc)
+        return None
     thread = threading.Thread(
         target=run_replay,
         args=(session, event_queue, pos_cache, live_bpm),

@@ -17,7 +17,32 @@ task) / OPUS tmux orchestrators / SONNET grind subagents — NEVER Fable below
 manager. New dispatches pin the model explicitly and VERIFY on-screen
 ("Set model to Opus 4.8" + banner) BEFORE task text.
 
-## Immediate state at write time
+## Immediate state — UPDATED post-F2 review (~04:0x)
+
+- **F2 (AWR-163) IMPLEMENTED + my adversarial review = PASS, verdict sent to
+  superman (queued at their prompt); AWAITING THE EXECUTIVE GATE.** All five GO
+  conditions verified in code/tests/row. My registry corrections committed:
+  red accounting reconciled + AWR-162 (B) relabeled NOT-landed, deferred WITH
+  D.2, named follow-up = F4 round or dedicated laser round (exec call at gate).
+- **Key mechanisms proven this pass:** (a) executive's 2 pack reds =
+  `generator_commit` race — manifest embeds `git rev-parse HEAD`
+  (`tools/export_soundswitch_pack.py:175`, `soundswitch_pack.py:597`); any
+  mid-run commit fails both byte-identity tests once; NOT a defect, does NOT
+  gate the mirror; proposed hygiene fix = mock `_generator_commit`. (b) lane's
+  "govee slot_colors_from KeyError" = the BASELINE PatchD red (its literal
+  error string). (c) my suite: 3688 / exactly six-red baseline by name.
+- **F4 dispatch is pre-authorized on superman's gate.** Message file READY:
+  `/private/tmp/claude-501/-Users-bbui-rb-ss-bridge-v2/f33cb16b-be97-432d-a8a5-c906dbbd2199/scratchpad/f4_dispatch_msg.txt`.
+  Fire = presence-check + /clear claude4, then
+  `tools/agents/dispatch_lane.sh claude4 opus high <msgfile> AWR164`, then
+  `tools/agents/watch_lane.sh claude4 'AWR164-(DONE|BLOCKED)' 540`.
+  If the gate adds the (B)+(D.2) laser follow-up to F4 scope, append an
+  explicit addendum to the msg file first (it currently forbids touching it).
+- One spec defect of mine on record: balloon gray-zone sentence vs the 0.35
+  pin (code implements the pin; one-line operator knob 0.35→0.30 if wanted).
+- After F4: mirror (R5, authorized backup-first) → morning summary feed.
+
+## Immediate state at write time (historical — micro-round era)
 
 - **AWR-161-FIX micro-round IN FLIGHT on claude5 (Opus-pinned, verified).**
   Scope: 3 RENDER_GROUPS names (`led_pad_controls.py:194` import-crash fix —
