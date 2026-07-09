@@ -83,6 +83,11 @@ _PLAY_EVIDENCE_POLLS = 2
 # is trusted enough to emit ANLZ_PATH + TRACK_LOADED. Browse-cursor churn
 # (phantom loads) rarely holds one title this long; a real load trivially does.
 _LOAD_STABLE_TICKS = 3
+# AWR-160: throttle for the per-discard phantom-load DEBUG line, and the
+# window for the edge-triggered INFO storm-count summary (so a browse storm
+# is visible in normal logs without turning DEBUG on).
+_PHANTOM_DEBUG_THROTTLE_S = 1.0
+_PHANTOM_STORM_WINDOW_S = 60.0
 RB_MASTER_REFRESH_INTERVAL_S = RB_MASTER_STALE_AFTER_S / 2.0
 _TRACK_INFO_FIELD_RE = re.compile(r"(?:^|\n)\s*(?:[A-Za-z]\s+)?Title:\s*(.*?)(?:\r?\n|$)")
 
@@ -174,6 +179,7 @@ class RBStateReader(threading.Thread):
         # confirmed, and how many consecutive ticks it has read identically).
         self._candidate_title: dict[int, str] = {}
         self._candidate_ticks: dict[int, int] = {}
+        self._phantom_suppressed_count: dict[int, int] = {}
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -365,6 +371,7 @@ class RBStateReader(threading.Thread):
                 self._candidate_ticks[d] = min(
                     self._candidate_ticks.get(d, 0) + 1, _LOAD_STABLE_TICKS)
             else:
+                self._note_candidate_discarded(d, bridge, anlz)
                 self._candidate_title[d] = title
                 self._candidate_ticks[d] = 1
 
@@ -392,6 +399,7 @@ class RBStateReader(threading.Thread):
                     source='rb_state',
                 ))
         else:
+            self._note_candidate_discarded(d, bridge, anlz)
             self._candidate_title.pop(d, None)
             self._candidate_ticks.pop(d, None)
             self._last_track.pop(d, None)
@@ -483,6 +491,30 @@ class RBStateReader(threading.Thread):
                 payload={"rb_raw_deck": d},
                 source='rb_state',
             ))
+
+    def _note_candidate_discarded(self, d: int, bridge: int, anlz: Optional[str]) -> None:
+        """A pending load candidate was replaced/cleared before it stabilized.
+
+        AWR-160 leak-source instrumentation: a real load's candidate always
+        reaches _LOAD_STABLE_TICKS (capped there) before it is replaced, so
+        anything discarded below that count is browse bleed, not a load.
+        """
+        prev_title = self._candidate_title.get(d)
+        prev_ticks = self._candidate_ticks.get(d, 0)
+        if not prev_title or prev_ticks >= _LOAD_STABLE_TICKS:
+            return
+        self._phantom_suppressed_count[d] = self._phantom_suppressed_count.get(d, 0) + 1
+        if bf.log_throttled(f"phantom_load_suppressed_deck_{d}", _PHANTOM_DEBUG_THROTTLE_S):
+            log.debug(
+                "[RBSR] phantom-load-suppressed deck=%d ticks=%d title=%r anlz=%r",
+                bridge, prev_ticks, prev_title, anlz,
+            )
+        if bf.log_throttled(f"phantom_storm_deck_{d}", _PHANTOM_STORM_WINDOW_S):
+            log.info(
+                "[RBSR] phantom-storm deck=%d suppressed=%d window=%ds",
+                bridge, self._phantom_suppressed_count[d], int(_PHANTOM_STORM_WINDOW_S),
+            )
+            self._phantom_suppressed_count[d] = 0
 
     def _raw_deck_supports_resolver(self, rb_idx: int) -> bool:
         return not self._mixer_authority_enabled or rb_idx in (0, 1)

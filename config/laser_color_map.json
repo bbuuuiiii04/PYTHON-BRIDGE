@@ -19,14 +19,14 @@
     "v2:GLACIER":   ["blue", "cyan", "white", {"chase": 172, "colors": ["blue", "cyan"]}, {"chase": 68, "colors": ["cyan", "white"]}],
     "v2:DEEP_POOL": ["blue", "cyan", {"chase": 172, "colors": ["blue", "cyan"]}, {"chase": 164, "colors": ["blue", "purple"]}],
     "v2:TWILIGHT":  ["blue", "purple", {"chase": 164, "colors": ["blue", "purple"]}],
-    "v2:ION":       ["green", "cyan"],
-    "v2:VOLT":      ["purple", {"chase": 68, "colors": ["cyan", "white"]}],
+    "v2:ION":       ["green", "cyan", {"chase": 144, "colors": ["green", "white"]}],
+    "v2:VOLT":      ["purple", {"chase": 68, "colors": ["cyan", "white"]}, {"chase": 168, "colors": ["red", "cyan"]}],
     "v2:EMBERCORE": ["red", "white", {"chase": 100, "colors": ["red", "white"]}],
     "v2:NEUTRAL":   ["blue", "cyan", {"chase": 172, "colors": ["blue", "cyan"]}, {"chase": 68, "colors": ["cyan", "white"]}]
   },
   "effects": {
     "rainbow_family": {
-      "ch8": null,
+      "ch8": 188,
       "ch9": null
     }
   },
