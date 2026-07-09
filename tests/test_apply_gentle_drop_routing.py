@@ -1,8 +1,10 @@
 """Tests for tools/apply_gentle_drop_routing.py (Part C staging script).
 
-Gentle set is RT-only: routing writes f2.drop_look_routing and does NOT touch the
-bank; the 8 legacy drop_diy_* CLOUD chases are excluded everywhere (operator
-cloud-disable) until Template-Lab RT recreations exist.
+Gentle set is RT-only. The four rt_drop_chase colorways must live IN the bank or
+the tier-1 routing cell intersects to empty and fail-opens to the full bank (a
+silent no-op on every gentle drop) — so the script appends them to
+banks.default.drop. tiers 2/3 stay the 12 pre-existing modern looks. The 8 legacy
+drop_diy_* CLOUD chases are excluded everywhere (operator cloud-disable).
 """
 import copy
 import json
@@ -24,12 +26,10 @@ MODERN = [
 
 
 def _fixture():
-    """A config shaped like the live one post cloud-disable: RT-only drop bank
-    (12 modern), f2.drop_look_routing = {}."""
+    """Live-shaped config post cloud-disable: RT-only drop bank = 12 modern (the
+    colorways NOT yet in the bank — the trap), f2.drop_look_routing = {}."""
     looks = {n: {"backend": None, "allow_strobe": True} for n in m.LEGACY_CLOUD}
-    for n in MODERN:
-        looks[n] = {"backend": "realtime_razer", "allow_strobe": True}
-    for n in m.SOFT_QUARTET:
+    for n in MODERN + m.SOFT_QUARTET:
         looks[n] = {"backend": "realtime_razer", "allow_strobe": True}
     return {
         "enabled": True,
@@ -41,18 +41,35 @@ def _fixture():
 
 
 class ApplyGentleDropRoutingTests(unittest.TestCase):
-    def test_writes_rt_only_routing_and_leaves_bank_untouched(self):
+    def test_appends_colorways_to_bank_and_writes_routing(self):
         data = _fixture()
-        bank_before = list(data["banks"]["default"]["drop"])
         self.assertTrue(m.apply(data))
-        # bank is NOT mutated
-        self.assertEqual(data["banks"]["default"]["drop"], bank_before)
+        # colorways appended after the existing 12 modern (order stable, no dupes)
+        self.assertEqual(data["banks"]["default"]["drop"], MODERN + m.SOFT_QUARTET)
         routing = data["f2"]["drop_look_routing"]
         self.assertEqual(sorted(routing), sorted(m.FAMILIES))
         for fam in m.FAMILIES:
-            self.assertEqual(routing[fam]["1"], m.SOFT_QUARTET)  # tier1 = rt colorways only
-            self.assertEqual(routing[fam]["2"], MODERN)          # tier2 = modern
-            self.assertEqual(routing[fam]["3"], MODERN)          # tier3 = modern
+            self.assertEqual(routing[fam]["1"], m.SOFT_QUARTET)  # tier1 = rt colorways
+            self.assertEqual(routing[fam]["2"], MODERN)          # tier2 = 12 modern
+            self.assertEqual(routing[fam]["3"], MODERN)          # tier3 = 12 modern
+
+    def test_tier1_is_subset_of_resulting_bank(self):
+        # THE trap: tier-1 names absent from the bank make the cell fail-open to the
+        # full bank. Every tier-1 name must be in the resulting bank, all families.
+        data = _fixture()
+        m.apply(data)
+        bank = set(data["banks"]["default"]["drop"])
+        for fam, cell in data["f2"]["drop_look_routing"].items():
+            self.assertTrue(set(cell["1"]).issubset(bank), f"{fam} tier-1 not in bank")
+
+    def test_tiers_2_3_exclude_the_quartet(self):
+        # Big drops must not rotate into the gentle chases.
+        data = _fixture()
+        m.apply(data)
+        q = set(m.SOFT_QUARTET)
+        for fam, cell in data["f2"]["drop_look_routing"].items():
+            self.assertFalse(set(cell["2"]) & q, f"{fam} tier-2 has a colorway")
+            self.assertFalse(set(cell["3"]) & q, f"{fam} tier-3 has a colorway")
 
     def test_no_cloud_look_anywhere_in_routing(self):
         data = _fixture()
@@ -63,15 +80,22 @@ class ApplyGentleDropRoutingTests(unittest.TestCase):
         ]
         self.assertFalse([n for n in names if n in set(m.LEGACY_CLOUD)])
 
-    def test_legacy_in_bank_is_filtered_out_of_tiers_2_3(self):
-        # Defensive RT-only guard: a stray cloud look in the bank must never reach
-        # the routing table (it would resurrect transport fighting).
+    def test_stray_cloud_in_bank_filtered_out_of_tiers_2_3(self):
         data = _fixture()
         data["banks"]["default"]["drop"] = [m.LEGACY_CLOUD[0]] + list(MODERN)
         m.apply(data)
         tier2 = data["f2"]["drop_look_routing"]["WALL"]["2"]
         self.assertEqual(tier2, MODERN)
         self.assertNotIn(m.LEGACY_CLOUD[0], tier2)
+
+    def test_add_if_missing_no_dupes(self):
+        # A colorway already in the bank is not duplicated.
+        data = _fixture()
+        data["banks"]["default"]["drop"] = list(MODERN) + ["rt_drop_chase_blue"]
+        m.apply(data)
+        bank = data["banks"]["default"]["drop"]
+        self.assertEqual(bank.count("rt_drop_chase_blue"), 1)
+        self.assertEqual(set(bank), set(MODERN) | set(m.SOFT_QUARTET))
 
     def test_idempotent_second_apply_no_change(self):
         data = _fixture()
@@ -81,24 +105,24 @@ class ApplyGentleDropRoutingTests(unittest.TestCase):
     def test_does_not_touch_other_keys(self):
         data = _fixture()
         before_unrelated = copy.deepcopy(data["unrelated_key"])
-        before_banks = copy.deepcopy(data["banks"])
+        before_groove = copy.deepcopy(data["banks"]["default"]["groove"])
         before_f2_other = {k: v for k, v in data["f2"].items() if k != "drop_look_routing"}
         m.apply(data)
         self.assertEqual(data["unrelated_key"], before_unrelated)
-        self.assertEqual(data["banks"], before_banks)   # ENTIRE banks block untouched
+        self.assertEqual(data["banks"]["default"]["groove"], before_groove)  # only drop changed
         self.assertEqual(
             {k: v for k, v in data["f2"].items() if k != "drop_look_routing"},
             before_f2_other,
         )
 
     def test_gentle_quartet_drops_absent_names(self):
+        # Absent from looks{} -> not in tier-1 AND not added to the bank.
         data = _fixture()
-        del data["looks"]["rt_drop_chase_red"]   # absent from looks{} -> dropped
+        del data["looks"]["rt_drop_chase_red"]
         m.apply(data)
         tier1 = data["f2"]["drop_look_routing"]["WALL"]["1"]
-        self.assertEqual(
-            tier1, ["rt_drop_chase_blue", "rt_drop_chase_cyan", "rt_drop_chase_green"],
-        )
+        self.assertEqual(tier1, ["rt_drop_chase_blue", "rt_drop_chase_cyan", "rt_drop_chase_green"])
+        self.assertNotIn("rt_drop_chase_red", data["banks"]["default"]["drop"])
 
     def test_main_writes_once_then_no_op(self):
         import tempfile, os
@@ -106,14 +130,12 @@ class ApplyGentleDropRoutingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             p = os.path.join(td, "cfg.json")
             Path(p).write_text(json.dumps(data), encoding="utf-8")
-            rc1 = m.main(["--config", p])
-            self.assertEqual(rc1, 0)
+            self.assertEqual(m.main(["--config", p]), 0)
             after_first = Path(p).read_text(encoding="utf-8")
-            rc2 = m.main(["--config", p])   # second run must not rewrite the file
-            self.assertEqual(rc2, 0)
+            self.assertEqual(m.main(["--config", p]), 0)   # second run must not rewrite
             self.assertEqual(Path(p).read_text(encoding="utf-8"), after_first)
             reloaded = json.loads(after_first)
-            self.assertEqual(sorted(reloaded["f2"]["drop_look_routing"]), sorted(m.FAMILIES))
+            self.assertEqual(reloaded["banks"]["default"]["drop"], MODERN + m.SOFT_QUARTET)
             self.assertEqual(reloaded["f2"]["drop_look_routing"]["WALL"]["1"], m.SOFT_QUARTET)
 
 

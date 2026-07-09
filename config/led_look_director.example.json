@@ -1694,7 +1694,11 @@
         "rt_drop_strobe_blue_cyan",
         "rt_drop_strobe_cyan_white",
         "rt_rainbow_drop",
-        "rt_drop_firework_explosion"
+        "rt_drop_firework_explosion",
+        "rt_drop_chase_blue",
+        "rt_drop_chase_cyan",
+        "rt_drop_chase_red",
+        "rt_drop_chase_green"
       ],
       "post_drop": [
         "rt_post_drop_chase",

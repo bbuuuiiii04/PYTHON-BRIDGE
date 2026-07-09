@@ -136,11 +136,12 @@ def apply(data: dict) -> bool:
 def _summary(data: dict, label: str) -> str:
     drop = _current_drop_bank(data)
     legacy_present = [n for n in LEGACY_CLOUD if n in drop]
+    quartet_in_bank = [n for n in SOFT_QUARTET if n in drop]
     routing = data.get("f2", {}).get("drop_look_routing", {})
     fams = sorted(routing.keys()) if isinstance(routing, dict) else []
     lines = [
         f"[{label}] banks.default.drop: {len(drop)} looks "
-        f"({len(legacy_present)} legacy cloud present — bank untouched)",
+        f"({len(quartet_in_bank)}/4 rt colorways, {len(legacy_present)} legacy cloud)",
         f"[{label}] f2.drop_look_routing: {len(fams)} families {fams}",
     ]
     if isinstance(routing, dict):
