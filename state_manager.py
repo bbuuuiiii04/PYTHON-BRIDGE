@@ -1548,10 +1548,15 @@ class StateManager(LEDDispatchPolicyMixin):
                         meta.smart_breakdowns = next_smart_breakdowns
                         meta.anlz_buildups = raw_buildups
                         meta.anlz_mood = raw_mood
-                        f2_plan = ev.payload.get("f2_plan")
+                    # F2 plan rides only the spectral-aware re-read, whose markers
+                    # usually match the earlier fast read — attach it regardless of
+                    # markers_changed or the plan is silently dropped every track.
+                    # meta.clear() on TRACK_LOADED + the load_gen guard above keep
+                    # a plan from outliving its track.
+                    f2_plan = ev.payload.get("f2_plan")
+                    if f2_plan is not None and f2_plan is not meta.f2_plan:
                         meta.f2_plan = f2_plan
-                        if f2_plan is not None:
-                            log.info("[F2] plan deck=%d %s", ev.deck, f2_plan.summary())
+                        log.info("[F2] plan deck=%d %s", ev.deck, f2_plan.summary())
                     meta.smart_drop_energy_shadow = new_shadow
                     if markers_changed or shadow_changed:
                         log.info("[SM] smart-transition-select  deck=%d  drops=%d  smart_drops=%d  bd=%d  smart_bd=%d  up=%d  source=%s",
