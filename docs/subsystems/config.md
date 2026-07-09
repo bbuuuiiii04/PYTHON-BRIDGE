@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 96923d3
-last_verified_date: 2026-07-08
-validation_scope: software-only; Stream Deck palette control config software-tested; AWR-157 blank_role_hold knob software-tested
+last_verified_commit: 9191c65
+last_verified_date: 2026-07-09
+validation_scope: software-only; Stream Deck palette control config software-tested; AWR-157 blank_role_hold knob software-tested; AWR-161 LED round 3 config additions software-tested
 ---
 
 # Configuration
@@ -98,6 +98,14 @@ Config:
   `banks.default.post_drop` (their `drop_pairs` entries deleted); renderer `scene_ref` for both is
   unchanged. Local ignored `config/led_look_director.json` was not touched by this round — mirror
   with explicit operator approval, same as Patch F.
+- AWR-161 (2026-07-09) adds `hz`/`duty` to `REALTIME_EFFECT_PARAM_KEYS` for 18 migrated strobe
+  effect names (the last remaining BPM-tied gates, now on the AWR-156 `_hz_strobe_on` gate), and two
+  new looks to the tracked example: `rt_rainbow_drop`/`rt_rainbow_post_drop` (`scene_ref:
+  rainbow_ordered`, `color_source: baked`, paired via `drop_pairs`) and
+  `rt_drop_firework_explosion` (`scene_ref: drop_firework_explosion`, `color_source: baked`, paired
+  via `drop_pairs` to the existing `rt_post_drop_firework_remnants`). Local ignored
+  `config/led_look_director.json` was not touched by this round — mirror with explicit operator
+  approval, same as Patch F/AWR-156.
 - LED `color_engine.v2.zones.*.slot5_white` (AWR-152) is an optional per-zone RGB list (3 ints,
   0-255); absent defaults to pure white `(255, 255, 255)`, malformed fails closed with an error and
   disables only the v2 sub-block. It replaces the removed `ZoneRampConfig.white` key (parsed,

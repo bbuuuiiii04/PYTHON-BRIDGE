@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 96923d3
-last_verified_date: 2026-07-08
-validation_scope: software-only; AWR-157 blank_role_hold knob software-tested
+last_verified_commit: 8867f7d
+last_verified_date: 2026-07-09
+validation_scope: software-only; AWR-157 blank_role_hold knob software-tested; AWR-161 LED round 3 config additions software-tested
 ---
 
 # Configuration Setup
@@ -127,6 +127,15 @@ reviewed deployment/hardware gate.
   full param/rename/bank-move list. `width` is now a real renderer param on `rt_groove_chase`/
   `rt_groove_nebula`/`rt_post_drop_center_comet` (was allowlisted but silently unread before this
   round).
+- AWR-161 (2026-07-09) migrates the last ten BPM-tied strobe gates (18 effect names) onto the
+  AWR-156 Hz gate — `hz`/`duty` are now dialable on all of them (defaults hz 6.0/duty 0.3, the
+  accepted feel). Adds two new looks to the tracked example: `rt_rainbow_drop`/
+  `rt_rainbow_post_drop` (an ordered hue-by-position rainbow pair, `width`/`cycle_beats`/
+  `rainbow_span`/`travel_per_beat`/`loop_beats` params) and `rt_drop_firework_explosion` (a
+  beat-tied surge + time-based ember field, `surge_beats`/`bg_level`/`bg_hold`/`color_a`/
+  `spark_a`/`spark_b`/`sparkle_density`/`sparkle_size`/`sparkle_life_s` params), paired to
+  `rt_rainbow_post_drop` and the existing `rt_post_drop_firework_remnants` respectively via
+  `drop_pairs`; see `docs/subsystems/config.md` for the full param list.
 - Point or mono palette selections can make slots 0-4 one solid RGB for any slot cue, including realtime chase/comet/twinkle cues. `random_with_mono_chance` can opt individual looks into probabilistic solid slots 0-4 without changing shipped behavior when its chance map is empty or zero.
 - In the tracked LED example, Patch F keeps generic slot looks in `banks.default` and stores legacy color-suffix realtime looks in `banks.legacy_color_suffix`. The director selects `banks.default`; the legacy bank is preservation storage unless future code explicitly selects it.
 - Do not mirror Patch F into ignored live LED config without explicit operator approval, because live config may be behind the tracked example and is hardware-adjacent.
