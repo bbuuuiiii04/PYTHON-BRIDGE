@@ -49,8 +49,11 @@ class LaserColorMap:
     effects: Mapping[str, Mapping[str, int | None]] | None = None
     settle: Mapping[str, int] | None = None
     white_templates: tuple[str, ...] = DEFAULT_WHITE_TEMPLATES
-    # Per-mood menus: {mood: ((\"solid\", name) | (\"chase\", ch8, (name, ...)), ...)}
-    # Stored as nested tuples so the frozen dataclass stays immutable.
+    # Per-mood menus: {mood: ((\"solid\", name)
+    #                        | (\"chase\", ch8, (name, ...))
+    #                        | (\"chase_tiered\", {tier: ch8}, (name, ...)), ...)}
+    # Stored as nested tuples so the frozen dataclass stays immutable (the tiered
+    # entry's inner dict is read-only in practice — never mutated or hashed).
     menus: Mapping[str, tuple] | None = None
 
     @classmethod
@@ -103,6 +106,7 @@ class LaserColorEngine:
         white_moment: bool,
         drop_phase: str | None,
         post_drop_progress: float | None,
+        tier: str | None = None,
     ) -> None:
         try:
             target = self._target(
@@ -110,6 +114,7 @@ class LaserColorEngine:
                 white_moment=white_moment,
                 drop_phase=drop_phase,
                 post_drop_progress=post_drop_progress,
+                tier=tier,
             )
         except Exception:
             target = None
@@ -129,6 +134,7 @@ class LaserColorEngine:
         white_moment: bool,
         drop_phase: str | None,
         post_drop_progress: float | None,
+        tier: str | None = None,
     ) -> tuple[int, int | None] | None:
         if not self._map.enabled:
             return None
@@ -175,7 +181,14 @@ class LaserColorEngine:
 
         is_drop = drop_phase == "drop"
         entry = _pick_menu_entry(eligible, led_color, is_drop)
-        ch8 = fixed.get(entry[1]) if entry[0] == "solid" else entry[1]
+        if entry[0] == "solid":
+            ch8 = fixed.get(entry[1])
+        elif entry[0] == "chase_tiered":
+            # AWR-170 (B): the drop's energy tier picks the chase DIVISION class
+            # (100→116→140 for red+white). Unknown/None tier ⇒ standard.
+            ch8 = _resolve_tier_ch8(entry[1], tier)
+        else:  # "chase" (single-value): byte-identical to pre-AWR-170.
+            ch8 = entry[1]
         if ch8 is None:
             return None
         ch9 = None if fixed_ch9 is None else self._settled_ch9(fixed_ch9, drop_phase, post_drop_progress)
@@ -226,8 +239,11 @@ def _parse_menus(raw: Any) -> Mapping[str, tuple] | None:
     Each mood's list becomes a tuple of normalized entries:
       - a str name -> ("solid", name)
       - {"chase": <ch8>, "colors": [a] or [a, b]} -> ("chase", ch8, (a, ...))
-    Malformed entries are dropped silently; a mood that ends up empty is
-    omitted entirely (so the mood falls back to the legacy nearest-fixed path).
+      - {"chase": {"standard"|"intense"|"monster": <ch8>}, "colors": [...]}
+        -> ("chase_tiered", {tier: ch8}, (a, ...))  (AWR-170 B: per-tier division)
+    Malformed entries are dropped silently (fail closed: a junk per-tier chase is
+    skipped, never invented); a mood that ends up empty is omitted entirely (so the
+    mood falls back to the legacy nearest-fixed path).
     """
     if not isinstance(raw, Mapping):
         return None
@@ -242,18 +258,54 @@ def _parse_menus(raw: Any) -> Mapping[str, tuple] | None:
                 if name:
                     entries.append(("solid", name))
             elif isinstance(item, Mapping):
-                ch8 = _byte_or_none(item.get("chase"))
                 colors_src = item.get("colors")
-                if ch8 is None or not isinstance(colors_src, list):
+                if not isinstance(colors_src, list):
                     continue
                 names = tuple(
                     c.strip() for c in colors_src if isinstance(c, str) and c.strip()
                 )
-                if 1 <= len(names) <= 2:
+                if not 1 <= len(names) <= 2:
+                    continue
+                chase_raw = item.get("chase")
+                if isinstance(chase_raw, Mapping):
+                    tiers = _resolve_chase_tiers(chase_raw)
+                    if tiers is None:
+                        continue  # all-junk per-tier dict: fail closed, skip entry
+                    entries.append(("chase_tiered", tiers, names))
+                else:
+                    ch8 = _byte_or_none(chase_raw)
+                    if ch8 is None:
+                        continue
                     entries.append(("chase", ch8, names))
         if entries:
             menus[str(mood)] = tuple(entries)
     return menus or None
+
+
+_CHASE_TIERS = ("standard", "intense", "monster")
+
+
+def _resolve_chase_tiers(raw: Mapping[str, Any]) -> dict[str, int] | None:
+    """Per-tier chase dict -> a fully-populated {standard,intense,monster: ch8}.
+
+    Missing keys fall back to `standard`, then to the first present value. All-junk
+    (no valid 0-255 byte anywhere) -> None so the caller fails closed to skipping the
+    entry (never invents a division). ponytail: a dict inside the frozen map is safe
+    — menu entries are only ever read, never mutated or hashed.
+    """
+    parsed = {t: _byte_or_none(raw.get(t)) for t in _CHASE_TIERS}
+    present = {t: v for t, v in parsed.items() if v is not None}
+    if not present:
+        return None
+    base = present.get("standard", next(iter(present.values())))
+    return {t: present.get(t, base) for t in _CHASE_TIERS}
+
+
+def _resolve_tier_ch8(tiers: Mapping[str, int], tier: str | None) -> int | None:
+    """CH8 for the current drop tier; None/unknown/`small` tier -> standard."""
+    if tier in tiers:
+        return tiers[tier]
+    return tiers.get("standard")
 
 
 def _entry_brightness(entry: tuple) -> int:
@@ -284,7 +336,7 @@ def _pick_menu_entry(eligible: list[tuple], led_color: str, is_drop: bool) -> tu
     Drops prefer a chase (fires the two-color effect); non-drops track the
     matching solid. `eligible` is guaranteed non-empty by the caller.
     """
-    chases = [e for e in eligible if e[0] == "chase"]
+    chases = [e for e in eligible if e[0] in ("chase", "chase_tiered")]
     solids = [e for e in eligible if e[0] == "solid"]
     if is_drop:
         for e in chases:
