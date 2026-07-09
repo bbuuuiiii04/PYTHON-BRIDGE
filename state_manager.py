@@ -66,7 +66,7 @@ from .models import (
 from . import led_dispatch_policy as _led_dispatch_policy
 from .led_dispatch_policy import LEDDispatchPolicyMixin
 from .led_palette_control import LedPaletteControl, PaletteFeedbackWriter
-from .led_config import load_drop_presentation_config, load_f2_config
+from .led_config import load_drop_presentation_config, load_f2_config, load_f4_config
 from .led_identity_v2 import (
     IdentityStore,
     NORM_ANCHORS as LED_IDENTITY_NORM_ANCHORS,
@@ -778,6 +778,13 @@ class StateManager(LEDDispatchPolicyMixin):
         self._f2_config = _f2_cfg
         self._f2_enabled = _f2_cfg.enabled
         self._f2_drop_look_routing = _f2_cfg.drop_look_routing
+        # F4 (LIGHTING ENGINE v2 texture seasoning) master switch, from the `/f4`
+        # config block. Absent block ⇒ disabled ⇒ byte-identical to F2-only (kill
+        # test). Consumer-only: nothing here schedules/darkens/types — F4 seasons
+        # variant params inside the already-selected look.
+        _f4_cfg = load_f4_config()
+        self._f4_config = _f4_cfg
+        self._f4_enabled = _f4_cfg.enabled
         self._stop  = threading.Event()
         self._mixer_authority_enabled = bool(mixer_authority_enabled)
 

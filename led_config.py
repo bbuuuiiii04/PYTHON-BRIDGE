@@ -20,6 +20,7 @@ from .govee_frame_renderer import (
 from .led_models import (
     ColorEngineConfig,
     F2Config,
+    F4Config,
     IdentityV2Config,
     LEDAutomation,
     LEDBank,
@@ -162,6 +163,22 @@ def load_f2_config(path: str | None = None) -> F2Config:
         return F2Config()
     block = data.get("f2") if isinstance(data, dict) else None
     return F2Config.from_dict(block)
+
+
+def load_f4_config(path: str | None = None) -> F4Config:
+    """Read the top-level `/f4` block (LIGHTING ENGINE v2 Feature 4 texture layer,
+    AWR-164) from the same config file. Absent block / missing file / bad JSON ⇒
+    F4Config() with enabled False (the live config that has no `f4` key stays
+    byte-identical to F2-only — the kill test). Never raises."""
+    resolved = _resolve_path(path)
+    if resolved is None:
+        return F4Config()
+    try:
+        data = json.loads(Path(resolved).read_text(encoding="utf-8"))
+    except Exception:
+        return F4Config()
+    block = data.get("f4") if isinstance(data, dict) else None
+    return F4Config.from_dict(block)
 
 
 def _resolve_path(explicit: str | None) -> Path | None:

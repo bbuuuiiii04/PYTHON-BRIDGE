@@ -398,6 +398,27 @@
       "ease_beats": 8
     }
   },
+  "f4": {
+    "enabled": true,
+    "busy_pulse_experimental": false,
+    "variant_seasoning": {
+      "house_stab": {"sparkle_density": 0.15, "sparkle_size": 1.6},
+      "house_sustain": {"sparkle_density": 0.45, "sparkle_size": 0.9},
+      "house_default": {},
+      "wall_trap": {"sparkle_density": 0.2, "sparkle_size": 2.0},
+      "wall_dense": {"sparkle_density": 0.6, "sparkle_size": 0.7},
+      "wall_default": {},
+      "comet_default": {},
+      "neutral_default": {}
+    },
+    "euphoric_bright_looks": [
+      "rt_drop_white_aggressive",
+      "rt_drop_strobe_cyan_white",
+      "rt_drop_strobe_red_white",
+      "drop_diy_1_red_white_chase"
+    ],
+    "simmer_seasoning": {"sparkle_density": 0.08, "sparkle_size": 1.2}
+  },
   "targets": {
     "room_perimeter": {
       "label": "Bui light test",

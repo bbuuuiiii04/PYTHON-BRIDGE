@@ -112,8 +112,12 @@ registry row with real numbers; AWR-162 row flips (B)/(D.2) from deferred to imp
 
 ## Part C - Invariants (live safety)
 - The 200 Hz push loop gains no blocking I/O and no new computation beyond dict lookups.
-- Mask precedence unchanged: blackout / emergency / pack-disabled always win; Static Override
-  semantics untouched.
+- Mask precedence unchanged: blackout / emergency / pack-disabled always win.
+- **CHOSEN BEHAVIOR (named, executive-ruled 2026-07-09):** a held laser STATIC OVERRIDE ducks dark
+  during every `pre_chorus` window and restores when it releases — mask precedence beats overlays,
+  per the standing invariant that statics lose to blackout masks, and per the operator's
+  unqualified "lasers black out 4 beats before every chorus". This is a real behavior change for
+  held statics; it is intentional, not drift.
 - AWR-138 both-sides re-entry untouched (`drop_presentation.py:698-727`): this round never touches
   the window machine.
 - A `pre_chorus` mask can NEVER outlive its track: prove via the cleanup-path tests.

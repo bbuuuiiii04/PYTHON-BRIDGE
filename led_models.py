@@ -160,6 +160,67 @@ class F2Config:
         )
 
 
+def _f4_param_dict(raw: Any) -> Dict[str, Any]:
+    """Coerce a seasoning param dict to {str: finite-number | str}. Anything else
+    (nested objects, bools, non-finite) is dropped — fail-closed to no-op."""
+    out: Dict[str, Any] = {}
+    if not isinstance(raw, dict):
+        return out
+    for key, value in raw.items():
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, (int, float)):
+            f = float(value)
+            if f == f and f not in (float("inf"), float("-inf")):
+                out[str(key)] = f
+        elif isinstance(value, str):
+            out[str(key)] = value
+    return out
+
+
+@dataclass(frozen=True)
+class F4Config:
+    """LIGHTING ENGINE v2 Feature 4 (texture seasoning) config block (AWR-164).
+    Absent block ⇒ enabled False, so an un-mirrored live config stays byte-
+    identical to F2-only (kill test); the example ships enabled and the operator's
+    mirror + restart activates it. S-2 containment: nothing here schedules,
+    darkens, or types anything — it only picks variant params inside an already-
+    selected look. Validation fails closed to defaults; unknown keys are ignored."""
+    enabled: bool = False
+    # lowmid_pulse stays UNCONSUMED behind this flag (C§6d experimental) — the
+    # busy-pulse duty is recorded in the plan for observability, rendered by
+    # nothing. Flipping this true renders nothing today (no consumer exists).
+    busy_pulse_experimental: bool = False
+    # {seasoning_key: {param: value}} merged into the drop cue's params. Keys are
+    # family+texture (house_stab / house_sustain / wall_trap / wall_dense / ...);
+    # an unknown key ⇒ {} ⇒ family default variant (containment).
+    variant_seasoning: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    # look names to prefer during euphoric windows (fail-open — empty, or none of
+    # them in the bank, ⇒ no added preference; only ever NARROWS within the bank).
+    euphoric_bright_looks: Tuple[str, ...] = ()
+    # params merged into a quiet-section role cue during a MEASURED simmer.
+    simmer_seasoning: Dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: Any) -> "F4Config":
+        src = data if isinstance(data, dict) else {}
+        seasoning: Dict[str, Dict[str, Any]] = {}
+        raw = src.get("variant_seasoning")
+        if isinstance(raw, dict):
+            for key, params in raw.items():
+                cell = _f4_param_dict(params)
+                seasoning[str(key)] = cell   # empty cell kept ⇒ explicit "no-op"
+        bright_raw = src.get("euphoric_bright_looks")
+        bright = tuple(str(n) for n in bright_raw) if isinstance(bright_raw, list) else ()
+        return cls(
+            enabled=bool(src.get("enabled", False)),
+            busy_pulse_experimental=bool(src.get("busy_pulse_experimental", False)),
+            variant_seasoning=seasoning,
+            euphoric_bright_looks=bright,
+            simmer_seasoning=_f4_param_dict(src.get("simmer_seasoning")),
+        )
+
+
 # Canonical default scale stops (6 stops from §7/§15.5).
 _DEFAULT_SCALE_STOPS: Dict[str, Tuple[int, int, int]] = {
     "green":   (0, 255, 0),
