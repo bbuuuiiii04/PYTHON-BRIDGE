@@ -611,28 +611,88 @@ class SoloPadIntegrationTests(unittest.TestCase):
         self.assertEqual(sm._drop_presentation_last_actions.presentation, LASERS_ONLY)
         self.assertEqual(sm._drop_presentation_solo_feedback, "active")
 
-        sm._handle_event(BridgeEvent(kind=Ev.LASER_SOLO_PAD, deck=0, source="test"))
-        self.assertTrue(sm._drop_presentation_manual_cancel)
-
         with self.assertLogs("perf.override", level="INFO") as logs:
-            sm._drop_presentation_tick(
-                active=1, d=d,
-                sp_state=_sp_state(
-                    abs_beat=33.0, active_drop_beat=32.0, smart_drop_crossing=False,
-                    current_phrase_is_chorus=True, smart_post_drop_active=True,
-                ),
-                impact_now=False,
-            )
+            sm._handle_event(BridgeEvent(kind=Ev.LASER_SOLO_PAD, deck=0, source="test"))
+        self.assertTrue(sm._drop_presentation_manual_cancel)
+        self.assertTrue(any(
+            (getattr(r, "data", None) or {}).get("action") == "solo_cancel" for r in logs.records
+        ))
+
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(
+                abs_beat=33.0, active_drop_beat=32.0, smart_drop_crossing=False,
+                current_phrase_is_chorus=True, smart_post_drop_active=True,
+            ),
+            impact_now=False,
+        )
         self.assertIsNone(sm._drop_presentation_last_actions.presentation)
         self.assertFalse(sm._drop_presentation_last_actions.led_dark_hold)
         self.assertFalse(sm._drop_presentation_last_actions.base_suppressed)
         self.assertFalse(sm._drop_presentation_manual_cancel)
         self.assertNotEqual(sm._drop_presentation_solo_feedback, "active")
-        self.assertTrue(any(
-            "solo-cancelled" in r.getMessage() for r in logs.records
-        ) or any(
-            (getattr(r, "data", None) or {}).get("action") == "solo_cancel" for r in logs.records
-        ))
+
+    def test_arm_cleared_on_track_load_on_armed_deck(self) -> None:
+        # AWR-159 Task 5: the "blinked the entire mix" evidence -- a track
+        # reload on the ARMED deck must clear the arm and the pad visibly,
+        # not just silently stop matching on the next drop.
+        sm = _make_sm()
+        _enable_drop_presentation(sm)
+        d = _deck_state(load_gen=5)
+        sm._deck = {1: d}
+        sm._os = SimpleNamespace(active_deck=1, lighting_mode="autoloop")
+        # Seed last_load_gen: a deck's FIRST tick never carries a "previous"
+        # value to compare against.
+        sm._drop_presentation_tick(
+            active=1, d=d, sp_state=_sp_state(abs_beat=1.0, smart_drop_crossing=False),
+            impact_now=False,
+        )
+        sm._handle_event(BridgeEvent(kind=Ev.LASER_SOLO_PAD, deck=0, source="test"))
+        self.assertEqual(sm._drop_presentation_armed_key, (1, 5))
+
+        d.load_gen = 6
+        with self.assertLogs("perf.override", level="INFO") as logs:
+            sm._drop_presentation_tick(
+                active=1, d=d, sp_state=_sp_state(abs_beat=10.0, smart_drop_crossing=False),
+                impact_now=False,
+            )
+        self.assertIsNone(sm._drop_presentation_armed_key)
+        self.assertEqual(sm._drop_presentation_solo_feedback, "off")
+        cleared = [
+            r for r in logs.records
+            if (getattr(r, "data", None) or {}).get("action") == "solo_arm_cleared"
+        ]
+        self.assertEqual(len(cleared), 1)
+        self.assertEqual(cleared[0].data["reason"], "track_changed")
+
+    def test_arm_cleared_on_active_deck_change(self) -> None:
+        sm = _make_sm()
+        _enable_drop_presentation(sm)
+        d1 = _deck_state(load_gen=5)
+        d2 = _deck_state(load_gen=9)
+        sm._deck = {1: d1, 2: d2}
+        sm._os = SimpleNamespace(active_deck=1, lighting_mode="autoloop")
+        sm._drop_presentation_tick(
+            active=1, d=d1, sp_state=_sp_state(abs_beat=1.0, smart_drop_crossing=False),
+            impact_now=False,
+        )
+        sm._handle_event(BridgeEvent(kind=Ev.LASER_SOLO_PAD, deck=0, source="test"))
+        self.assertEqual(sm._drop_presentation_armed_key, (1, 5))
+
+        sm._os.active_deck = 2
+        with self.assertLogs("perf.override", level="INFO") as logs:
+            sm._drop_presentation_tick(
+                active=2, d=d2, sp_state=_sp_state(abs_beat=1.0, smart_drop_crossing=False),
+                impact_now=False,
+            )
+        self.assertIsNone(sm._drop_presentation_armed_key)
+        self.assertEqual(sm._drop_presentation_solo_feedback, "off")
+        cleared = [
+            r for r in logs.records
+            if (getattr(r, "data", None) or {}).get("action") == "solo_arm_cleared"
+        ]
+        self.assertEqual(len(cleared), 1)
+        self.assertEqual(cleared[0].data["reason"], "deck_changed")
 
     def test_solo_arm_then_disarm_logs_feedback_transitions(self) -> None:
         sm = _make_sm()
@@ -890,6 +950,23 @@ class StopFailOpenReleaseTests(unittest.TestCase):
         self.assertFalse(sm._drop_presentation_base_suppressed_held)
         self.assertNotEqual(
             sm._pack_runtime.player.render().diagnostic.code, "base_suppressed")
+
+    def test_release_on_stop_clears_a_stale_armed_key(self) -> None:
+        # AWR-159 Task 5: a stop invalidates any pending arm too -- there is
+        # no "next true drop" coming while stopped.
+        sm = self._held_sm()
+        sm._drop_presentation_armed_key = (1, 5)
+        sm._drop_presentation_solo_feedback = "armed"
+        with self.assertLogs("perf.override", level="INFO") as logs:
+            sm._drop_presentation_release_on_stop()
+        self.assertIsNone(sm._drop_presentation_armed_key)
+        self.assertEqual(sm._drop_presentation_solo_feedback, "off")
+        cleared = [
+            r for r in logs.records
+            if (getattr(r, "data", None) or {}).get("action") == "solo_arm_cleared"
+        ]
+        self.assertEqual(len(cleared), 1)
+        self.assertEqual(cleared[0].data["reason"], "stopped")
 
     def test_do_stop_fails_open_a_held_dark_hold(self):
         # The real bug path: _do_stop is the single stop chokepoint; every stop
