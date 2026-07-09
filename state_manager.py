@@ -582,10 +582,15 @@ class StateManager(LEDDispatchPolicyMixin):
         # here.
         self._drop_presentation_audible_start_beat: dict[tuple[int, int], float] = {}
         # Solo pad: one-shot manual arm state (tier 2), keyed on (deck, load_gen)
-        # so it auto-invalidates on track change without a separate clear call
         # (authority doc: "an armed solo never carries into a track the
-        # operator didn't aim it at"). The feedback string is what
-        # LedPaletteControl's get_laser_solo pulls ("off" | "armed" | "active").
+        # operator didn't aim it at"). The KEY MATCH auto-invalidates on
+        # track/deck change, but the key itself and the pad feedback do not
+        # self-clear from that alone -- _drop_presentation_tick explicitly
+        # clears it on track_changed/active_deck_changed, and
+        # _drop_presentation_release_on_stop on stop (AWR-159 Task 5; before
+        # that fix the pad could keep showing "armed" indefinitely). The
+        # feedback string is what LedPaletteControl's get_laser_solo pulls
+        # ("off" | "armed" | "pending" | "active" | "refused").
         self._drop_presentation_armed_key: Optional[tuple[int, int]] = None
         self._drop_presentation_solo_feedback: str = "off"
         # One-tick request set by a pad press while a solo window is open
@@ -2597,6 +2602,23 @@ class StateManager(LEDDispatchPolicyMixin):
         self._drop_presentation_last_load_gen[active] = d.load_gen
         self._drop_presentation_last_active_deck = active
 
+        if self._drop_presentation_armed_key is not None and (track_changed or active_deck_changed):
+            # AWR-159 Task 5: the arm's key match already auto-invalidates
+            # (armed = self._drop_presentation_armed_key == track_key would
+            # read False from here on), but the key itself and the pad
+            # feedback used to keep showing "armed" until some LATER event
+            # happened to call the feedback updater -- the "blinked the
+            # entire mix" evidence. Clear explicitly and visibly right here.
+            stale_reason = "track_changed" if track_changed else "deck_changed"
+            self._drop_presentation_armed_key = None
+            bridge_log.perf(
+                "override", "[LASER] solo-arm-cleared reason=%s", stale_reason,
+                data={
+                    "surface": "laser", "action": "solo_arm_cleared",
+                    "reason": stale_reason,
+                },
+            )
+
         # Opening-damper ≥16-beat audible latch: count a track once its deck
         # has been the audible active deck (playing) for >=16 beats since
         # load, once per (deck, load_gen). A loaded-but-never-audible deck
@@ -2817,6 +2839,17 @@ class StateManager(LEDDispatchPolicyMixin):
         tick). Pure/in-memory -- no I/O added to the 200 Hz path."""
         if not self._drop_presentation_config.enabled:
             return
+        if self._drop_presentation_armed_key is not None:
+            # AWR-159 Task 5: a stop invalidates any pending arm too -- there
+            # is no "next true drop" coming while stopped.
+            self._drop_presentation_armed_key = None
+            bridge_log.perf(
+                "override", "[LASER] solo-arm-cleared reason=stopped",
+                data={
+                    "surface": "laser", "action": "solo_arm_cleared",
+                    "reason": "stopped",
+                },
+            )
         actions = self._drop_presentation_window.tick(
             WindowInputs(
                 abs_beat=None, beats_to_next_drop=None, next_drop_beat=None,
@@ -2829,6 +2862,7 @@ class StateManager(LEDDispatchPolicyMixin):
         self._drop_presentation_last_actions = actions
         self._drop_presentation_last_pending = (None, "", None)
         self._drop_presentation_manual_cancel = False
+        self._drop_presentation_update_solo_feedback()
 
     def _drop_presentation_update_solo_feedback(self) -> None:
         last_actions = self._drop_presentation_last_actions
@@ -2842,7 +2876,12 @@ class StateManager(LEDDispatchPolicyMixin):
         elif self._drop_presentation_armed_key is not None:
             state = "armed"
         else:
-            state = "armed" if self._drop_presentation_last_pending[0] == LASERS_ONLY else "off"
+            # AWR-159 Task 5: distinct from a MANUAL arm -- an auto tier
+            # (hotcue/learned/gearshift/record) queued for the next drop
+            # ("the pad pulses whenever ANY tier has a solo pending",
+            # authority doc). led_palette_control._control_payload already
+            # expected "pending" here; state_manager just never emitted it.
+            state = "pending" if self._drop_presentation_last_pending[0] == LASERS_ONLY else "off"
         if state != self._drop_presentation_solo_feedback:
             prev = self._drop_presentation_solo_feedback
             self._drop_presentation_solo_feedback = state
