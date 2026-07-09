@@ -553,6 +553,29 @@ def default_recording_path() -> str:
     return RECORDING_PATH_TEMPLATE.format(stamp=time.strftime("%Y%m%d-%H%M%S"))
 
 
+def newest_recorded_session() -> str | None:
+    import glob
+
+    files = sorted(glob.glob(RECORDING_PATH_TEMPLATE.format(stamp="*")))
+    return files[-1] if files else None
+
+
+def rekordbox_running() -> bool:
+    # Same canonical check the watcher uses (pgrep -x rekordbox); replay must
+    # never run against live decks.
+    return subprocess.run(["pgrep", "-x", "rekordbox"], capture_output=True).returncode == 0
+
+
+def _notify(message: str) -> None:
+    # Reuse osascript (already this file's dialog mechanism) for a visible,
+    # non-blocking heads-up without pulling in more AppKit surface.
+    subprocess.run(
+        ["osascript", "-e", f'display notification {json.dumps(message)} with title "RBSS Bridge"'],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
 def recording_status_from_snapshot(status: dict) -> dict:
     sm = status.get("state_manager") or {}
     rec = sm.get("recording") or {}
