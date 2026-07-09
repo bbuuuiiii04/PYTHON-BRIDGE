@@ -250,12 +250,16 @@ class _AutomationLEDLookDirector:
         scripted_default_role: str = "breakdown",
         scripted_role_map: dict[str, str] | None = None,
         mapped_roles: set[str] | None = None,
+        blank_role_hold: bool = True,
+        blackout_look: str = "room_blackout",
     ) -> None:
         self._enabled = enabled
         self._dry_run = dry_run
         self._automation_enabled = automation_enabled
         self._scripted_mode_automation = scripted_mode_automation
         self._scripted_default_role = scripted_default_role
+        self._blank_role_hold = blank_role_hold
+        self.blackout_look = blackout_look
         if scripted_role_map is None:
             scripted_role_map = {
                 "ambient": "breakdown",
