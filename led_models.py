@@ -97,6 +97,69 @@ class IdentityV2Config:
     budget_wide_threshold: float = 0.5
 
 
+def _f2_num(value: Any, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _f2_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+@dataclass(frozen=True)
+class F2Config:
+    """LIGHTING ENGINE v2 Feature 2 (moments / darkness / drop-typing) config
+    block (AWR-163). An ABSENT block ⇒ enabled False, so an un-mirrored live
+    config stays byte-identical to v1 (kill test); the example config ships
+    enabled True and the operator's mirror + restart activates it. Validation
+    fails closed to defaults; unknown legacy keys are ignored."""
+    enabled: bool = False
+    # {family: {tier(int): (look names...)}}. Empty ⇒ drop looks keep today's
+    # rotation pick (unknown cell also falls back to rotation).
+    drop_look_routing: Dict[str, Dict[int, Tuple[str, ...]]] = field(default_factory=dict)
+    balloon_perc_boundary: float = 0.35      # C§6f pinned; TUNE-LIVE
+    dip_cap_beats: int = 4                    # D§4.1-5 TUNE-LIVE
+    flick_ms: int = 200                       # D§4.1-6 TUNE-LIVE
+    impact_burndown_enabled: bool = False     # AWR-162 (C) ships disabled
+    impact_burndown_ease_beats: int = 8
+
+    @classmethod
+    def from_dict(cls, data: Any) -> "F2Config":
+        src = data if isinstance(data, dict) else {}
+        routing: Dict[str, Dict[int, Tuple[str, ...]]] = {}
+        raw = src.get("drop_look_routing")
+        if isinstance(raw, dict):
+            for fam, tiers in raw.items():
+                if not isinstance(tiers, dict):
+                    continue
+                cell: Dict[int, Tuple[str, ...]] = {}
+                for tk, names in tiers.items():
+                    try:
+                        ti = int(tk)
+                    except (TypeError, ValueError):
+                        continue
+                    if isinstance(names, list):
+                        cell[ti] = tuple(str(n) for n in names)
+                if cell:
+                    routing[str(fam)] = cell
+        bd = src.get("impact_burndown")
+        bd = bd if isinstance(bd, dict) else {}
+        return cls(
+            enabled=bool(src.get("enabled", False)),
+            drop_look_routing=routing,
+            balloon_perc_boundary=_f2_num(src.get("balloon_perc_boundary"), 0.35),
+            dip_cap_beats=_f2_int(src.get("dip_cap_beats"), 4),
+            flick_ms=_f2_int(src.get("flick_ms"), 200),
+            impact_burndown_enabled=bool(bd.get("enabled", False)),
+            impact_burndown_ease_beats=_f2_int(bd.get("ease_beats"), 8),
+        )
+
+
 # Canonical default scale stops (6 stops from §7/§15.5).
 _DEFAULT_SCALE_STOPS: Dict[str, Tuple[int, int, int]] = {
     "green":   (0, 255, 0),
