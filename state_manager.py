@@ -4973,23 +4973,35 @@ class StateManager(LEDDispatchPolicyMixin):
         self._led_cfx_last_mono = now
         dt_s = (now - prev_mono) if prev_mono > 0.0 else 0.0
 
+        # AWR-173 Leg 2: an inert/gating BLIP mid-ride must not FORGET a fired
+        # engagement. These paths zero the output but return the state LATCHED-RELEASED
+        # when it had already fired, so a single blip (gating / v2-off / stale reading)
+        # can't re-arm the trigger and re-flood at full brightness on the next healthy
+        # tick. A never-fired engagement resets clean (a mask over a pre-fire flood may
+        # re-flood when it lifts — knob-state behavior, correct). Only the feature being
+        # off fully re-arms (nothing to latch).
+        prev = self._led_cfx_state
+        inert = CfxEnvState(fired=prev.fired, released=prev.fired)
+
         cfg = getattr(self, "_cfx_sweep_config", None)
+        if cfg is None or not cfg.enabled:
+            self._led_cfx_state = CfxEnvState()          # feature off: full re-arm
+            self._led_cfx_sweep = None
+            return
         if (
-            cfg is None
-            or not cfg.enabled
-            or active_deck not in (1, 2)
+            active_deck not in (1, 2)
             or self._led_blackout_active()               # blackout/emergency/solo/drop owners win
             or self._os.breakdown_active                 # F2 smart-breakdown sections own their frames
             or bool(self._led_smart_drop_blackout_key)   # smart-drop pre-drop tactical blackout wins
         ):
-            self._led_cfx_state = CfxEnvState()
+            self._led_cfx_state = inert
             self._led_cfx_sweep = None
             return
 
         engine = self._led_color_engine
         rgb = engine.v2_darkest_rgb() if engine is not None else None
         if rgb is None:                          # v2 identity off / no active dressing
-            self._led_cfx_state = CfxEnvState()
+            self._led_cfx_state = inert
             self._led_cfx_sweep = None
             return
 
@@ -4998,11 +5010,11 @@ class StateManager(LEDDispatchPolicyMixin):
         if snap is not None and (now - snap.updated_at) <= CFX_STALE_AFTER_S:
             reading = snap.deck.get(active_deck)
         if reading is None or not reading.valid:
-            self._led_cfx_state = CfxEnvState()
+            self._led_cfx_state = inert
             self._led_cfx_sweep = None
             return
 
-        st = cfx_sweep_envelope(reading.filter_norm, self._led_cfx_state, dt_s, cfg)
+        st = cfx_sweep_envelope(reading.filter_norm, prev, dt_s, cfg)
         self._led_cfx_state = st
         self._led_cfx_sweep = (
             None if (st.mix <= 0.0 and st.dim >= 1.0) else (st.mix, st.dim, rgb, now)

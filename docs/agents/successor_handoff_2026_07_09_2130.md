@@ -58,7 +58,12 @@ status) are allowed during boot; mutations are not.
 6. Verify the bridge stack yourself: `pgrep -f 'rb_ss_bridge_v2$' | wc -l` must be
    1 (plus frame-engine child + watcher + streamdeck; see AGENTS.md §6 and
    `scripts/ss_bridge_watcher.sh` header). SoundSwitch won't autorotate without it.
-7. Announce the watch to the operator in chat, one message, plain language.
+7. Announce readiness to the operator in chat, one message, plain language — then
+   HOLD at the approval gate above. He approves; only then do you take actions.
+8. Note: superman4 killed every other tmux session at handoff (operator's order) —
+   the lane map below describes what EXISTED and what their on-disk state briefs
+   say; you re-create lanes as codex agents when work resumes, you do not look for
+   live panes.
 
 ## Hard rules that bit people this very day (do not relearn them)
 
