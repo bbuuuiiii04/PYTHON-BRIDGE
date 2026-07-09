@@ -85,9 +85,11 @@ Kickoff: `docs/prompts/active/qaminors_kickoff_2026_07_09.md`. ZERO runtime cont
   ruled no-harm misattribution (the swept renderer content was ledtune's already-gated
   embers flavor-b, live since the 16:25 bounce; ledger note only). Hard checks re-ran
   3/3 green at the executive desk.
-- [ ] FINAL CLOSURE: executive's consolidated full suite ~18:25, reconciled BY NAME;
-  closure expected ~18:45. Lane PARKED per executive instruction. Completion signal
-  (`qaminors.QAMINORS.done` + sentinel) fires only on closure.
+- [x] FINAL CLOSURE 18:21 (superman4): consolidated suite 3871 tests, expected red set
+  reconciled BY NAME exactly (4F+1E environmental, zero laser_color errors); the one
+  extra red (patch_f × Part-C bank policy) attributed to `f0b40ba`, routed to ledtune —
+  NOT this round. **VERDICT: PASS — ROUND CLOSED.** Completion signal written
+  (`/tmp/rbss_lane_signals/qaminors.QAMINORS.done`). Seat retired.
 - [ ] Registry row updated to round outcome; completion signal
   `touch /tmp/rbss_lane_signals/qaminors.QAMINORS.done` + sentinel.
 
