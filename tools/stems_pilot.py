@@ -519,7 +519,10 @@ def _build_scorecard(records: list[dict], op: dict, thresholds: dict) -> dict:
     Once ANY operator label of a kind exists, that criterion scores labeled
     anchors only (auto-derived proxies for vocal windows / wobble scan are the
     exact thing the pilot proved invalid); unlabeled anchors show "unlabeled"."""
-    labeled_wobble_any = any((r.get("labels") or {}).get("wobble_moments") for r in records)
+    labeled_wobble_any = any(
+        (r.get("labels") or {}).get("wobble_moments") or (r.get("labels") or {}).get("wobble_spans")
+        for r in records
+    )
     labeled_vocal_any = any((r.get("labels") or {}).get("vocal_free_windows") for r in records)
     # reconstruction: frac of tracks whose median per-beat |delta| <= threshold
     recon_ok = 0
@@ -542,10 +545,13 @@ def _build_scorecard(records: list[dict], op: dict, thresholds: dict) -> dict:
         for r in anchors:
             labels = r.get("labels") or {}
             if element == "wobble":
-                if labels.get("wobble_moments"):
+                if labels.get("wobble_moments") or labels.get("wobble_spans"):
                     moments = _wobble_labeled(
                         r["env"], r["grid"],
-                        [spm.parse_mmss(m) for m in labels["wobble_moments"]],
+                        [spm.parse_mmss(m) for m in labels.get("wobble_moments") or []],
+                    ) + _wobble_spans_scored(
+                        r["env"], r["grid"],
+                        _label_windows_beats(labels.get("wobble_spans"), r["grid"]),
                     )
                     ok = any(m["cleared"] for m in moments)
                     stat = moments
@@ -617,13 +623,15 @@ def _build_scorecard(records: list[dict], op: dict, thresholds: dict) -> dict:
             continue
         labels = r.get("labels") or {}
         if labeled_wobble_any:
-            if labels.get("wobble_moments"):
-                wobble_moments += sum(
-                    int(m["cleared"]) for m in _wobble_labeled(
-                        r["env"], r["grid"],
-                        [spm.parse_mmss(m) for m in labels["wobble_moments"]],
-                    )
+            if labels.get("wobble_moments") or labels.get("wobble_spans"):
+                scored = _wobble_labeled(
+                    r["env"], r["grid"],
+                    [spm.parse_mmss(m) for m in labels.get("wobble_moments") or []],
+                ) + _wobble_spans_scored(
+                    r["env"], r["grid"],
+                    _label_windows_beats(labels.get("wobble_spans"), r["grid"]),
                 )
+                wobble_moments += sum(int(m["cleared"]) for m in scored)
         else:
             ok, _stat = _wobble_cleared(r["env"], r["grid"])
             wobble_moments += int(ok)
