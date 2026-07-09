@@ -9,9 +9,12 @@ validation_scope: LED-lane Fable manager state brief (session f33cb16b) written 
 # LED-lane manager state brief — overnight 2026-07-09 (delta only)
 
 **Who I am in this org:** Fable manager for the LED quality-pass program.
-Executive = tmux `superman` (Fable) — ALL reports/reviews/ship notices go
-there via `tmux send-keys` (paste-safe: send text with `-l`, wait ~3s, send
-Enter AGAIN — first Enter is often eaten by bracketed paste). Doctrine
+**Executive = tmux `superman3` (Fable; seat transferred ~05:3x 2026-07-09
+per the 60-65% context rule — superman retired; all standing
+rulings/gates/pre-authorizations carry over; never send to old seats).**
+ALL reports/reviews/ship notices go there via `tmux send-keys` (paste-safe:
+send text with `-l`, wait ~3s, send Enter AGAIN — first Enter is often
+eaten by bracketed paste). Doctrine
 (operator, restated 3×): superman Fable / Fable managers (parallel, one per
 task) / OPUS tmux orchestrators / SONNET grind subagents — NEVER Fable below
 manager. New dispatches pin the model explicitly and VERIFY on-screen
