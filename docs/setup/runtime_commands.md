@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 74febec
-last_verified_date: 2026-06-29
+last_verified_commit: 94e4fcf
+last_verified_date: 2026-07-08
 validation_scope: software-validated only; hardware-unvalidated in repo evidence
 ---
 
@@ -88,7 +88,7 @@ echo '{"cmd":"run_validation"}' >> /tmp/rb_ss_bridge_v2_commands.jsonl
 | `set_led_look_director` | `enabled` | none | Rejects unknown fields. `enabled` must be boolean. | Sets LED Look Director enabled state through callback if wired. |
 | `led_scene` | `look` or `scene` | `ttl_s`, `target` | Rejects unknown fields. `look`/`scene` must identify the same non-empty string if both are provided. Stored as normalized `look`. `ttl_s`, when present, must be numeric, finite, positive, and `<= 300.0`. `target`, when present, must be a non-empty string. | Sets a temporary/manual LED look through callback if wired. |
 | `led_blackout` | none | `reason`, `target` | Rejects unknown fields. `reason` and `target`, when present, must be non-empty strings. | Invokes LED blackout callback if wired. |
-| `led_clear_blackout` | none | none | Rejects all payload fields except `cmd`. | Clears LED blackout callback if wired. |
+| `led_clear_blackout` | none | `reason` | Rejects unknown fields. `reason`, when present, must be a non-empty string. | Discards exactly the named `reason` owner (or `legacy` when absent) from the blackout-owner set through callback if wired; the strip stays dark while any other owner remains (AWR-154). |
 | `led_clear_scene_override` | none | none | Rejects all payload fields except `cmd`. | Clears LED scene override callback if wired. |
 | `led_palette_queue` | `name` | none | `name` must be a non-empty palette name string. | Queues a palette through the StateManager event rail when wired; software command surface only. |
 | `led_palette_override` | `name` | none | `name` must be a non-empty palette name string. | Overrides/fades to a palette through the StateManager event rail when wired; software command surface only. |

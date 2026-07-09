@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 50578b3
+last_verified_commit: 94e4fcf
 last_verified_date: 2026-07-08
 validation_scope: software-only; LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (lab_update/lab_switch/lab_preview), QR same-network access, pad editor unset-param-defaults, Stream Deck palette control Package 2 plus AWR-121 gesture v2, drop presentation policy Package 3, LED idle/pause ambient fix, and LED pad queued-color restore software-tested, hardware-unvalidated
 ---
@@ -268,6 +268,29 @@ White-knob round 1 (AWR-152, 2026-07-08; implemented, software-tested, hardware-
   rejection on palette/zone dict keys) and render exactly as before, except the reset-window
   slot-5 dimming and the breakdown-star slot range, which apply immediately. Full detail:
   `docs/plans/active/led_white_knobs_round1_spec.md`.
+
+LED pad blackout unlatch fix (AWR-154, 2026-07-08; implemented, software-tested, hardware-unvalidated):
+- Caught live during an operator mix: LEDs latched dark and unremovable. Root cause was a
+  reason-blind clear chain — the pad takes ownership via `led_blackout reason=led_pad`
+  (`tools/led_pad_playback.py`), which lands owner `"led_pad"` in `_led_blackout_owners`
+  (`led_dispatch_policy.py`), but `OwnershipGate.release()` sent a bare `led_clear_blackout` with
+  no reason, and the whole clear path from there — `runtime_status.py`'s `CommandReader` dispatch
+  through `__main__.py`'s `_led_clear_blackout` — carried no reason either. The discard line itself
+  (`ev.payload.get("reason") or "legacy"`) was always correct; it just never received anything but
+  the implicit `"legacy"` default, so the pad's own claim could never be discarded.
+- Minimal fix, three files: `release()` now sends `reason=led_pad`; `parse_command()` accepts an
+  optional non-empty `reason` on `led_clear_blackout` (validation split out from the shared
+  `led_clear_scene_override` block, which is unchanged); `CommandReader`'s dispatch handler parses
+  the reason and passes it to the callback instead of invoking a zero-arg callback;
+  `_led_clear_blackout(reason=None)` adds `"reason"` to the `BridgeEvent` payload only when truthy.
+  Absent reason resolves to an empty payload everywhere, so a bare clear is byte-identical to
+  before this fix.
+- `led_dispatch_policy.py` was not touched — the owner-set add/discard logic needed no change, only
+  the reason needed to reach it. No clear-ALL-owners fail-open behavior was implemented; that stays
+  proposal-only elsewhere.
+- This is a code fix, not a runtime unlatch: it changes what the next bridge start will do. A
+  process already latched dark from this defect needs a restart to pick up the fix — none was
+  performed during this pass.
 
 LED hold starvation fix (2026-07-07):
 - Active-deck switches and active-deck track loads still protect against an

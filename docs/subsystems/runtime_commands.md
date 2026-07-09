@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 662fbb5
-last_verified_date: 2026-07-04
+last_verified_commit: 94e4fcf
+last_verified_date: 2026-07-08
 validation_scope: software-only; Stream Deck palette control runtime command rail plus AWR-121 gesture v2 interactions software-tested
 ---
 
@@ -16,6 +16,19 @@ Status:
 
 Purpose:
 - Own local status snapshots, the throttled `[BEAT]` operator heartbeat, and append-only JSONL runtime command handling.
+
+Reason-carrying LED blackout clear (AWR-154, 2026-07-08; implemented, software-tested, hardware-unvalidated):
+- `led_clear_blackout` accepts an optional `reason` string. `parse_command()` validates it as
+  non-empty when present and rejects any other unknown field; `CommandReader.handle_command()`
+  parses it and passes it to the callback (present or `None`) instead of invoking a zero-arg
+  callback. Absent `reason` resolves to `None` end to end, and `__main__.py`'s `_led_clear_blackout`
+  only adds `"reason"` to the `BridgeEvent` payload when it is truthy — a bare clear is byte-identical
+  to before this change.
+- Fixes a real defect: the LED Pad's `OwnershipGate.release()` sent a bare `led_clear_blackout`
+  after taking ownership with `reason=led_pad`, so the pad's own blackout-owner claim in
+  `led_dispatch_policy.py`'s `_led_blackout_owners` set could never be discarded (that discard line
+  was already correct — `ev.payload.get("reason") or "legacy"` — it just never received the reason).
+  `led_dispatch_policy.py` itself is unchanged by this fix.
 
 Audit P1 (2026-07-03):
 - `toggle_smart_drop` and `toggle_smart_breakdown` callbacks now report queue-full failures through

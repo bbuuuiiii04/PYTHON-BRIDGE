@@ -40,6 +40,13 @@ example-config bank/palette changes are software-tested only. The live, gitignor
 `config/led_look_director.json` was not touched or mirrored; the operator's config mirror +
 menubar restart + next mix is the remaining validation gate.
 
+LED pad blackout unlatch fix (AWR-154, 2026-07-08): no hardware, Govee, or room-visible validation
+was performed; the code fix and its tests are software-only. This defect was caught live during an
+operator mix (a pad-owned blackout claim was unremovable) and the fix's actual effect on the
+currently-running latched-dark process cannot be validated without a bridge restart, which was
+explicitly out of scope for this pass. `led_dispatch_policy.py`'s owner-set discard logic was not
+touched — only the reason now reaches it.
+
 The current exporter/importer evidence boundary is **SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED**.
 
 The pinned SoundSwitch 2.10.3 project/pack tooling, immutable loader/player,
