@@ -422,7 +422,7 @@ class TickEventTests(unittest.TestCase):
             self.reader._tick(0xCAFE, self.base)
         self.assertEqual([e for e in _drain(self.q) if e.kind == Ev.TRACK_LOADED], [])
 
-    def test_browse_storm_of_churning_titles_emits_nothing_and_counts_suppressed(self) -> None:
+    def test_browse_storm_of_churning_titles_emits_nothing_and_logs_phantom_suppression(self) -> None:
         self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
         endpoint = self.mem.install_chain(
             self.base, self.offs.track_info_per_deck[0], payload=b"Browse 0\x00")
@@ -430,14 +430,14 @@ class TickEventTests(unittest.TestCase):
         # Sub-_LOAD_STABLE_TICKS churn: a new title every tick, never the
         # same identity twice in a row — the real-world "9 tracks in ~2s"
         # browse-cursor bleed from the phantom-load triage.
-        for i in range(1, 10):
-            self.mem.update_leaf(endpoint, f"Browse {i}\x00".encode("utf-8"))
-            self.reader._tick(0xCAFE, self.base)
+        with self.assertLogs("rb_state", level="DEBUG") as logs:
+            for i in range(1, 10):
+                self.mem.update_leaf(endpoint, f"Browse {i}\x00".encode("utf-8"))
+                self.reader._tick(0xCAFE, self.base)
         self.assertEqual([e for e in _drain(self.q) if e.kind == Ev.TRACK_LOADED], [])
         self.assertEqual([e for e in _drain(self.q) if e.kind == Ev.ANLZ_PATH], [])
-        # Every discarded candidate after the first counts as suppressed
-        # (the very first title has no prior candidate to discard).
-        self.assertEqual(self.reader._phantom_suppressed_count.get(0, 0), 9)
+        self.assertTrue(any("phantom-load-suppressed" in m for m in logs.output))
+        self.assertTrue(any("phantom-storm" in m for m in logs.output))
 
     def test_stable_new_track_never_playing_still_emits_fein_case(self) -> None:
         # FEIN case: a track loads and is never played (position never
@@ -469,7 +469,6 @@ class TickEventTests(unittest.TestCase):
         loaded = [e for e in _drain(self.q) if e.kind == Ev.TRACK_LOADED]
         self.assertEqual(len(loaded), 1)
         self.assertEqual(loaded[0].payload["title"], "Track B")
-        self.assertEqual(self.reader._phantom_suppressed_count.get(0, 0), 1)
 
     def test_unload_after_stable_load_behaves_as_today(self) -> None:
         self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
@@ -496,16 +495,28 @@ class TickEventTests(unittest.TestCase):
 
     def test_deck_1_and_deck_2_stability_gate_symmetric(self) -> None:
         self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
-        # RB raw deck 0 → bridge 1, RB raw deck 1 → bridge 2.
+        # RB raw deck 0 → bridge 1, RB raw deck 1 → bridge 2. Verified in two
+        # phases, not simultaneously: this fixture's track_info chains share
+        # their first hop across all decks (_make_offsets uses a constant
+        # leading 0x3000 for every d), so installing two decks' non-empty
+        # leaves at once clobbers each other in FakeMem, not in the reader.
         self.mem.install_chain(
             self.base, self.offs.track_info_per_deck[0], payload=b"Deck One Track\x00")
+        for _ in range(mod._LOAD_STABLE_TICKS):
+            self.reader._tick(0xCAFE, self.base)
+        deck1_loaded = [e for e in _drain(self.q) if e.kind == Ev.TRACK_LOADED]
+        self.assertEqual(len(deck1_loaded), 1)
+        self.assertEqual(deck1_loaded[0].deck, 1)
+        self.assertEqual(deck1_loaded[0].payload["title"], "Deck One Track")
+
         self.mem.install_chain(
             self.base, self.offs.track_info_per_deck[1], payload=b"Deck Two Track\x00")
         for _ in range(mod._LOAD_STABLE_TICKS):
             self.reader._tick(0xCAFE, self.base)
-        loaded = {e.deck: e.payload["title"]
-                  for e in _drain(self.q) if e.kind == Ev.TRACK_LOADED}
-        self.assertEqual(loaded, {1: "Deck One Track", 2: "Deck Two Track"})
+        deck2_loaded = [
+            e for e in _drain(self.q) if e.kind == Ev.TRACK_LOADED and e.deck == 2]
+        self.assertEqual(len(deck2_loaded), 1)
+        self.assertEqual(deck2_loaded[0].payload["title"], "Deck Two Track")
 
     def test_stable_load_emits_exactly_once_per_confirmed_track(self) -> None:
         # Proxy for "load_gen advances only on emission" at the reader

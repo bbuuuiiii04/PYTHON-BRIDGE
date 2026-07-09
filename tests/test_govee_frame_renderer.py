@@ -405,7 +405,9 @@ class GoveeFrameRendererTests(unittest.TestCase):
         self.assertIn((255, 255, 255), frame)
         self.assertIn((0, 255, 255), frame)
 
-    def test_drop_chase_keeps_sixteenth_strobe_mask(self) -> None:
+    def test_drop_chase_flashes_on_the_hz_gate_independent_of_bpm(self) -> None:
+        """AWR-161: migrated off int(beat*16)%2 onto the wall-clock Hz gate --
+        the on/off split now comes from local_t, not beat, at any BPM."""
         renderer = GoveeFrameRenderer()
         on_frame = renderer.render(
             "drop_chase_blue",
@@ -418,8 +420,8 @@ class GoveeFrameRendererTests(unittest.TestCase):
         )
         off_frame = renderer.render(
             "drop_chase_blue",
-            beat_pos=9.0625,
-            local_t=0.0,
+            beat_pos=9.0,
+            local_t=0.1,
             frame_index=0,
             params={},
             segments=20,
@@ -465,7 +467,8 @@ class GoveeFrameRendererTests(unittest.TestCase):
             lit = sum(sum(px) for px in frame)
             self.assertGreater(lit, 0, msg=f"dark tail at beat {beat}")
 
-    def test_post_drop_chase_keeps_sixteenth_strobe_mask(self) -> None:
+    def test_post_drop_chase_flashes_on_the_hz_gate_independent_of_bpm(self) -> None:
+        """AWR-161: migrated off int(beat*16)%2 onto the wall-clock Hz gate."""
         renderer = GoveeFrameRenderer()
 
         on_frame = renderer.render(
@@ -479,8 +482,8 @@ class GoveeFrameRendererTests(unittest.TestCase):
         )
         off_frame = renderer.render(
             "post_drop_chase_cyan_white",
-            beat_pos=0.0625,
-            local_t=0.0,
+            beat_pos=0.0,
+            local_t=0.1,
             frame_index=1,
             params={},
             segments=20,
@@ -502,6 +505,7 @@ class GoveeFrameRendererTests(unittest.TestCase):
             self.assertIn(name, REALTIME_STROBE_EFFECTS)
             self.assertIn(name, EDM_BUILDS)
 
+        # AWR-161: migrated off int(beat*16)%2 onto the wall-clock Hz gate.
         renderer = GoveeFrameRenderer()
         on_frame = renderer.render(
             "post_drop_freestyle_nebula",
@@ -514,8 +518,8 @@ class GoveeFrameRendererTests(unittest.TestCase):
         )
         off_frame = renderer.render(
             "post_drop_freestyle_nebula",
-            beat_pos=0.0625,
-            local_t=0.0,
+            beat_pos=0.0,
+            local_t=0.1,
             frame_index=1,
             params={},
             segments=20,
