@@ -183,3 +183,52 @@ these docs).
 state = on-disk briefs (`docs/prompts/active/*_state_*.md`) + the registry, not
 panes. Claude-side transcripts persist on disk and are resumable, but treat repo
 docs as the only current truth.
+
+## POST-KICKSTART ADDENDUM (appended 21:2x — everything after your kickstart)
+
+SINCE-KICKSTART DELTAS (kickstart went ~21:05; you may have read docs older than these):
+
+1. B1 ear verdicts: ALL three blast-radius classes CLEARED (no void-threshold round).
+   Successor labels batch = Scary Monsters tier misread (F2 scorer evidence) + REWIND
+   post-grid-fix re-measure + possible 16→32 blackout cap-raise datum. In handoff doc.
+2. AWR-186 = the USB M2 spec row (docs/plans/active/usb_bridge_launcher_m2_codex_spec.md,
+   banked for Jul-11). NOT a collision: AWR-182 prose contains "NO AWR-186" — that was a
+   negative ruling on a never-opened void round; the ID was never allocated.
+3. Interim stick helpers SHIPPED + on the stick root (install.command/purge.command,
+   typed-PURGE, manifest-scoped; tests 4/4 + real-DMG smoke). rebuild_stick.sh operator
+   ask = CLOSED, folded into M2's make_stick.sh.
+4. STICK SEQUENCING (order is mandatory): operator renames stick (still "USB" at park) →
+   re-fire pre-warm sweep against /Volumes/<NEW-NAME> (one-liner in handoff doc) → wait
+   for completion → THEN payload export (runbook one-liner, RBSS_payload/spectral_cache).
+5. Filter lane parked WITH final proof: full suite at park HEAD 3889 = named baseline
+   exactly, zero new. Park commit 3793b60; brief filter_lane_state_2026_07_09.md.
+6. All lanes parked by ~21:15. P1 backfill sweep still running (PID 78394, log
+   local/sweep_p1_20260709.log) — do not kill it; acceptance checks in resume doc.
+7. Operator lighting-review setlist delivered + filed:
+   docs/operator/lighting_review_setlist_2026_07_09.md — 13 rows covering AWR-184
+   moments, AWR-185 stop lengths, controls (Killa/Caramelle/Sexy), REWIND grid-fix
+   recovery, the 16→32 cap datum, and the CFX ride-home knob test. Every row's
+   verdict routes to YOU as a labels-style batch (AWR-182 protocol).
+8. LASER PRE-CHORUS BLACKOUT (operator bug report ~21:20, YOUR FIRST FIX ROUND):
+   operator expects lasers to black out 4 BARS before every chorus phrase. Shipped
+   reality (AWR-170 D.2): config `pre_chorus_laser_beats: 4` = 4 BEATS (1 bar) —
+   confirmed in live + example config. AND it never armed tonight: zero
+   'pre_chorus' log lines in both evening logs. CONFIRMED: unit/intent mismatch.
+   UNKNOWN: why it never arms — suspects: chorus-phrase-start data quality (same
+   ANLZ marker-quality root the operator flagged in B1), an upstream gate, or
+   DEBUG-only logging hiding a working-but-subtle 1-bar window. Fix round shape:
+   root-cause the null-arming FIRST, then set 16 beats; live gate = the operator
+   setlist doc. Plumbing seams: state_manager.py:787,5060-5069,5116,5342;
+   smart_phrasing.py:47,82-85; mask owner "pre_chorus"; laser dark-window owner
+   registry at laser_executor.py:346-382.
+9. TIER-SCORER round (operator ear evidence, both directions): REWIND re-measured
+   post-grid-fix = still WALL-T1 (viol 0.53-0.61) vs his "wall tier 3, rips heads
+   off" — grid fix did NOT recover it. Clue: identity distortion MAXED 1.00 but
+   aggression = 0.39; the aggression formula takes ZERO distortion input
+   (led_identity_v2.py:98-103). Scary Monsters (Levex) = the over-rate pin (T3
+   planned, ~T1 to his ear). B2 labels batch (5 cases incl OCHO blackout-density,
+   fires 5x) was going to his ear at handoff — check the corpus for verdicts.
+10. Final HEAD at handoff: [FILL]; sweeps: P1 running PID 78394; stick sweep
+   awaits rename → re-fire → THEN payload export (order mandatory).
+
+Item 10 final HEAD = the commit that carries THIS addendum (git log -1). superman4 purged all Claude tmux sessions immediately after appending this; hold at the approval gate.
