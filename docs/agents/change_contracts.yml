@@ -298,6 +298,7 @@ contracts:
       - docs/plans/active/usb_bridge_launcher_design.md
       - docs/status/active_work_registry.md
       - docs/validation/software_test_inventory.md
+      - docs/setup/usb_launcher_runbook.md
     forbidden_assumptions:
       - A PyInstaller software build proves packaging only, never that a bundled bridge's memory reads or lighting hardware behave identically to a source run
       - The bundle launch profile must be verified byte-identical to the watcher env set from code, never assumed from docs
@@ -645,6 +646,8 @@ contracts:
       - spectral_profile.py
       - tools/spectral_sweep.py
       - tools/spectral_calibration_report.py
+      - tools/stems_pilot.py
+      - tools/stems_pilot_metrics.py
     key_symbols:
       - extract_spectral_features
       - extract_spectral_features_v4
@@ -662,6 +665,7 @@ contracts:
       - docs/research/spectral_audio_analysis_redesign.md
       - docs/research/spectral_calibration_expansion_2026_07_08.md
       - docs/subsystems/core_bridge.md
+      - docs/plans/active/stems_pilot_spec.md
     tests:
       - python3 -m unittest discover tests
       - python3 tools/check_docs_metadata.py

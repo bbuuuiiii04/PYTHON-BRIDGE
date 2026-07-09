@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))       # rb_ss_bridg
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))  # the metrics module
 
 import stems_pilot_metrics as spm  # noqa: E402
+import stems_pilot as sp  # noqa: E402  (must import with no torch/demucs installed)
 
 
 class StemBeatEnvelopesTests(unittest.TestCase):
@@ -158,6 +159,36 @@ class EvaluateGatesTests(unittest.TestCase):
         res = spm.evaluate_gates(sc, {})
         self.assertEqual(res["verdict"], "FAIL")
         self.assertIn("named_element_floor", res["call_off_reasons"])
+
+
+class RunnerGuardTests(unittest.TestCase):
+    def test_disk_floor_refuses_below_and_runs_above(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        with patch.object(sp.shutil, "disk_usage", return_value=SimpleNamespace(free=3.0e9)):
+            self.assertFalse(sp._disk_ok(4.0))
+            self.assertFalse(sp._disk_ok(10.0))
+        with patch.object(sp.shutil, "disk_usage", return_value=SimpleNamespace(free=12.0e9)):
+            self.assertTrue(sp._disk_ok(4.0))
+            self.assertTrue(sp._disk_ok(10.0))
+
+    def test_existing_envelope_json_is_resumable_skip(self):
+        import json
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            env_dir = Path(d)
+            # a real file so _cache_key can stat it (any bytes; grid is fixed).
+            audio = env_dir / "track.wav"
+            audio.write_bytes(b"\x00\x01")
+            grid = [0.0, 500.0, 1000.0]
+            key = sp._cache_key(str(audio), grid)
+            self.assertIsNotNone(key)
+            env_path = env_dir / f"{key}.json"
+            self.assertFalse(bool(key and env_path.exists()))   # nothing cached yet
+            env_path.write_text(json.dumps({"n_beats": 3}))
+            self.assertTrue(bool(key and env_path.exists()))    # now the loop would skip + reload
 
 
 if __name__ == "__main__":

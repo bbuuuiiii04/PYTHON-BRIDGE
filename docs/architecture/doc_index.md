@@ -58,7 +58,7 @@ source of truth when documents conflict. A doc is *active* only if it is listed 
 | Subsystem cards | `docs/subsystems/{core_bridge,rekordbox_readers,soundswitch_output,laser,led_govee,runtime_commands,config,tests}.md` | CURRENT — compact, code-verified cards. |
 | Status / truth | `docs/status/*.md` (7) | CURRENT — project status, feature/support/validation matrices, known limitations, active work. |
 | Prompt authoring | `docs/prompts/README.md`, `docs/prompts/snippets/*.md`, `.claude/skills/fable-prompt-writer/SKILL.md`, `.claude/skills/opus-prompt-writer/SKILL.md`, `.claude/skills/codex-spec/SKILL.md` | CURRENT SUPPORTING — one prompt/spec-authoring skill per target agent (Fable 5, Opus 4.8, Codex/GPT-5) plus per-model snippet libraries; prompt-only, not active work. |
-| Setup / usage | `docs/setup/*.md` (5) | CURRENT. |
+| Setup / usage | `docs/setup/*.md` (7) | CURRENT. |
 | Validation policy | `docs/validation/{validation_policy,software_test_inventory,hardware_validation_log,soundswitch_hardware_validation_procedure}.md`, `docs/validation/soundswitch_hardware_runs/TEMPLATE.md` | CURRENT — SoundSwitch procedure/template are operator gates, not completed hardware evidence. |
 | Archive banner | `docs/archive/README.md` | CURRENT. |
 
@@ -156,6 +156,7 @@ Active only if also listed in `docs/status/active_work_registry.md`. Confirm eac
 | File | Type |
 | --- | --- |
 | `docs/setup/graphify.md` | CURRENT SUPPORTING — local Graphify CLI/query setup; graph is an orientation lead, not authority. |
+| `docs/setup/usb_launcher_runbook.md` | CURRENT SUPPORTING — USB launcher M1 build/sign/DMG runbook + operator §2 parity checklist (AWR-122). Build proven; live rig parity is the operator gate. |
 
 ## Archive / historical — evidence only
 
