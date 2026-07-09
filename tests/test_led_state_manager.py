@@ -3408,6 +3408,65 @@ class LEDStateManagerTests(unittest.TestCase):
         self.assertIsNotNone(result.led_identity)
         self.assertEqual(result.led_identity["base"], "measured")
 
+    def test_anlz_extractions_capped_at_two_and_skip_stale_gen(self) -> None:
+        # AWR-179 D4-F2: no more than 2 ANLZ extractions run at once (a
+        # multi-track cache-miss storm can't spawn N simultaneous ~16 s reads),
+        # and a worker whose deck already advanced past its load_gen exits
+        # WITHOUT running the extraction at all.
+        import threading
+
+        sm = _make_sm()
+        deck = 1
+        current_gen = sm._deck[deck].load_gen
+
+        entered = threading.Semaphore(0)   # posted once per stub entry
+        release = threading.Event()        # gates the stub until the test lets go
+        lock = threading.Lock()
+        state = {"active": 0, "peak": 0, "calls": 0}
+
+        def blocking_stub(path, **kwargs):
+            with lock:
+                state["calls"] += 1
+                state["active"] += 1
+                state["peak"] = max(state["peak"], state["active"])
+            entered.release()
+            release.wait(timeout=10.0)
+            with lock:
+                state["active"] -= 1
+            return Mock(
+                drop_beat_indices=[], breakdown_beat_indices=[],
+                buildup_beat_indices=[], mood="", energy_shadow=None,
+                f2_plan=None, led_identity=None,
+            )
+
+        try:
+            with patch.object(state_manager_mod, "_read_runtime_anlz_data",
+                              side_effect=blocking_stub):
+                for _ in range(5):                                   # 5 fresh
+                    sm._start_anlz_worker("x", deck, current_gen)
+                sm._start_anlz_worker("x", deck, current_gen + 999)  # 1 stale
+
+                # Exactly two enter the extraction; the gate blocks the rest.
+                self.assertTrue(entered.acquire(timeout=5.0))
+                self.assertTrue(entered.acquire(timeout=5.0))
+                # No third may enter while the two hold the gate (expected timeout).
+                self.assertFalse(entered.acquire(timeout=0.5),
+                                 "more than 2 extractions ran concurrently")
+
+                release.set()
+                # The remaining three fresh workers now drain (2 at a time).
+                for _ in range(3):
+                    self.assertTrue(entered.acquire(timeout=5.0))
+
+            # 5 fresh ran, the stale worker skipped the extraction entirely.
+            self.assertEqual(state["calls"], 5)
+            self.assertEqual(state["peak"], 2)
+        finally:
+            release.set()
+            for thread in threading.enumerate():
+                if thread.name.startswith("anlz-drop-"):
+                    thread.join(timeout=5.0)
+
     # ── AWR-125 W3b: perf("led.look") emit assertions ─────────────────────
 
     def test_accepted_automation_dispatch_emits_perf_led_look(self) -> None:
