@@ -366,6 +366,9 @@
     },
     "rt_drop_center_burst": {
       "post_drop": "rt_post_drop_center_comet"
+    },
+    "rt_rainbow_drop": {
+      "post_drop": "rt_rainbow_post_drop"
     }
   },
   "post_drop_cycle_beats": 32.0,
@@ -1245,6 +1248,37 @@
         "color": [255, 255, 255]
       }
     },
+    "rt_rainbow_drop": {
+      "target": "room_perimeter",
+      "action": "realtime",
+      "scene_ref": "rainbow_ordered",
+      "fallback": "rt_blackout",
+      "safety_class": "drop",
+      "brightness": 100,
+      "allow_strobe": false,
+      "backend": "realtime_razer",
+      "color_source": "baked",
+      "params": {
+        "width": 6,
+        "cycle_beats": 1,
+        "travel_per_beat": 30
+      }
+    },
+    "rt_rainbow_post_drop": {
+      "target": "room_perimeter",
+      "action": "realtime",
+      "scene_ref": "rainbow_ordered",
+      "fallback": "rt_blackout",
+      "safety_class": "post_drop",
+      "brightness": 100,
+      "allow_strobe": false,
+      "backend": "realtime_razer",
+      "color_source": "baked",
+      "params": {
+        "width": 2,
+        "cycle_beats": 8
+      }
+    },
     "rt_groove_heartbeat": {
       "target": "room_perimeter",
       "action": "realtime",
@@ -1454,7 +1488,8 @@
         "rt_drop_strobe_red",
         "rt_drop_strobe_red_white",
         "rt_drop_strobe_blue_cyan",
-        "rt_drop_strobe_cyan_white"
+        "rt_drop_strobe_cyan_white",
+        "rt_rainbow_drop"
       ],
       "post_drop": [
         "rt_post_drop_chase",
@@ -1464,7 +1499,8 @@
         "rt_post_drop_firework_chase",
         "rt_post_drop_remnant_chase",
         "rt_post_drop_remnant_nebula",
-        "rt_post_drop_firework_remnants"
+        "rt_post_drop_firework_remnants",
+        "rt_rainbow_post_drop"
       ],
       "breakdown": [
         "breakdown_1_red",

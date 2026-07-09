@@ -1,6 +1,7 @@
 """Pure frame renderer for Govee realtime/DreamView effects."""
 from __future__ import annotations
 
+import colorsys
 import hashlib
 import math
 import random
@@ -590,6 +591,41 @@ def _buildup_balloon_comet(beat: float, local_t: float, frame_index: int, params
             acc[idx][0] += color[0] * amount
             acc[idx][1] += color[1] * amount
             acc[idx][2] += color[2] * amount
+    return [(_clamp_channel(r), _clamp_channel(g), _clamp_channel(b)) for r, g, b in acc]
+
+
+def _rainbow_ordered(beat: float, local_t: float, frame_index: int, params: Mapping[str, Any], segments: int, seed: int) -> Frame:
+    """AWR-161: ported from the lab comet_rainbow_ordered (operator re-tap:
+    'rainbow should be RGB etc' -- an ordered spectrum by strip position plus
+    a slow time cycle, NOT the rejected brightness-mashup). Hue comes from
+    strip position; brightness only dims. Heads via the AWR-156 peak-
+    normalized helper (_head_weights). travel_per_beat, when present,
+    beat-locks the head advance (the accepted movement fix); absent falls
+    back to the legacy loop_beats pace (the post-drop look's accepted-as-is
+    feel, which must not change)."""
+    seg = max(0, int(segments))
+    width = max(0.3, min(6.0, float(params.get("width", 2.0))))
+    loop_beats = max(0.001, float(params.get("loop_beats", 4.0)))
+    span = max(0.1, min(2.0, float(params.get("rainbow_span", 1.0))))
+    cycle_beats = max(1.0, float(params.get("cycle_beats", 8.0)))
+
+    tpb = params.get("travel_per_beat")
+    if tpb is not None:
+        travel = max(2.0, min(120.0, float(tpb)))
+        pos1 = (beat * travel) % max(1, seg)
+        pos2 = (beat * travel + seg / 2.0) % max(1, seg)
+    else:
+        pos1 = ((beat / loop_beats) % 1.0) * seg
+        pos2 = (((beat + loop_beats / 2.0) / loop_beats) % 1.0) * seg
+
+    acc = [[0.0, 0.0, 0.0] for _ in range(seg)]
+    for pos in (pos1, pos2):
+        for idx, w in _head_weights(pos, width, seg).items():
+            hue = ((idx / max(1, seg)) * span + beat / cycle_beats) % 1.0
+            r, g, b = colorsys.hsv_to_rgb(hue, 1.0, 1.0)
+            acc[idx][0] += r * 255.0 * w
+            acc[idx][1] += g * 255.0 * w
+            acc[idx][2] += b * 255.0 * w
     return [(_clamp_channel(r), _clamp_channel(g), _clamp_channel(b)) for r, g, b in acc]
 
 
@@ -1991,6 +2027,10 @@ _EFFECTS["drop_strobe_colorway"] = _drop_strobe_colorway
 # language is white by design). Not a strobe.
 _EFFECTS["buildup_balloon_comet"] = _buildup_balloon_comet
 
+# AWR-161: accepted rainbow pair promotion; baked (self-generated hue, no
+# injected palette). Not a strobe.
+_EFFECTS["rainbow_ordered"] = _rainbow_ordered
+
 # Phase-2b config validation must accept slot cues + the baked sand name.
 REALTIME_EFFECT_NAMES = frozenset(_EFFECTS.keys() | SLOT_EFFECTS.keys())
 
@@ -2037,6 +2077,10 @@ _M2_PHASE2A_PARAM_KEYS: dict[str, frozenset[str]] = {
     "buildup_balloon_comet": (
         frozenset({"start_width", "end_width", "build_beats", "dim_floor",
                    "loop_beats", "color", "duration_beats"}) | _SYNC_PARAM_KEYS
+    ),
+    "rainbow_ordered": (
+        frozenset({"width", "cycle_beats", "rainbow_span", "travel_per_beat",
+                   "loop_beats", "duration_beats"}) | _SYNC_PARAM_KEYS
     ),
     "rt_groove_heartbeat": (
         frozenset({"base_width", "pulse_width", "decay", "loop_beats",
