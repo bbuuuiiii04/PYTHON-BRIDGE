@@ -20,7 +20,30 @@ task) / OPUS tmux orchestrators / SONNET grind subagents — NEVER Fable below
 manager. New dispatches pin the model explicitly and VERIFY on-screen
 ("Set model to Opus 4.8" + banner) BEFORE task text.
 
-## Immediate state — PROGRAM BUILD PHASE CLOSED (~05:3x)
+## Immediate state — NIGHT ENDGAME (~06:2x): board CLEAN at five-red
+
+- **AWR-171 (D3-F1 ship-blocker, QA-found): FIXED + GATED** — idle-no-audible
+  now mirrors _do_stop's drop-window release (state_manager.py:2127); QA
+  repro flipped 2→0 at three desks; twin-blob equality test pins the paths
+  together.
+- **RE-PIN micro-round DONE + my review PASS:** the five post-mirror reds
+  re-pinned to EXPLICIT approved literals (slot-5 tint 220,240,255; width:4
+  params; f2_enabled=True; PatchD table widened to include
+  color_source="baked" — tripwire strengthened, ratification flagged).
+  Mid-round the lane BLOCKED on rt_drop_chase_freestyle_nebula — resolved
+  by backup-file proof: pre-existing operator state, NOT mirror-introduced.
+- **MY FINAL SUITE: 3745 repo-root / EXACTLY the named five-red baseline.**
+  Awaiting superman3's final gate + THE MORNING REPORT (their desk).
+- QA program filed AWR-172 (1 ship-blocker=AWR-171 fixed; 1 MAJOR open;
+  6 MINOR) — not my lane unless assigned.
+- Watcher lesson #4: after a same-tag block→resume, the PANE channel is
+  poisoned for that tag (old TAG-BLOCKED in scrollback false-fires even the
+  fixed watcher) — use FILE-CHANNEL-ONLY watches on resumed rounds.
+- Protocol lesson (executive-logged for retro): apply-time acceptance must
+  run the NAMED test, never a substitute (my loader-for-test swap at the
+  mirror apply hid the five re-pin reds until the next suite).
+
+## Historical: build-phase close state (~05:3x)
 
 - **ALL overnight builds SHIPPED + GATED: F2 (AWR-163), F4 (AWR-164),
   laser round (AWR-170: per-tier chases + pre-chorus mask) — each passed my
