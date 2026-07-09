@@ -134,6 +134,10 @@ class LEDLookDirector:
     def set_emergency_blackout(self, enabled: bool) -> None:
         self._emergency_blackout = bool(enabled)
 
+    @property
+    def blackout_look(self) -> str:
+        return self._config.blackout
+
     def tick(self, context: LEDContext | None = None) -> LEDLookDecision | None:
         """Compute one bounded decision with no I/O."""
         if not self._config.enabled:
@@ -232,6 +236,7 @@ class LEDLookDirector:
             manual_override=self._manual_override,
             emergency_blackout=self._emergency_blackout,
             role_cursors=dict(self._role_cursors),
+            blank_role_hold=self._config.blank_role_hold,
         )
         status = asdict(payload)
         status["queued_post_drop_look"] = self._queued_post_drop_look

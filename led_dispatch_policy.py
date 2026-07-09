@@ -92,6 +92,8 @@ class LEDDispatchPolicyMixin:
         self._led_dry_run_latch = True
         self._led_automation_enabled_latch = False
         self._led_scripted_mode_automation_latch = False
+        self._led_blank_role_hold_latch = True
+        self._led_had_accepted_automation_decision = False
         self._led_scripted_default_role = "breakdown"
         self._led_scripted_role_map: dict[str, str] = {}
         self._led_last_auto_role_key = ""
@@ -159,6 +161,9 @@ class LEDDispatchPolicyMixin:
                 )
                 self._led_scripted_mode_automation_latch = bool(
                     status_payload.get("scripted_mode_automation", False)
+                )
+                self._led_blank_role_hold_latch = bool(
+                    status_payload.get("blank_role_hold", True)
                 )
                 sm_policy = status_payload.get("scripted_mode", {}) or {}
                 if not isinstance(sm_policy, dict):

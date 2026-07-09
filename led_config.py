@@ -227,6 +227,7 @@ def _validate(data: dict[str, Any], errors: list[str]) -> None:
     target_names = set(targets_raw.keys())
     _validate_drop_pairs(data, look_names, errors)
     _validate_post_drop_cycle_beats(data, errors)
+    _validate_blank_role_hold(data, errors)
     for name, target in targets_raw.items():
         if not isinstance(target, dict):
             continue
@@ -529,6 +530,13 @@ def _validate_drop_pairs(
 def _validate_post_drop_cycle_beats(data: dict[str, Any], errors: list[str]) -> None:
     value = data.get("post_drop_cycle_beats", 32.0)
     _validate_positive_number("post_drop_cycle_beats", value, errors)
+
+
+def _validate_blank_role_hold(data: dict[str, Any], errors: list[str]) -> None:
+    if "blank_role_hold" not in data:
+        return
+    if not isinstance(data["blank_role_hold"], bool):
+        errors.append("'blank_role_hold' must be a boolean")
 
 
 def _is_dotted_quad(value: str) -> bool:
@@ -1802,6 +1810,7 @@ def _build_config(data: dict[str, Any]) -> LEDConfig:
         post_drop_cycle_beats=float(data.get("post_drop_cycle_beats", 32.0)),
         color_engine=_parse_color_engine(data),
         scripted_mode=_build_scripted_mode(data.get("scripted_mode")),
+        blank_role_hold=bool(data.get("blank_role_hold", True)),
     )
 
 

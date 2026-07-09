@@ -230,6 +230,7 @@ class LEDConfig:
     post_drop_cycle_beats: float = 32.0
     color_engine: Optional[ColorEngineConfig] = None
     scripted_mode: LEDScriptedModePolicy = field(default_factory=LEDScriptedModePolicy)
+    blank_role_hold: bool = True
 
 
 @dataclass(frozen=True)
@@ -298,6 +299,7 @@ class LEDLookDirectorStatus:
     manual_override: str
     emergency_blackout: bool
     role_cursors: dict[str, int] = field(default_factory=dict)
+    blank_role_hold: bool = True
 
 
 @dataclass(frozen=True)
