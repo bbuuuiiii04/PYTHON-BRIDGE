@@ -105,6 +105,108 @@ class GrowlCentroidExtractionTests(unittest.TestCase):
             self.assertEqual(getattr(first, field), getattr(second, field), field)
 
 
+def _wobble_v4(*, n_beats=32, frames_per_beat=20, r_cpb=1.0, amp_oct=0.3,
+               base_db=20.0, static=False, silent=False):
+    """Synthetic v4: flat/loud growl LEVEL, growl CENTROID that sweeps as
+    2**(7 + amp_oct*sin(2π·r·beat_pos)). Beat = 0.5 s, frame hop = 25 ms — the
+    App-E scenario (level flat, timbre moving)."""
+    n_frames = n_beats * frames_per_beat
+    band, cent = [], []
+    for i in range(n_frames):
+        beat_pos = i / frames_per_beat
+        level = -80.0 if silent else base_db
+        if static or r_cpb <= 0.0:
+            exp = 7.0
+        else:
+            exp = 7.0 + amp_oct * math.sin(2.0 * math.pi * r_cpb * beat_pos)
+        band.append(round(level, 1))
+        cent.append(round(2.0 ** exp, 1))
+    v4 = _v4(
+        growl_band_frames=tuple(band),
+        growl_centroid_frames=tuple(cent),
+        n_beats=n_beats,
+        frame_hop_s=0.025,
+    )
+    grid = [i * 500.0 for i in range(n_beats)]
+    return v4, grid
+
+
+class GrowlCentroidMeasureTests(unittest.TestCase):
+    """Part D items 1-5 — the derived movement measure (pure, no librosa)."""
+
+    def test_detects_synthetic_wobble_while_level_is_flat(self) -> None:
+        # Item 1: THE App-E case — level flat, timbre sweeping at 1.0 c/b.
+        v4, grid = _wobble_v4(r_cpb=1.0, amp_oct=0.3)
+        span_oct, dominant, conc = spectral_profile.growl_centroid_movement_measure(
+            v4, grid, 16
+        )
+        self.assertGreaterEqual(span_oct, 0.4)
+        self.assertAlmostEqual(dominant, 1.0, delta=0.2)  # nearest grid bin to 1.0
+        self.assertGreaterEqual(conc, 0.10)
+        self.assertTrue(any(spectral_profile.growl_centroid_wobble_flags(v4, grid)))
+
+    def test_static_centroid_is_no_signal(self) -> None:
+        # Item 2: constant tone -> span ~0, flags all False.
+        v4, grid = _wobble_v4(static=True)
+        span_oct, dominant, conc = spectral_profile.growl_centroid_movement_measure(
+            v4, grid, 16
+        )
+        self.assertAlmostEqual(span_oct, 0.0, delta=1e-6)
+        self.assertEqual((dominant, conc), (0.0, 0.0))
+        self.assertFalse(any(spectral_profile.growl_centroid_wobble_flags(v4, grid)))
+
+    def test_silence_gate_suppresses_moving_centroid(self) -> None:
+        # Item 3: growl level below the gate -> zeros even though centroid moves.
+        v4, grid = _wobble_v4(r_cpb=1.0, amp_oct=0.3, silent=True)
+        self.assertEqual(
+            spectral_profile.growl_centroid_movement_measure(v4, grid, 16),
+            (0.0, 0.0, 0.0),
+        )
+        self.assertFalse(any(spectral_profile.growl_centroid_wobble_flags(v4, grid)))
+
+    def test_absent_or_mismatched_field_is_no_signal(self) -> None:
+        # Item 4: () centroid -> zeros + all-False; length != level series -> zeros.
+        absent, grid = _wobble_v4()
+        absent = _v4(
+            growl_band_frames=absent.growl_band_frames,
+            growl_centroid_frames=(),
+            n_beats=absent.n_beats,
+            frame_hop_s=0.025,
+        )
+        self.assertEqual(
+            spectral_profile.growl_centroid_movement_measure(absent, grid, 16),
+            (0.0, 0.0, 0.0),
+        )
+        self.assertFalse(any(spectral_profile.growl_centroid_wobble_flags(absent, grid)))
+
+        moving, grid2 = _wobble_v4()
+        mismatched = _v4(
+            growl_band_frames=moving.growl_band_frames,
+            growl_centroid_frames=moving.growl_centroid_frames[:-5],  # len != level
+            n_beats=moving.n_beats,
+            frame_hop_s=0.025,
+        )
+        self.assertEqual(
+            spectral_profile.growl_centroid_movement_measure(mismatched, grid2, 16),
+            (0.0, 0.0, 0.0),
+        )
+
+    def test_flags_persistence_drops_isolated_blips(self) -> None:
+        # Item 5: single-beat blip dropped; a min_run-length run kept.
+        v4, grid = _wobble_v4()
+        firing = {5: (0.5, 1.0, 0.5), 10: (0.5, 1.0, 0.5), 11: (0.5, 1.0, 0.5)}
+
+        def fake_measure(_v4, _grid, beat):
+            return firing.get(beat, (0.0, 0.0, 0.0))
+
+        with patch.object(
+            spectral_profile, "growl_centroid_movement_measure", fake_measure
+        ):
+            flags = spectral_profile.growl_centroid_wobble_flags(v4, grid)
+        self.assertFalse(flags[5])                 # isolated single beat: dropped
+        self.assertTrue(flags[10] and flags[11])   # 2-beat run: kept (min_run 2)
+
+
 class GrowlCentroidCacheTests(unittest.TestCase):
     """Part D items 6-8 — tolerant read, strict shape, round-trip."""
 

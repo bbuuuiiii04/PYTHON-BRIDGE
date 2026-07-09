@@ -44,6 +44,13 @@ SPECTRAL_V4_CALIBRATION: dict[str, float] = {
     "lowmid_pulse_min_conc": 0.10,   # dominant share of rate-grid power
     "lowmid_pulse_min_run": 2.0,     # consecutive flagged beats to count (Girl$ fires in 2-beat bursts)
     "lowmid_pulse_min_level_db": -70.0,  # window p90 must clear this (silence guard)
+    # Growl-band centroid movement (AWR-176, computed-not-consumed until the
+    # operator scrub gate closes — same App-E path lowmid_pulse took).
+    # Provisional values; the named-track calibration pass may tune ONLY these.
+    "growl_centroid_min_level_db": -70.0,  # growl level p90 silence guard (same convention as lowmid_pulse)
+    "growl_centroid_min_span_oct": 0.15,   # p90-p10 travel of log2(centroid), octaves
+    "growl_centroid_min_conc": 0.10,       # dominant share of rate-grid power
+    "growl_centroid_min_run": 2.0,         # consecutive flagged beats to count
     # Section map (engineering scale constants, not corpus-calibrated — they
     # normalize feature diffs for a pacing-only chapter view):
     "section_block_beats": 16.0,
@@ -398,6 +405,116 @@ def lowmid_pulse_flags(
             and conc >= cal["lowmid_pulse_min_conc"]
         )
     min_run = int(cal["lowmid_pulse_min_run"])
+    out = [False] * n
+    start: Optional[int] = None
+    for i, v in enumerate(raw + [False]):
+        if v and start is None:
+            start = i
+        elif not v and start is not None:
+            if i - start >= min_run:
+                for j in range(start, i):
+                    out[j] = True
+            start = None
+    return out
+
+
+def growl_centroid_movement_measure(
+    v4: SpectralFeaturesV4,
+    beatgrid_times_ms: Sequence[float],
+    beat: int,
+) -> tuple[float, float, float]:
+    """(span_oct, dominant cycles/beat, concentration) of growl-band centroid
+    MOVEMENT over a 4-beat window centered on ``beat``.
+
+    Timbre travel, not level: sees the filter wobble ("wow wow wow") the growl
+    LEVEL series is blind to. Same preprocessing as lowmid_pulse_measure, except
+    the movement series is log2(centroid Hz) in octave space so DC removal is a
+    subtraction, and the silence gate reads the level series (the centroid of a
+    silent band is meaningless). Absent/short/silent data -> (0, 0, 0), never an
+    error. Computed-not-consumed until the operator scrub gate closes.
+    """
+    import math
+
+    n = v4.n_beats
+    grid = beatgrid_times_ms
+    if (
+        not grid
+        or len(grid) != n
+        or n < 4
+        or not v4.growl_band_frames
+        or not v4.growl_centroid_frames
+        or len(v4.growl_centroid_frames) != len(v4.growl_band_frames)
+    ):
+        return (0.0, 0.0, 0.0)
+    beat = max(0, min(int(beat), n - 1))
+    lo = max(0, beat - 2)
+    hi = min(n - 1, beat + 2)
+    if hi - lo < 3:
+        return (0.0, 0.0, 0.0)
+    start_ms = float(grid[lo])
+    end_ms = float(grid[hi])
+    if end_ms <= start_ms:
+        return (0.0, 0.0, 0.0)
+    hop_ms = v4.frame_hop_s * 1000.0
+    i0 = max(0, int(start_ms / hop_ms))
+    i1 = min(len(v4.growl_centroid_frames), int(end_ms / hop_ms))
+    cseg = v4.growl_centroid_frames[i0:i1]
+    if len(cseg) < 32:
+        return (0.0, 0.0, 0.0)
+    cal = SPECTRAL_V4_CALIBRATION
+    level_seg = v4.growl_band_frames[i0:i1]
+    if percentile(level_seg, 90.0) < cal["growl_centroid_min_level_db"]:
+        return (0.0, 0.0, 0.0)
+    # Movement in octave space (20 Hz clamp keeps the ~0 Hz silent-frame
+    # sentinel finite); span = p90-p10 travel.
+    o = [math.log2(max(c, 20.0)) for c in cseg]
+    span_oct = percentile(o, 90.0) - percentile(o, 10.0)
+    m = len(o)
+    mean = sum(o) / m
+    x = [
+        (o[i] - mean) * (0.5 - 0.5 * math.cos(2.0 * math.pi * i / (m - 1)))
+        for i in range(m)
+    ]
+    beats_in_window = hi - lo
+    nyquist_cycles = 0.45 * m
+    powers: list[float] = []
+    for cpb in PULSE_RATE_GRID_CPB:
+        cycles = cpb * beats_in_window
+        if cycles < 1.5 or cycles > nyquist_cycles:
+            powers.append(0.0)
+            continue
+        powers.append(_goertzel_power(x, cycles))
+    total = sum(powers)
+    if total <= 0.0:
+        return (round(span_oct, 4), 0.0, 0.0)
+    top = max(range(len(powers)), key=lambda i: powers[i])
+    return (
+        round(span_oct, 4),
+        PULSE_RATE_GRID_CPB[top],
+        round(powers[top] / total, 4),
+    )
+
+
+def growl_centroid_wobble_flags(
+    v4: SpectralFeaturesV4, beatgrid_times_ms: Sequence[float]
+) -> list[bool]:
+    """Per beat: the growl tone SWEEPS (filter wobble) — span and periodic
+    concentration both clear their gates. No cpb floor (unlike lowmid_pulse):
+    that floor rejects a level confound the harmonic-component timbre series
+    does not carry; the Part E negative set is the check on that assumption.
+    Experimental / computed-not-consumed — the operator scrub is the acceptance
+    gate. Absent data -> all False.
+    """
+    cal = SPECTRAL_V4_CALIBRATION
+    n = v4.n_beats
+    raw = [False] * n
+    for b in range(n):
+        span_oct, _cpb, conc = growl_centroid_movement_measure(v4, beatgrid_times_ms, b)
+        raw[b] = (
+            span_oct >= cal["growl_centroid_min_span_oct"]
+            and conc >= cal["growl_centroid_min_conc"]
+        )
+    min_run = int(cal["growl_centroid_min_run"])
     out = [False] * n
     start: Optional[int] = None
     for i, v in enumerate(raw + [False]):
