@@ -9,7 +9,10 @@ validation_scope: >
   docs/plans/active/usb_bridge_launcher_m1_codex_spec.md per the executive green light of
   2026-07-09 (~03:30): Opus implements instead of Codex, three operator decisions locked,
   file fence while F2/F4 build in parallel, frame-engine re-exec task gated last.
-  Retire when M1 closes.
+  Retire when M1 closes. CLOSED 2026-07-09 ~05:30: M1 shipped and accepted by the
+  executive (USBM1-DONE); claude8 torn down; the operator §2 parity run is the only
+  remaining gate and lives in docs/setup/usb_launcher_runbook.md, not here. Historical
+  record from this point.
 ---
 
 # USB M1 build — Opus orchestrator brief (2026-07-09)
