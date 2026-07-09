@@ -9,9 +9,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from rb_ss_bridge_v2.govee_frame_renderer import (  # noqa: E402
     EDM_BUILDS,
     REALTIME_EFFECT_NAMES,
+    REALTIME_EFFECT_PARAM_KEYS,
     REALTIME_STROBE_EFFECTS,
+    SLOT_EFFECTS,
     GoveeFrameRenderer,
+    _drop_chase_spawn_times,
+    _ember_field,
+    _head_weights,
+    _hz_strobe_on,
     _slot_breakdown_star_twinkle,
+    _slot_drop_center_burst,
+    _slot_drop_nebula,
+    _slot_groove_chase,
+    _slot_groove_nebula,
+    _slot_post_drop_center_comet,
+    _slot_post_drop_nebula,
+    _slot_rt_groove_heartbeat,
+    _slot_rt_post_drop_firework_remnants,
     default_sync_mode,
     is_comet_effect,
 )
@@ -510,11 +524,12 @@ class GoveeFrameRendererTests(unittest.TestCase):
         self.assertGreater(sum(sum(px) for px in on_frame), 0)
         self.assertEqual(off_frame, [(0, 0, 0)] * 20)
 
-    def test_drop_white_aggressive_full_strip_32nd_strobe(self) -> None:
+    def test_drop_white_aggressive_full_strip_hz_strobe(self) -> None:
+        """AWR-156: rebuilt on the Hz gate — local_t-driven, not beat-driven."""
         renderer = GoveeFrameRenderer()
         on_frame = renderer.render(
             "drop_white_aggressive",
-            beat_pos=0.0,
+            beat_pos=999.0,  # beat is irrelevant to the Hz gate now
             local_t=0.0,
             frame_index=0,
             params={},
@@ -523,8 +538,8 @@ class GoveeFrameRendererTests(unittest.TestCase):
         )
         off_frame = renderer.render(
             "drop_white_aggressive",
-            beat_pos=0.0625,
-            local_t=0.0,
+            beat_pos=999.0,
+            local_t=0.1,  # default hz 6.0/duty 0.3 -> ON window is [0, 0.05)
             frame_index=1,
             params={},
             segments=20,
@@ -533,6 +548,64 @@ class GoveeFrameRendererTests(unittest.TestCase):
         # On-phase: every segment full white. Off-phase: fully dark.
         self.assertEqual(on_frame, [(255, 255, 255)] * 20)
         self.assertEqual(off_frame, [(0, 0, 0)] * 20)
+
+    def test_drop_white_aggressive_hz_duty_params_drive_the_gate(self) -> None:
+        """hz/duty are static config params now (allowlisted, not defaults-only)."""
+        renderer = GoveeFrameRenderer()
+        # hz=1.0 duty=0.5 -> cycle 1.0s, ON for [0, 0.5).
+        on = renderer.render("drop_white_aggressive", beat_pos=0.0, local_t=0.4,
+                              frame_index=0, params={"hz": 1.0, "duty": 0.5}, segments=4, seed=1)
+        off = renderer.render("drop_white_aggressive", beat_pos=0.0, local_t=0.6,
+                               frame_index=0, params={"hz": 1.0, "duty": 0.5}, segments=4, seed=1)
+        self.assertEqual(on, [(255, 255, 255)] * 4)
+        self.assertEqual(off, [(0, 0, 0)] * 4)
+
+
+class HzStrobeGateTests(unittest.TestCase):
+    """AWR-156 Task 7.1: the shared Hz gate (_hz_strobe_on)."""
+
+    def test_bpm_invariant_same_local_t_series_ignores_beat(self) -> None:
+        params = {"hz": 6.0, "duty": 0.3}
+        local_ts = [t / 100.0 for t in range(0, 200)]
+        pattern_a = [_hz_strobe_on(t, {**params, "_probe": "beat=0"}) for t in local_ts]
+        pattern_b = [_hz_strobe_on(t, {**params, "_probe": "beat=999999"}) for t in local_ts]
+        self.assertEqual(pattern_a, pattern_b)
+        self.assertGreater(sum(pattern_a), 0)
+        self.assertLess(sum(pattern_a), len(pattern_a))
+
+    def test_frame_aware_widening_lands_at_least_one_on_frame_every_cycle(self) -> None:
+        hz, duty = 6.0, 0.3
+        frame_period = 1.0 / 28.0
+        params = {"hz": hz, "duty": duty, "frame_period_s": frame_period}
+        cycle_s = 1.0 / hz
+        # ON window must be >= 1.6 frames wide.
+        on_s = duty * cycle_s
+        widened_on_s = max(on_s, min(cycle_s * 0.9, 1.6 * frame_period))
+        self.assertGreaterEqual(widened_on_s, 1.6 * frame_period - 1e-9)
+
+        seen_cycles: dict[int, bool] = {}
+        t = 0.0
+        for _ in range(400):
+            cycle_idx = int(t // cycle_s)
+            hit = _hz_strobe_on(t, params)
+            seen_cycles[cycle_idx] = seen_cycles.get(cycle_idx, False) or hit
+            t += frame_period
+        # Every cycle we swept through landed at least one ON frame.
+        complete_cycles = max(seen_cycles) if seen_cycles else 0
+        for cycle_idx in range(complete_cycles):
+            self.assertTrue(seen_cycles[cycle_idx], msg=f"cycle {cycle_idx} never lit")
+
+    def test_hz_capped_at_ten(self) -> None:
+        local_ts = [t / 1000.0 for t in range(0, 500)]
+        capped = [_hz_strobe_on(t, {"hz": 10.0, "duty": 0.3}) for t in local_ts]
+        over = [_hz_strobe_on(t, {"hz": 999.0, "duty": 0.3}) for t in local_ts]
+        self.assertEqual(capped, over)
+
+    def test_duty_capped_at_half(self) -> None:
+        local_ts = [t / 1000.0 for t in range(0, 500)]
+        capped = [_hz_strobe_on(t, {"hz": 2.0, "duty": 0.5}) for t in local_ts]
+        over = [_hz_strobe_on(t, {"hz": 2.0, "duty": 999.0}) for t in local_ts]
+        self.assertEqual(capped, over)
 
     def test_post_drop_white_shatter_dissolves_and_is_pure_white(self) -> None:
         renderer = GoveeFrameRenderer()
@@ -606,6 +679,269 @@ class GoveeFrameRendererTests(unittest.TestCase):
                 explicit_changed = renderer.render(name, beat_pos=beat_pos, local_t=0.0, frame_index=3, params={**slot_colors, **changed}, segments=20, seed=11)
                 self.assertEqual(absent, explicit_default)
                 self.assertNotEqual(absent, explicit_changed)
+
+
+class DropStrobeColorwayTests(unittest.TestCase):
+    """AWR-156 Task 7.3."""
+
+    def test_solid_color_a_on_off(self) -> None:
+        renderer = GoveeFrameRenderer()
+        on = renderer.render("drop_strobe_colorway", beat_pos=0.0, local_t=0.0, frame_index=0,
+                              params={"color_a": [10, 20, 30], "hz": 6.0, "duty": 0.3}, segments=5, seed=1)
+        off = renderer.render("drop_strobe_colorway", beat_pos=0.0, local_t=0.1, frame_index=0,
+                               params={"color_a": [10, 20, 30], "hz": 6.0, "duty": 0.3}, segments=5, seed=1)
+        self.assertEqual(on, [(10, 20, 30)] * 5)
+        self.assertEqual(off, [(0, 0, 0)] * 5)
+
+    def test_alternating_color_a_color_b_by_flash_index(self) -> None:
+        renderer = GoveeFrameRenderer()
+        params = {"color_a": [255, 0, 0], "color_b": [0, 255, 0], "hz": 6.0, "duty": 0.3}
+        flash0 = renderer.render("drop_strobe_colorway", beat_pos=0.0, local_t=0.0,
+                                  frame_index=0, params=params, segments=3, seed=1)
+        flash1 = renderer.render("drop_strobe_colorway", beat_pos=0.0, local_t=1.0 / 6.0,
+                                  frame_index=0, params=params, segments=3, seed=1)
+        self.assertEqual(flash0, [(255, 0, 0)] * 3)
+        self.assertEqual(flash1, [(0, 255, 0)] * 3)
+
+    def test_color_a_defaults_white_when_absent(self) -> None:
+        renderer = GoveeFrameRenderer()
+        frame = renderer.render("drop_strobe_colorway", beat_pos=0.0, local_t=0.0,
+                                 frame_index=0, params={}, segments=3, seed=1)
+        self.assertEqual(frame, [(255, 255, 255)] * 3)
+
+    def test_registered_as_strobe_effect(self) -> None:
+        self.assertIn("drop_strobe_colorway", REALTIME_EFFECT_NAMES)
+        self.assertIn("drop_strobe_colorway", REALTIME_STROBE_EFFECTS)
+
+
+class Awr156ParamAllowlistTests(unittest.TestCase):
+    """AWR-156 Task 7.3/7.4: C5 guard — every static param used by a new or
+    changed look must have an allowlist entry, or the look disables all LED."""
+
+    def test_new_and_changed_looks_have_allowlist_entries(self) -> None:
+        expected = {
+            "drop_white_aggressive": {"hz", "duty"},
+            "drop_strobe_colorway": {"color_a", "color_b", "hz", "duty"},
+            "buildup_balloon_comet": {"start_width", "end_width", "build_beats",
+                                      "dim_floor", "loop_beats", "color"},
+            "rt_groove_heartbeat": {"base_width", "pulse_width", "decay",
+                                    "loop_beats", "color_mode"},
+            "rt_post_drop_firework_remnants": {"dim_beats", "ember_hold_beats",
+                                               "ember_decay_beats", "sparkle_density",
+                                               "sparkle_size", "sparkle_life_s"},
+            "rt_groove_chase": {"width"},
+            "rt_groove_nebula": {"width"},
+            "rt_post_drop_center_comet": {"width"},
+        }
+        for name, keys in expected.items():
+            with self.subTest(name=name):
+                allowed = REALTIME_EFFECT_PARAM_KEYS.get(name, frozenset())
+                for key in keys:
+                    self.assertIn(key, allowed, msg=f"{name} missing allowlist entry for {key}")
+
+    def test_new_promoted_looks_registered(self) -> None:
+        for name in ("buildup_balloon_comet", "drop_strobe_colorway"):
+            self.assertIn(name, REALTIME_EFFECT_NAMES)
+        for name in ("rt_groove_heartbeat", "rt_post_drop_firework_remnants"):
+            self.assertIn(name, SLOT_EFFECTS)
+            self.assertIn(name, REALTIME_EFFECT_NAMES)
+        # Not strobes.
+        for name in ("buildup_balloon_comet", "rt_groove_heartbeat", "rt_post_drop_firework_remnants"):
+            self.assertNotIn(name, REALTIME_STROBE_EFFECTS)
+
+
+class BuildupBalloonCometTests(unittest.TestCase):
+    """AWR-156 Task 7.4."""
+
+    def _params(self, **overrides):
+        base = {"start_width": 6, "end_width": 0.8, "build_beats": 32,
+                "dim_floor": 0.05, "loop_beats": 4, "color": [255, 255, 255]}
+        base.update(overrides)
+        return base
+
+    def test_brightness_monotonically_shrinks_over_build_beats(self) -> None:
+        renderer = GoveeFrameRenderer()
+        peaks = []
+        for beat in (0.0, 8.0, 16.0, 24.0, 31.9):
+            frame = renderer.render("buildup_balloon_comet", beat_pos=beat, local_t=0.0,
+                                     frame_index=0, params=self._params(), segments=40, seed=1)
+            peaks.append(max(sum(px) for px in frame))
+        for earlier, later in zip(peaks, peaks[1:]):
+            self.assertGreaterEqual(earlier, later)
+        self.assertGreater(peaks[0], peaks[-1])
+
+    def test_default_color_is_pure_white(self) -> None:
+        renderer = GoveeFrameRenderer()
+        frame = renderer.render("buildup_balloon_comet", beat_pos=0.0, local_t=0.0,
+                                 frame_index=0, params={}, segments=10, seed=1)
+        lit = [px for px in frame if sum(px) > 0]
+        self.assertTrue(lit)
+        for px in lit:
+            self.assertEqual(px[0], px[1])
+            self.assertEqual(px[1], px[2])
+
+
+class HeadWeightsPeakNormalizationTests(unittest.TestCase):
+    """AWR-156 Task 7.4: the 0.53x between-pixel dip regression test."""
+
+    def test_peak_weight_is_always_one_regardless_of_subpixel_offset(self) -> None:
+        segments = 20
+        for width in (0.8, 1.5, 3.0, 4.5):
+            for pos in [i / 4.0 for i in range(0, segments * 4)]:
+                weights = _head_weights(pos, width, segments)
+                self.assertAlmostEqual(max(weights.values()), 1.0, places=9,
+                                        msg=f"dip at pos={pos} width={width}")
+
+
+class GrooveHeartbeatTests(unittest.TestCase):
+    """AWR-156 Task 7.4."""
+
+    def _field(self, **params):
+        base = {"base_width": 1.5, "pulse_width": 3.0, "decay": 0.3, "loop_beats": 4.0}
+        base.update(params)
+        return _slot_rt_groove_heartbeat(0.0, 0.0, 0, base, 20, 1)
+
+    def test_color_mode_0_both_heads_slot_1(self) -> None:
+        field = self._field(color_mode=0)
+        for row in field:
+            for slot in (0, 2, 3, 4, 5):
+                self.assertEqual(row[slot], 0.0)
+
+    def test_color_mode_2_default_head1_slot1_head2_slot3(self) -> None:
+        field = self._field(color_mode=2)
+        for row in field:
+            for slot in (0, 2, 4, 5):
+                self.assertEqual(row[slot], 0.0)
+        self.assertTrue(any(row[1] > 0 for row in field))
+        self.assertTrue(any(row[3] > 0 for row in field))
+
+    def test_color_modes_1_and_3_write_only_slots_1_and_3(self) -> None:
+        for mode in (1, 3):
+            field = self._field(color_mode=mode)
+            for row in field:
+                for slot in (0, 2, 4, 5):
+                    self.assertEqual(row[slot], 0.0, msg=f"mode {mode} wrote slot {slot}")
+
+    def test_slots_never_exceed_0_through_4(self) -> None:
+        for mode in (0, 1, 2, 3):
+            field = self._field(color_mode=mode)
+            for row in field:
+                self.assertEqual(row[5], 0.0)
+
+
+class PostDropFireworkRemnantsTests(unittest.TestCase):
+    """AWR-156 Task 7.4."""
+
+    def _params(self, **overrides):
+        base = {"dim_beats": 8, "ember_hold_beats": 8, "ember_decay_beats": 2,
+                "sparkle_density": 0.35, "sparkle_size": 1.0, "sparkle_life_s": 0.8}
+        base.update(overrides)
+        return base
+
+    def test_ember_full_at_or_before_hold_beats(self) -> None:
+        field = _slot_rt_post_drop_firework_remnants(8.0, 5.0, 0, self._params(), 20, 1)
+        ember_total = sum(sum(row[:5]) for row in field)
+        self.assertGreater(ember_total, 0.0)
+
+    def test_ember_zero_by_beat_ten_point_five(self) -> None:
+        field = _slot_rt_post_drop_firework_remnants(10.5, 5.0, 0, self._params(), 20, 1)
+        for row in field:
+            for slot in range(5):
+                self.assertEqual(row[slot], 0.0)
+
+    def test_slot_five_carries_only_background(self) -> None:
+        field = _slot_rt_post_drop_firework_remnants(0.0, 0.3, 0, self._params(), 20, 1)
+        for row in field:
+            self.assertAlmostEqual(row[5], 1.0, places=9)
+
+    def test_embers_only_write_slots_zero_through_four(self) -> None:
+        field = _slot_rt_post_drop_firework_remnants(2.0, 1.5, 0, self._params(), 20, 1)
+        # background at beat 2 is 1 - 2/8 = 0.75, distinct from any ember contribution
+        for row in field:
+            self.assertAlmostEqual(row[5], 0.75, places=9)
+
+    def test_deterministic_for_same_seed_and_local_t(self) -> None:
+        a = _slot_rt_post_drop_firework_remnants(2.0, 1.5, 0, self._params(), 20, 7)
+        b = _slot_rt_post_drop_firework_remnants(2.0, 1.5, 0, self._params(), 20, 7)
+        self.assertEqual(a, b)
+        c = _slot_rt_post_drop_firework_remnants(2.0, 1.5, 0, self._params(), 20, 8)
+        self.assertNotEqual(a, c)
+
+
+class Knob4MashupDeathTests(unittest.TestCase):
+    """AWR-156 Task 7.5: per-spawn single slot, intensity is brightness only."""
+
+    def test_groove_chase_two_heads_land_on_different_slots(self) -> None:
+        field = _slot_groove_chase(1.0, 0.0, 0, {"loop_beats": 4.0}, 20, 1)
+        touched = {slot for row in field for slot in range(6) if row[slot] > 0}
+        self.assertEqual(len(touched), 2)
+        for row in field:
+            lit = [s for s in range(6) if row[s] > 0]
+            self.assertLessEqual(len(lit), 1)
+
+    def test_groove_nebula_two_heads_land_on_different_slots(self) -> None:
+        field = _slot_groove_nebula(1.0, 0.0, 0, {"loop_beats": 4.0}, 20, 1)
+        touched = {slot for row in field for slot in range(6) if row[slot] > 0}
+        self.assertEqual(len(touched), 2)
+        for row in field:
+            lit = [s for s in range(6) if row[s] > 0]
+            self.assertLessEqual(len(lit), 1)
+
+    def test_post_drop_chase_single_slot_per_spawn(self) -> None:
+        for spawn_at, spawn_idx in _drop_chase_spawn_times(9.5, start=0.0):
+            field = _slot_post_drop_chase(9.5, 0.0, 0, {}, 20, 1)
+            for row in field:
+                lit = [s for s in range(6) if row[s] > 0]
+                self.assertLessEqual(len(lit), 1)
+                if lit:
+                    self.assertEqual(lit[0], spawn_idx % 5)
+
+    def test_drop_nebula_palette_branch_single_slot_white_branch_untouched(self) -> None:
+        field = _slot_drop_nebula(9.5, 0.0, 0, {}, 20, 1)
+        for row in field:
+            lit = [s for s in range(6) if row[s] > 0]
+            self.assertLessEqual(len(lit), 1)
+
+    def test_post_drop_nebula_palette_branch_single_slot_white_branch_untouched(self) -> None:
+        field = _slot_post_drop_nebula(1.5, 0.0, 0, {}, 20, 1)
+        for row in field:
+            lit = [s for s in range(6) if row[s] > 0]
+            self.assertLessEqual(len(lit), 1)
+        # Confirm both a palette slot (0-4) and the white slot (5) still fire
+        # somewhere across the frame -- the white branch is untouched.
+        any_palette = any(row[s] > 0 for row in field for s in range(5))
+        any_white = any(row[5] > 0 for row in field)
+        self.assertTrue(any_palette)
+        self.assertTrue(any_white)
+
+    def test_drop_center_burst_main_and_accent_bands_survive(self) -> None:
+        main_field = _slot_drop_center_burst(0.0, 0.0, 0, {}, 20, 1)
+        main_lit = {s for row in main_field for s in range(3) if row[s] > 0}
+        self.assertTrue(main_lit)
+        self.assertTrue(main_lit.issubset({0, 1, 2}))
+        for row in main_field:
+            for s in (3, 4, 5):
+                self.assertEqual(row[s], 0.0)
+
+        accent_field = _slot_drop_center_burst(1.5, 0.0, 0, {}, 20, 1)
+        accent_lit = {s for row in accent_field for s in range(6) if row[s] > 0}
+        self.assertTrue(accent_lit)
+        self.assertTrue(accent_lit.issubset({2, 3, 4}))
+
+    def test_post_drop_center_comet_single_slot_per_pass(self) -> None:
+        field = _slot_post_drop_center_comet(0.0, 0.0, 0, {}, 20, 1)
+        for row in field:
+            lit = [s for s in range(6) if row[s] > 0]
+            self.assertLessEqual(len(lit), 1)
+
+    def test_positional_mapping_prototypes_untouched(self) -> None:
+        """_slot_groove_center_chase and _slot_post_drop_firework_chase are NOT
+        mashup sites (Absolute Rules exclusion) -- they still use the ordered
+        gradient split across two adjacent slots."""
+        from rb_ss_bridge_v2.govee_frame_renderer import _slot_groove_center_chase
+        field = _slot_groove_center_chase(2.0, 0.0, 0, {"travel_beats": 1.0}, 20, 1)
+        multi_slot_rows = [row for row in field if sum(1 for v in row if v > 0) > 1]
+        self.assertTrue(multi_slot_rows, msg="expected the ordered gradient split to survive untouched")
 
 
 if __name__ == "__main__":
