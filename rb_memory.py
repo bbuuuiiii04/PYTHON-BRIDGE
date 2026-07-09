@@ -244,6 +244,9 @@ _D2_HEAP_TARGET_TOL_MS = 10_000
 _D2_HEAP_MAX_CANDIDATES = 8
 _CHAIN_BACKWARD_THR_SAMPLES = 10_000
 _CHAIN_RESET_SAMPLES = 10_000
+# AWR-157: consecutive identical-raw reads before a chain counts as stale
+# while the external playing hint says playing (a real pause is exempt).
+_CHAIN_FRESH_TICKS = 5
 
 
 def _is_objc(ptr: int) -> bool:
@@ -763,6 +766,10 @@ class RBSession:
         self._chain_last_raw: dict[int, int] = {}
         self._chain_valid_count: dict[int, int] = {}
         self._chain_unreadable_logged: set[int] = set()
+        # AWR-157: consecutive identical-raw reads per deck, for the
+        # freshness-aware chain health gate (deck-2 only; see rb_memory
+        # docstring at _read_decks_chain_first).
+        self._chain_raw_unchanged_ticks: dict[int, int] = {}
 
     # ── Container / DPU1 / inner1 ────────────────────────────────────────────
 
@@ -897,6 +904,12 @@ class RBSession:
         playing = bool(previous.playing) if previous is not None else False
         if prev_raw is not None:
             playing = raw != prev_raw
+        if prev_raw is not None and raw == prev_raw:
+            self._chain_raw_unchanged_ticks[bridge_deck] = (
+                self._chain_raw_unchanged_ticks.get(bridge_deck, 0) + 1
+            )
+        else:
+            self._chain_raw_unchanged_ticks[bridge_deck] = 0
         self._chain_last_raw[bridge_deck] = raw
         self._chain_valid_count[bridge_deck] = self._chain_valid_count.get(bridge_deck, 0) + 1
 
@@ -910,6 +923,11 @@ class RBSession:
             ddj_mode=ddj_mode,
             updated_at=time.monotonic(),
         )
+
+    def chain_raw_fresh(self, bridge_deck: int) -> bool:
+        """True unless raw has been identical for >= _CHAIN_FRESH_TICKS
+        consecutive reads (a frozen-while-playing chain)."""
+        return self._chain_raw_unchanged_ticks.get(bridge_deck, 0) < _CHAIN_FRESH_TICKS
 
     # ── Deck 2 resolution ────────────────────────────────────────────────────
 
@@ -1364,7 +1382,7 @@ class RBMemoryReader(threading.Thread):
             self._d2_unresolved_since = 0.0
 
         if self._skip_objc_when_chain:
-            self._read_decks_chain_first(s, now_t)
+            self._read_decks_chain_first(s, now_t, deck2_playing_hint=deck2_playing)
             return
 
         for deck in (1, 2):
@@ -1389,7 +1407,9 @@ class RBMemoryReader(threading.Thread):
             warn = self._drift.update(deck, chain_snap.elapsed_ms, chain_snap.playing)
             self._log_drift(deck, warn)
 
-    def _read_decks_chain_first(self, s: "RBSession", now_t: float) -> None:
+    def _read_decks_chain_first(
+        self, s: "RBSession", now_t: float, *, deck2_playing_hint: bool = False
+    ) -> None:
         """Skip-ObjC path: chain is authoritative; read_deck only as fallback.
 
         For each deck, read the live_pos chain first. When it is valid we publish
@@ -1397,11 +1417,22 @@ class RBMemoryReader(threading.Thread):
         deck-1 read used solely to keep track_length_ms fresh (the chain cannot
         read length). When the chain misses a tick, fall back to read_deck() so
         position never goes dark.
+
+        AWR-157: deck 2 additionally requires freshness. A chain that hasn't
+        advanced in _CHAIN_FRESH_TICKS consecutive reads while
+        deck2_playing_hint (the external, non-chain-derived play flag) says
+        playing counts as a miss, so the ObjC fallback engages instead of
+        silently staying on a frozen value. A real pause (hint says not
+        playing) is exempt — an unchanging raw while paused is legitimate,
+        never stale. Deck 1 is untouched: chain_ok stays exactly
+        `chain_snap is not None`.
         """
         for deck in (1, 2):
             previous = self._cache.get(deck)
             chain_snap = s.read_live_pos_chain(deck, previous)
             chain_ok = chain_snap is not None
+            if deck == 2 and chain_ok and deck2_playing_hint and not s.chain_raw_fresh(2):
+                chain_ok = False
             self._chain_ok_last[deck] = chain_ok
             if chain_ok:
                 self._publish_chain(deck, chain_snap)
