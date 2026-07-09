@@ -260,6 +260,18 @@ cleared by ear, NO AWR-186; misread evidence below hands to the successor.
   plan for this track: no drop presentation, no blackout, on one of his hardest
   tracks. LIVE NOTE for the operator: let Rekordbox finish (or re-analyze the track)
   before playing it in a mix; successor re-measures after markers return.
+- **post-re-analysis re-measure (~19:50, operator re-analyzed; markers restored):**
+  8 drops, all WALL (family AGREES) — but ALL EIGHT read **tier 1** (violence
+  0.53–0.61) against his "wall tier 3 / full energy throughout every drop". The grid
+  fix did NOT recover it: the tier scorer itself underrates this track on clean
+  input. Diagnostic clue recorded, not theorized: identity distortion is MAXED at
+  1.00 while aggression reads 0.39 — the aggression formula
+  (`led_identity_v2.py:98-103`: punch/attack_low/grit/onset_mh) takes no input from
+  the distortion/growl-timbre signal. Darkness at head: mostly blackout-1/dip, one
+  blackout-4 @2:46.4 vs his "4 bar blackout". Paired with B1-4 (over-rated T3), the
+  successor tier round now has pins in BOTH directions. Footnote: this re-extraction
+  ran post-AWR-176 code, so REWIND is the first library track carrying
+  `growl_centroid_frames` (8,562 frames).
 - **systems:** f2, led, stems (grid fixes invalidate caches library-wide — pipeline
   note)
 
