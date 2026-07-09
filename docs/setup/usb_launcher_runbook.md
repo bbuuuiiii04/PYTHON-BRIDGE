@@ -108,9 +108,34 @@ the watcher will log adopt/start churn. One bridge at a time.
 - **Install modes** — temporary "stage to scratch" and permanent (`~/Applications`
   copy + LaunchAgent + `StartOnMount` + Uninstall) are M2/M3. `launch_agent_plist.py`
   can *render* an Interactive LaunchAgent plist, but nothing installs/loads it.
+  Interim stick-side helpers exist (below) — they are NOT the designed install modes.
 - **Foreign-Mac** anything (the memory grant, permission cascade) — M4.
 - **Dev-only watcher features** not carried into the bundle: the
   `RBSS_BRIDGE_TRUTH=1` Art-Net truth-check and the `WATCHER_NO_LOOP` test hook.
+
+## Stick helpers (Saturday interim — AWR-122; the native M2 installer/PURGE replaces these)
+
+`packaging/stick/install.command` + `purge.command` ride the stick next to the DMG:
+
+- **install.command** (double-click; right-click → Open on a fresh Mac): mounts the
+  DMG, copies the app to `~/Applications`, installs `RBSS_payload/spectral_cache`
+  into `~/Library/Application Support/RBSS Bridge/spectral_cache`, and records every
+  path it creates in `install_manifest.txt`. App + pre-warm ONLY — no configs or
+  secrets (M2 scope, operator veto open on secrets-on-stick).
+- **purge.command**: requires typing `PURGE`, then removes EXACTLY the manifest
+  paths (allowed roots only, `..` rejected), prunes emptied dirs, deletes the
+  manifest. Not the full M2 menubar PURGE: System Settings permission entries and
+  `~/Library/Logs/rb_ss_bridge` run logs are not the installer's and remain.
+- **Stick layout:** `RBSS Bridge.dmg` + both `.command` files + `RBSS_payload/
+  spectral_cache/` at the stick root. Payload export (run AFTER the AWR-183 stick
+  sweep completes; copying home-keyed extras along is harmless — they are never
+  looked up on the foreign Mac):
+  ```bash
+  mkdir -p "/Volumes/<stick>/RBSS_payload" && \
+  cp -R "$HOME/Library/Application Support/RBSS Bridge/spectral_cache" "/Volumes/<stick>/RBSS_payload/"
+  ```
+- Tests: `tests/test_stick_commands.py` (purge deletion scoping, 4 cases);
+  install.command proven by a desk smoke (real DMG → throwaway `$HOME` → purge).
 
 ## Operator parity run (Task 7 — the gate, do on a TEST session, never a live show)
 
