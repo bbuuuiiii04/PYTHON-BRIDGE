@@ -682,6 +682,16 @@ LIGHTING ENGINE v2 F4 texture layer (AWR-164, 2026-07-09):
   enable surface (no new config key): F2-off, scripted, no-plan, and no-abort all resolve to a 0.0 bound,
   which is byte-identical to before. Software-tested (`tests/test_lighting_moments_v2.py`,
   `tests/test_smart_phrasing.py`); no bridge/hardware validation.
+- Deep sub-void blackout rung (AWR-184, labels batch-1, 2026-07-09): a new additive rung in
+  `lighting_moments_v2.darkness_ladder`, checked AFTER the Part H true-silence rung and BEFORE the
+  balloon split. Fires only when BOTH the sub band is genuinely voided (`SUB_VOID_DB`, ≥
+  `VOID_MIN_BEATS` consecutive beats ending at the drop) AND the growl/tonal band died with it
+  (`GROWL_DARK_DB`) — a filtered melodic swell keeps its growl ringing and still resolves balloon
+  (Caramelle control), while a real full cut resolves blackout for the void length rounded UP to bar
+  rungs {4,8,16}. Grounded in operator ear-truth (AWR-182 labels: Utopia b192 "2 bar blackout" →
+  8 beats, b384 "1 bar blackout" → 4 beats) measured against the real spectral cache; no existing
+  constant moved. Software-tested (`tests/test_lighting_moments_v2.py`, `TestDeepSubVoidBlackout`);
+  no bridge/hardware validation.
 
 Drop presentation policy (Package 3, AWR-119, 2026-07-04):
 - The implemented behavior authority is `docs/architecture/drop_presentation_authority.md`; the
