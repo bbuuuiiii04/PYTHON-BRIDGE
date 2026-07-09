@@ -251,7 +251,13 @@ only; they must not change presentation, learned-store, or feedback behavior.
    manual LED mute survives all of them; a held laser static override survives
    an `leds_only` drop. Pressing the Solo pad while a window is open
    (`active`) is now one of these triggers (AWR-159 Task 1) — additive to the
-   existing automatic releases, never replacing them.
+   existing automatic releases, never replacing them. A hard **stop**
+   (`_do_stop`) releases the window via `_drop_presentation_release_on_stop`;
+   AWR-171 (D3-F1) adds the mirror release to **idle-no-audible**
+   (`_enter_idle_no_audible`) so the same helper fires when the active-deck
+   resolver lands on 0 mid-window — otherwise `_push_tick_inner` early-returns
+   forever on `active_deck` not in (1,2) and a latched `drop_spotlight` owner
+   would keep the room dark to the 192-beat cap. Fail-open beats fail-dark.
 9. Scripted tracks: zero policy activity end-to-end; arm survives into the
    next autoloop track only via the allowed path.
 

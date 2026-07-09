@@ -559,6 +559,19 @@ LED solo pre-dark hold (AWR-144, 2026-07-07):
   (`leds_only`/`leds_plus_lasers`/plan-unavailable/disabled) dispatches its drop
   look byte-identically. SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
 
+Idle-no-audible releases the `drop_spotlight` owner (AWR-171 / D3-F1, 2026-07-09):
+- `_do_stop` already releases a latched solo window via
+  `_drop_presentation_release_on_stop`, but `_enter_idle_no_audible` reset
+  LED/laser/autoloop state and never called it. When the active-deck resolver
+  lands on 0 mid-solo-window (the operator's fader/EQ mixing path, not a stop),
+  `_push_tick_inner` early-returns on `active_deck` not in (1,2) forever, so a
+  held `drop_spotlight` LED blackout owner never released — the room stayed dark
+  up to the 192-beat cap. The fix mirrors the stop path: one call to the same
+  idempotent, policy-gated, in-memory helper at the end of
+  `_enter_idle_no_audible` (before the idle-ambient dispatch, so the room
+  re-renders lit). `enabled:false` stays byte-identical (helper's own guard).
+  Fail-open beats fail-dark. SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
+
 LED pad queued-color restore (AWR-137, 2026-07-07):
 - AWR-134 instant realtime recolor is superseded by operator decision: color
   pad changes queue again. Manual color pad events (`red`, `green`, `blue`,
