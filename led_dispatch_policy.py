@@ -193,6 +193,7 @@ class LEDDispatchPolicyMixin:
                 self._led_dry_run_latch = True
                 self._led_automation_enabled_latch = False
                 self._led_scripted_mode_automation_latch = False
+                self._led_blank_role_hold_latch = True
                 self._led_scripted_default_role = "breakdown"
                 self._led_scripted_role_map = {}
                 self._led_automation_gate_reason = "status_unavailable"
@@ -326,6 +327,7 @@ class LEDDispatchPolicyMixin:
             sp_state=sp_state,
         )
         if outcome == "accepted":
+            self._led_had_accepted_automation_decision = True
             self._led_auto_retry = None
             self._led_smart_drop_blackout_key = ""
             if r_role == "drop":
@@ -1261,6 +1263,16 @@ class LEDDispatchPolicyMixin:
         )
 
         look = str(getattr(decision, "look", ""))
+        if self._led_blank_role_hold_would_engage(look=look, playing=d.playing):
+            if self._led_blank_role_hold_latch:
+                self._gate_led_automation(
+                    "blank_role_hold",
+                    active_deck=active,
+                    role=role,
+                    role_key=role_key,
+                    rt_permitted=True,
+                )
+                return
         scene_ref = self._sanitize_led_scene_ref(getattr(decision, "scene_ref", ""))
         decision_reason = str(getattr(decision, "reason", ""))
         outcome = self._led_send_decision(
@@ -1286,6 +1298,7 @@ class LEDDispatchPolicyMixin:
             return
 
         if outcome == "accepted":
+            self._led_had_accepted_automation_decision = True
             self._led_smart_drop_blackout_key = ""
             if role == "drop":
                 committed = self._led_drop_cloud_stage_pending
@@ -1415,6 +1428,19 @@ class LEDDispatchPolicyMixin:
         self._led_idle_retry = (role_key, decision, 1)
         self._led_idle_retry_at = time.monotonic() + LED_DISPATCH_RETRY_S
 
+    def _led_blank_role_hold_would_engage(self, *, look: str, playing: bool) -> bool:
+        """AWR-157: true when the blank-role hold guard's conditions are met,
+        independent of the ``blank_role_hold`` knob (the knob only decides
+        whether we act on it). Only ever called from the automation dispatch
+        path, so source is structurally never emergency/manual/tactical.
+        """
+        if not playing or not self._led_had_accepted_automation_decision:
+            return False
+        director = self._led_look_director
+        blackout_look = (
+            str(getattr(director, "blackout_look", "")) if director is not None else ""
+        )
+        return bool(blackout_look) and look == blackout_look
 
     def _gate_led_automation(
         self,
