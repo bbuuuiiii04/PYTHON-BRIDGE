@@ -3,295 +3,232 @@ doc_status: current
 truth_level: code-verified + log-corpus-grounded (read-only diagnosis, no code changed)
 last_verified_commit: f627853
 last_verified_date: 2026-07-08
-validation_scope: read-only forensic diagnosis of the deck-2 rekordbox reader across 20 session logs in ~/Library/Logs/rb_ss_bridge/ plus source verification of rb_memory.py / rb_state_reader.py / active_deck_resolver.py / led_dispatch_policy.py / scripts/ss_bridge_watcher.sh at commit f627853; the bridge was DOWN during analysis. No runtime behavior changed, no code written. Names the mechanism, three hypotheses (H1 rejected, H2 = core defect), and fix shapes. Operator correction 2026-07-08: the fallback (RBSS_POS_CHAIN_SKIP_OBJC) was turned off deliberately, not the deck; H1 (pause) is dead, H2 (chain field freezes on fresh deck-2 load) is the core defect. §10 fix shapes are direction, not an implementation authorization.
+validation_scope: read-only diagnosis of the 2026-07-08 evening "last-song LED blackout" across 20 session logs in ~/Library/Logs/rb_ss_bridge/ plus source verification of state_manager.py / led_look_director.py / rb_memory.py / rb_state_reader.py / active_deck_resolver.py / scripts/ss_bridge_watcher.sh at commit f627853; the bridge was DOWN during analysis. No runtime behavior changed, no code written. THREE operator corrections (2026-07-08) reversed the original thesis — see §0. Conclusion: the deck-2 reader was HEALTHY during the faulty darkness; the darkness was a scripted-mode blank-role room_blackout during the crossover into the Knock2 mashup. The deck-2 reader single-source/dead-fallback findings are preserved as a LATENT risk, not tonight's cause. §7 fix shapes are direction, not an implementation authorization.
 ---
 
-# Deck-2 reader diagnosis — the "last-song LED blackout" root cause (2026-07-08)
+# Last-song LED blackout diagnosis — the reader was healthy; the role went blank (2026-07-08)
 
 **What this is.** A read-only diagnosis of why the LEDs went dark during the last
-song of the 2026-07-08 evening mix and never returned, traced past the LED
-subsystem into the rekordbox deck-2 position reader. The LED darkness was a
-*correct* downstream reaction; the real fault is that the bridge stopped seeing
-deck 2 as playing. This doc names the mechanism with `file:line` evidence and
-leaves three instrumented hypotheses for the fix owner (Codex).
+song of the 2026-07-08 evening mix. It began as a deck-2 rekordbox-reader
+investigation and, after three operator corrections plus log re-verification,
+**exonerates the reader**: the deck-2 position and active-deck reads were healthy
+throughout the faulty darkness. The real cause is a **blank-role `room_blackout`
+default during the crossover into a scripted-mode mashup**. The deck-2 reader
+weaknesses found along the way are real but latent — they did not fire tonight.
 
-**Claim labels:** **confirmed** = verified against source at commit `a98927a` or
-counted from the log corpus; **assumed** = inferred from a documented mechanism;
-**unknown** = could not be settled from available evidence; **operator-testimony**
-= the operator's first-hand account of the live session (evidence, but memory can
-be wrong — instrument anyway).
-
----
-
-## 1. The one-line reframe
-
-**Deck 2 was running on a single position source with its backup deliberately
-switched off, and that source's "healthy" test passes on a frozen value.** When
-the one source froze on the FEIN load, both readers reported deck 2 paused, the
-active-deck resolver went idle, and the LEDs parked on the dim ambient idle look.
-This is **not** an LED bug and **not** a blackout latch — it is a rekordbox-reader
-fault, and it is two things compounding: **(1)** the operator has the ObjC scan
-fallback turned off (`RBSS_POS_CHAIN_SKIP_OBJC=1`) to avoid the pre-AWR-148
-multi-second freezes, and **(2)** the chain's health check is freeze-blind, so a
-frozen chain never yields to re-engage the scan. The core defect underneath both
-is **(3)** the chain field itself freezing on a fresh deck-2 load (§8, H2).
-
-**Operator correction (2026-07-08):** "I turned it off" meant the **fallback**
-(the ObjC scan), not the deck. The deck was playing the whole session, FEIN
-included. That kills H1 (a genuine pause) and makes H2 the core defect.
+**Claim labels:** **confirmed** = verified against source at `f627853` or counted
+from the logs; **assumed** = inferred from a documented mechanism; **unknown** =
+could not be settled from available evidence; **operator-testimony** = the
+operator's first-hand account (evidence, but instrument before trusting).
 
 ---
 
-## 2. Why deck 2 and not deck 1 — the structural asymmetry **[confirmed]**
+## 0. Correction trail (read this first)
 
-Two completely different resolution strategies:
+This doc's original thesis was wrong. It was corrected in three steps:
 
-- **Deck 1 — deterministic pointer walk.** `base → container → DPU1 → inner1 → +0x0C`
-  (`rb_memory.py:732-733`, `rb_memory.py:774-789`). Resolves the same way every
-  tick, cached, independent of play state. Always available.
-- **Deck 2 — no known fixed offset for its ObjC position field.** It is *found by
-  scanning* memory near `inner1` for an int counting up at ~44,100/sec — i.e. by
-  recognising a **moving** counter (`_strict_eval_candidate`, `rb_memory.py:677-724`;
-  `probe_deck2.py:8-12` exists precisely because this field had to be discovered
-  by scan). A counter can only be recognised **while the deck is playing and
-  advancing**. A stopped or just-loaded deck 2 is, by design, unfindable this way.
+1. **"Turned it off" meant the fallback, not the deck.** `RBSS_POS_CHAIN_SKIP_OBJC=1`
+   is set deliberately (`scripts/ss_bridge_watcher.sh:152`); the ObjC scan is
+   operator-disabled, not bug-dead.
+2. **FEIN was never played.** The operator loaded FEIN and ended the night without
+   playing it. So FEIN reading "paused at 0:02" is *correct*, not a freeze bug.
+3. **The faulty blackout happened BEFORE FEIN.** It occurred during the Knock2
+   mashup that was playing before FEIN; the FEIN load was the operator's
+   **reaction** to the already-dark room, not its cause.
 
-Corpus proof: across all 20 sessions, `[RBMEM][INVALID]` references deck 1 **zero
-times** and deck 2 **24 times**. There is no `_d1_pending`/`_deck2_inner`
-machinery for deck 1 — the failure is deck-2-exclusive by construction.
-
----
-
-## 3. The two deck-2 sources, and how the fallback died
-
-Deck 2 actually has two position sources; the fault is that only one works and it
-suppresses the other.
-
-### 3a. The offset-table live_pos chain (the only working source) **[confirmed]**
-
-`read_live_pos_chain` (`rb_memory.py:859-912`) walks a versioned offset chain
-(`live_pos_per_deck[2]`) fresh every tick — `_follow_chain_addr` re-walks from
-`base` with **no cached intermediate pointers** (`rb_memory.py:839-848`), so a
-frozen reading means the field at that offset genuinely was not changing (not a
-stale pointer). Play state is inferred from movement: `playing = raw != prev_raw`
-(`rb_memory.py:899`). During the mix this chain carried deck 2 correctly (e.g.
-Knock2 – 2HEARTS advanced 0:33 → 1:19).
-
-### 3b. The `chain_ok`-suppresses-fallback mechanism (the core defect) **[confirmed]**
-
-`read_live_pos_chain` returns a **valid snapshot even when the value is frozen** —
-it returns `None` only on unreadable / negative / out-of-range / rewind
-(`rb_memory.py:871-895`). So the health test is:
-
-```
-chain_ok = (chain_snap is not None)      # rb_memory.py:1404
-skip2    = self._skip_objc_when_chain and self._chain_ok_last.get(2, False)  # :1307
-```
-
-A **frozen-but-readable** chain therefore counts as "healthy" → `skip2 = True` →
-the entire ObjC heap-scan resolution pipeline is skipped (`rb_memory.py:1310`,
-`_read_decks_chain_first` at `rb_memory.py:1392-1410`). **A frozen chain reads as
-healthy and turns off the very fallback meant to catch it.**
-
-`skip2` is only armed because the operator enabled the skip flag: the launcher
-sets `RBSS_POS_CHAIN_SKIP_OBJC=1` (`scripts/ss_bridge_watcher.sh:152`, alongside
-`RBSS_POS_CHAIN_DIRECT=1` at `:151`), and `_skip_objc_when_chain` requires
-`SKIP_OBJC=1 AND chain-direct AND offsets resolved` (`rb_memory.py:1201-1205`).
-So the fallback is **operator-configured off**, engaged only opportunistically on
-ticks where the chain itself misses (`skip2 = _skip_objc_when_chain AND
-_chain_ok_last[2]`, `rb_memory.py:1307`). A *frozen* chain never misses — it
-returns a value — so it never lets the fallback back in.
-
-### 3c. The ObjC fallback is off by config, and unproductive on the rare ticks it runs **[confirmed]**
-
-The 0-commit picture is **not** a pure bug — it is the operator skip flag (§3b)
-plus a scan that, on the rare chain-miss ticks it does engage, fails to validate:
-
-- Tonight (`bridge-20260708-203103.jsonl`): **11 resolution attempts, 0
-  validated, 0 committed.** Those 11 attempts happened on chain-miss ticks (where
-  `skip2` briefly dropped to `False`); they were short windows that never
-  accumulated ≥4 advancing samples on the true field.
-- Zero `[RBMEM][D2COMMIT]` in every July-8 afternoon/evening session
-  (`145239`, `153227`, `203103`). Only 2 commits exist across all 20 sessions.
-
-So "the fallback is dead" is really **operator-disabled skip + a scan starved by
-brief engagement windows + the freeze-blind `chain_ok` that never opens those
-windows when it matters** — three things compounding, not one broken scan. When
-the scan *does* run it also self-sabotages: stage **B** always finds a decoy pointer
-`ptr_b = (container − 0x270)[+0x78]` (`rb_memory.py:960-969`) that never
-validates; stage **C** is the zone scan (`rb_memory.py:972-984`); and the stage
-**D** heap scan that could find the *real* moving field is gated on
-`target_ms is not None and not zone_hits and attempt >= min and deck2_playing`
-(`rb_memory.py:1004-1011`). Whenever B/C surface any zone hit, `not zone_hits`
-is false and **stage D never runs** — no `heap moving` scan line appears in
-tonight's log at all. The decoy starves the scan that would succeed.
-
-### 3d. The circular dependency that makes fresh loads worst **[confirmed]**
-
-Stage D also needs `deck2_playing` and `target_ms`, and both come from the
-StateManager, which is fed by the readers:
-
-- `deck2_playing = self._deck_playing_hint(2)` (`rb_memory.py:1291`)
-- `target_ms = self._deck_elapsed_hint(2)` (`rb_memory.py:1330-1332`)
-- wired to `sm.get_deck_playing` / `sm.get_deck_elapsed_ms`
-  (`__main__.py:1621-1622`).
-
-On a fresh load the direct reader hasn't established the new track's play/elapsed
-yet, so `target_ms=none` and `deck2_playing=False` gate the scan off. Corpus:
-`target_ms=none` appears **26 times at attempt 2–30 with `playing=True`** — the
-scanner repeatedly unable to get a reference position mid-playing.
+Net effect: the "deck-2 chain froze on a fresh load and caused the darkness"
+thesis is **falsified**. The reader was healthy during the darkness (§3). The
+cause is in the LED role path (§4).
 
 ---
 
-## 4. `[INVALID]` vs `[INCONCLUSIVE]` — and why the label is only partly trustworthy **[confirmed]**
+## 1. The corrected one-line finding
 
-- **INCONCLUSIVE** (`rb_memory.py:1104-1105`, **DEBUG**): every candidate returned
-  `None` — movement < 500 samples → "deck likely paused."
-- **INVALID** (`rb_memory.py:1106-1107`, **INFO**): at least one candidate returned
-  `False` (negative jump / bad rate / out-of-range) and none validated.
+**The faulty darkness was a blank-role `room_blackout` burst during the crossover
+into the scripted Knock2 mashup — the LED role kept arriving empty while a track
+played audibly, so the look director fell back to its `utility` blackout.** The
+deck-2 position reader and the active-deck reader were both healthy the whole
+time. No track load and no reader freeze triggered it.
 
-Two trust problems:
+Two separate things, kept distinct in this doc:
 
-1. **It conflates a transient load-reset with a hard failure.** On a fresh load
-   the old candidate resets → negative jump → `False` (`rb_memory.py:704-711`) →
-   forces the "INVALID" label even though the true state is just "track changed a
-   moment ago." `[INVALID]` does **not** mean "deck is unreadable."
-2. **The paused case is invisible.** The entire 77k-line corpus has **zero DEBUG
-   lines**, so `[INCONCLUSIVE]` ("deck likely paused") and the per-candidate
-   `[RBMEM][REJECT]` reasons (`rb_memory.py:709/714/719`) never appear. You only
-   ever see the INFO-level `[INVALID]` — the most alarming and least diagnostic
-   variant.
+- **(A) Tonight's cause — §4:** scripted-mode / blank-role → `room_blackout`,
+  firing repeatedly during a normal DJ crossover. An LED look-director /
+  drop-presentation issue. Readers healthy.
+- **(B) A latent reader risk — §5:** deck 2 runs on one position source with its
+  ObjC fallback configured off and a freeze-blind health check. This did **not**
+  cause tonight's darkness, but it is a real gap worth closing.
 
 ---
 
-## 5. Self-heal vs wedge **[confirmed]**
+## 2. Corrected timeline (`bridge-20260708-203103.jsonl`)
 
-Retry loop retries indefinitely on intervals (`rb_memory.py:1317-1348`). Across
-23 `[INVALID]` events:
-
-| outcome | count |
-|---|---|
-| RECOVERED (deck-2 pos advanced past the frozen value, same track) | 12 (10–80s, median ~26s) |
-| TRACK CHANGED before recovery could be observed | 10 |
-| PERMANENT WEDGE to session end | **1 (tonight, 20:53:26)** |
-
-Permanent wedge is rare (1 in 23). `read_deck(2)` returns `None` while
-`_deck2_inner is None` (`rb_memory.py:1129-1130`), so during a wedge the ObjC path
-contributes nothing and the (frozen) chain is authoritative.
-
----
-
-## 6. Tonight's exact sequence — the wedge (`bridge-20260708-203103.jsonl`)
+The darkness window is **20:52:37 → 20:53:23, during the Knock2 mashup on deck 2**.
+FEIN comes *after*.
 
 | Time | Line | Event |
 |---|---|---|
-| 20:47:23 | 3294 | `[RBMEM][INVALID]` #1 — recovered in ~16s (unremarkable) |
-| 20:53:23 | 4307 | FEIN loads on deck 2; `health.reader drift: backward jump 83234→0 ms` |
-| 20:53:26.8 | 4339 | `[RBMEM][INVALID] deck=2 all candidates failed strict validation` (the load reset) |
-| 20:53:26.87 | 4342 | `[SM] pause deck=2 src=rb_state` (+71ms) — direct reader reports the field frozen |
-| 20:53:26 | 4343 | `switch 2->0 (idle_no_audible)` → LEDs `[RGB] idle-freewheel-start look=rt_twinkle` |
-| 20:53:27 → 20:56:11 | — | frozen; zero deck-2 activity; clean shutdown |
+| 20:51:31–20:52:03 | 3929–4100 | Operator browses deck 2 — ~11 rapid loads (gen 11–21), a preview storm |
+| 20:52:03 | 4115 | Knock2 mashup settles on **deck 2** (`mode=scripted`); plays 0:01 → 1:19 |
+| 20:52:30 | 4182 | `switch 1->2 (fader_top)` — crossover: deck 2 becomes active |
+| 20:52:36 | — | master 1→2; deck 2 `only_audible` |
+| **20:52:37** | 4209/4211 | deck 1 (POP LOCK) pauses; **`look room_blackout role=utility`** — darkness onset |
+| 20:52:37 → 20:53:23 | — | `room_blackout (utility)` burst, oscillating with brief buildup/drop/ambient looks; deck 2 stays `only_audible` and its position keeps advancing |
+| 20:53:23 | 4307 | FEIN loads on deck 2 — the operator's **reaction** to the dark room |
+| 20:53:26 | 4339/4343 | FEIN `[RBMEM][INVALID]` + `pause deck=2` + `switch 2->0 idle_no_audible` → idle-freewheel `rt_twinkle` |
+| 20:53:27 → 20:56:11 | — | idle ambient (FEIN never played = correctly idle); clean shutdown |
 
-**Downstream chain (all correct given the frozen input):**
-`active_deck_resolver.py:103-112` returns `idle_no_audible` / `no_eligible_deck`
-→ `led_dispatch_policy.py:1313` dispatches the idle-ambient look and starts the
-freewheel (`led_dispatch_policy.py:384-385`). `rt_twinkle` on the `deep_ocean`
-palette renders as a sparse dim twinkle — "dead" during a loud last song.
-
-**Independence caveat (correction to the first triage note).** The `src=rb_state`
-pause is a *separate thread* but **not a separate signal**: both the direct reader
-(`rb_state_reader.py:397, 437` — `is_playing = pos != prev`) and the chain reader
-(`rb_memory.py:871, 899` — `playing = raw != prev_raw`) infer "playing" from
-movement of the **same** `live_pos_per_deck[2]` field. Their agreement confirms
-**the field froze** — it does not independently prove FEIN was paused.
+**Onset is independent of the FEIN load:** darkness began at 20:52:37, 46s before
+FEIN loaded.
 
 ---
 
-## 7. The 15:13 "laser miss" premise — corrected **[confirmed from logs]**
+## 3. Why the reader is exonerated **[confirmed]**
 
-The 15:13 session (`bridge-20260708-145239.jsonl`) had the *same* deck-2 INVALID
-churn, but the specific "scripted-laser miss via active-deck non-flip" **did not
-happen**:
+During the entire faulty-darkness window (20:52:37–20:53:19), with deck 2 playing
+the Knock2 mashup:
 
-- 15:13:01.041 (`:3148`) — `[RBMEM][INVALID] deck=2 all candidates failed…`
-- 15:13:13.497 (`:3167`) — `switch 1->2 (bass_dominance)` — **active deck DID flip**
-- 15:13:13.499 (`:3170`) — `arm deck=2 id=1284885839 elapsed=0:30.202` — **scripted laser DID arm** (2ms later)
-- 15:13:13.612 (`:3172`) — `arm-phase2 deck=2 id=1284885839 elapsed=0:30.202`
+- **Deck-2 position advanced smoothly and monotonically** — 16 consecutive `[SM]
+  pos deck=2` samples: 0:01 → 0:04 → 0:10 → 0:16 → 0:21 → 0:27 → 0:33 → 0:39 →
+  0:44 → 0:49 → 0:54 → 0:59 → 1:04 → 1:09 → 1:14 → 1:19. No wobble, no freeze.
+- **Zero `[RBMEM]`/chain-INVALID events** during Knock2 play. The only tonight
+  INVALID is at 20:53:26 (FEIN, after the darkness and after the reaction load).
+- **The active-deck read was healthy** — every heartbeat in the window reads
+  `deck=2 auth=only_audible` (one 1-tick `deck=0` flicker at 20:53:13 is the only
+  exception). The deck was correctly resolved as the audible one.
 
-The real symptom at 15:13 was **INVALID churn plus a position wobble**
-(`pos deck=2` bounced 30.4 → 20.5 → 25.6 → 30.8 across 15:13:01–15:13:14), which
-could cause subtle mistiming (armed at 30.2s while the live value was moving), but
-**not** a missed trigger or a non-flip. The deck-2 fault family is real and
-shared; the specific "non-flip laser miss" framing is not supported by that
-session's logs.
-
----
-
-## 8. What froze, and why H1 is dead **[operator-testimony + confirmed]**
-
-Was the FEIN field frozen because **(a)** FEIN was genuinely paused, or **(b)**
-the offset chain read the *wrong field* for a freshly-loaded deck-2 track while
-audio actually played?
-
-**The operator correction settles it: (b).** His "I turned it off" referred to
-the **fallback** (`RBSS_POS_CHAIN_SKIP_OBJC`), not the deck. Both decks — FEIN
-included — were playing the whole session. So:
-
-- **(a) genuine pause is rejected.** H1 is dead; the original testimony (deck
-  playing) stands, now un-contradicted.
-- **(b) wrong field on fresh load is the core defect.** The chain returned a
-  frozen value for a *playing* FEIN, which by `playing = raw != prev_raw`
-  (`rb_memory.py:899`) reads as paused.
-- Log support for (b): the 15:13 position wobble (30.4 → 20.5 → 25.6 → 30.8)
-  proves the chain/scan *can* misreport deck-2 position during instability, and
-  with the fallback configured off nothing catches a wrong chain.
+So the operator's "a load on either deck invalidates the deck-2 chain mid-play"
+lead is **not supported by tonight's log**: there was no load during Knock2's
+play, and the deck-2 chain never degraded. And the "position wobble / INVALID
+churn degraded role resolution" sub-lead is also **not supported** — neither
+happened during Knock2. The role went blank while every reader was healthy.
 
 ---
 
-## 9. Three instrumented-testable hypotheses (for the fix owner)
+## 4. The actual mechanism — scripted-mode blank-role blackout **[confirmed origin; persistence partly unknown]**
 
-Priority order reflects §8: **H2 first**, then H3 (the missing safety net), with
-H1 as the cheap confirm that runs regardless.
+The `room_blackout` look is the look director's **default when the LED context
+role is empty**: `role = "utility"` when `context.role` is blank
+(`led_look_director.py:145-150`), and `utility` maps to `room_blackout`.
 
-### H2 — the live_pos offset reads the wrong/stale field for a freshly-loaded deck-2 track **[unknown — priority per operator testimony]**
-- *Instrument:* for ~10s after each deck-2 load, log (INFO) the chain-resolved
-  address from `_follow_chain_addr` (`rb_memory.py:848`) and its raw value,
-  alongside the best moving candidate the `inner1±window` scan finds and its rate.
-- *Decisive test:* `probe_deck2.py` already performs this scan standalone — run it
-  live against a freshly-loaded **and playing** deck-2 track and compare its
-  `STRICT PASS` address to the chain's resolved address. **Same** address → the
-  offset is correct (the freeze was real). **Different** → the offset points at the
-  wrong field on fresh loads (the software bug), and the fix is an offset/anchor
-  correction for the post-load deck-2 live_pos field.
+The blank role has a code-confirmed source. When the active deck's lighting mode
+is scripted, the drop-presentation is ticked with **`drop_role="none"`** by design
+(`state_manager.py:2555-2567` — "Required Behavior Test 9: zero policy activity
+end-to-end on a scripted track"). The Knock2 mashup was `mode=scripted` on every
+`[SM] pos` line, so while it was the audible active deck the drop-presentation
+contributed a blank/`none` role each tick.
 
-### H3 — the ObjC deck-2 fallback is effectively dead in rekordbox 7.2.11 **[confirmed dead; mechanism to pin down]**
-- *Evidence:* 0 commits across all July-8 sessions; stage D never ran tonight; the
-  stage-B decoy `ptr_b` plus any zone hit gate stage D off (`not zone_hits`,
-  `rb_memory.py:1004`).
-- *Instrument:* promote the stage-B/C candidate addresses and per-sample deltas
-  from DEBUG to INFO (`rb_memory.py:709/714`), and log which of
-  `target_ms / zone_hits / deck2_playing / min_attempt` blocked stage D each
-  attempt (`rb_memory.py:1004-1011`).
-- *Test / fix direction:* one session shows whether B/C perpetually surface a
-  static decoy that starves the heap scan. If so, validate B/C before trusting them
-  enough to skip D, or run stage D regardless of zone hits. Note: if the fix makes
-  stage D run, the **AWR-148 vectorized filter** (`rb_memory.py:264-458`) becomes
-  load-bearing — verify its `target_ms` tolerance does not exclude the true moving
-  field (`rb_memory.py:315-316`).
+Corroborating the role-path (not reader-path) cause, the RGB events across the
+window are all look-director/drop-lifecycle churn, never reader errors:
 
-### H1 — FEIN was genuinely paused/previewed **[REJECTED]**
-Killed by the operator correction (§8): "turned it off" referred to the fallback,
-not the deck; FEIN was playing. No pause-detection instrumentation is needed. The
-chain-freshness log proposed here has been folded into H2's instrumentation
-(logging `raw`/`prev_raw` while the playing-hint says playing is exactly what
-distinguishes a wrong-field freeze), so nothing is lost by dropping H1.
+- 20:52:31 `[RGB] hold-engaged deck=2` → 20:52:37 `[RGB] hold-released
+  reason=beat_backstop held_s=6.5` — the LED hold that was covering the crossover
+  expires exactly at the darkness onset.
+- 20:52:44 / 20:53:13 `[RGB] gate-reason-change reason=adapter_rejected` — looks
+  rejected by the adapter, back to `clear` a beat later.
+- 20:52:57 `[RGB] tactical-blackout-accepted phase=pre_drop` — a pre-drop
+  blackout arming on the mashup.
+- 20:53:23 `[SM] smart-drop-energy-shadow deck=2 anlz_elapsed=0:22 … 1:26` — the
+  ANLZ/energy model disagreeing with itself by ~64s on the mashup's position.
+
+**Confirmed:** the darkness is the blank-role/`utility` `room_blackout` default
+(`led_look_director.py:145-150`), and scripted lighting mode feeds `drop_role=
+"none"` (`state_manager.py:2555-2567`). **Unknown / needs instrumentation:** why
+the blank role *persisted and oscillated for ~46s* rather than the scripted-mode
+fail-open (comment at `state_manager.py:2559-2561`) restoring a lit look — the
+interaction between the crossover, the prior autoloop track's leftover window
+state, and the scripted fail-open is not resolved from logs alone (§6, Q-A).
 
 ---
 
-## 10. What this diagnosis did NOT do
+## 5. The latent deck-2 reader risk (real, but NOT tonight's cause)
+
+Preserved because it is a genuine gap the investigation surfaced — it simply did
+not fire tonight (deck 2 was healthy in §3; FEIN's "freeze" was a real pause).
+
+- **Deck 1 vs deck 2 asymmetry [confirmed].** Deck 1 is a deterministic pointer
+  walk (`rb_memory.py:732-733, 774-789`), always resolvable. Deck 2 has no known
+  fixed offset — its ObjC field is found by scanning for a counter moving at
+  ~44,100/sec *while playing* (`rb_memory.py:677-724`; `probe_deck2.py:8-12`).
+  Corpus: `[RBMEM][INVALID]` references deck 1 zero times, deck 2 24 times, across
+  20 sessions.
+- **The ObjC fallback is operator-disabled [confirmed].** `RBSS_POS_CHAIN_SKIP_OBJC=1`
+  (`scripts/ss_bridge_watcher.sh:152`, with `RBSS_POS_CHAIN_DIRECT=1` at `:151`)
+  gates `_skip_objc_when_chain` (`rb_memory.py:1201-1205`); the scan then engages
+  only on ticks where the chain itself misses (`skip2 = _skip_objc_when_chain AND
+  _chain_ok_last[2]`, `rb_memory.py:1307`). It was turned off to avoid the
+  pre-AWR-148 multi-second GIL freezes.
+- **The chain health check is freeze-blind [confirmed].** `chain_ok =
+  (chain_snap is not None)` (`rb_memory.py:1404`); `read_live_pos_chain` returns a
+  valid snapshot even when the value is frozen (`rb_memory.py:871-895`), inferring
+  `playing = raw != prev_raw` (`:899`). So a *frozen* chain reads as "healthy,"
+  never misses, and never lets the fallback back in. **This is the one to fix**
+  even though it was not tonight's trigger: it is exactly the failure mode that
+  would turn a real future freeze-while-playing into an unrecoverable dark room,
+  with no working fallback behind it.
+
+---
+
+## 6. Open questions and rejected leads
+
+**Rejected [confirmed against log]:**
+- **"A load on either deck freezes the deck-2 chain mid-play"** — no load during
+  Knock2 play; deck-2 position advanced smoothly (§3).
+- **H1 "FEIN was paused, and that pause caused the darkness"** — FEIN was never
+  played (correct pause) and loaded 46s *after* the darkness began; it is the
+  reaction, not the cause.
+
+**Primary open — Q-A: why did the blank role persist ~46s on a scripted, audibly
+playing deck?** The look director should not sit on `room_blackout` while a deck
+is `only_audible`. Candidates: the scripted-mode fail-open
+(`state_manager.py:2559-2561`) not restoring a prior autoloop track's dark window
+state; the phrase→role path emitting `none` on the mashup's irregular structure;
+the adapter repeatedly rejecting the intended look. This is an LED look-director /
+drop-presentation investigation, **separate from the reader** — likely its own doc.
+
+**Latent — Q-B: does the deck-2 chain ever freeze while a track truly plays?**
+Not demonstrated tonight (Knock2 advanced fine; FEIN was a real pause). Still
+worth ruling out because the freeze-blind health check (§5) has no safety net.
+
+---
+
+## 7. Fix shapes (direction, not an implementation authorization)
+
+**Priority (a) — tonight's actual cause.** A blank/`none` role must not produce a
+room blackout while a deck is audibly playing. When `active_deck` is
+`only_audible` and the role is empty, **hold the last real look** (or a safe
+groove default) instead of falling through to `utility`/`room_blackout`
+(`led_look_director.py:145-150`). This addresses the crossover-into-scripted burst
+directly. Pair with Q-A instrumentation: log, each tick the look would go
+`utility` while a deck is `only_audible`, the source of the blank role
+(scripted-mode `none` vs phrase `none` vs adapter reject) so the exact persistence
+path is named.
+
+**Priority (b) — the latent reader risk (hardening).** Two coupled changes:
+1. **Freshness-aware chain health.** `chain_ok` should require the value to be
+   *advancing* while the playing-hint says playing, not merely non-null
+   (`rb_memory.py:1404`, `read_live_pos_chain` at `:859-912`). A frozen chain on a
+   playing deck must count as a miss so the fallback can engage.
+2. **Conditional skip.** Skip the ObjC scan while the chain is healthy-and-advancing;
+   engage the now-vectorized (AWR-148, `rb_memory.py:264-458`) scan when the chain
+   goes stale. The original reason for disabling it (multi-second GIL freezes) no
+   longer holds post-AWR-148, so the fallback can be re-enabled behind the
+   freshness gate rather than left globally off.
+
+**(c) — instrumentation to settle Q-B.** In `read_live_pos_chain`
+(`rb_memory.py:~899`), when deck-2 `playing` flips False within N seconds of a
+load, log `raw`, `prev_raw`, and (if a rekordbox play-flag byte exists at a known
+offset) that flag — distinguishing a real pause from a frozen-while-playing field
+in one session.
+
+---
+
+## 8. What this diagnosis did NOT do
 
 No code changed, no tests changed, the (down) bridge was not touched, and nothing
-in `~/Library/Logs/rb_ss_bridge` was modified. AWR-148 was **not** implicated as
-the cause of the wedge (stage D never ran); it is only relevant on the H3 repair
-path. This doc is analysis, not an implementation authorization — the fix is a
-separate Codex spec once H2/H3 instrumentation names the exact offset or gate.
+in `~/Library/Logs/rb_ss_bridge` was modified. Tonight's darkness is attributed to
+the LED role path, not the reader; the reader findings are preserved as latent
+risk. The 15:13 session cross-check earlier in this investigation still holds
+(the active deck flipped `1->2` at 15:13:13.497 and the scripted laser armed 2ms
+later — no non-flip miss). The fix is a separate spec once Q-A instrumentation
+names the exact blank-role persistence path.
