@@ -233,6 +233,35 @@ class TestTrackPlan(unittest.TestCase):
         self.assertIn("drops=2", plan.summary())
 
 
+class TestLaserEnergyGate(unittest.TestCase):
+    """AWR-162 (A): tier → laser energy mapping + the plan_track energy gate."""
+
+    def test_laser_tier_mapping(self):
+        self.assertEqual(M.laser_tier("NEUTRAL", 3), "small")   # flagged veto item
+        self.assertEqual(M.laser_tier("NEUTRAL", 1), "small")
+        self.assertEqual(M.laser_tier("WALL", 1), "standard")
+        self.assertEqual(M.laser_tier("HOUSE", 2), "intense")
+        self.assertEqual(M.laser_tier("COMET", 3), "monster")
+
+    def test_plan_track_energy_gate(self):
+        from rb_ss_bridge_v2 import drop_presentation as DP
+        cfg = DP.load_drop_presentation_config("/nonexistent")   # fails open to defaults
+        drops = [100.0, 200.0, 300.0]
+        tiers = {100.0: "small", 200.0: "intense", 300.0: "monster"}
+        plan = DP.plan_track(drops, [], [], [], cfg, laser_tiers=tiers)
+        got = {d.beat: d.personality_presentation for d in plan.decisions}
+        self.assertEqual(got[100.0], DP.LEDS_ONLY)          # small → lasers silent
+        self.assertEqual(got[200.0], DP.LEDS_PLUS_LASERS)
+        self.assertEqual(got[300.0], DP.LEDS_PLUS_LASERS)
+
+    def test_tier_less_is_legacy(self):
+        # laser_tiers=None ⇒ the legacy laser_ratio ranking runs unchanged.
+        from rb_ss_bridge_v2 import drop_presentation as DP
+        cfg = DP.load_drop_presentation_config("/nonexistent")
+        legacy = DP.plan_track([100.0, 200.0], [], [], [], cfg)
+        self.assertEqual(len(legacy.decisions), 2)   # builds, no tier gate applied
+
+
 class TestTransitionWindow(unittest.TestCase):
     """Task 3.1: the pre-drop dark-window length override (LED+laser shared)."""
 
