@@ -31,6 +31,27 @@ manager. New dispatches pin the model explicitly and VERIFY on-screen
   claude4 after /clear, tag AWR170. Then mirror (R5).
 - F4 substrate caveats for the morning note: seasoning renders on REALTIME
   looks only (cloud DIY ignores param merges) — operator live-tune gate.
+- **F4 GATE PASSED → AWR-170 DISPATCHED (claude4, Opus/high, tag AWR170,
+  building). MIRROR (R5) CANDIDATE BUILT + validated, AWAITING superman's
+  explicit eyeball (NOT pre-authorized to apply):** backup =
+  `config/led_look_director.json.backup_1783586470` (gitignored, verified);
+  candidate = scratchpad `led_look_director.mirror_candidate.json` (kept out
+  of the repo tree — auto-sync safe); loader zero errors, f2 ON/burndown
+  off, f4 ON/busy-pulse off, dry_run false, device ids + strip IP .216
+  preserved, long_press_s kept live 1.0 (FLAGGED vs example 0.5); bank
+  curation follows the rounds (rt_drop_chase/rt_drop_nebula leave the drop
+  rotation — defs preserved; bright_white_chase moves groove→buildup).
+  RIDER: rebuild candidate after AWR-170 lands if apply wants
+  pre_chorus_laser_beats included (absent = off = safe).
+- **Third standard-tooling bug (reported):** stale signal files false-fire
+  watch_lane.sh — it globs $SESSION.*.done across ALL tags; consumed files
+  from closed rounds must be rm'd (I now consume-on-read). A stale
+  `research.EDMRESEARCH.done` sits in /tmp/rbss_lane_signals for its owner.
+- **Filter-knob lighting directive (operator, via superman): POST-PROGRAM,
+  DO NOT ACT.** CFX-driven flood/drain; RE evidence exists at
+  docs/research/rekordbox_mixer_active_deck_re_evidence.md but NO runtime
+  read is wired today; spec via the normal chain only after the operator
+  confirms superman's restatement.
 
 ## Historical: post-F2 review state (~04:0x)
 
