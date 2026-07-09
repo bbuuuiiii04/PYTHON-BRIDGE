@@ -524,6 +524,21 @@ def _drop_white_aggressive(beat: float, local_t: float, frame_index: int, params
     return _empty(segments, (255, 255, 255) if strobe_on else (0, 0, 0))
 
 
+def _drop_strobe_colorway(beat: float, local_t: float, frame_index: int, params: Mapping[str, Any], segments: int, seed: int) -> Frame:
+    """AWR-156: fixed-colorway full-strip strobe on the Hz gate (ported from
+    the lab strobe_colorway, gate replaced with _hz_strobe_on). Solid color_a,
+    or color_a/color_b alternating per flash when color_b is present."""
+    if not _hz_strobe_on(local_t, params):
+        return _empty(segments)
+    color_a = _color(params.get("color_a"), (255, 255, 255))
+    if "color_b" not in params:
+        return _empty(segments, color_a)
+    hz = max(0.5, min(10.0, float(params.get("hz", 6.0))))
+    flash_idx = int(local_t * hz)
+    color_b = _color(params.get("color_b"), color_a)
+    return _empty(segments, color_a if flash_idx % 2 == 0 else color_b)
+
+
 def _post_drop_white_shatter(beat: float, local_t: float, frame_index: int, params: Mapping[str, Any], segments: int, seed: int) -> Frame:
     # Per-frame full-white stroboscopic static. Each pixel is independently
     # re-randomized every render frame (keyed on frame_index) for a true
@@ -1837,6 +1852,9 @@ SLOT_EFFECTS: dict[str, SlotEffectFn] = {
 # registers as a normal Frame effect, NOT in SLOT_EFFECTS.
 _EFFECTS["breakdown_star_twinkle_sand"] = _baked_breakdown_star_twinkle_sand
 
+# AWR-156: fixed-colorway strobe family rides the Hz gate; baked (no palette).
+_EFFECTS["drop_strobe_colorway"] = _drop_strobe_colorway
+
 # Phase-2b config validation must accept slot cues + the baked sand name.
 REALTIME_EFFECT_NAMES = frozenset(_EFFECTS.keys() | SLOT_EFFECTS.keys())
 
@@ -1848,6 +1866,7 @@ REALTIME_STROBE_EFFECTS = REALTIME_STROBE_EFFECTS | frozenset({
     "rt_drop_chase",
     "rt_drop_nebula",
     "rt_post_drop_center_comet",
+    "drop_strobe_colorway",
 })
 
 # Param allowlist for each new name = standard EDM keys (duration_beats +
@@ -1875,6 +1894,9 @@ _M2_PHASE2A_PARAM_KEYS: dict[str, frozenset[str]] = {
     "rt_drop_center_burst": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
     "rt_post_drop_center_comet": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
     "rt_twinkle": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
+    "drop_strobe_colorway": (
+        frozenset({"color_a", "color_b", "hz", "duty", "duration_beats"}) | _SYNC_PARAM_KEYS
+    ),
 }
 for _name, _keys in _M2_PHASE2A_PARAM_KEYS.items():
     REALTIME_EFFECT_PARAM_KEYS[_name] = _keys
