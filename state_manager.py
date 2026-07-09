@@ -2700,6 +2700,18 @@ class StateManager(LEDDispatchPolicyMixin):
             manual_refuse_reason = "role"
         else:
             manual_refuse_reason = ""
+        # AWR-159 Task 4: same idea for the general (auto-tier) laser_visible
+        # gate, checked in the same priority laser_visible itself uses.
+        if not laser_enabled:
+            not_visible_reason = "director_disabled"
+        elif not self._drop_presentation_base_live:
+            not_visible_reason = "base_live_false"
+        elif laser_masked:
+            not_visible_reason = "masked"
+        elif not role_visible:
+            not_visible_reason = "role"
+        else:
+            not_visible_reason = ""
 
         inputs = WindowInputs(
             abs_beat=sp_state.abs_beat,
@@ -2709,6 +2721,7 @@ class StateManager(LEDDispatchPolicyMixin):
             impact_now=presentation_impact,
             laser_visible=laser_visible,
             manual_laser_visible=manual_laser_visible,
+            not_visible_reason=not_visible_reason,
             stopped=not d.playing,
             track_changed=track_changed,
             active_deck_changed=active_deck_changed,

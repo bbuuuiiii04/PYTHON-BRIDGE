@@ -567,14 +567,16 @@ class WindowInputs:
 
     __slots__ = (
         "abs_beat", "beats_to_next_drop", "next_drop_beat", "drop_role",
-        "impact_now", "laser_visible", "manual_laser_visible", "scripted_mode",
-        "stopped", "track_changed", "active_deck_changed", "manual_interaction",
+        "impact_now", "laser_visible", "manual_laser_visible", "not_visible_reason",
+        "scripted_mode", "stopped", "track_changed", "active_deck_changed",
+        "manual_interaction",
     )
 
     def __init__(
         self, *, abs_beat: Optional[float], beats_to_next_drop: Optional[float],
         next_drop_beat: Optional[float], drop_role: str, impact_now: bool,
         laser_visible: bool, manual_laser_visible: bool = True,
+        not_visible_reason: str = "",
         scripted_mode: bool = False, stopped: bool = False,
         track_changed: bool = False, active_deck_changed: bool = False,
         manual_interaction: bool = False,
@@ -591,6 +593,12 @@ class WindowInputs:
         # tiers (the physical lasers run on the SoundSwitch pack path
         # independent of the Director's enable flag).
         self.manual_laser_visible = manual_laser_visible
+        # AWR-159 Task 4: which single gate is failing `laser_visible` right
+        # now ("director_disabled" | "base_live_false" | "masked" | "role"),
+        # empty when laser_visible is True. Precomputed by state_manager.py
+        # (it already knows the gates individually); used only to name the
+        # reason on a predark->clear reset.
+        self.not_visible_reason = not_visible_reason
         self.scripted_mode = scripted_mode
         self.stopped = stopped
         self.track_changed = track_changed
@@ -706,6 +714,14 @@ class WindowMachine:
                 and inputs.abs_beat > self._target_impact_beat + 1e-6
             )
             if passed_without_drop or not inputs.laser_visible:
+                # AWR-159 Task 4: name why -- closes the triage's open unknown
+                # (which gate) for every future miss instead of just logging
+                # the transition.
+                reset_reason = (
+                    "passed_without_drop" if passed_without_drop
+                    else (inputs.not_visible_reason or "not_visible")
+                )
+                log.info("[DROP-PRESENTATION] predark-reset reason=%s", reset_reason)
                 self._reset()
                 return _IDLE_ACTIONS
             return WindowActions(
