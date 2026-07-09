@@ -1,7 +1,7 @@
 ---
 doc_status: current-incomplete
 truth_level: code-and-config-grounded
-last_verified_commit: e28ce6c
+last_verified_commit: 96923d3
 last_verified_date: 2026-07-08
 validation_scope: software-validated only, except the Govee/LED color-engine, realtime-comet, and beat-sync paths (AWR-101–104) which carry operator hardware sign-off on Home Govee (2026-06-29); SoundSwitch / laser / Enttec remain hardware-unvalidated
 ---
@@ -61,6 +61,18 @@ the 3 promoted looks, the knob #4 mashup removal, the knob #9 widths, the bank r
 the Task 9 slot-5 narrowing are all software-tested only. The live, gitignored
 `config/led_look_director.json` was not touched or mirrored; the operator's config mirror + menubar
 restart + next mix is the remaining validation gate.
+
+Darkness-fix round: blank-role hold + reader freshness (AWR-157, 2026-07-08): no hardware, Govee,
+or room-visible validation was performed. The `blank_role_hold` dispatch guard, its Q-A
+instrumentation, the deck-2 chain-freshness gate, the conditional ObjC fallback re-engage, and the
+Q-B pause-vs-freeze instrumentation are all software-tested only. Unlike AWR-154/155/156, the
+bridge was DOWN for this entire round — implemented overnight against the executive-released spec
+with no running process to affect. NO bridge start, NO live-config edit, and nothing touching the
+strip was performed at any point. The live, gitignored `config/led_look_director.json` was not
+touched or mirrored; the tracked example gains `blank_role_hold: true`. The operator's next
+menubar start (the first start since this round landed) plus his next mix are the remaining
+validation gate — both for whether a blank-role blackout still recurs and for whether the deck-2
+fallback actually re-engages on a real freeze.
 
 The current exporter/importer evidence boundary is **SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED**.
 
