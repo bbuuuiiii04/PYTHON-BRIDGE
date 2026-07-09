@@ -2071,6 +2071,15 @@ _M2_PHASE2A_PARAM_KEYS: dict[str, frozenset[str]] = {
         frozenset({"start_width", "end_width", "build_beats", "dim_floor",
                    "loop_beats", "color", "duration_beats"}) | _SYNC_PARAM_KEYS
     ),
+    "rt_groove_heartbeat": (
+        frozenset({"base_width", "pulse_width", "decay", "loop_beats",
+                   "color_mode", "duration_beats"}) | _SYNC_PARAM_KEYS
+    ),
+    "rt_post_drop_firework_remnants": (
+        frozenset({"dim_beats", "ember_hold_beats", "ember_decay_beats",
+                   "sparkle_density", "sparkle_size", "sparkle_life_s",
+                   "duration_beats"}) | _SYNC_PARAM_KEYS
+    ),
 }
 for _name, _keys in _M2_PHASE2A_PARAM_KEYS.items():
     REALTIME_EFFECT_PARAM_KEYS[_name] = _keys
