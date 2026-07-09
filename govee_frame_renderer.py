@@ -1266,6 +1266,11 @@ def _slot_groove_nebula(beat: float, local_t: float, frame_index: int,
     pos1 = ((cue_beat / loop_beats) % 1.0) * segments
     pos2 = ((1.0 - (cue_beat / loop_beats)) % 1.0) * segments
 
+    # AWR-156 knob #4: per-spawn single slot, not intensity-derived hue.
+    cycle = int(cue_beat / loop_beats)
+    slot1 = cycle % 5
+    slot2 = (cycle + 2) % 5
+
     for idx in range(segments):
         dist1 = _distance_on_ring(idx, pos1, segments)
         dist2 = _distance_on_ring(idx, pos2, segments)
@@ -1274,28 +1279,10 @@ def _slot_groove_nebula(beat: float, local_t: float, frame_index: int,
         intensity2 = max(0.0, 1.0 - (dist2 / max(0.001, width)))
 
         if intensity1 > 0.0:
-            slot_coord = intensity1 * 4.0
-            s_below = int(math.floor(slot_coord))
-            s_above = int(math.ceil(slot_coord))
-            w_above = slot_coord - s_below
-            w_below = 1.0 - w_above
-            if s_below == s_above:
-                field[idx][s_below] = min(1.0, field[idx][s_below] + intensity1)
-            else:
-                field[idx][s_below] = min(1.0, field[idx][s_below] + intensity1 * w_below)
-                field[idx][s_above] = min(1.0, field[idx][s_above] + intensity1 * w_above)
+            field[idx][slot1] = min(1.0, field[idx][slot1] + intensity1)
 
         if intensity2 > 0.0:
-            slot_coord = intensity2 * 4.0
-            s_below = int(math.floor(slot_coord))
-            s_above = int(math.ceil(slot_coord))
-            w_above = slot_coord - s_below
-            w_below = 1.0 - w_above
-            if s_below == s_above:
-                field[idx][s_below] = min(1.0, field[idx][s_below] + intensity2)
-            else:
-                field[idx][s_below] = min(1.0, field[idx][s_below] + intensity2 * w_below)
-                field[idx][s_above] = min(1.0, field[idx][s_above] + intensity2 * w_above)
+            field[idx][slot2] = min(1.0, field[idx][slot2] + intensity2)
 
     return field
 
@@ -1316,7 +1303,9 @@ def _slot_post_drop_chase(beat: float, local_t: float, frame_index: int,
 
     width = max(0.001, float(params.get("width", 0.8)))
     travel_beats = max(0.001, float(params.get("travel_beats", 2.0)))
-    for spawn_at, _spawn_idx in _drop_chase_spawn_times(cue_beat, start=0.0):
+    for spawn_at, spawn_idx in _drop_chase_spawn_times(cue_beat, start=0.0):
+        # AWR-156 knob #4: per-spawn single slot, not intensity-derived hue.
+        slot = spawn_idx % 5
         progress = (cue_beat - spawn_at) / travel_beats
         pos = progress * segments
         for idx in range(max(0, int(segments))):
@@ -1325,17 +1314,7 @@ def _slot_post_drop_chase(beat: float, local_t: float, frame_index: int,
             if intensity <= 0.0:
                 continue
 
-            slot_coord = intensity * 4.0
-            slot_below = int(math.floor(slot_coord))
-            slot_above = int(math.ceil(slot_coord))
-            weight_above = slot_coord - slot_below
-            weight_below = 1.0 - weight_above
-
-            if slot_below == slot_above:
-                field[idx][slot_below] = min(1.0, field[idx][slot_below] + intensity)
-            else:
-                field[idx][slot_below] = min(1.0, field[idx][slot_below] + intensity * weight_below)
-                field[idx][slot_above] = min(1.0, field[idx][slot_above] + intensity * weight_above)
+            field[idx][slot] = min(1.0, field[idx][slot] + intensity)
 
     return field
 
@@ -1366,17 +1345,9 @@ def _slot_post_drop_nebula(beat: float, local_t: float, frame_index: int,
                 field[idx][5] = min(1.0, field[idx][5] + intensity)
                 continue
 
-            slot_coord = intensity * 4.0
-            slot_below = int(math.floor(slot_coord))
-            slot_above = int(math.ceil(slot_coord))
-            weight_above = slot_coord - slot_below
-            weight_below = 1.0 - weight_above
-
-            if slot_below == slot_above:
-                field[idx][slot_below] = min(1.0, field[idx][slot_below] + intensity)
-            else:
-                field[idx][slot_below] = min(1.0, field[idx][slot_below] + intensity * weight_below)
-                field[idx][slot_above] = min(1.0, field[idx][slot_above] + intensity * weight_above)
+            # AWR-156 knob #4: per-spawn single slot, not intensity-derived hue.
+            slot = spawn_idx % 5
+            field[idx][slot] = min(1.0, field[idx][slot] + intensity)
 
     return field
 
@@ -1406,7 +1377,9 @@ def _slot_drop_chase(beat: float, local_t: float, frame_index: int,
 
     width = max(0.001, float(params.get("width", 0.8)))
     travel_beats = max(0.001, float(params.get("travel_beats", 2.0)))
-    for spawn_at, _spawn_idx in _drop_chase_spawn_times(cue_beat, start=8.0):
+    for spawn_at, spawn_idx in _drop_chase_spawn_times(cue_beat, start=8.0):
+        # AWR-156 knob #4: per-spawn single slot, not intensity-derived hue.
+        slot = spawn_idx % 5
         progress = (cue_beat - spawn_at) / travel_beats
         pos = progress * segments
         for idx in range(max(0, int(segments))):
@@ -1415,17 +1388,7 @@ def _slot_drop_chase(beat: float, local_t: float, frame_index: int,
             if intensity <= 0.0:
                 continue
 
-            slot_coord = intensity * 4.0
-            slot_below = int(math.floor(slot_coord))
-            slot_above = int(math.ceil(slot_coord))
-            weight_above = slot_coord - slot_below
-            weight_below = 1.0 - weight_above
-
-            if slot_below == slot_above:
-                field[idx][slot_below] = min(1.0, field[idx][slot_below] + intensity)
-            else:
-                field[idx][slot_below] = min(1.0, field[idx][slot_below] + intensity * weight_below)
-                field[idx][slot_above] = min(1.0, field[idx][slot_above] + intensity * weight_above)
+            field[idx][slot] = min(1.0, field[idx][slot] + intensity)
 
     return field
 
@@ -1472,17 +1435,9 @@ def _slot_drop_nebula(beat: float, local_t: float, frame_index: int,
                 field[idx][5] = min(1.0, field[idx][5] + intensity)
                 continue
 
-            slot_coord = intensity * 4.0
-            slot_below = int(math.floor(slot_coord))
-            slot_above = int(math.ceil(slot_coord))
-            weight_above = slot_coord - slot_below
-            weight_below = 1.0 - weight_above
-
-            if slot_below == slot_above:
-                field[idx][slot_below] = min(1.0, field[idx][slot_below] + intensity)
-            else:
-                field[idx][slot_below] = min(1.0, field[idx][slot_below] + intensity * weight_below)
-                field[idx][slot_above] = min(1.0, field[idx][slot_above] + intensity * weight_above)
+            # AWR-156 knob #4: per-spawn single slot, not intensity-derived hue.
+            slot = spawn_idx % 5
+            field[idx][slot] = min(1.0, field[idx][slot] + intensity)
 
     return field
 
@@ -1508,20 +1463,14 @@ def _slot_drop_center_burst(beat: float, local_t: float, frame_index: int,
         if intensity <= 0.0:
             continue
 
+        # AWR-156 knob #4: per-spawn single slot, not intensity-derived hue —
+        # the main/accent slot-band split survives, the intra-burst hue
+        # sweep dies. Main bursts rotate slots 0-2, accent bursts 2-4.
         if is_accent:
-            slot_coord = 2.0 + intensity * 2.0
+            slot = 2 + (burst_idx % 3)
         else:
-            slot_coord = intensity * 2.0
-        slot_below = int(math.floor(slot_coord))
-        slot_above = int(math.ceil(slot_coord))
-        weight_above = slot_coord - slot_below
-        weight_below = 1.0 - weight_above
-
-        if slot_below == slot_above:
-            field[idx][slot_below] = min(1.0, field[idx][slot_below] + intensity)
-        else:
-            field[idx][slot_below] = min(1.0, field[idx][slot_below] + intensity * weight_below)
-            field[idx][slot_above] = min(1.0, field[idx][slot_above] + intensity * weight_above)
+            slot = burst_idx % 3
+        field[idx][slot] = min(1.0, field[idx][slot] + intensity)
 
     return field
 
@@ -1548,6 +1497,10 @@ def _slot_post_drop_center_comet(beat: float, local_t: float, frame_index: int,
         if age > 2.0:
             continue
 
+        # AWR-156 knob #4: per-spawn single slot, not intensity-derived hue —
+        # the spawn index is which integer beat launched this comet pass.
+        spawn_idx = int(round(cue_beat - age))
+        slot = spawn_idx % 5
         comet_head_dist = age * center
         for idx in range(max(0, int(segments))):
             dist_from_center = abs(idx - center)
@@ -1558,17 +1511,7 @@ def _slot_post_drop_center_comet(beat: float, local_t: float, frame_index: int,
             if intensity <= 0.0:
                 continue
 
-            slot_coord = intensity * 4.0
-            slot_below = int(math.floor(slot_coord))
-            slot_above = int(math.ceil(slot_coord))
-            weight_above = slot_coord - slot_below
-            weight_below = 1.0 - weight_above
-
-            if slot_below == slot_above:
-                field[idx][slot_below] = min(1.0, field[idx][slot_below] + intensity)
-            else:
-                field[idx][slot_below] = min(1.0, field[idx][slot_below] + intensity * weight_below)
-                field[idx][slot_above] = min(1.0, field[idx][slot_above] + intensity * weight_above)
+            field[idx][slot] = min(1.0, field[idx][slot] + intensity)
 
     return field
 
