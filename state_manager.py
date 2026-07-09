@@ -4817,6 +4817,15 @@ class StateManager(LEDDispatchPolicyMixin):
                     shadow.confidence,
                 )
 
+    def _f2_transition_window_beats(self, d, abs_beat, smart_drop_beats, default):
+        """F2 pre-drop dark-window length for the next drop (Task 3.1). F2 off ⇒
+        the fixed default, byte-identical to v1 (kill test). Shared LED+laser
+        window, so the whole room breathes together (AWR-162 Task 4.1)."""
+        if not self._f2_enabled:
+            return default
+        return lighting_moments_v2.transition_window_for(
+            getattr(d.meta, "f2_plan", None), abs_beat, smart_drop_beats, default)
+
     def _update_smart_phrasing_state(
         self,
         active: int,
@@ -4857,7 +4866,9 @@ class StateManager(LEDDispatchPolicyMixin):
             phrase_lookahead_beats=self._sp_phrase_lookahead,
             drop_window_beats=self._sp_drop_window,
             post_drop_beats=self._sp_post_drop,
-            transition_window_beats=self._sp_transition_window,
+            transition_window_beats=self._f2_transition_window_beats(
+                d, abs_beat_pos if bpm > 0 else None, smart_drop_beats,
+                self._sp_transition_window),
             phrase_anchor_last_beat=self._os.phrase_anchor_last_beat,
             phrase_anchor_period_beats=PHRASE_ANCHOR_BEATS,
         )

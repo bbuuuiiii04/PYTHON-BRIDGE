@@ -648,6 +648,25 @@ def _track_build_move(v4: SpectralFeaturesV4, first_drop: int) -> str:
     return build_move(norm_punch, norm_attack, norm_onset, vec.get("low_swing_db", 0.0))
 
 
+def transition_window_for(plan: Optional[F2TrackPlan], abs_beat: Optional[float],
+                          smart_drop_beats: Sequence[float], default: float) -> float:
+    """The pre-drop dark-window LENGTH for the next upcoming drop = its quantized
+    emphasis-blackout length (Task 3.1). This drives the SHARED transition window,
+    so LED and laser breathe together (AWR-162 Task 4.1). No plan / no upcoming
+    drop → `default` (the fixed predark = byte-identical to v1). Balloon / dip /
+    snap → 0 (no fixed pre-drop black window; those ride their own paths)."""
+    if plan is None or abs_beat is None:
+        return default
+    upcoming = [b for b in smart_drop_beats if b >= abs_beat]
+    if not upcoming:
+        return default
+    entry = plan.for_drop(min(upcoming))
+    if entry is None:
+        return default
+    dark = entry.decision.darkness
+    return float(dark.beats) if dark.kind in ("blackout", "perc-flick") else 0.0
+
+
 def build_track_plan(v4: SpectralFeaturesV4, drops: Sequence[int],
                      buildups: Sequence[int], *, hotcues: Sequence[int] = ()) -> F2TrackPlan:
     """Compute the per-track F2 plan over the RAW drop list. One decision per raw
