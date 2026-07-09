@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: e28ce6c
+last_verified_commit: 96923d3
 last_verified_date: 2026-07-08
-validation_scope: software-only; LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (lab_update/lab_switch/lab_preview), QR same-network access, pad editor unset-param-defaults, Stream Deck palette control Package 2 plus AWR-121 gesture v2, drop presentation policy Package 3, LED idle/pause ambient fix, LED pad queued-color restore, and AWR-156 LED round 2 (strobe-gate rebuild + accepted-look promotion) software-tested, hardware-unvalidated
+validation_scope: software-only; LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (lab_update/lab_switch/lab_preview), QR same-network access, pad editor unset-param-defaults, Stream Deck palette control Package 2 plus AWR-121 gesture v2, drop presentation policy Package 3, LED idle/pause ambient fix, LED pad queued-color restore, AWR-156 LED round 2 (strobe-gate rebuild + accepted-look promotion), and AWR-157 darkness-fix round (blank-role hold guard) software-tested, hardware-unvalidated
 ---
 
 # LED / Govee Subsystem
@@ -30,6 +30,41 @@ Audit P3 (2026-07-03):
 - Realtime-to-cloud handoff no longer calls Govee realtime transport blackout/deactivate from the
   StateManager push-loop caller; the runner thread now performs that teardown before another frame
   is sent.
+
+Darkness-fix round: blank-role hold + reader freshness (AWR-157, 2026-07-08; implemented, software-tested, hardware-unvalidated):
+- Root cause (from `docs/research/deck2_reader_diagnosis_2026_07_08.md`): a blank/none LED role
+  while a deck played audibly fell through to the `utility` bank's configured blackout look for
+  ~46s during a scripted-mashup crossover — the room went pitch black mid-song even though nothing
+  was actually wrong.
+- New config knob `blank_role_hold: bool = True` (top-level, `led_config.py`/`led_models.py`,
+  absent-key default true). In the automation dispatch path only (never emergency, manual, or the
+  tactical pre-drop blackout — those return before this code is even reached), when the decision's
+  look equals the configured blackout look while the deck is audibly playing and a prior automation
+  decision was already accepted this session, the blackout dispatch is suppressed and the room
+  holds its current look; gated via the existing `_gate_led_automation` bookkeeping, reason
+  `blank_role_hold`, with `rt_permitted=True` so realtime motion keeps animating (same pattern as
+  `manual_override`/`scripted_mode`). Setting the knob `false` restores today's blackout-on-blank
+  behavior byte-for-byte.
+- Q-A instrumentation: edge-triggered `[RGB] blank-role-hold` INFO log (DEBUG on identical
+  per-tick repeats) fires whenever the guard fires OR would fire with the knob off, with
+  `original_role`, `effective_role`, `scripted`, `active_deck`, and a best-effort source
+  classification (`phrase_none`/`scripted_map`/`adapter_reject`/`other`) — the exact upstream
+  origin of the blank role stays Part A's OPEN question in the diagnosis doc; this instrumentation
+  is meant to resolve it from one live session's logs, not to already have the answer.
+- `led_look_director.py` gained a `blackout_look` property (`self._config.blackout`) so the
+  dispatch layer can compare a decision's look against the configured blackout look without
+  reaching into a private attribute.
+- Files: `led_dispatch_policy.py`, `led_models.py`, `led_config.py`, `led_look_director.py`.
+  Tests: `tests/test_led_state_manager.py` (`BlankRoleHoldTests`, 8 cases),
+  `tests/test_led_config.py` (`BlankRoleHoldConfigTests`, 5 cases).
+- Unaffected/unchanged (test-pinned): emergency/manual blackout paths, the tactical pre-drop
+  blackout, idle/no-audible blackout behavior, scripted-mode Required Behavior Test 9, AWR-149
+  rotation, the 200 Hz push loop.
+- The rekordbox-reader half of this round (deck-2 chain freshness gating, ObjC fallback
+  re-engage, Q-B pause-vs-freeze instrumentation) lives in `docs/subsystems/rekordbox_readers.md`.
+- The live, gitignored `config/led_look_director.json` was not touched or mirrored; the tracked
+  example config gains `blank_role_hold: true`. The bridge stayed down the entire round — no
+  bridge start, no live-config edit, no restart. SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
 
 Razer keepalive + blackout backstop + dispatch retry + pad mutual exclusion (AWR-145, 2026-07-08; implemented, software-tested, hardware-unvalidated):
 - Razer keepalive replaces the WI-6 cloud-suspect reconcile. A cloud DIY scene silently knocks the
@@ -673,6 +708,10 @@ Config:
 - Patch F collapses the tracked example `default` bank onto generic engine-colored slot looks and moves legacy color-suffix realtime looks into the storage-only `legacy_color_suffix` bank. `LEDLookDirector` still selects only `banks.default`, so the legacy bank preserves definitions without runtime rotation.
 - `safety.scripted_mode_automation` remains the master switch for scripted-track LED automation. The shipped example config sets it `true` (paired with the conservative blackout `scripted_mode` policy); set it to `false` to keep LEDs inert during scripted tracks. The code-level `LEDSafety` dataclass default stays `false`, but the loader requires the JSON key. When it is true and `StateManager` is in `lighting_mode == "scripted"`, automatic LED dispatch may proceed through the `scripted_mode` role-remap policy.
 - The top-level LED `scripted_mode` block defines `default_role` plus `role_map` for scripted-track automation. If the block is absent, groove, drop, and post-drop map to the `utility` blackout bank; buildup/pre-drop map to `buildup`, and breakdown maps to `breakdown`. `utility` is allowed only as a destination, and partial maps fall back to `default_role`.
+- `blank_role_hold` (AWR-157, top-level boolean, default `true`) — when a scripted or blank-role
+  path resolves to the configured blackout look while the deck is audibly playing and a look was
+  already accepted this session, the room holds its current look instead of blacking out. Set it
+  `false` to restore the pre-AWR-157 blackout-on-blank behavior. Absent key parses as `true`.
 - LED Pad persists its edit draft in `config/led_look_director.draft.json` and commits only after the full draft passes `load_led_look_director_config_from_dict()`. In the UI this draft commit is labeled **Apply** (2026-07-03 visual reskin; the `/api/commit` route name is unchanged, and the reskin — design tokens plus a vendored Archivo font in `tools/led_pad_assets/` — changes no runtime behavior). The pad-only Drafts bank lives in root `_pad_meta.drafts`, so those looks are automation-invisible unless moved into `banks.default`.
 - LED Pad Locked Palette writes through `color_engine.locked_palette_by_look`; playback of a locked look ignores the session Test Palette. Renderer param unlocks are frame-identical when omitted: `loop_beats` on `rt_groove_chase`/`rt_groove_nebula`; `travel_beats` + `width` on `rt_drop_chase`, `rt_post_drop_chase`, `rt_drop_nebula`, and `rt_post_drop_nebula`; `travel_beats` on `groove_center_chase` and `post_drop_firework_chase`.
 - Template Lab persists draft metadata under gitignored `config/led_lab/drafts.json` and loads gitignored `config/led_lab/effects_lab.py` only inside the pad process. Lab scenes play as `lab_<name>` through `LabRenderer`; bridge runtime modules never import lab code, and production renderer registries are not mutated by lab playback.
@@ -691,6 +730,12 @@ Tests:
 - inspect `tests/` for LED color engine, Govee realtime runner, frame renderer, state manager LED integration, and config tests
 - slot-color coverage lives in `tests/test_led_color_engine.py`, `tests/test_led_color_engine_m2_phase1.py`, `tests/test_led_color_engine_m2_patch_b.py`, `tests/test_led_color_engine_m2_patch_c.py`, `tests/test_led_color_engine_m2_patch_d.py`, `tests/test_led_color_engine_m2_patch_e1.py`, `tests/test_led_color_engine_m2_patch_e2.py`, `tests/test_led_color_engine_m2_patch_e3.py`, `tests/test_led_color_engine_m2_patch_s.py`, `tests/test_led_color_engine_m2_patch_f.py`, and config validation coverage in `tests/test_color_engine_config.py`
 - scripted-mode LED policy coverage lives in `tests/test_led_config.py` and `tests/test_led_state_manager.py`, including blackout mapping for groove/drop/post-drop; this is software validation only and does not prove room-visible Govee behavior during scripted SoundSwitch tracks.
+- blank-role hold guard coverage (AWR-157) lives in `tests/test_led_state_manager.py`
+  (`BlankRoleHoldTests`): suppression + look retention while playing, no-op when not playing or
+  no prior accepted decision, emergency blackout and the tactical pre-drop blackout both unaffected,
+  knob-off byte-identical dispatch, and the Q-A log's edge-triggered INFO/DEBUG split. Config parse
+  coverage lives in `tests/test_led_config.py` (`BlankRoleHoldConfigTests`). Software validation
+  only — does not prove room-visible behavior.
 - intra-section rotation coverage lives in `tests/test_led_state_manager.py` and
   `tests/test_led_color_engine_integration.py`: role-key cycle math for long
   buildup/pre-drop/breakdown/monotonic ambient sections, legacy ambient

@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 4a827f7
+last_verified_commit: e43edff
 last_verified_date: 2026-07-08
-validation_scope: software-only plus Rekordbox 7.2.11 passive mixer RE evidence routing; hardware-output unvalidated
+validation_scope: software-only plus Rekordbox 7.2.11 passive mixer RE evidence routing; AWR-157 deck-2 chain freshness gating software-tested; hardware-output unvalidated
 ---
 
 # Rekordbox Readers
@@ -77,6 +77,27 @@ Runtime flow:
   that call. Candidate values, order, per-candidate checks, retries, and every log
   line are unchanged — proven byte-identical against an old-loop oracle (incl. the
   int32-overflow edge) in `tests/test_rb_memory_scans.py`.
+- AWR-157 deck-2 chain freshness gating (`rb_memory.py`): a live_pos chain
+  snapshot only counts as healthy (`chain_ok`) for deck 2 when it is FRESH — raw
+  advanced within the last `_CHAIN_FRESH_TICKS = 5` consecutive reads while the
+  external playing hint (`RBMemoryReader._deck_playing_hint`, wired from
+  `StateManager.get_deck_playing` in `__main__.py`) says the deck is playing. A
+  frozen-while-playing chain now marks `chain_ok = False` so the existing ObjC
+  fallback (`RBSession.read_deck`) engages on the same tick instead of silently
+  trusting a dead value; position handling is otherwise unchanged (no zeroing).
+  While the hint says paused/stopped, an unchanging raw is exempt — a real pause
+  reads frozen legitimately and never counts as stale. Deck 1 is untouched:
+  `chain_ok` stays exactly `chain_snap is not None`. `skip2` (the "don't scan
+  while the chain is healthy" gate) already read `_chain_ok_last[2]`, so it
+  inherits the freshness gate automatically — `RBSS_POS_CHAIN_SKIP_OBJC=1` now
+  means "never scan while the chain is actually working", not "never scan while
+  a chain merely exists"; the env line itself is untouched. Edge-triggered INFO
+  `[RBMEM] chain-stale fallback-engaged/fallback-idle deck=2` logs the
+  staleness transition. A companion Q-B DEBUG log (`[RBMEM] deck=2
+  pause-vs-freeze`) fires when deck 2's self-inferred playing flips true→false
+  within 10s of the deck starting to play, with raw/prev_raw/the hint value, to
+  tell a real pause apart from a frozen-while-playing field from one live
+  session — diagnostic only, no dispatch behavior change.
 
 Config:
 - `config.py`
@@ -88,6 +109,13 @@ Tests:
 - `tests/test_rb_memory_scans.py` proves the deck-2 scan pre-filters are
   byte-identical across numpy / pure fallback / old-loop oracle and that both
   paths yield the GIL (pure seams only — no mach, no live process)
+- `tests/test_rb_memory_chain.py` (`ChainFreshnessTests`) proves the AWR-157
+  freshness gate: frozen raw while playing goes stale after exactly 5
+  identical reads, advancing raw always stays fresh, frozen raw while paused
+  stays healthy indefinitely (the FEIN case), the ObjC fallback engages when
+  stale, deck 1 is provably untouched, and both new log lines are
+  edge-triggered rather than per-tick. Pure seams via a fake-memory `RBSession`
+  — no mach, no live process.
 - if no direct hardware/process test exists, mark live behavior unvalidated in repo evidence
 
 Change contract:

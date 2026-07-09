@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: e28ce6c
+last_verified_commit: 96923d3
 last_verified_date: 2026-07-08
-validation_scope: software-only
+validation_scope: software-only; AWR-157 blank_role_hold knob software-tested
 ---
 
 # Configuration Setup
@@ -137,3 +137,10 @@ reviewed deployment/hardware gate.
 - The top-level `scripted_mode` block controls role remapping when that master switch is enabled. Source roles and `default_role` exclude `utility`; `role_map` destinations may use `utility` to select the configured blackout bank.
 - If `scripted_mode` is absent, the loader maps `groove`, `drop`, and `post_drop` to `utility` (off), `buildup` and `pre_drop` to `buildup`, and `ambient` and `breakdown` to `breakdown`.
 - A present partial `role_map` is operator opt-in. Missing roles fall back to `default_role`, which defaults to `breakdown`.
+- `blank_role_hold` (AWR-157, top-level, sibling of `scripted_mode`) defaults to `true`. When a
+  scripted (or otherwise blank-role) path lands on the configured blackout look while the deck is
+  audibly playing — the exact failure that used to black the room out mid-song when the phrase/
+  role data went blank — the room now holds its current look instead. Set it `false` to restore
+  the old blackout-on-blank behavior. This interacts with the `scripted_mode`/`utility` mapping
+  above: it is the mapping that produces the blackout look; `blank_role_hold` decides whether that
+  particular dispatch is allowed through while the deck is audibly playing.

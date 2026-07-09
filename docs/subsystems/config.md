@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: e28ce6c
+last_verified_commit: 96923d3
 last_verified_date: 2026-07-08
-validation_scope: software-only; Stream Deck palette control config software-tested
+validation_scope: software-only; Stream Deck palette control config software-tested; AWR-157 blank_role_hold knob software-tested
 ---
 
 # Configuration
@@ -79,6 +79,12 @@ Config:
   those notes into pack MIDI bindings; `laser_solo_note` is parsed/reserved for a later package and
   does not emit a binding yet.
 - LED `scripted_mode` is an optional top-level object with `default_role` and `role_map`. Source/default roles exclude `utility`, but `utility` is accepted as a destination meaning the configured blackout bank. Absent config maps scripted groove/drop/post-drop to `utility`; a present partial map falls back to `default_role`.
+- LED `blank_role_hold` (AWR-157, top-level boolean) defaults to `true` when absent; malformed
+  (non-boolean) values fail closed. `true` suppresses the automation blackout dispatch while a
+  deck is audibly playing and a look was already accepted this session, whenever the resolved
+  role lands on the configured blackout look (e.g. via `scripted_mode`'s `utility` mapping); the
+  room holds its current look instead. `false` restores the pre-AWR-157 blackout-on-blank
+  behavior byte-for-byte.
 - M2.5 slotized generic LED looks such as `rt_groove_chase`, `rt_post_drop_chase`, Patch E1 nebula looks, Patch E2 `rt_post_drop_center_comet`, and Patch E3 `rt_twinkle` are additive config entries. Patch F moves legacy color-suffix looks out of the tracked example `default` bank into `legacy_color_suffix` storage while keeping their look definitions intact.
 - Local ignored `config/led_look_director.json` can legitimately lag the tracked example; mirror Patch F to live config only with explicit operator approval and a loader check.
 - AWR-156 (2026-07-08) adds to the tracked example: 7 colorway strobe looks (`rt_drop_strobe_blue`/
@@ -113,6 +119,9 @@ Tests:
 - run config-specific tests when schema changes
 - `tests/test_color_engine_config.py` covers LED color-engine slot-fill strategy defaults, accepted values, mono-chance parsing, locked-palette parsing, palette-control binding parsing, and invalid-value rejection.
 - `tests/test_led_config.py` covers the LED `scripted_mode` blackout defaults, accepted `utility` destinations and partial maps, and invalid role/schema rejection.
+- `tests/test_led_config.py` (`BlankRoleHoldConfigTests`, AWR-157) covers `blank_role_hold`
+  absent-defaults-true, explicit true/false parsing, non-boolean rejection, and that the shipped
+  example config still loads with the new field.
 - `tests/test_soundswitch_pack_player_config.py` covers T7a defaults, path precedence, inline/external fixture maps, strict validation, immutability, and the never-raising contract.
 - `tests/test_laser_config.py` and `tests/test_laser_config_deprecation.py` cover Laser Audit P4
   scene fallback/cooldown validation and deprecated `pre_drop_scene` load compatibility.

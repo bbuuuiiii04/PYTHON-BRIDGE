@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 4a827f7
+last_verified_commit: e43edff
 last_verified_date: 2026-07-08
 validation_scope: software-only
 ---
@@ -45,6 +45,14 @@ Implementation notes:
   fallback that yields the GIL). If you touch those filters, keep candidate
   values/order/logs identical and re-run the byte-identical oracle check in
   `tests/test_rb_memory_scans.py`; numpy must stay a lazy optional import.
+- (AWR-157) Deck 2's live_pos chain health (`chain_ok`) is freshness-gated:
+  frozen raw for `_CHAIN_FRESH_TICKS` consecutive reads while the external
+  play hint (`RBMemoryReader._deck_playing_hint`) says playing is a miss, not
+  a healthy read; a real pause is exempt (unchanging raw while paused is
+  legitimate). Deck 1 must stay untouched by any future change here — its
+  `chain_ok` is exactly `chain_snap is not None`, no freshness check. If you
+  touch the freshness gate, re-verify the exact-5-ticks boundary and the
+  deck-1-untouched invariant in `tests/test_rb_memory_chain.py`.
 
 Required tests:
 - Run the targeted tests listed in the subsystem card.

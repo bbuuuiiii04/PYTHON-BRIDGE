@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: e28ce6c
+last_verified_commit: 96923d3
 last_verified_date: 2026-07-08
 validation_scope: software-only
 ---
@@ -41,6 +41,10 @@ Implementation notes:
 - Prefer the smallest code or docs change that satisfies the task.
 - Verify current behavior against code before updating docs.
 - For LED `scripted_mode`, document that source/default roles exclude `utility`, destinations may use `utility` for blackout, absent-block defaults turn groove/drop/post-drop off, and `safety.scripted_mode_automation` remains the separate master switch (the shipped example config enables it; the `LEDSafety` dataclass default stays `false`).
+- For LED `blank_role_hold` (AWR-157, top-level boolean, default `true`), document that it's a
+  dispatch-layer guard, not a role-mapping knob: it decides whether a blackout dispatch produced
+  by a blank/scripted-mapped role is suppressed while the deck is audibly playing, never whether
+  the mapping itself changes. Absent key parses `true`; malformed values fail closed.
 - For LED `color_engine` strategy fields, document defaults, accepted values, `slot_mono_chance_by_look` range validation, `locked_palette_by_look` palette-name validation when relevant, and invalid-config behavior in the setup and subsystem docs.
 - For LED `color_engine.palette_control`, document Stream Deck device/channel/note validation,
   reserved notes, generated MIDI bindings, tracked-example status, and hardware-unvalidated scope.

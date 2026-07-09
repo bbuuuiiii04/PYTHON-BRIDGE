@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: e28ce6c
+last_verified_commit: 96923d3
 last_verified_date: 2026-07-08
 validation_scope: software-only
 ---
@@ -42,6 +42,14 @@ Implementation notes:
 - Prefer the smallest code or docs change that satisfies the task.
 - Verify current behavior against code before updating docs.
 - For scripted-track LED automation, preserve the split between `safety.scripted_mode_automation` as the master switch (the shipped example config enables it; the `LEDSafety` dataclass default stays `false`) and the top-level `scripted_mode` role-remap policy. `utility` is a blackout destination only; verify active and off role transitions separately.
+- When a blackout can be produced by several upstream causes (blank role, scripted mapping, an
+  upstream reject) and only some of those causes should actually darken the room, intercept at the
+  DISPATCH layer where every path converges — do not chase and patch each origin path separately
+  (AWR-157's `blank_role_hold` guard: one check in `_dispatch_led_automation` right before
+  `_led_send_decision`, gated on `decision.look == blackout_look`, catches every upstream cause at
+  once). Keep the source check load-bearing and test-pinned: the guard must live somewhere
+  emergency/manual/tactical-blackout code paths structurally cannot reach, not behind a runtime
+  `source ==` string check that could silently drift.
 - For StateManager LED automation timing changes, keep the push-loop path pure/non-blocking, keep source arming at the content-change event, and prove arm/release/cleanup in `tests/test_led_state_manager.py`.
 - For realtime-to-cloud handoff changes, `force_deactivate()` must not perform transport socket
   calls on the caller/push-loop thread; prove teardown on the runner thread in
