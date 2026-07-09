@@ -74,7 +74,12 @@ Kickoff: `docs/prompts/active/qaminors_kickoff_2026_07_09.md`. ZERO runtime cont
   (b) D2-F1 single-revert drop NOT available (code swept into `32b64b7`); drop
   procedure = mechanical revert patch of 3 small hunks (25+8+12 lines) + its tests +
   the led_govee.md paragraph — I stage it on ruling.
-- [ ] Executive gate at superman3 (explicit D2-F1 ruling) — REQUESTED.
+- SEAT TRANSFER ~18:00: superman3 retired → **superman4** (Fable/max) is the executive.
+  Bridge went down 17:48 (sig-15, source unknown, NOT this lane — zero runtime contact
+  held throughout); superman4 relaunched + verified it 18:00. Executive runs ONE
+  consolidated full suite at its desk ~18:30 — my reconcile rides that.
+- [ ] Executive gate at superman4 (explicit D2-F1 ruling) — package SENT ~18:05,
+  queued into its turn (paste chips cleared, submission verified).
 - [ ] Registry row updated to round outcome; completion signal
   `touch /tmp/rbss_lane_signals/qaminors.QAMINORS.done` + sentinel.
 
