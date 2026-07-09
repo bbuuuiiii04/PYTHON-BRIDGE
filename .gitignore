@@ -9,6 +9,10 @@ govee.env
 *.backup_*
 *.bak
 .venv/
+# USB launcher (M1) build artifacts and disposable build interpreters — never commit
+.build-venv-*/
+build/
+dist/
 .hypothesis/
 .claude/
 !.claude/
