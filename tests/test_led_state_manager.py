@@ -300,6 +300,7 @@ class _AutomationLEDLookDirector:
             "last_source": "",
             "manual_override": self._manual_override,
             "emergency_blackout": self._emergency_blackout,
+            "blank_role_hold": self._blank_role_hold,
         }
 
     def set_manual_override(self, look_name: str | None) -> bool:
@@ -3675,6 +3676,166 @@ class LedDiyEligiblePredicateTests(unittest.TestCase):
         director = sm._led_look_director
         self.assertTrue(director.tick_calls)
         self.assertIsNone(director.tick_calls[-1].diy_eligible)
+
+
+class BlankRoleHoldTests(unittest.TestCase):
+    """AWR-157 T6: blank-role hold guard (led_dispatch_policy.py
+    _led_blank_role_hold_would_engage / the intercept in _dispatch_led_automation).
+    """
+
+    def test_suppresses_blackout_and_keeps_current_look_when_playing(self) -> None:
+        director = _AutomationLEDLookDirector(scripted_mode_automation=True)
+        adapter = _StubLEDAdapter()
+        sm = _make_sm(director=director, adapter=adapter)
+
+        _prepare_playing_push_tick(
+            sm, SmartPhrasingState(smart_breakdown_active=True), scripted=True
+        )
+        sm._push_tick()
+        self.assertEqual(len(adapter.trigger_calls), 1)
+        self.assertEqual(adapter.trigger_calls[0].role, "breakdown")
+
+        # groove -> (scripted map) utility -> room_blackout, while still playing.
+        _prepare_playing_push_tick(sm, SmartPhrasingState(), scripted=True)
+        sm._push_tick()
+
+        self.assertEqual(len(adapter.trigger_calls), 1)  # unchanged: suppressed
+        self.assertEqual(
+            sm.led_status_provider()["automation_gate_reason"], "blank_role_hold"
+        )
+
+    def test_not_playing_would_not_engage(self) -> None:
+        director = _AutomationLEDLookDirector(scripted_mode_automation=True)
+        sm = _make_sm(director=director, adapter=_StubLEDAdapter())
+        sm._led_had_accepted_automation_decision = True
+
+        self.assertFalse(
+            sm._led_blank_role_hold_would_engage(look="room_blackout", playing=False)
+        )
+        self.assertTrue(
+            sm._led_blank_role_hold_would_engage(look="room_blackout", playing=True)
+        )
+
+    def test_no_prior_accepted_decision_dispatches_blackout_normally(self) -> None:
+        # Nothing to "hold" yet this session -- first-ever decision dispatches.
+        director = _AutomationLEDLookDirector(scripted_mode_automation=True)
+        adapter = _StubLEDAdapter()
+        sm = _make_sm(director=director, adapter=adapter)
+
+        _prepare_playing_push_tick(sm, SmartPhrasingState(), scripted=True)
+        sm._push_tick()
+
+        self.assertEqual(len(adapter.trigger_calls), 1)
+        self.assertEqual(adapter.trigger_calls[0].look, "room_blackout")
+
+    def test_emergency_blackout_still_wins_immediately(self) -> None:
+        director = _AutomationLEDLookDirector(scripted_mode_automation=True)
+        adapter = _StubLEDAdapter()
+        sm = _make_sm(director=director, adapter=adapter)
+
+        _prepare_playing_push_tick(
+            sm, SmartPhrasingState(smart_breakdown_active=True), scripted=True
+        )
+        sm._push_tick()
+        self.assertEqual(len(adapter.trigger_calls), 1)
+
+        sm._led_emergency_blackout = True
+        _prepare_playing_push_tick(sm, SmartPhrasingState(), scripted=True)
+        sm._push_tick()
+
+        self.assertEqual(
+            sm.led_status_provider()["automation_gate_reason"], "emergency_blackout"
+        )
+
+    def test_tactical_pre_drop_blackout_unaffected_by_hold(self) -> None:
+        director = _AutomationLEDLookDirector()
+        adapter = _StubLEDAdapter()
+        sm = _make_sm(director=director, adapter=adapter)
+        sm._led_automation_offset_s = 1.0
+        sm._os.lighting_mode = "autoloop"
+        d = sm._deck[1]
+        d.playing = True
+        d.meta.filepath = "/tracks/current.wav"
+        d.meta.smart_drops = [64]
+        d.meta.beatgrid_times_ms = list(range(0, 200 * 500, 500))
+        d.load_gen = 11
+
+        # Prime a prior accepted automation decision this session.
+        sm._dispatch_led_automation(active=1, d=d, sp_state=_groove_sp(2.0))
+        self.assertEqual(len(adapter.trigger_calls), 1)
+        self.assertEqual(adapter.trigger_calls[0].role, "groove")
+
+        sm._update_smart_phrasing_state(1, d, 57.0, 120.0)
+        live_sp = sm._update_smart_phrasing_state(1, d, 58.0, 120.0)
+        led_sp = sm._led_sp_state_with_offset(live_sp, 120.0)
+        self.assertTrue(sm._led_should_smart_drop_blackout(led_sp))
+
+        sm._dispatch_led_automation(active=1, d=d, sp_state=led_sp)
+
+        self.assertEqual(len(adapter.trigger_calls), 2)
+        self.assertEqual(adapter.trigger_calls[-1].look, "room_blackout")
+
+    def test_knob_false_is_byte_identical(self) -> None:
+        director = _AutomationLEDLookDirector(
+            scripted_mode_automation=True, blank_role_hold=False
+        )
+        adapter = _StubLEDAdapter()
+        sm = _make_sm(director=director, adapter=adapter)
+
+        _prepare_playing_push_tick(
+            sm, SmartPhrasingState(smart_breakdown_active=True), scripted=True
+        )
+        sm._push_tick()
+        self.assertEqual(len(adapter.trigger_calls), 1)
+
+        _prepare_playing_push_tick(sm, SmartPhrasingState(), scripted=True)
+        sm._push_tick()
+
+        self.assertEqual(len(adapter.trigger_calls), 2)
+        self.assertEqual(adapter.trigger_calls[-1].look, "room_blackout")
+        self.assertNotEqual(
+            sm.led_status_provider()["automation_gate_reason"], "blank_role_hold"
+        )
+
+    def test_would_fire_log_emitted_even_with_knob_off(self) -> None:
+        director = _AutomationLEDLookDirector(
+            scripted_mode_automation=True, blank_role_hold=False
+        )
+        adapter = _StubLEDAdapter()
+        sm = _make_sm(director=director, adapter=adapter)
+        records = _capture_perf(self, "state_manager")
+
+        _prepare_playing_push_tick(
+            sm, SmartPhrasingState(smart_breakdown_active=True), scripted=True
+        )
+        sm._push_tick()
+        _prepare_playing_push_tick(sm, SmartPhrasingState(), scripted=True)
+        sm._push_tick()
+
+        hold_logs = [r for r in records if "blank-role-hold" in r.getMessage()]
+        self.assertTrue(hold_logs)
+        self.assertEqual(hold_logs[0].levelno, logging.INFO)
+
+    def test_log_is_edge_triggered_not_per_tick_spam(self) -> None:
+        director = _AutomationLEDLookDirector(scripted_mode_automation=True)
+        adapter = _StubLEDAdapter()
+        sm = _make_sm(director=director, adapter=adapter)
+        records = _capture_perf(self, "state_manager")
+
+        _prepare_playing_push_tick(
+            sm, SmartPhrasingState(smart_breakdown_active=True), scripted=True
+        )
+        sm._push_tick()
+        # Same blank-role condition, repeated identically across several ticks.
+        for _ in range(3):
+            _prepare_playing_push_tick(sm, SmartPhrasingState(), scripted=True)
+            sm._push_tick()
+
+        hold_logs = [r for r in records if "blank-role-hold" in r.getMessage()]
+        self.assertEqual(len(hold_logs), 3)
+        self.assertEqual(hold_logs[0].levelno, logging.INFO)
+        for repeat in hold_logs[1:]:
+            self.assertEqual(repeat.levelno, logging.DEBUG)
 
 
 if __name__ == "__main__":

@@ -977,5 +977,52 @@ class Awr156Round2ConfigTests(unittest.TestCase):
             self.assertEqual(looks[name]["params"]["width"], 2.5)
 
 
+class BlankRoleHoldConfigTests(unittest.TestCase):
+    """AWR-157 T6: blank_role_hold top-level knob parsing (led_config.py)."""
+
+    def test_absent_defaults_true(self) -> None:
+        cfg = _live_ready_base_config()
+        self.assertNotIn("blank_role_hold", cfg)
+
+        result = load_led_look_director_config_from_dict(cfg)
+
+        self.assertTrue(result.available, msg=result.errors)
+        self.assertTrue(result.config.blank_role_hold)
+
+    def test_explicit_false_parses_false(self) -> None:
+        cfg = _live_ready_base_config()
+        cfg["blank_role_hold"] = False
+
+        result = load_led_look_director_config_from_dict(cfg)
+
+        self.assertTrue(result.available, msg=result.errors)
+        self.assertFalse(result.config.blank_role_hold)
+
+    def test_explicit_true_parses_true(self) -> None:
+        cfg = _live_ready_base_config()
+        cfg["blank_role_hold"] = True
+
+        result = load_led_look_director_config_from_dict(cfg)
+
+        self.assertTrue(result.available, msg=result.errors)
+        self.assertTrue(result.config.blank_role_hold)
+
+    def test_malformed_rejected(self) -> None:
+        cfg = _live_ready_base_config()
+        cfg["blank_role_hold"] = "yes"
+
+        result = load_led_look_director_config_from_dict(cfg)
+
+        self.assertFalse(result.available)
+        self.assertTrue(any("blank_role_hold" in err for err in result.errors))
+
+    def test_example_config_still_loads(self) -> None:
+        cfg = _example_config()
+
+        result = load_led_look_director_config_from_dict(cfg)
+
+        self.assertTrue(result.available, msg=result.errors)
+
+
 if __name__ == "__main__":
     unittest.main()

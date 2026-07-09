@@ -1,6 +1,7 @@
 """Unit tests for RBMemoryReader live_pos_per_deck chain snapshots."""
 from __future__ import annotations
 
+import logging
 import struct
 import sys
 import unittest
@@ -12,6 +13,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from rb_ss_bridge_v2 import rb_memory as mod
 from rb_ss_bridge_v2.models import PositionSnapshot
 from rb_ss_bridge_v2.rb_offsets import ChainEntry, RBOffsetVersion
+
+
+def _capture(logger_name: str):
+    logger = logging.getLogger(logger_name)
+    records: list[logging.LogRecord] = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = _Capture()
+    logger.addHandler(handler)
+    prior_level = logger.level
+    logger.setLevel(logging.DEBUG)
+    return logger, handler, prior_level, records
 
 
 class FakeMem:
@@ -139,6 +155,142 @@ class LivePosChainTests(unittest.TestCase):
         self.assertIsNotNone(snap)
         assert snap is not None
         self.assertEqual(snap.elapsed_ms, int(150_000 * mod.RB_SCALE))
+
+
+class ChainFreshnessTests(unittest.TestCase):
+    """AWR-157 T6: freshness-aware deck-2 chain health (rb_memory.py T3/T4)."""
+
+    def setUp(self) -> None:
+        self.mem = FakeMem()
+        self.base = 0x100000000
+        self.offs = offsets()
+        self.session = mod.RBSession(123, self.base, 0xCAFE, offsets=self.offs)
+        self._patch = mock.patch.object(mod, "_read_bytes", side_effect=self.mem.read_bytes)
+        self._patch.start()
+        self.addCleanup(self._patch.stop)
+        self.reader = mod.RBMemoryReader(mod.PositionCache())
+
+    def test_frozen_raw_while_playing_hint_goes_stale_after_five_identical_reads(self) -> None:
+        endpoint = self.mem.install_chain(
+            self.base, self.offs.live_pos_per_deck[1], struct.pack("<q", 100_000)
+        )
+        del endpoint
+        # First read establishes the baseline raw (nothing to compare against
+        # yet, so it can't itself be "unchanged"); each read after that with
+        # the same raw is one identical-read tick.
+        snap = self.session.read_live_pos_chain(2, None)
+        self.assertTrue(self.session.chain_raw_fresh(2))
+        for _ in range(4):
+            snap = self.session.read_live_pos_chain(2, snap)
+            self.assertTrue(self.session.chain_raw_fresh(2))
+        # 5th consecutive identical-raw read crosses _CHAIN_FRESH_TICKS.
+        self.session.read_live_pos_chain(2, snap)
+        self.assertFalse(self.session.chain_raw_fresh(2))
+
+    def test_advancing_raw_stays_fresh(self) -> None:
+        endpoint = self.mem.install_chain(
+            self.base, self.offs.live_pos_per_deck[1], struct.pack("<q", 100_000)
+        )
+        snap = None
+        for i in range(8):
+            self.mem.leaf[endpoint] = struct.pack("<q", 100_000 + i * 50)
+            snap = self.session.read_live_pos_chain(2, snap)
+            self.assertTrue(self.session.chain_raw_fresh(2))
+
+    def test_frozen_raw_while_paused_hint_stays_healthy(self) -> None:
+        """The FEIN case: a real pause reads frozen legitimately, never stale."""
+        self.mem.install_chain(
+            self.base, self.offs.live_pos_per_deck[1], struct.pack("<q", 100_000)
+        )
+        for _ in range(8):
+            self.reader._read_decks_chain_first(
+                self.session, now_t=100.0, deck2_playing_hint=False
+            )
+            self.assertTrue(self.reader._chain_ok_last[2])
+
+    def test_fallback_engages_when_stale_while_playing(self) -> None:
+        self.mem.install_chain(
+            self.base, self.offs.live_pos_per_deck[1], struct.pack("<q", 100_000)
+        )
+        deck_reads: list[int] = []
+        self.session.read_deck = lambda deck: deck_reads.append(deck) or None  # type: ignore[method-assign]
+
+        for _ in range(6):
+            self.reader._read_decks_chain_first(
+                self.session, now_t=100.0, deck2_playing_hint=True
+            )
+
+        self.assertFalse(self.reader._chain_ok_last[2])
+        self.assertIn(2, deck_reads)
+
+    def test_deck1_path_untouched_by_freshness_gate(self) -> None:
+        self.mem.install_chain(
+            self.base, self.offs.live_pos_per_deck[0], struct.pack("<q", 100_000)
+        )
+        deck_reads: list[int] = []
+        self.session.read_deck = lambda deck: deck_reads.append(deck) or None  # type: ignore[method-assign]
+
+        for _ in range(8):
+            self.reader._read_decks_chain_first(
+                self.session, now_t=100.0, deck2_playing_hint=True
+            )
+
+        self.assertTrue(self.reader._chain_ok_last[1])
+        # deck 1 hits read_deck() exactly once, from the pre-existing slow-cadence
+        # length refresh (now_t fixed, so it only fires on the first tick) -- never
+        # from the freshness-staleness fallback, which is deck-2-only.
+        self.assertEqual(deck_reads.count(1), 1)
+
+    def test_stale_fallback_log_is_edge_triggered_not_per_tick_spam(self) -> None:
+        endpoint = self.mem.install_chain(
+            self.base, self.offs.live_pos_per_deck[1], struct.pack("<q", 100_000)
+        )
+        logger, handler, prior_level, records = _capture("rb_memory")
+        self.addCleanup(logger.setLevel, prior_level)
+        self.addCleanup(logger.removeHandler, handler)
+
+        # Frozen for 8 ticks while "playing" -> goes stale once, not per tick.
+        for _ in range(8):
+            self.reader._read_decks_chain_first(
+                self.session, now_t=100.0, deck2_playing_hint=True
+            )
+        # Raw starts advancing again -> recovers once.
+        for i in range(3):
+            self.mem.leaf[endpoint] = struct.pack("<q", 100_000 + (i + 1) * 50)
+            self.reader._read_decks_chain_first(
+                self.session, now_t=100.0, deck2_playing_hint=True
+            )
+
+        stale_logs = [r for r in records if "chain-stale" in r.getMessage()]
+        engaged = [r for r in stale_logs if "fallback-engaged" in r.getMessage()]
+        idle = [r for r in stale_logs if "fallback-idle" in r.getMessage()]
+        self.assertEqual(len(engaged), 1)
+        self.assertEqual(len(idle), 1)
+
+    def test_pause_vs_freeze_debug_log_is_edge_triggered(self) -> None:
+        self.mem.install_chain(
+            self.base, self.offs.live_pos_per_deck[1], struct.pack("<q", 100_000)
+        )
+        logger, handler, prior_level, records = _capture("rb_memory")
+        self.addCleanup(logger.setLevel, prior_level)
+        self.addCleanup(logger.removeHandler, handler)
+
+        # Playing, then flips to not-playing within the recent-play-start window,
+        # then stays not-playing (frozen raw) for several more reads.
+        snap = self.session.read_live_pos_chain(
+            2, None, playing_hint=True, recent_play_start=True
+        )
+        snap = PositionSnapshot(
+            deck=2, elapsed_ms=snap.elapsed_ms, playing=True, track_length_ms=0
+        )
+        for _ in range(4):
+            snap = self.session.read_live_pos_chain(
+                2, snap, playing_hint=False, recent_play_start=True
+            )
+
+        pause_logs = [r for r in records if "pause-vs-freeze" in r.getMessage()]
+        self.assertEqual(len(pause_logs), 1)
+        self.assertEqual(pause_logs[0].levelno, logging.DEBUG)
 
 
 if __name__ == "__main__":
