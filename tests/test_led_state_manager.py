@@ -855,22 +855,53 @@ class LEDStateManagerTests(unittest.TestCase):
         status = sm.led_status_provider()
         self.assertTrue(status["emergency_blackout"])
 
-    def test_bare_clear_blackout_still_removes_only_legacy(self) -> None:
-        """A bare led_clear_blackout (no reason) must stay byte-identical to
-        today: it discards only the "legacy" owner, never a named owner."""
+    def test_bare_clear_blackout_clears_all_owners_and_logs_once(self) -> None:
+        """AWR-155: a bare led_clear_blackout (no reason) is operator
+        authority and clears every blackout owner at once, with exactly one
+        INFO outcome log naming what was cleared."""
         director = _StubLEDLookDirector(enabled=True)
         adapter = _StubLEDAdapter()
         sm = _make_sm(director=director, adapter=adapter)
         sm._handle_event(BridgeEvent(kind=Ev.LED_SCENE, deck=0, payload={"look": "room_drop_a"}, source="test"))
         sm._handle_event(BridgeEvent(kind=Ev.LED_BLACKOUT, deck=0, payload={"reason": "led_pad"}, source="test"))
+        sm._handle_event(BridgeEvent(kind=Ev.LED_BLACKOUT, deck=0, payload={"reason": "drop_spotlight"}, source="test"))
         sm._handle_event(BridgeEvent(kind=Ev.LED_BLACKOUT, deck=0, payload={}, source="test"))
-        self.assertEqual(sm._led_blackout_owners, {"led_pad", "legacy"})
+        self.assertEqual(sm._led_blackout_owners, {"led_pad", "drop_spotlight", "legacy"})
+
+        with self.assertLogs("state_manager", level="INFO") as captured:
+            sm._handle_event(BridgeEvent(kind=Ev.LED_CLEAR_BLACKOUT, deck=0, payload={}, source="test"))
+
+        self.assertEqual(sm._led_blackout_owners, set())
+        status = sm.led_status_provider()
+        self.assertFalse(status["emergency_blackout"])
+        clear_all_lines = [line for line in captured.output if "blackout-clear-all" in line]
+        self.assertEqual(len(clear_all_lines), 1)
+        self.assertIn("led_pad", clear_all_lines[0])
+        self.assertIn("drop_spotlight", clear_all_lines[0])
+        self.assertIn("legacy", clear_all_lines[0])
+
+    def test_restore_brightness_fires_when_clear_all_empties_owners(self) -> None:
+        """AWR-155: a bare clear-all that empties the owner set fires the
+        same brightness-restore backstop as any other now-clear transition."""
+
+        class _RestoreAdapter(_StubLEDAdapter):
+            def __init__(self, **kw) -> None:
+                super().__init__(**kw)
+                self.restore_calls = 0
+
+            def restore_brightness(self) -> None:
+                self.restore_calls += 1
+
+        adapter = _RestoreAdapter()
+        sm = _make_sm(director=_StubLEDLookDirector(enabled=True), adapter=adapter)
+        sm._handle_event(BridgeEvent(kind=Ev.LED_BLACKOUT, deck=0, payload={"reason": "led_pad"}, source="test"))
+        sm._handle_event(BridgeEvent(kind=Ev.LED_BLACKOUT, deck=0, payload={"reason": "drop_spotlight"}, source="test"))
+        self.assertEqual(adapter.restore_calls, 0)
 
         sm._handle_event(BridgeEvent(kind=Ev.LED_CLEAR_BLACKOUT, deck=0, payload={}, source="test"))
 
-        self.assertEqual(sm._led_blackout_owners, {"led_pad"})
-        status = sm.led_status_provider()
-        self.assertTrue(status["emergency_blackout"])
+        self.assertEqual(adapter.restore_calls, 1)
+        self.assertFalse(sm.led_status_provider()["emergency_blackout"])
 
     def test_blackout_brightness_backstop_fires_on_accept_only(self) -> None:
         """AWR-146 Task 6: an accepted LED_BLACKOUT dims via the adapter's
