@@ -136,6 +136,19 @@ under the `stems_pilot/` namespace — re-evaluable via `--report` with **no** r
 venv rebuilds in ~4 min and weights re-download in ~7 s if a re-run or the full sweep is
 authorized.
 
+## Addendum 2026-07-09 (P1 session): operator-label re-score path
+
+`--report` now auto-loads `stems_pilot/labels.json` (operator mm:ss labels, captured
+verbatim in chat by the session lead). Labeled tracks get their REAL beatgrid re-resolved
+via pyrekordbox + `anlz_reader` on plain Python (no venv); once any label of a kind
+exists, that criterion scores labeled anchors only — vocal ghost margin over HIS
+vocal-free windows, wobble moments at HIS timestamps (rate 0.5–8 cyc/beat, conc ≥ 0.30,
+per-track background concentration reported alongside for honesty, not gated). Criteria
+thresholds unchanged from the frozen set. Smoke-tested on the documented capochino 1:01.7
+moment: conc 0.098 vs background 0.179 → correctly NOT cleared (that wow is filter/timbre
+movement — the known level-blindness; the honest fix is the AWR-166 P1 centroid field,
+not stems level envelopes). Labels file skeleton holds the 13 wobble/vocal anchor tracks.
+
 ## Corpus resolution (33 tracks; anchors + versions)
 
 Ambiguous titles (versions/edits of the same song) were all included, capped at 3 per

@@ -222,6 +222,30 @@ def modulation_strength(
     return (PULSE_RATE_GRID_CPB[top], round(powers[top] / total, 4))
 
 
+def parse_mmss(text: object) -> float:
+    """Operator time label -> milliseconds. Accepts "1:01.7", "75.3", "1:02:03"."""
+    parts = str(text).strip().split(":")
+    if len(parts) == 1:
+        sec = float(parts[0])
+    elif len(parts) == 2:
+        sec = int(parts[0]) * 60 + float(parts[1])
+    elif len(parts) == 3:
+        sec = int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+    else:
+        raise ValueError(f"unparseable time label: {text!r}")
+    if sec < 0:
+        raise ValueError(f"negative time label: {text!r}")
+    return sec * 1000.0
+
+
+def nearest_beat(beatgrid_times_ms: Sequence[float], t_ms: float) -> int:
+    """Index of the beat nearest to ``t_ms`` (0 on an empty grid)."""
+    a = np.asarray(beatgrid_times_ms, dtype=float)
+    if a.size == 0:
+        return 0
+    return int(np.argmin(np.abs(a - float(t_ms))))
+
+
 def evaluate_gates(
     scorecard: Mapping[str, object],
     thresholds: Mapping[str, float],

@@ -161,6 +161,34 @@ class EvaluateGatesTests(unittest.TestCase):
         self.assertIn("named_element_floor", res["call_off_reasons"])
 
 
+class LabelHelperTests(unittest.TestCase):
+    def test_parse_mmss_forms(self):
+        self.assertAlmostEqual(spm.parse_mmss("1:01.7"), 61700.0)
+        self.assertAlmostEqual(spm.parse_mmss("75.3"), 75300.0)
+        self.assertAlmostEqual(spm.parse_mmss("1:02:03"), 3723000.0)
+
+    def test_parse_mmss_rejects_garbage(self):
+        with self.assertRaises(ValueError):
+            spm.parse_mmss("1:2:3:4")
+        with self.assertRaises(ValueError):
+            spm.parse_mmss("abc")
+        with self.assertRaises(ValueError):
+            spm.parse_mmss("-5")
+
+    def test_nearest_beat(self):
+        grid = [0.0, 500.0, 1000.0, 1500.0]
+        self.assertEqual(spm.nearest_beat(grid, 0.0), 0)
+        self.assertEqual(spm.nearest_beat(grid, 740.0), 1)
+        self.assertEqual(spm.nearest_beat(grid, 760.0), 2)
+        self.assertEqual(spm.nearest_beat(grid, 99999.0), 3)
+        self.assertEqual(spm.nearest_beat([], 100.0), 0)
+
+    def test_label_windows_beats_orders_and_drops_empty(self):
+        grid = [float(i * 500) for i in range(20)]
+        wins = sp._label_windows_beats([["0:01", "0:03"], ["0:05", "0:05"]], grid)
+        self.assertEqual(wins, [(2, 6)])
+
+
 class RunnerGuardTests(unittest.TestCase):
     def test_disk_floor_refuses_below_and_runs_above(self):
         from types import SimpleNamespace

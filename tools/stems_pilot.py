@@ -63,6 +63,7 @@ SHARE_ROOT = Path("~/Library/Pioneer/rekordbox/share").expanduser()
 DB_PATH = Path("~/Library/Pioneer/rekordbox/master.db").expanduser()
 OUT_ROOT = Path("~/Library/Application Support/RBSS Bridge/stems_pilot").expanduser()
 ENV_DIR = OUT_ROOT / "envelopes"
+LABELS_PATH = OUT_ROOT / "labels.json"  # operator ground-truth labels (P1)
 SR = 44100  # demucs htdemucs native rate
 
 # Pinned anchors (element -> case-insensitive title substrings). All are
@@ -428,6 +429,53 @@ def _wobble_cleared(T, grid: list[float]) -> tuple[bool, float]:
     return (best >= WOBBLE_CONC_FLOOR, round(best, 4))
 
 
+def _wobble_labeled(T, grid: list[float], moments_ms: list[float]) -> list[dict]:
+    """Score modulation at the operator's labeled moments (spec-faithful: the
+    criterion is 'dominant rate readable at his moments'). Background = median
+    scan concentration across the track, reported alongside for honesty (shows
+    whether the moment stands out from beat-rate periodicity) but not gated."""
+    n = len(grid)
+    concs = []
+    for stem in ("bass", "other"):
+        frames = T["wobble_frames"].get(stem)
+        if not frames:
+            continue
+        for lo in range(0, max(1, n - 4), 2):
+            _r, c = spm.modulation_strength(frames, T["frame_hop_s"], grid, (lo, lo + 4))
+            concs.append(c)
+    background = float(np.median(concs)) if concs else 0.0
+    out = []
+    for ms in moments_ms:
+        bi = spm.nearest_beat(grid, ms)
+        win = (max(0, bi - 2), min(n - 1, bi + 2))
+        best_rate, best_conc = 0.0, 0.0
+        for stem in ("bass", "other"):
+            frames = T["wobble_frames"].get(stem)
+            if not frames:
+                continue
+            rate, conc = spm.modulation_strength(frames, T["frame_hop_s"], grid, win)
+            if conc > best_conc:
+                best_rate, best_conc = rate, conc
+        out.append({
+            "at_s": round(ms / 1000.0, 1),
+            "rate_cpb": best_rate,
+            "conc": round(best_conc, 4),
+            "background_conc": round(background, 4),
+            "cleared": bool(0.5 <= best_rate <= 8.0 and best_conc >= WOBBLE_CONC_FLOOR),
+        })
+    return out
+
+
+def _label_windows_beats(windows, grid: list[float]) -> list[tuple[int, int]]:
+    out = []
+    for pair in windows or []:
+        a = spm.nearest_beat(grid, spm.parse_mmss(pair[0]))
+        b = spm.nearest_beat(grid, spm.parse_mmss(pair[1]))
+        if b > a:
+            out.append((a, b))
+    return out
+
+
 # ---------------------------------------------------------------------------
 # scorecard aggregation + gate
 # ---------------------------------------------------------------------------
@@ -436,7 +484,13 @@ def _verdict(cleared: int) -> str:
 
 
 def _build_scorecard(records: list[dict], op: dict, thresholds: dict) -> dict:
-    """records: [{content_id,title,elements,grid,env}] for separated tracks."""
+    """records: [{content_id,title,elements,grid,env,labels?}] for separated tracks.
+
+    Once ANY operator label of a kind exists, that criterion scores labeled
+    anchors only (auto-derived proxies for vocal windows / wobble scan are the
+    exact thing the pilot proved invalid); unlabeled anchors show "unlabeled"."""
+    labeled_wobble_any = any((r.get("labels") or {}).get("wobble_moments") for r in records)
+    labeled_vocal_any = any((r.get("labels") or {}).get("vocal_free_windows") for r in records)
     # reconstruction: frac of tracks whose median per-beat |delta| <= threshold
     recon_ok = 0
     recon_meds = []
@@ -456,14 +510,31 @@ def _build_scorecard(records: list[dict], op: dict, thresholds: dict) -> dict:
         cleared = 0
         detail = []
         for r in anchors:
+            labels = r.get("labels") or {}
             if element == "wobble":
-                ok, stat = _wobble_cleared(r["env"], r["grid"])
+                if labels.get("wobble_moments"):
+                    moments = _wobble_labeled(
+                        r["env"], r["grid"],
+                        [spm.parse_mmss(m) for m in labels["wobble_moments"]],
+                    )
+                    ok = any(m["cleared"] for m in moments)
+                    stat = moments
+                elif labeled_wobble_any:
+                    ok, stat = False, "unlabeled"
+                else:
+                    ok, stat = _wobble_cleared(r["env"], r["grid"])
             elif element == "vocal_axis":
-                margin = spm.ghost_margin_db(
-                    r["env"]["vocal_full_beats"],
-                    _high_energy_windows(r["env"]["full_mix_beats"]),
-                )
-                ok, stat = (margin <= thresholds["ghost_margin_db"]), round(margin, 1)
+                if labels.get("vocal_free_windows"):
+                    windows = _label_windows_beats(labels["vocal_free_windows"], r["grid"])
+                elif labeled_vocal_any:
+                    windows = []
+                else:
+                    windows = _high_energy_windows(r["env"]["full_mix_beats"])
+                margin = spm.ghost_margin_db(r["env"]["vocal_full_beats"], windows)
+                if not windows:
+                    ok, stat = False, "unlabeled"
+                else:
+                    ok, stat = (margin <= thresholds["ghost_margin_db"]), round(margin, 1)
             else:
                 fn, thr = ELEMENT_STATS[element]
                 stat = round(float(fn(r["env"])), 3)
@@ -480,14 +551,25 @@ def _build_scorecard(records: list[dict], op: dict, thresholds: dict) -> dict:
     )
 
     # vocal: pair separation (extremes of vocal presence among vocal anchors) +
-    # worst ghost margin across vocal anchors (auto-derived high-energy windows).
+    # worst ghost margin. With operator labels: labeled windows on labeled
+    # anchors only; without: auto-derived high-energy windows (legacy).
     vocal_anchors = [r for r in records if "vocal_axis" in r["elements"]]
-    margins = [
-        spm.ghost_margin_db(
-            r["env"]["vocal_full_beats"], _high_energy_windows(r["env"]["full_mix_beats"])
-        )
-        for r in vocal_anchors
-    ]
+    if labeled_vocal_any:
+        margins = [
+            spm.ghost_margin_db(
+                r["env"]["vocal_full_beats"],
+                _label_windows_beats((r.get("labels") or {}).get("vocal_free_windows"), r["grid"]),
+            )
+            for r in vocal_anchors
+            if (r.get("labels") or {}).get("vocal_free_windows")
+        ]
+    else:
+        margins = [
+            spm.ghost_margin_db(
+                r["env"]["vocal_full_beats"], _high_energy_windows(r["env"]["full_mix_beats"])
+            )
+            for r in vocal_anchors
+        ]
     worst_ghost = max(margins) if margins else 0.0  # closest to 0 = worst bleed
     presences = [
         (float(np.median(np.asarray(r["env"]["vocal_full_beats"], dtype=float)))
@@ -497,10 +579,22 @@ def _build_scorecard(records: list[dict], op: dict, thresholds: dict) -> dict:
     ]
     pair_separates = (max(presences) - min(presences) >= 3.0) if len(presences) >= 2 else False
 
-    # wobble: distinct strong-modulation moments across wobble anchors
+    # wobble: with labels, count the operator's cleared moments; without,
+    # legacy one-per-anchor scan count (known false-positive-prone).
     wobble_moments = 0
     for r in records:
-        if "wobble" in r["elements"]:
+        if "wobble" not in r["elements"]:
+            continue
+        labels = r.get("labels") or {}
+        if labeled_wobble_any:
+            if labels.get("wobble_moments"):
+                wobble_moments += sum(
+                    int(m["cleared"]) for m in _wobble_labeled(
+                        r["env"], r["grid"],
+                        [spm.parse_mmss(m) for m in labels["wobble_moments"]],
+                    )
+                )
+        else:
             ok, _stat = _wobble_cleared(r["env"], r["grid"])
             wobble_moments += int(ok)
 
@@ -513,6 +607,12 @@ def _build_scorecard(records: list[dict], op: dict, thresholds: dict) -> dict:
         "sidechain": {"anchors_pumped": anchors_pumped, "anchors_total": len(sidechain_anchors)},
         "vocal": {"pair_separates": pair_separates, "ghost_margin_db": round(worst_ghost, 1)},
         "wobble": {"moments_detected": wobble_moments},
+        "labels": {
+            "wobble_labeled_tracks": sum(
+                1 for r in records if (r.get("labels") or {}).get("wobble_moments")),
+            "vocal_labeled_tracks": sum(
+                1 for r in records if (r.get("labels") or {}).get("vocal_free_windows")),
+        },
         "elements": elements,
         "element_detail": element_detail,
         "n_tracks": len(records),
@@ -624,21 +724,73 @@ def _write_report_md(scorecard: dict) -> None:
 
 
 def _run_report(args) -> int:
-    """Recompute scorecard + gate from existing envelope JSONs (no separation)."""
+    """Recompute scorecard + gate from existing envelope JSONs (no separation).
+    Auto-loads operator labels from ``labels.json`` when present; labeled tracks
+    get their REAL beatgrid re-resolved (mm:ss labels need true beat times —
+    the uniform fallback grid is fiction)."""
     if not ENV_DIR.exists():
         print("no envelopes to report on", flush=True)
         return 1
+    labels = _load_labels()
+    grids = _real_grids(set(labels)) if labels else {}
     records = []
+    n_labeled = 0
     for p in sorted(ENV_DIR.glob("*.json")):
         env = json.loads(p.read_text())
+        cid = str(env.get("content_id", p.stem))
+        grid, track_labels = _grid_from_env(env), None
+        if cid in labels:
+            real = grids.get(cid)
+            if real and abs((len(real) - 1) - env.get("n_beats", 0)) <= 2:
+                grid, track_labels = real, labels[cid]
+                n_labeled += 1
+            else:
+                print(f"labels SKIPPED for {env.get('title', cid)!r}: "
+                      f"{'no real beatgrid resolvable' if not real else 'beatgrid length drifted'}",
+                      flush=True)
         records.append({
-            "content_id": env.get("content_id", p.stem),
+            "content_id": cid,
             "title": env.get("title", p.stem),
             "elements": env.get("elements", ["fill"]),
-            "grid": _grid_from_env(env),
+            "grid": grid,
             "env": env,
+            **({"labels": track_labels} if track_labels else {}),
         })
+    if labels:
+        print(f"labels: {len(labels)} labeled track(s) in labels.json, "
+              f"{n_labeled} matched to envelopes + real grids", flush=True)
     return _finish_scorecard(records, records, 0, {}, args)
+
+
+def _load_labels() -> dict[str, dict]:
+    """labels.json -> {content_id: track labels} for tracks with any content."""
+    if not LABELS_PATH.exists():
+        return {}
+    raw = json.loads(LABELS_PATH.read_text())
+    out = {}
+    for cid, t in (raw.get("tracks") or {}).items():
+        if t.get("wobble_moments") or t.get("vocal_free_windows"):
+            out[str(cid)] = t
+    return out
+
+
+def _real_grids(content_ids: set[str]) -> dict[str, list[float]]:
+    """Re-resolve true beatgrids for labeled tracks via the rekordbox DB +
+    ANLZ reader (plain Python — no venv/torch). Fail soft: {} on DB trouble."""
+    if not content_ids:
+        return {}
+    try:
+        tracks = _enumerate_tracks()
+    except Exception as exc:
+        print(f"labels DISABLED: rekordbox DB unavailable ({exc})", flush=True)
+        return {}
+    out = {}
+    for t in tracks:
+        if t["content_id"] in content_ids:
+            grid = _beatgrid_for(t["anlz_abs"])
+            if grid:
+                out[t["content_id"]] = grid
+    return out
 
 
 def _grid_from_env(env: dict) -> list[float]:
