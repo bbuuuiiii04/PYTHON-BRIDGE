@@ -453,10 +453,11 @@ def _post_drop_center_comet_blue_cyan(beat: float, local_t: float, frame_index: 
     center = segments / 2.0
     
     # Phase 2: Dual comets spawning in the middle and chasing outward on the beat + strobing
-    strobe_on = (int(beat * 16.0) % 2) == 0
+    # AWR-161: Hz-gate migration (BPM-tied 16th-note gate -> wall-clock Hz gate).
+    strobe_on = _hz_strobe_on(local_t, params)
     if not strobe_on:
         return frame
-        
+
     comet_width = 1.0  # Extremely small comet tail
     
     for age in [beat % 1.0, (beat % 1.0) + 1.0]:
@@ -490,7 +491,8 @@ def _drop_chase(name: str, beat: float, local_t: float, frame_index: int, params
     color1, color2 = _edm_color_for_look(name, beat)
     # M1b WI-4: prefer an engine-injected color; fall back to the suffix color.
     color1 = _color(params.get("color"), color1)
-    strobe_on = (int(beat * 16.0) % 2) == 0
+    # AWR-161: Hz-gate migration (BPM-tied 16th-note gate -> wall-clock Hz gate).
+    strobe_on = _hz_strobe_on(local_t, params)
     if not strobe_on:
         return _empty(segments)
     if beat < 8.0:
@@ -507,11 +509,12 @@ def _drop_chase(name: str, beat: float, local_t: float, frame_index: int, params
     return _drop_chase_comets(name, beat, segments, color1, color2)
 
 
-def _post_drop_chase(name: str, beat: float, params: Mapping[str, Any], segments: int) -> Frame:
+def _post_drop_chase(name: str, beat: float, local_t: float, params: Mapping[str, Any], segments: int) -> Frame:
     color1, color2 = _edm_color_for_look(name, beat)
     # M1b WI-4: prefer an engine-injected color; fall back to the suffix color.
     color1 = _color(params.get("color"), color1)
-    strobe_on = (int(beat * 16.0) % 2) == 0
+    # AWR-161: Hz-gate migration (BPM-tied 16th-note gate -> wall-clock Hz gate).
+    strobe_on = _hz_strobe_on(local_t, params)
     if not strobe_on:
         return _empty(segments)
     # Standalone post-drop chase: comets begin at beat 0 (no sparkle intro) and
@@ -521,8 +524,9 @@ def _post_drop_chase(name: str, beat: float, params: Mapping[str, Any], segments
     return _drop_chase_comets(name, beat, segments, color1, color2, start=0.0)
 
 
-def _post_drop_nebula(beat: float, segments: int) -> Frame:
-    strobe_on = (int(beat * 16.0) % 2) == 0
+def _post_drop_nebula(beat: float, local_t: float, params: Mapping[str, Any], segments: int) -> Frame:
+    # AWR-161: Hz-gate migration (BPM-tied 16th-note gate -> wall-clock Hz gate).
+    strobe_on = _hz_strobe_on(local_t, params)
     if not strobe_on:
         return _empty(segments)
     return _drop_chase_comets(
@@ -657,7 +661,8 @@ def _drop_chase_comets(
 
 
 def _drop_nebula(beat: float, local_t: float, frame_index: int, params: Mapping[str, Any], segments: int, seed: int) -> Frame:
-    strobe_on = (int(beat * 16.0) % 2) == 0
+    # AWR-161: Hz-gate migration (BPM-tied 16th-note gate -> wall-clock Hz gate).
+    strobe_on = _hz_strobe_on(local_t, params)
     if not strobe_on:
         return _empty(segments)
     if beat < 8.0:
@@ -935,11 +940,11 @@ def _edm_dispatch(name: str, beat: float, local_t: float, frame_index: int, para
     if name == "drop_center_burst_blue_cyan":
         return _drop_center_burst_blue_cyan(cue_beat, local_t, frame_index, params, segments, seed)
     if name.startswith("post_drop_chase_"):
-        return _post_drop_chase(name, cue_beat, params, segments)
+        return _post_drop_chase(name, cue_beat, local_t, params, segments)
     if name == "post_drop_center_comet_blue_cyan":
         return _post_drop_center_comet_blue_cyan(cue_beat, local_t, frame_index, params, segments, seed)
     if name == "post_drop_freestyle_nebula":
-        return _post_drop_nebula(cue_beat, segments)
+        return _post_drop_nebula(cue_beat, local_t, params, segments)
     if name == "drop_white_aggressive":
         return _drop_white_aggressive(cue_beat, local_t, frame_index, params, segments, seed)
     if name == "post_drop_white_shatter":
@@ -1075,6 +1080,17 @@ for _k in ("groove_chase_blue", "groove_chase_cyan", "groove_chase_red",
 REALTIME_EFFECT_PARAM_KEYS["drop_white_aggressive"] = (
     REALTIME_EFFECT_PARAM_KEYS["drop_white_aggressive"] | frozenset({"hz", "duty"})
 )
+# AWR-161: remaining legacy frame-effect strobe gates migrated onto _hz_strobe_on.
+for _name in (
+    "post_drop_center_comet_blue_cyan",
+    "drop_chase_blue", "drop_chase_cyan", "drop_chase_red",
+    "drop_chase_green", "drop_chase_cyan_white",
+    "post_drop_chase_blue", "post_drop_chase_cyan", "post_drop_chase_red",
+    "post_drop_chase_green", "post_drop_chase_cyan_white",
+    "post_drop_freestyle_nebula",
+    "drop_chase_freestyle_nebula",
+):
+    REALTIME_EFFECT_PARAM_KEYS[_name] = REALTIME_EFFECT_PARAM_KEYS[_name] | frozenset({"hz", "duty"})
 
 _OVERLAP_EFFECTS = frozenset({
     "groove_chase_blue", "groove_chase_cyan", "groove_chase_red",
@@ -1301,7 +1317,8 @@ def _slot_post_drop_chase(beat: float, local_t: float, frame_index: int,
     cue_beat = _edm_beat(beat, params)
     field = _empty_motion_field(segments)
 
-    strobe_on = (int(cue_beat * 16.0) % 2) == 0
+    # AWR-161: Hz-gate migration (BPM-tied 16th-note gate -> wall-clock Hz gate).
+    strobe_on = _hz_strobe_on(local_t, params)
     if not strobe_on:
         return field
 
@@ -1329,7 +1346,8 @@ def _slot_post_drop_nebula(beat: float, local_t: float, frame_index: int,
     cue_beat = _edm_beat(beat, params)
     field = _empty_motion_field(segments)
 
-    strobe_on = (int(cue_beat * 16.0) % 2) == 0
+    # AWR-161: Hz-gate migration (BPM-tied 16th-note gate -> wall-clock Hz gate).
+    strobe_on = _hz_strobe_on(local_t, params)
     if not strobe_on:
         return field
 
@@ -1362,7 +1380,8 @@ def _slot_drop_chase(beat: float, local_t: float, frame_index: int,
     cue_beat = _edm_beat(beat, params)
     field = _empty_motion_field(segments)
 
-    strobe_on = (int(cue_beat * 16.0) % 2) == 0
+    # AWR-161: Hz-gate migration (BPM-tied 16th-note gate -> wall-clock Hz gate).
+    strobe_on = _hz_strobe_on(local_t, params)
     if not strobe_on:
         return field
 
@@ -1403,7 +1422,8 @@ def _slot_drop_nebula(beat: float, local_t: float, frame_index: int,
     cue_beat = _edm_beat(beat, params)
     field = _empty_motion_field(segments)
 
-    strobe_on = (int(cue_beat * 16.0) % 2) == 0
+    # AWR-161: Hz-gate migration (BPM-tied 16th-note gate -> wall-clock Hz gate).
+    strobe_on = _hz_strobe_on(local_t, params)
     if not strobe_on:
         return field
 
@@ -1490,7 +1510,8 @@ def _slot_post_drop_center_comet(beat: float, local_t: float, frame_index: int,
     cue_beat = _edm_beat(beat, params)
     field = _empty_motion_field(segments)
 
-    strobe_on = (int(cue_beat * 16.0) % 2) == 0
+    # AWR-161: Hz-gate migration (BPM-tied 16th-note gate -> wall-clock Hz gate).
+    strobe_on = _hz_strobe_on(local_t, params)
     if not strobe_on:
         return field
 
@@ -2002,12 +2023,13 @@ _M2_PHASE2A_PARAM_KEYS: dict[str, frozenset[str]] = {
     "breakdown_star_twinkle_sand": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
     "rt_groove_chase": frozenset({"duration_beats", "loop_beats"}) | _SYNC_PARAM_KEYS,
     "rt_groove_nebula": frozenset({"duration_beats", "loop_beats"}) | _SYNC_PARAM_KEYS,
-    "rt_post_drop_chase": frozenset({"duration_beats", "travel_beats", "width"}) | _SYNC_PARAM_KEYS,
-    "rt_post_drop_nebula": frozenset({"duration_beats", "travel_beats", "width"}) | _SYNC_PARAM_KEYS,
-    "rt_drop_chase": frozenset({"duration_beats", "travel_beats", "width"}) | _SYNC_PARAM_KEYS,
-    "rt_drop_nebula": frozenset({"duration_beats", "travel_beats", "width"}) | _SYNC_PARAM_KEYS,
+    # AWR-161: Hz-gate migration -- hz/duty now dialable per look.
+    "rt_post_drop_chase": frozenset({"duration_beats", "travel_beats", "width", "hz", "duty"}) | _SYNC_PARAM_KEYS,
+    "rt_post_drop_nebula": frozenset({"duration_beats", "travel_beats", "width", "hz", "duty"}) | _SYNC_PARAM_KEYS,
+    "rt_drop_chase": frozenset({"duration_beats", "travel_beats", "width", "hz", "duty"}) | _SYNC_PARAM_KEYS,
+    "rt_drop_nebula": frozenset({"duration_beats", "travel_beats", "width", "hz", "duty"}) | _SYNC_PARAM_KEYS,
     "rt_drop_center_burst": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
-    "rt_post_drop_center_comet": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
+    "rt_post_drop_center_comet": frozenset({"duration_beats", "hz", "duty"}) | _SYNC_PARAM_KEYS,
     "rt_twinkle": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
     "drop_strobe_colorway": (
         frozenset({"color_a", "color_b", "hz", "duty", "duration_beats"}) | _SYNC_PARAM_KEYS

@@ -881,7 +881,8 @@ class TickEventTests(unittest.TestCase):
         self.mem.update_leaf(endpoint, path_addr.to_bytes(8, "little"))
         self.mem.leaf[path_addr] = b"/tmp/ANLZ0000.DAT\x00"
 
-        reader._tick(0xCAFE, self.base)
+        for _ in range(mod._LOAD_STABLE_TICKS):
+            reader._tick(0xCAFE, self.base)
 
         self.assertEqual(_drain(self.q), [])
         events = _drain(auth_q)
@@ -932,7 +933,8 @@ class TickEventTests(unittest.TestCase):
             payload=b"Direct Loaded Title\x00",
         )
 
-        reader._tick(0xCAFE, self.base)
+        for _ in range(mod._LOAD_STABLE_TICKS):
+            reader._tick(0xCAFE, self.base)
 
         self.assertEqual(_drain(self.q), [])
         events = _drain(auth_q)
@@ -968,7 +970,8 @@ class TickEventTests(unittest.TestCase):
             payload=b"Fresh Direct Title\x00",
         )
 
-        reader._tick(0xCAFE, self.base)
+        for _ in range(mod._LOAD_STABLE_TICKS):
+            reader._tick(0xCAFE, self.base)
 
         events = _drain(auth_q)
         self.assertEqual([e.kind for e in events], [Ev.ANLZ_PATH, Ev.TRACK_LOADED])
@@ -976,6 +979,10 @@ class TickEventTests(unittest.TestCase):
         self.assertEqual(events[1].payload["title"], "Fresh Direct Title")
 
     def test_transient_anlz_read_failure_does_not_poison_recovery_diff(self) -> None:
+        # A transient ANLZ read failure during the title's stability window
+        # must not block the title from confirming, and a late-resolving
+        # ANLZ path must still catch up on its own once the title is already
+        # confirmed (AWR-160: ANLZ_PATH is coupled to the load, never lost).
         auth_q: queue.Queue = queue.Queue()
         reader = mod.RBStateReader(
             self.q,
@@ -999,24 +1006,19 @@ class TickEventTests(unittest.TestCase):
         self.mem.install_chain(
             self.base,
             self.offs.track_info_per_deck[0],
-            payload=b"Old ANLZ Title\x00",
+            payload=b"Steady Title\x00",
         )
 
-        reader._tick(0xCAFE, self.base)
-        _drain(auth_q)
-
+        reader._tick(0xCAFE, self.base)  # candidate ticks=1, anlz read ok
         missing_path_addr = 0xABCDEF40
         self.mem.update_leaf(endpoint, missing_path_addr.to_bytes(8, "little"))
-        self.mem.update_leaf(
-            self.mem.install_chain(
-                self.base,
-                self.offs.track_info_per_deck[0],
-                payload=b"Late ANLZ Title\x00",
-            ),
-            b"Late ANLZ Title\x00",
-        )
-        reader._tick(0xCAFE, self.base)
-        self.assertEqual(reader._last_anlz[0], "/tmp/OLD_ANLZ.DAT")
+        reader._tick(0xCAFE, self.base)  # candidate ticks=2, anlz read fails (unmapped)
+        self.assertIsNone(reader._last_anlz.get(0))
+
+        reader._tick(0xCAFE, self.base)  # candidate ticks=3: title confirms
+        events = _drain(auth_q)
+        self.assertEqual([e.kind for e in events], [Ev.TRACK_LOADED])
+        self.assertIsNone(reader._last_anlz.get(0))
 
         recovered_path_addr = 0xABCDEF60
         self.mem.update_leaf(endpoint, recovered_path_addr.to_bytes(8, "little"))
@@ -1024,8 +1026,8 @@ class TickEventTests(unittest.TestCase):
         reader._tick(0xCAFE, self.base)
 
         events = _drain(auth_q)
-        self.assertEqual([e.kind for e in events], [Ev.TRACK_LOADED, Ev.ANLZ_PATH])
-        self.assertEqual(events[1].payload["anlz_path"], "/tmp/RECOVERED_ANLZ.DAT")
+        self.assertEqual([e.kind for e in events], [Ev.ANLZ_PATH])
+        self.assertEqual(events[0].payload["anlz_path"], "/tmp/RECOVERED_ANLZ.DAT")
 
     def test_anlz_availability_sets_and_clears_with_direct_readability(self) -> None:
         states: list[tuple[int, bool]] = []
