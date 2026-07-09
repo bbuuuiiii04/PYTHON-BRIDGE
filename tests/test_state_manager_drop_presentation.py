@@ -362,6 +362,32 @@ class PlanAndTickIntegrationTests(unittest.TestCase):
         self.assertEqual(sm._drop_presentation_last_actions.reason, "solo_hotcue")
         self.assertIn("drop_spotlight", sm._led_blackout_owners)
 
+    def test_auto_tier_pending_feedback_is_distinct_from_manual_armed(self) -> None:
+        # AWR-159 Task 5: the pad's "pending" state (an auto tier queued for
+        # the next drop) is a distinct literal from "armed" (an explicit
+        # manual press) -- led_palette_control already treated both as
+        # "queued" for display, but state_manager previously only ever
+        # emitted "armed" for both cases.
+        sm, d = self._sm_with_plan(
+            drops=(64.0,), tags=(64.5,),
+            phrase_segments=(PhraseSegment(0.0, 16.0, "up"),),
+        )
+        sm._drop_presentation_base_live = True
+        sm._laser_director = mock.Mock()
+        sm._laser_director.is_enabled.return_value = True
+
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(
+                abs_beat=60.0, active_drop_beat=None, smart_drop_crossing=False,
+                next_smart_drop_beat=64.0, beats_to_next_drop=4.0,
+            ),
+            impact_now=False,
+        )
+        self.assertEqual(sm._drop_presentation_last_pending[:2], (LASERS_ONLY, "solo_hotcue"))
+        self.assertIsNone(sm._drop_presentation_armed_key)
+        self.assertEqual(sm._drop_presentation_solo_feedback, "pending")
+
     def test_manual_armed_runway_less_drop_still_fires_lasers_only(self) -> None:
         sm, d = self._sm_with_plan(
             drops=(64.0,),

@@ -490,6 +490,14 @@ class LedPaletteControlTests(unittest.TestCase):
         self.assertEqual(control.snapshot()["laser_solo"], "active")
         self.assertEqual(control._control_payload()["laser_solo"]["state"], "active")
 
+        # AWR-159 Task 3/5: "pending" (auto-tier queued) reads the same as
+        # "armed" for display; "refused" is its own distinct state.
+        state["value"] = "pending"
+        self.assertEqual(control._control_payload()["laser_solo"]["state"], "queued")
+
+        state["value"] = "refused"
+        self.assertEqual(control._control_payload()["laser_solo"]["state"], "refused")
+
     def test_static_held_payload_reflects_supplied_getter(self) -> None:
         control = LedPaletteControl(
             engine=self.engine,
