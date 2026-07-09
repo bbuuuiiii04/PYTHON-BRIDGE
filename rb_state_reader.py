@@ -353,9 +353,10 @@ class RBStateReader(threading.Thread):
         assert offs is not None
         bridge = _bridge_deck(d)
 
-        # ANLZ path is read here but its emission is held for the same
-        # stability gate as the title below, so the two always land in the
-        # same tick, ANLZ_PATH first, for a single confirmed load (AWR-160).
+        # ANLZ path is read here but its emission is held below: it fires
+        # alongside a newly confirmed load (ANLZ_PATH first, AWR-160) or,
+        # once a load is already confirmed, on its own if it resolves late.
+        # It never leaks ahead of an unconfirmed (possibly phantom) candidate.
         anlz = self._follow_pointer_string(task, base, offs.anlz_path_per_deck[d])
         if anlz:
             self._anlz_readable_this_tick.add(bridge)
@@ -375,20 +376,23 @@ class RBStateReader(threading.Thread):
                 self._candidate_title[d] = title
                 self._candidate_ticks[d] = 1
 
-            if (
-                self._candidate_ticks[d] >= _LOAD_STABLE_TICKS
-                and title != self._last_track.get(d)
-            ):
-                if anlz and anlz != self._last_anlz.get(d):
-                    self._last_anlz[d] = anlz
-                    if self._shadow_logs_enabled or Ev.ANLZ_PATH in self._authoritative_kinds:
-                        log.info("[ANLZ][DIRECT] deck=%d path=%s", bridge, anlz)
-                    self._enqueue(BridgeEvent(
-                        kind=Ev.ANLZ_PATH,
-                        deck=bridge,
-                        payload={'anlz_path': anlz, 'rb_raw_deck': d},
-                        source='rb_state',
-                    ))
+            already_loaded = title == self._last_track.get(d)
+            stable_new = self._candidate_ticks[d] >= _LOAD_STABLE_TICKS and not already_loaded
+            # ANLZ_PATH is held for the same confirmed-new-load tick as
+            # TRACK_LOADED (never leaks a phantom candidate's path early);
+            # once the title is already confirmed, a late-resolving anlz
+            # path may still catch up on its own, same as before the gate.
+            if anlz and anlz != self._last_anlz.get(d) and (stable_new or already_loaded):
+                self._last_anlz[d] = anlz
+                if self._shadow_logs_enabled or Ev.ANLZ_PATH in self._authoritative_kinds:
+                    log.info("[ANLZ][DIRECT] deck=%d path=%s", bridge, anlz)
+                self._enqueue(BridgeEvent(
+                    kind=Ev.ANLZ_PATH,
+                    deck=bridge,
+                    payload={'anlz_path': anlz, 'rb_raw_deck': d},
+                    source='rb_state',
+                ))
+            if stable_new:
                 self._last_track[d] = title
                 if self._shadow_logs_enabled or Ev.TRACK_LOADED in self._authoritative_kinds:
                     log.info("[TITLE][DIRECT] deck=%d rb_idx=%d title=%r", bridge, d, title)

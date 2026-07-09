@@ -303,8 +303,9 @@ class LaserColorMapperTests(unittest.TestCase):
         # 4-value bands, order W,R,Y,G,C,B,M), ENABLED by operator decision
         # 2026-07-04 (supervised first visual pass still pending). fixed_ch9
         # is now 90 (operator design 2026-07-07, laser_color_menu_spec.md —
-        # chase speed driven, not passthrough). The rainbow effect family is
-        # still pending operator data and remains null.
+        # chase speed driven, not passthrough). rainbow_family CH8 = 188
+        # (operator verdict 2026-07-09 overnight config round); its CH9
+        # curve is still pending and remains null.
         loaded = load_laser_color_map("config/laser_color_map.json")
         self.assertTrue(loaded.enabled)
         fixed = loaded.fixed or {}
@@ -317,8 +318,8 @@ class LaserColorMapperTests(unittest.TestCase):
         self.assertEqual(fixed.get("purple"), 28)  # fixture magenta band
         self.assertEqual(loaded.fixed_ch9, 90)     # operator CH9 (menu chase speed)
         rainbow = (loaded.effects or {}).get("rainbow_family", {})
-        self.assertIsNone(rainbow.get("ch8"))
-        self.assertIsNone(rainbow.get("ch9"))
+        self.assertEqual(rainbow.get("ch8"), 188)  # operator verdict 2026-07-09
+        self.assertIsNone(rainbow.get("ch9"))      # CH9 rainbow curve still pending
         # Menus parsed for every mood that reaches the pick (no rainbow/white_sand).
         menus = loaded.menus or {}
         self.assertIn("blue_cyan", menus)
