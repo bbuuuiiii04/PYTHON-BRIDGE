@@ -1222,6 +1222,8 @@ class RBMemoryReader(threading.Thread):
             and self._offsets is not None
         )
         self._chain_ok_last: dict[int, bool] = {1: False, 2: False}
+        # AWR-157: edge-trigger state for the deck-2 chain-stale fallback log.
+        self._chain_stale_last: bool = False
         self._length_refresh_at: float = 0.0
         self._stop     = threading.Event()
         self._session: Optional[RBSession] = None
@@ -1318,10 +1320,13 @@ class RBMemoryReader(threading.Thread):
             and now_t - self._d2_play_seen_at < _D2_PLAY_RECENT_S
         )
 
-        # When the deck-2 live_pos chain was healthy last tick, the ObjC deck-2
-        # inner is never read (the chain supplies deck-2 position), so skip the
-        # whole resolution pipeline — including its periodic blocking zone scans.
-        # Falls back automatically the moment the chain misses a tick.
+        # When the deck-2 live_pos chain was healthy AND fresh last tick, the
+        # ObjC deck-2 inner is never read (the chain supplies deck-2 position),
+        # so skip the whole resolution pipeline — including its periodic
+        # blocking zone scans. Falls back automatically the moment the chain
+        # misses a tick OR (AWR-157) goes stale while playing: RBSS_POS_CHAIN_
+        # SKIP_OBJC=1 no longer means "never scan while a chain exists", it
+        # means "never scan while the chain is actually working."
         skip2 = self._skip_objc_when_chain and self._chain_ok_last.get(2, False)
 
         # Drive deck-2 resolution pipeline (non-blocking).
@@ -1431,8 +1436,16 @@ class RBMemoryReader(threading.Thread):
             previous = self._cache.get(deck)
             chain_snap = s.read_live_pos_chain(deck, previous)
             chain_ok = chain_snap is not None
-            if deck == 2 and chain_ok and deck2_playing_hint and not s.chain_raw_fresh(2):
-                chain_ok = False
+            if deck == 2:
+                stale_now = chain_ok and deck2_playing_hint and not s.chain_raw_fresh(2)
+                if stale_now:
+                    chain_ok = False
+                if stale_now != self._chain_stale_last:
+                    log.info(
+                        "[RBMEM] chain-stale %s deck=2",
+                        "fallback-engaged" if stale_now else "fallback-idle",
+                    )
+                self._chain_stale_last = stale_now
             self._chain_ok_last[deck] = chain_ok
             if chain_ok:
                 self._publish_chain(deck, chain_snap)
