@@ -1227,6 +1227,13 @@ def _slot_groove_chase(beat: float, local_t: float, frame_index: int,
     pos1 = ((cue_beat / loop_beats) % 1.0) * segments
     pos2 = (((cue_beat + offset_beats) / loop_beats) % 1.0) * segments
 
+    # AWR-156 knob #4: per-spawn single slot, not intensity-derived hue —
+    # each head is ONE palette color for its whole body; intensity is
+    # brightness only. cycle = which loop_beats cycle we're in.
+    cycle = int(cue_beat / loop_beats)
+    slot1 = cycle % 5
+    slot2 = (cycle + 2) % 5
+
     for idx in range(segments):
         dist1 = _distance_on_ring(idx, pos1, segments)
         dist2 = _distance_on_ring(idx, pos2, segments)
@@ -1234,33 +1241,11 @@ def _slot_groove_chase(beat: float, local_t: float, frame_index: int,
         intensity1 = max(0.0, 1.0 - (dist1 / max(0.001, width)))
         intensity2 = max(0.0, 1.0 - (dist2 / max(0.001, width)))
 
-        # Apply head 1 across slots 0-4
         if intensity1 > 0.0:
-            slot_coord1 = intensity1 * 4.0
-            s_below1 = int(math.floor(slot_coord1))
-            s_above1 = int(math.ceil(slot_coord1))
-            w_above1 = slot_coord1 - s_below1
-            w_below1 = 1.0 - w_above1
+            field[idx][slot1] = min(1.0, field[idx][slot1] + intensity1)
 
-            if s_below1 == s_above1:
-                field[idx][s_below1] = min(1.0, field[idx][s_below1] + intensity1)
-            else:
-                field[idx][s_below1] = min(1.0, field[idx][s_below1] + intensity1 * w_below1)
-                field[idx][s_above1] = min(1.0, field[idx][s_above1] + intensity1 * w_above1)
-
-        # Apply head 2 across slots 0-4
         if intensity2 > 0.0:
-            slot_coord2 = intensity2 * 4.0
-            s_below2 = int(math.floor(slot_coord2))
-            s_above2 = int(math.ceil(slot_coord2))
-            w_above2 = slot_coord2 - s_below2
-            w_below2 = 1.0 - w_above2
-
-            if s_below2 == s_above2:
-                field[idx][s_below2] = min(1.0, field[idx][s_below2] + intensity2)
-            else:
-                field[idx][s_below2] = min(1.0, field[idx][s_below2] + intensity2 * w_below2)
-                field[idx][s_above2] = min(1.0, field[idx][s_above2] + intensity2 * w_above2)
+            field[idx][slot2] = min(1.0, field[idx][slot2] + intensity2)
 
     return field
 
