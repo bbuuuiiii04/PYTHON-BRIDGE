@@ -187,6 +187,66 @@ class DamperAudibleLatchIntegrationTests(unittest.TestCase):
         self.assertEqual(sm._drop_presentation_session.opening_tracks_counted, 0)
 
 
+class PerLoadStructureTrimTests(unittest.TestCase):
+    """AWR-179 D4-F4: the per-load maps stay bounded instead of growing one
+    dead entry per track over a multi-hour set. Behavior otherwise unchanged."""
+
+    def test_drop_damper_key_trimmed_on_track_change_and_new_latch_works(self) -> None:
+        sm = _make_sm()
+        _enable_drop_presentation(sm)
+        sm._os = SimpleNamespace(active_deck=1, lighting_mode="autoloop")
+
+        d_old = _deck_state(load_gen=6, playing=True)
+        sm._drop_presentation_tick(
+            active=1, d=d_old,
+            sp_state=_sp_state(abs_beat=100.0, smart_drop_crossing=False),
+            impact_now=False,
+        )
+        self.assertIn((1, 6), sm._drop_presentation_audible_start_beat)
+
+        # New track on the same deck (load_gen advances) -> the dead prior-gen
+        # key is dropped, the new key is written.
+        d_new = _deck_state(load_gen=7, playing=True)
+        sm._drop_presentation_tick(
+            active=1, d=d_new,
+            sp_state=_sp_state(abs_beat=200.0, smart_drop_crossing=False),
+            impact_now=False,
+        )
+        self.assertNotIn((1, 6), sm._drop_presentation_audible_start_beat)
+        self.assertIn((1, 7), sm._drop_presentation_audible_start_beat)
+
+        # The new track's >=16-beat audible latch still fires exactly once.
+        self.assertEqual(sm._drop_presentation_session.opening_tracks_counted, 0)
+        sm._drop_presentation_tick(
+            active=1, d=d_new,
+            sp_state=_sp_state(abs_beat=216.0, smart_drop_crossing=False),
+            impact_now=False,
+        )
+        self.assertEqual(sm._drop_presentation_session.opening_tracks_counted, 1)
+
+    def test_arm_debounce_map_prunes_dead_entries_and_still_debounces(self) -> None:
+        import time as _time
+
+        sm = _make_sm()
+        d = sm._deck[1]
+        d.meta.filepath = "/tmp/scripted-direct.wav"
+        d.meta.bpm = 128.0
+        d.meta.soundswitch_id = "ssid-direct"
+
+        # A dead entry well past the 2.0 s debounce window.
+        sm._arm_times[(111, 1)] = _time.monotonic() - 5.0
+
+        sm._arm_scripted(1, 222)
+        self.assertNotIn((111, 1), sm._arm_times, "dead arm-debounce entry not pruned")
+        self.assertIn((222, 1), sm._arm_times)
+
+        # Debounce still blocks an immediate (<2.0 s) re-arm of the same track:
+        # it returns before building a new pending arm.
+        sm._pending_arm = None
+        sm._arm_scripted(1, 222)
+        self.assertIsNone(sm._pending_arm, "sub-2.0 s re-arm was not debounced")
+
+
 class PlanAndTickIntegrationTests(unittest.TestCase):
     def _sm_with_plan(
         self, *, drops=(64.0,), tags=(), learned=(), with_player=False,

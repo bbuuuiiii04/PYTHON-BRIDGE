@@ -1271,6 +1271,29 @@ class TestIdentityV2Timing(unittest.TestCase):
         e.advance_fade(104.0)
         self.assertIsNone(e._v2_reset_until)
 
+    def test_bloom_latch_caps_and_clears_without_losing_bloom(self) -> None:
+        # AWR-179 D4-F4: the once-per-identity bloom latch is bounded. Past 512
+        # distinct identities it clears wholesale; the next bloom still arms
+        # normally (a claim-ranked color breath, never a mask owner), so the
+        # only consequence is a benign extra bloom for a repeated track.
+        e = _engine(seed=5, v2=_v2_config())
+        key = "bloom-cap-track"
+        e.set_track_identity(1, 1, key, _v2_record(key, "GLACIER"))
+        _dispatch(e, load_gen=1, content_id=key)
+
+        # Fill the latch to the cap with unrelated identities.
+        e._v2_bloomed = {f"old-{i}" for i in range(512)}
+
+        e.advance_fade(0.0)   # first-seen
+        e.advance_fade(8.0)   # hold satisfied -> arms bloom for `key`
+
+        # Cap tripped: the set was cleared, then `key` recorded — no unbounded growth.
+        self.assertLess(len(e._v2_bloomed), 512)
+        self.assertIn(key, e._v2_bloomed)
+        # The bloom still produced its color claim (no exception, not swallowed).
+        self.assertIsNotNone(e._v2_bloom_until)
+        self.assertIsNotNone(e._v2_bloom_pending)
+
     def test_moments_blocked_prevents_bloom_hold(self) -> None:
         e = _engine(seed=7, v2=_v2_config())
         key = "blocked-track"
