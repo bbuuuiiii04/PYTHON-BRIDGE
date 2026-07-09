@@ -124,6 +124,25 @@ def _distance_on_ring(index: int, pos: float, segments: int) -> float:
     return min(diff, max(0.0, float(segments) - diff))
 
 
+def _head_weights(pos: float, width: float, segments: int) -> dict[int, float]:
+    """AWR-156: peak-normalized anti-aliased head weights — triangle falloff
+    per pixel, all weights divided by the head's max weight so the brightest
+    pixel always carries the full head level (kills the measured 0.53x
+    between-pixel dip). Shared by buildup_balloon_comet and rt_groove_heartbeat."""
+    out: dict[int, float] = {}
+    seg = max(0, int(segments))
+    w = max(1e-6, float(width))
+    for idx in range(seg):
+        weight = max(0.0, 1.0 - _distance_on_ring(idx, pos, seg) / w)
+        if weight > 0.0:
+            out[idx] = weight
+    peak = max(out.values(), default=0.0)
+    if peak > 0.0:
+        for idx in out:
+            out[idx] /= peak
+    return out
+
+
 COMET_MIN_HEAD_SOFT = 1.0   # one/two segment anti-aliased head
 COMET_MIN_TRAIL_LEDS = 0.0  # default comet is a tight dot, not a long tail
 COMET_TAIL_SCALE = 0.35
