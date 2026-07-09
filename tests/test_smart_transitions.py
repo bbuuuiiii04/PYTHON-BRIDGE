@@ -465,7 +465,7 @@ class SmartRearmFlagTests(unittest.TestCase):
                 audio_filepath="/music/track.wav",
                 spectral_enabled=True,
                 wide_window=True,
-                f2_enabled=False,
+                f2_enabled=True,
             ),
         ])
 
@@ -492,7 +492,7 @@ class SmartRearmFlagTests(unittest.TestCase):
                 audio_filepath="/music/track.wav",
                 spectral_enabled=True,
                 wide_window=False,
-                f2_enabled=False,
+                f2_enabled=True,
             ),
         ])
 

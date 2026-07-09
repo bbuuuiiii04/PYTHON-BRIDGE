@@ -183,21 +183,38 @@ class PatchDTests(unittest.TestCase):
 
     def test_tracked_and_live_configs_validate(self) -> None:
         root = Path(__file__).resolve().parents[1]
-        # AWR-156: rt_drop_chase got a role-scoped width param (knob #9), and
-        # was renamed to rt_post_drop_remnant_chase + moved drop -> post_drop
-        # (bank recast, knob f, T6.4 amended to a rename) in the TRACKED
-        # example config only; the live config is gitignored/read-only and
-        # renders identically to today (old look name, old bank, no width)
-        # until the operator mirrors it in. scene_ref stays rt_drop_chase
-        # either way. rt_drop_center_burst is untouched by all of this.
+        # AWR-156 (TRACKED example.json): rt_drop_chase got a role-scoped width
+        # param (knob #9) and was renamed to rt_post_drop_remnant_chase + moved
+        # drop -> post_drop (bank recast, knob f, T6.4 amended to a rename).
+        #
+        # LIVE config (gitignored/read-only) — 2026-07-09 executive-approved
+        # mirror curation: rt_drop_chase and rt_drop_nebula left the default
+        # drop bank (reversible; their look DEFINITIONS are preserved out of
+        # bank). rt_drop_chase_freestyle_nebula is a pre-existing member (params
+        # {}, verified against the pre-mirror backup — not a rename). The mirror
+        # added nine drop-bank members (seven rt_drop_strobe_* + rt_rainbow_drop
+        # + rt_drop_firework_explosion). Every value below is transcribed once
+        # from the approved mirror content and hardcoded as an explicit literal
+        # so these stay drift tripwires: an unapproved live change turns red.
+        # Tuple = (scene_ref, color_source, params, role). safety_class == drop
+        # for every row.
         expected_by_rel = {
             "config/led_look_director.example.json": {
-                "rt_post_drop_remnant_chase": ("rt_drop_chase", {"width": 4}, "post_drop"),
-                "rt_drop_center_burst": ("rt_drop_center_burst", {}, "drop"),
+                "rt_post_drop_remnant_chase": ("rt_drop_chase", "engine", {"width": 4}, "post_drop"),
+                "rt_drop_center_burst": ("rt_drop_center_burst", "engine", {}, "drop"),
             },
             "config/led_look_director.json": {
-                "rt_drop_chase": ("rt_drop_chase", {}, "drop"),
-                "rt_drop_center_burst": ("rt_drop_center_burst", {}, "drop"),
+                "rt_drop_chase_freestyle_nebula": ("drop_chase_freestyle_nebula", "engine", {}, "drop"),
+                "rt_drop_center_burst": ("rt_drop_center_burst", "engine", {}, "drop"),
+                "rt_drop_strobe_blue": ("drop_strobe_colorway", "baked", {"color_a": [0, 0, 255], "hz": 6.0, "duty": 0.3}, "drop"),
+                "rt_drop_strobe_cyan": ("drop_strobe_colorway", "baked", {"color_a": [0, 255, 255], "hz": 6.0, "duty": 0.3}, "drop"),
+                "rt_drop_strobe_green": ("drop_strobe_colorway", "baked", {"color_a": [0, 255, 0], "hz": 6.0, "duty": 0.3}, "drop"),
+                "rt_drop_strobe_red": ("drop_strobe_colorway", "baked", {"color_a": [255, 0, 0], "hz": 6.0, "duty": 0.3}, "drop"),
+                "rt_drop_strobe_red_white": ("drop_strobe_colorway", "baked", {"color_a": [255, 0, 0], "color_b": [255, 255, 255], "hz": 5.5, "duty": 0.25}, "drop"),
+                "rt_drop_strobe_blue_cyan": ("drop_strobe_colorway", "baked", {"color_a": [0, 0, 255], "color_b": [0, 135, 255], "hz": 5.0, "duty": 0.25}, "drop"),
+                "rt_drop_strobe_cyan_white": ("drop_strobe_colorway", "baked", {"color_a": [0, 255, 255], "color_b": [100, 105, 255], "hz": 5.0, "duty": 0.25}, "drop"),
+                "rt_rainbow_drop": ("rainbow_ordered", "baked", {"width": 6, "cycle_beats": 1, "travel_per_beat": 30}, "drop"),
+                "rt_drop_firework_explosion": ("drop_firework_explosion", "baked", {"color_a": [255, 240, 220], "spark_a": [255, 170, 60], "spark_b": [255, 240, 220], "surge_beats": 0.5, "bg_hold": 0.7, "sparkle_density": 0.35, "sparkle_size": 1.0, "sparkle_life_s": 0.35}, "drop"),
             },
         }
         for rel in ("config/led_look_director.example.json", "config/led_look_director.json"):
@@ -208,11 +225,11 @@ class PatchDTests(unittest.TestCase):
                 continue
             result = load_led_look_director_config(str(cfg_path))
             self.assertEqual(tuple(result.errors), (), f"{rel}: {result.errors}")
-            for name, (scene_ref, params, role) in expected_by_rel[rel].items():
+            for name, (scene_ref, color_source, params, role) in expected_by_rel[rel].items():
                 self.assertIn(name, result.config.looks)
                 look = result.config.looks[name]
                 self.assertEqual(look.scene_ref, scene_ref)
-                self.assertEqual(look.color_source, "engine")
+                self.assertEqual(look.color_source, color_source, msg=f"{rel}:{name}")
                 self.assertEqual(look.params, params, msg=f"{rel}:{name}")
                 self.assertEqual(look.safety_class, "drop")
                 self.assertIn(name, getattr(result.config.banks["default"], role), msg=f"{rel}:{name}")

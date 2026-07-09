@@ -106,12 +106,14 @@ class PatchCTests(unittest.TestCase):
 
     def test_tracked_and_live_configs_validate(self) -> None:
         root = Path(__file__).resolve().parents[1]
-        # AWR-156 knob #9 added a role-scoped width param to the TRACKED
-        # example config only; the live config is gitignored/read-only and
-        # renders identically to today until the operator mirrors it in.
+        # AWR-156 knob #9 added a role-scoped width param. It landed in the
+        # TRACKED example config first; the 2026-07-09 executive-approved live
+        # mirror then carried it into the gitignored/read-only live config, so
+        # both now render with {'width': 4}. Pinned explicit per approved
+        # mirror content (drift tripwire: an unapproved live change turns red).
         expected_params_by_rel = {
             "config/led_look_director.example.json": {"width": 4},
-            "config/led_look_director.json": {},
+            "config/led_look_director.json": {"width": 4},
         }
         for rel in ("config/led_look_director.example.json", "config/led_look_director.json"):
             cfg_path = root / rel
@@ -153,7 +155,9 @@ class PatchCTests(unittest.TestCase):
             color_source="engine",
         )["slot_colors"]
         self.assertEqual(len(slots), MAX_SLOTS)
-        self.assertEqual(slots[5], (255, 255, 255))
+        # AWR-156 zone tint landed in the 2026-07-09 executive-approved live
+        # mirror: slot 5 now renders the approved tint (was pure white).
+        self.assertEqual(slots[5], (220, 240, 255))
         self.assertGreater(len(set(slots[:5])), 1)
 
 
