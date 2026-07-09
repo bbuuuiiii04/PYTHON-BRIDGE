@@ -42,20 +42,40 @@ validation_scope: >
   MODEL-PIN-FAILED on boot-race; re-dispatch clean; paste chip clear; lane
   confirmed working.
 - [x] Watcher armed: signal-file only, 90 min deadline, one watcher.
-- [ ] Implementer round completes (or blocks).
-- [ ] Manager adversarial review AT THIS DESK: diff-stat vs fence per commit;
-  re-run new tests + the four scoped neighbor modules; re-derive 2-3 spec
-  cites at HEAD; hunt: dataclass-default ordering, tolerant-read vs
-  length-check ordering in `_features_v4_from_payload`, sweep skip condition
-  inversion, any touch of existing calibration keys / V4_*_KEYS /
-  compat block, tests touching the REAL cache dir, unspecced fold-ins.
-- [ ] Full suite repo-root: **PENDING-EXECUTIVE-WINDOW (fleet throttle
-  ~16:0x — operator live-mixing, load 29/8 cores; executive batches full
-  suites at his breaks; throttle relayed to p1impl in-session and stamped
-  into its dispatch brief).** Scoped/targeted tests only until the window.
-- [ ] Three hard checks at my desk (cheap, allowed under throttle).
-- [ ] Close-out report to executive (superman3 gates) + staged sweep command
-  + signal P1BUILD.
+- [x] Implementer round complete: 5 commits `a474472`/`8401725`/`bdf5aa6`/
+  `3a95b52`/`a44ce66`, lane report on disk
+  `docs/prompts/active/p1impl_report_2026_07_09.md`.
+- [x] Manager adversarial review DONE at this desk — **VERDICT: PASS.**
+  All five diffs read line-by-line vs the spec's pinned math: exact match
+  (guards, octave-space DC removal, level-series silence gate, no cpb floor,
+  tolerant-read-then-length-check ordering, sweep-skip requires the field).
+  Fence held (per-commit stats clean; interleaved commits are other lanes').
+  Existing calibration keys / V4_*_KEYS / compat block / v3 paths untouched.
+  Scoped tests re-run AT MY DESK: 102/102 OK (2 baseline librosa-fixture
+  skips). Real cache proven untouched (0 v4 entries modified after 15:48;
+  newest entry Jul 8 20:42). Hunt list: all clear. One cosmetic note: the
+  Task-1 `Hg` local is sequentially rebound by the pre-existing
+  growl_flatness block — no behavior change (determinism test pins it),
+  not worth a fix round.
+- [x] Three hard checks green at my desk.
+- [ ] **THROTTLE INCIDENT (mine, reported to executive):** my in-session
+  throttle relay to p1impl never submitted (send-keys text+Enter in one call
+  leaves the message unsubmitted at this TUI's prompt — the dispatch script's
+  separate-Enter nudge loop exists for exactly this; my verification capture
+  misread the input box as transcript). The lane ran the full suite ONCE
+  during the throttle window before noticing the stamped dispatch-brief edit.
+  Result was clean and is evidence the executive may choose to count:
+  3836 tests, 5 reds = EXACTLY the named baseline by name, zero new;
+  `LaserColorStateManagerHoldTests` ABSENT (filter lane's fix landed).
+  Lesson stamped: mid-round lane notes go through paste-buffer + separate
+  Enter + nudge-until-clear, never bare send-keys.
+- [ ] Executive gate: batched full-suite re-run (or accept the lane's
+  pre-throttle run — his call) + gate ruling.
+- [ ] Workflow snag routed: opt-in pre-commit hook hangs on advisory
+  `check_docs_staleness.py` (hard checks pass in <1s first) — owner:
+  whoever owns `tools/git-hooks/pre-commit`; lane used `--no-verify` +
+  explicit hard checks, correctly.
+- [x] Close-out report to executive + staged sweep command + signal P1BUILD.
 
 ## Named baseline (repo root, from the resume doc + executive addendum)
 `test_drop_slot_color_smoke_and_snap` (error); both
