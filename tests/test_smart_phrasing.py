@@ -221,6 +221,62 @@ class TestSmartPhrasing(unittest.TestCase):
             or preview.transition_window_active
         )
 
+    # AWR-179 D2-F1 (OLC-B): transition_release_beats early-releases the dark window.
+    def _window_trace(self, release: float, abs_beats, **snap_kwargs):
+        """Run a fresh engine over abs_beats, returning the per-tick
+        (active, arm, clear) transition flags."""
+        engine = SmartPhrasingEngine()
+        snap = self._default_snap(
+            smart_drop_beats=(64.0,), transition_window_beats=8.0, **snap_kwargs)
+        trace = []
+        for beat in abs_beats:
+            res = engine.update(replace(snap, abs_beat=float(beat)))
+            trace.append((
+                res.state.transition_window_active,
+                res.state.transition_mask_should_arm,
+                res.state.transition_mask_should_clear,
+            ))
+        return trace
+
+    def test_transition_release_zero_is_byte_identical_to_no_field(self) -> None:
+        beats = [55, 56, 60, 61, 62, 63, 64]
+        with_field = self._window_trace(0.0, beats, transition_release_beats=0.0)
+        without_field = self._window_trace(0.0, beats)  # field omitted -> default 0.0
+        self.assertEqual(with_field, without_field)
+        # Sanity: with release 0 the window opens at the edge and stays open to the drop.
+        self.assertTrue(with_field[1][0], "window should be active at the window edge (beat 56)")
+        self.assertTrue(with_field[4][0], "window should still be active at beat 62")
+
+    def test_transition_release_positive_deactivates_early_and_clears(self) -> None:
+        # window opens 8 beats out (beat 56); release 3 => deactivate at beats_to_drop==3 (beat 61).
+        engine = SmartPhrasingEngine()
+        snap = self._default_snap(
+            smart_drop_beats=(64.0,), transition_window_beats=8.0,
+            transition_release_beats=3.0)
+        r55 = engine.update(replace(snap, abs_beat=55.0))   # outside window
+        r56 = engine.update(replace(snap, abs_beat=56.0))   # window edge -> active, arm
+        r60 = engine.update(replace(snap, abs_beat=60.0))   # still active (bnd 4 > 3)
+        r61 = engine.update(replace(snap, abs_beat=61.0))   # bnd 3 -> deactivate, clear
+        r62 = engine.update(replace(snap, abs_beat=62.0))   # stays off, no re-arm before drop
+
+        self.assertFalse(r55.state.transition_window_active)
+        self.assertTrue(r56.state.transition_window_active)
+        self.assertTrue(r56.state.transition_mask_should_arm)
+        self.assertTrue(r60.state.transition_window_active)
+        # Early release: falling edge BEFORE the drop (beat 64) fires the clear.
+        self.assertFalse(r61.state.transition_window_active)
+        self.assertTrue(r61.state.transition_mask_should_clear)
+        # No re-arm before the drop.
+        self.assertFalse(r62.state.transition_window_active)
+        self.assertFalse(r62.state.transition_mask_should_arm)
+
+    def test_transition_release_equal_to_window_never_activates(self) -> None:
+        # abort_at == window start => release == window length => window never opens.
+        trace = self._window_trace(8.0, [56, 60, 63], transition_release_beats=8.0)
+        for active, arm, _clear in trace:
+            self.assertFalse(active)
+            self.assertFalse(arm)
+
     def test_buildup_only_in_up_phrase_before_future_drop(self):
         snap = self._default_snap(
             smart_drop_beats=(64.0,),

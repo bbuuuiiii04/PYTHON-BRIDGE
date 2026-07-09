@@ -91,17 +91,9 @@ def impl_files(code_globs: list[str], root: Path = ROOT) -> list[str]:
     return sorted(set(out))
 
 
-def changed_files(base: str) -> set[str]:
-    """Files touched by any commit in base..HEAD, in ONE git call.
-
-    Membership matches the old per-path `git log --format=%h base..HEAD -- <path>`
-    non-empty test: --name-only lists every file each (non-merge) commit changed,
-    same default merge/rename handling as the path-limited log it replaces.
-    """
-    code, out = git("log", "--name-only", "--format=", f"{base}..HEAD")
-    if code != 0:
-        return set()
-    return {ln.strip() for ln in out.splitlines() if ln.strip()}
+def changed_since(base: str, path: str) -> bool:
+    code, out = git("log", "--format=%h", f"{base}..HEAD", "--", path)
+    return code == 0 and bool(out)
 
 
 def main() -> int:
@@ -132,12 +124,11 @@ def main() -> int:
         return 0
 
     contracts = parse_contracts(text)
-    changed_set = changed_files(base)
     stale: list[tuple[str, list[str], list[str]]] = []
     rows: list[tuple[str, int, int]] = []
     for name, fields in contracts.items():
         impl = impl_files(fields.get("code_globs", []))
-        changed = [f for f in impl if f in changed_set]
+        changed = [f for f in impl if changed_since(base, f)]
         rows.append((name, len(impl), len(changed)))
         if changed:
             stale.append((name, changed, fields.get("docs_update", [])))

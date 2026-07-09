@@ -324,6 +324,40 @@ class TestTransitionWindow(unittest.TestCase):
         self.assertEqual(M.transition_window_for(plan, None, [32], default=4.0), 4.0)  # no beat
 
 
+class TestTransitionRelease(unittest.TestCase):
+    """AWR-179 D2-F1 (OLC-B): the early-release bound for the pre-drop dark window."""
+
+    def _plan(self, kind, beats, drop_beat=32, abort_at=None):
+        dark = M.DarknessDecision(kind, beats, (drop_beat - beats, drop_beat), abort_at, {}, "x")
+        dec = M.DropDecision(drop_beat, "WALL", 0.7, 3, dark, "", "x")
+        entry = M.DropPlanEntry(drop_beat, dec, 0.5, 0)
+        return M.F2TrackPlan((entry,), "swell")
+
+    def test_blackout_with_abort_releases_at_drop_minus_abort(self):
+        plan = self._plan("blackout", 16, drop_beat=32, abort_at=29)
+        self.assertEqual(M.transition_release_for(plan, 20.0, [32]), 3.0)  # 32 - 29
+
+    def test_blackout_without_abort_is_zero(self):
+        plan = self._plan("blackout", 16, drop_beat=32, abort_at=None)
+        self.assertEqual(M.transition_release_for(plan, 20.0, [32]), 0.0)
+
+    def test_non_blackout_families_are_zero(self):
+        for kind in ("balloon", "dip", "snap", "perc-flick"):
+            plan = self._plan(kind, 8, drop_beat=32, abort_at=20)
+            self.assertEqual(M.transition_release_for(plan, 20.0, [32]), 0.0)
+
+    def test_no_plan_no_beat_or_drop_passed_is_zero(self):
+        plan = self._plan("blackout", 16, drop_beat=32, abort_at=29)
+        self.assertEqual(M.transition_release_for(None, 20.0, [32]), 0.0)
+        self.assertEqual(M.transition_release_for(plan, None, [32]), 0.0)
+        self.assertEqual(M.transition_release_for(plan, 40.0, [32]), 0.0)  # drop passed
+
+    def test_abort_at_window_start_equals_window_length(self):
+        # abort_at == window start (drop - beats) => release == window length => zero dark beats.
+        plan = self._plan("blackout", 16, drop_beat=32, abort_at=16)
+        self.assertEqual(M.transition_release_for(plan, 20.0, [32]), 16.0)
+
+
 class TestKillSwitchByteIdentity(unittest.TestCase):
     """MANDATORY kill test (Part C): with F2 OFF, every F2 hook passes through to
     the v1 default even when a plan is present — so F2-off is byte-identical to v1.
@@ -371,6 +405,24 @@ class TestKillSwitchByteIdentity(unittest.TestCase):
         self.assertEqual(
             SM._f2_transition_window_beats(on, no_plan, 20.0, [32], 4.0), 4.0)
         self.assertIsNone(SM._f2_laser_tiers(on, no_plan, [32]))
+
+    def _abort_plan(self):
+        # blackout drop@32, window [16,32], abort_at=29 -> release bound 3.0.
+        dark = M.DarknessDecision("blackout", 16, (16, 32), 29, {}, "x")
+        dec = M.DropDecision(32, "WALL", 0.7, 3, dark, "", "x")
+        return M.F2TrackPlan((M.DropPlanEntry(32, dec, 0.5, 0),), "swell")
+
+    def test_transition_release_gate_off_scripted_and_plumbed(self):
+        # AWR-179 D2-F1: same gate as the window method — F2 off / scripted => 0.0;
+        # F2 on + plan with abort => the delegated release bound is plumbed through.
+        SM = self._sm()
+        deck = SimpleNamespace(scripted_id=0, meta=SimpleNamespace(f2_plan=self._abort_plan()))
+        off = SimpleNamespace(_f2_enabled=False)
+        on = SimpleNamespace(_f2_enabled=True)
+        scripted = SimpleNamespace(scripted_id=7, meta=SimpleNamespace(f2_plan=self._abort_plan()))
+        self.assertEqual(SM._f2_transition_release_beats(off, deck, 20.0, [32]), 0.0)
+        self.assertEqual(SM._f2_transition_release_beats(on, scripted, 20.0, [32]), 0.0)
+        self.assertEqual(SM._f2_transition_release_beats(on, deck, 20.0, [32]), 3.0)
 
 
 class TestBalloonBoundary(unittest.TestCase):
