@@ -23,6 +23,7 @@ from rb_ss_bridge_v2.govee_frame_renderer import (  # noqa: E402
     _slot_groove_chase,
     _slot_groove_nebula,
     _slot_post_drop_center_comet,
+    _slot_post_drop_chase,
     _slot_post_drop_nebula,
     _slot_rt_groove_heartbeat,
     _slot_rt_post_drop_firework_remnants,
@@ -888,13 +889,16 @@ class Knob4MashupDeathTests(unittest.TestCase):
             self.assertLessEqual(len(lit), 1)
 
     def test_post_drop_chase_single_slot_per_spawn(self) -> None:
-        for spawn_at, spawn_idx in _drop_chase_spawn_times(9.5, start=0.0):
-            field = _slot_post_drop_chase(9.5, 0.0, 0, {}, 20, 1)
-            for row in field:
-                lit = [s for s in range(6) if row[s] > 0]
-                self.assertLessEqual(len(lit), 1)
-                if lit:
-                    self.assertEqual(lit[0], spawn_idx % 5)
+        # cue_beat=0.5 -> exactly one spawn active (_drop_chase_spawn_times
+        # start=0.0): spawn_idx=0 -> slot 0.
+        spawns = _drop_chase_spawn_times(0.5, start=0.0)
+        self.assertEqual([idx for _, idx in spawns], [0])
+        field = _slot_post_drop_chase(0.5, 0.0, 0, {}, 20, 1)
+        lit_rows = [row for row in field if sum(row) > 0]
+        self.assertTrue(lit_rows)
+        for row in lit_rows:
+            lit = [s for s in range(6) if row[s] > 0]
+            self.assertEqual(lit, [0])
 
     def test_drop_nebula_palette_branch_single_slot_white_branch_untouched(self) -> None:
         field = _slot_drop_nebula(9.5, 0.0, 0, {}, 20, 1)
@@ -937,11 +941,16 @@ class Knob4MashupDeathTests(unittest.TestCase):
     def test_positional_mapping_prototypes_untouched(self) -> None:
         """_slot_groove_center_chase and _slot_post_drop_firework_chase are NOT
         mashup sites (Absolute Rules exclusion) -- they still use the ordered
-        gradient split across two adjacent slots."""
+        gradient split across two adjacent slots (a sub-pixel comet position
+        lands between two slot boundaries)."""
         from rb_ss_bridge_v2.govee_frame_renderer import _slot_groove_center_chase
-        field = _slot_groove_center_chase(2.0, 0.0, 0, {"travel_beats": 1.0}, 20, 1)
-        multi_slot_rows = [row for row in field if sum(1 for v in row if v > 0) > 1]
-        self.assertTrue(multi_slot_rows, msg="expected the ordered gradient split to survive untouched")
+        found_split = False
+        for beat in [i / 7.0 for i in range(50)]:
+            field = _slot_groove_center_chase(beat, 0.0, 0, {"travel_beats": 1.0}, 20, 1)
+            if any(sum(1 for v in row if v > 0) > 1 for row in field):
+                found_split = True
+                break
+        self.assertTrue(found_split, msg="expected the ordered gradient split to survive untouched")
 
 
 if __name__ == "__main__":

@@ -899,5 +899,76 @@ class GoveeRealtimeRunnerHealthTransitionTests(unittest.TestCase):
         self.assertTrue(any("GoveeRealtimeRunner exited" in r.getMessage() for r in records))
 
 
+class FramePeriodInjectionTests(unittest.TestCase):
+    """AWR-156 Task 7.2: the runner injects measured frame timing into params."""
+
+    def test_frame_period_s_reaches_renderer_params(self) -> None:
+        transport = _FakeTransport()
+        renderer = GoveeFrameRenderer()
+        captured: list[dict] = []
+        orig_render = renderer.render
+
+        def spy_render(name, **kwargs):
+            captured.append(dict(kwargs["params"]))
+            return orig_render(name, **kwargs)
+
+        renderer.render = spy_render  # type: ignore[method-assign]
+        runner = GoveeRealtimeRunner(transport, renderer, segments=4, fps=25)
+        runner.set_desired(EffectSpec("solid", {"color": [1, 2, 3]}, 1, 100.0))
+
+        runner._tick_once(_anchor(100.0), 100.0)
+
+        self.assertTrue(captured)
+        self.assertIn("frame_period_s", captured[-1])
+        self.assertAlmostEqual(captured[-1]["frame_period_s"], 1.0 / 25.0, places=6)
+
+    def test_frame_period_s_initialized_to_one_over_fps_before_any_tick(self) -> None:
+        transport = _FakeTransport()
+        runner = GoveeRealtimeRunner(transport, GoveeFrameRenderer(), segments=4, fps=50)
+        self.assertAlmostEqual(runner._frame_period_ema, 1.0 / 50.0, places=9)
+
+    def test_frame_period_ema_pulls_toward_a_simulated_slow_tick(self) -> None:
+        """A stalled tick (simulated via the sleep_fn seam) should raise the EMA
+        above the steady-state 1/fps baseline. The fake sleep_fn does not
+        actually block, so the runner thread would otherwise free-spin past the
+        transient before the test could observe it -- an Event-based lockstep
+        (real thread, no real wall-clock delay) single-steps each iteration."""
+        clock = [1000.0]
+        call_count = [0]
+        step_done = threading.Event()
+        proceed = threading.Event()
+
+        def time_fn() -> float:
+            return clock[0]
+
+        def sleep_fn(_interval: float) -> None:
+            call_count[0] += 1
+            # Call #3 simulates a stall; every other call is on-cadence.
+            clock[0] += 0.5 if call_count[0] == 3 else (1.0 / 30.0)
+            step_done.set()
+            proceed.wait(timeout=1.0)
+            proceed.clear()
+
+        transport = _FakeTransport()
+        runner = GoveeRealtimeRunner(
+            transport, GoveeFrameRenderer(), segments=4, fps=30,
+            time_fn=time_fn, sleep_fn=sleep_fn,
+        )
+        runner.start()
+        ema_after_stall = None
+        for call_num in range(1, 5):
+            self.assertTrue(step_done.wait(timeout=1.0), msg=f"sleep_fn call #{call_num} never fired")
+            step_done.clear()
+            if call_num == 4:
+                # Iteration 4's EMA update (consuming call #3's stalled dt) has
+                # already run by the time sleep_fn call #4 fires.
+                ema_after_stall = runner._frame_period_ema
+            proceed.set()
+        runner.stop()
+
+        self.assertIsNotNone(ema_after_stall)
+        self.assertGreater(ema_after_stall, 1.0 / 30.0)
+
+
 if __name__ == "__main__":
     unittest.main()
