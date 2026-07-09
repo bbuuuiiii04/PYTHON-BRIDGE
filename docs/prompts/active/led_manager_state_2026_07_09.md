@@ -20,7 +20,29 @@ task) / OPUS tmux orchestrators / SONNET grind subagents — NEVER Fable below
 manager. New dispatches pin the model explicitly and VERIFY on-screen
 ("Set model to Opus 4.8" + banner) BEFORE task text.
 
-## Immediate state — UPDATED post-F4 review (~04:5x)
+## Immediate state — PROGRAM BUILD PHASE CLOSED (~05:3x)
+
+- **ALL overnight builds SHIPPED + GATED: F2 (AWR-163), F4 (AWR-164),
+  laser round (AWR-170: per-tier chases + pre-chorus mask) — each passed my
+  adversarial review + the executive gate; suite 3742 / exact six-red
+  baseline at three desks.**
+- **MIRROR (R5) APPLIED 05:25:49** per the superman3-ruled sequence:
+  candidate rebuilt WITH f2.pre_chorus_laser_beats=4, applied, real loader
+  on the applied file = zero errors (f2 ON burndown-off pre_chorus 4; f4 ON
+  busy-pulse off; dry_run false; ids/IP/long_press preserved). Backup =
+  `config/led_look_director.json.backup_1783586470` (04:41). Rollback = cp
+  backup over live. **Bridge DOWN; ACTIVATION = operator morning menubar
+  start.**
+- Ledger discrepancy (not chasing): superman3 reports the two pack
+  byte-identity tests isolation-RED at their desk; my 3/3 isolation-green
+  measured ~04:00. Fold into AWR-169 post-program if it persists.
+- REMAINING = morning-facing only: operator one-line veto list
+  (strobe_red_white side B, groove width 2.5, NEUTRAL→small +
+  damped-thin→small laser silences, burn-down off until haze, balloon
+  gray-zone 0.35→0.30 knob), pre-drop tease parked item, my inputs to
+  superman3's morning summary. Filter-knob directive = post-program.
+
+## Historical: post-F4 review state (~04:5x)
 
 - **F4 (AWR-164) IMPLEMENTED + my review = PASS zero corrections, verdict at
   superman's desk, AWAITING GATE.** My suite: 3716 / exact six-red baseline.
