@@ -2123,6 +2123,10 @@ REALTIME_STROBE_EFFECTS = REALTIME_STROBE_EFFECTS | frozenset({
     "rt_drop_nebula",
     "rt_post_drop_center_comet",
     "drop_strobe_colorway",
+    # AWR-161-FIX: _post_drop_center_comet_blue_cyan gates on _hz_strobe_on
+    # (returns a dark frame when off) but was never flagged as a strobe --
+    # pre-existing gap. Its example/live looks already carry allow_strobe=true.
+    "post_drop_center_comet_blue_cyan",
 })
 
 # Param allowlist for each new name = standard EDM keys (duration_beats +

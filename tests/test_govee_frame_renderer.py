@@ -506,6 +506,14 @@ class GoveeFrameRendererTests(unittest.TestCase):
             self.assertIn(name, REALTIME_STROBE_EFFECTS)
             self.assertIn(name, EDM_BUILDS)
 
+    def test_post_drop_center_comet_blue_cyan_registered_as_strobe(self) -> None:
+        # AWR-161-FIX: it gates on _hz_strobe_on (goes dark when off) but was
+        # never flagged as a strobe -- pre-existing registration gap.
+        name = "post_drop_center_comet_blue_cyan"
+        self.assertIn(name, REALTIME_EFFECT_NAMES)
+        self.assertIn(name, REALTIME_STROBE_EFFECTS)
+        self.assertIn(name, EDM_BUILDS)
+
         # AWR-161: migrated off int(beat*16)%2 onto the wall-clock Hz gate.
         renderer = GoveeFrameRenderer()
         on_frame = renderer.render(
