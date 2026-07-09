@@ -98,6 +98,22 @@ class LedPadControlDefaultsTests(unittest.TestCase):
             'params.get("travel_beats", 1.0)',
             'params.get("travel_beats", 2.0)',
             'params.get("width", 0.8)',
+            # AWR-156 additions.
+            'params.get("hz", 6.0)',
+            'params.get("duty", 0.3)',
+            'params.get("start_width", 4.0)',
+            'params.get("end_width", 1.0)',
+            'params.get("build_beats", 16.0)',
+            'params.get("dim_floor", 0.35)',
+            'params.get("base_width", 1.5)',
+            'params.get("pulse_width", 3.0)',
+            'params.get("color_mode", 2)',
+            'params.get("dim_beats", 8.0)',
+            'params.get("ember_hold_beats", 8.0)',
+            'params.get("ember_decay_beats", 2.0)',
+            'params.get("sparkle_density", 0.35)',
+            'params.get("sparkle_size", 1.0)',
+            'params.get("sparkle_life_s", 0.8)',
         ]
         for literal in expected_literals:
             self.assertIn(literal, source, literal)
@@ -123,6 +139,22 @@ class LedPadControlDefaultsTests(unittest.TestCase):
         self.assertEqual(CONTROL_META["breath_beats"]["default"], 8.0)
         self.assertEqual(CONTROL_META["drift_beats"]["default"], 32.0)
         self.assertEqual(CONTROL_META["beat_division"]["default"], 1.0)
+        # AWR-156 additions: single global default (shared by every scene_ref
+        # that reads the key).
+        self.assertEqual(CONTROL_META["hz"]["default"], 6.0)
+        self.assertEqual(CONTROL_META["start_width"]["default"], 4.0)
+        self.assertEqual(CONTROL_META["end_width"]["default"], 1.0)
+        self.assertEqual(CONTROL_META["build_beats"]["default"], 16.0)
+        self.assertEqual(CONTROL_META["dim_floor"]["default"], 0.35)
+        self.assertEqual(CONTROL_META["base_width"]["default"], 1.5)
+        self.assertEqual(CONTROL_META["pulse_width"]["default"], 3.0)
+        self.assertEqual(CONTROL_META["color_mode"]["default"], 2)
+        self.assertEqual(CONTROL_META["dim_beats"]["default"], 8.0)
+        self.assertEqual(CONTROL_META["ember_hold_beats"]["default"], 8.0)
+        self.assertEqual(CONTROL_META["ember_decay_beats"]["default"], 2.0)
+        self.assertEqual(CONTROL_META["sparkle_density"]["default"], 0.35)
+        self.assertEqual(CONTROL_META["sparkle_size"]["default"], 1.0)
+        self.assertEqual(CONTROL_META["sparkle_life_s"]["default"], 0.8)
 
         # Divergent-by-scene or never-read-from-params keys: no single global
         # default exists, so the catalog must say "auto" (None), not guess.
@@ -143,6 +175,10 @@ class LedPadControlDefaultsTests(unittest.TestCase):
             "rt_post_drop_nebula": {"travel_beats": 2.0, "width": 0.8},
             "rt_drop_chase": {"travel_beats": 2.0, "width": 0.8},
             "rt_drop_nebula": {"travel_beats": 2.0, "width": 0.8},
+            # AWR-156: the Hz gate's duty fallback (0.3) differs from
+            # beat_strobe's (0.5, the global CONTROL_META default).
+            "drop_white_aggressive": {"duty": 0.3},
+            "drop_strobe_colorway": {"duty": 0.3},
         }
         self.assertEqual(PARAM_DEFAULT_OVERRIDES, expected)
         for scene_ref, overrides in expected.items():

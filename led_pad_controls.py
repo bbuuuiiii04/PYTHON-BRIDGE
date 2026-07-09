@@ -79,6 +79,21 @@ CONTROL_META: dict[str, dict[str, Any]] = {
     "bg": _meta("Background Color", "rgb", help="Fixed RGB background color."),
     "color_a": _meta("Color A", "rgb", help="First fixed RGB color."),
     "color_b": _meta("Color B", "rgb", help="Second fixed RGB color."),
+    # AWR-156 additions.
+    "hz": _meta("Strobe Hz", "number", min=0.5, max=10, step=0.1, help="Real-time strobe rate (BPM-free).", default=6.0),
+    "start_width": _meta("Start Width", "number", min=0.3, max=8, step=0.1, help="Head width at the start of the build.", advanced=True, default=4.0),
+    "end_width": _meta("End Width", "number", min=0.3, max=8, step=0.1, help="Head width at the end of the build.", advanced=True, default=1.0),
+    "build_beats": _meta("Build Beats", "number", min=1, max=64, step=1, help="How many beats the build takes.", default=16.0),
+    "dim_floor": _meta("Dim Floor", "number", min=0.05, max=1, step=0.05, help="The dimmest brightness the build reaches.", default=0.35),
+    "base_width": _meta("Base Width", "number", min=0.3, max=6, step=0.1, help="Resting head width between beats.", advanced=True, default=1.5),
+    "pulse_width": _meta("Pulse Width", "number", min=0, max=8, step=0.1, help="How much the head widens on each beat.", advanced=True, default=3.0),
+    "color_mode": _meta("Color Mode", "choice", choices=(0, 1, 2, 3), help="How the two heads split across palette slots.", advanced=True, default=2),
+    "dim_beats": _meta("Background Dim Beats", "number", min=0.5, max=32, step=0.5, help="How many beats the background takes to dim to black.", default=8.0),
+    "ember_hold_beats": _meta("Ember Hold Beats", "number", min=0, max=32, step=0.5, help="How many beats embers stay at full brightness.", default=8.0),
+    "ember_decay_beats": _meta("Ember Decay Beats", "number", min=0.25, max=16, step=0.25, help="How many beats embers take to fade out after the hold.", default=2.0),
+    "sparkle_density": _meta("Sparkle Density", "number", min=0, max=0.8, step=0.05, help="How many embers are active at once.", default=0.35),
+    "sparkle_size": _meta("Sparkle Size", "number", min=0.5, max=3, step=0.1, help="How wide each ember appears.", default=1.0),
+    "sparkle_life_s": _meta("Sparkle Life (s)", "number", min=0.1, max=2, step=0.05, help="How many real seconds each ember lives.", default=0.8),
 }
 
 for _key, _entry in CONTROL_META.items():
@@ -98,6 +113,10 @@ PARAM_DEFAULT_OVERRIDES: dict[str, dict[str, Any]] = {
     "rt_post_drop_nebula": {"travel_beats": 2.0, "width": 0.8},
     "rt_drop_chase": {"travel_beats": 2.0, "width": 0.8},
     "rt_drop_nebula": {"travel_beats": 2.0, "width": 0.8},
+    # AWR-156: the Hz gate's duty fallback (0.3) differs from beat_strobe's
+    # (0.5, the global CONTROL_META default).
+    "drop_white_aggressive": {"duty": 0.3},
+    "drop_strobe_colorway": {"duty": 0.3},
 }
 
 
@@ -127,6 +146,7 @@ RENDER_GROUPS: dict[str, tuple[str, ...]] = {
         "rt_groove_nebula",
         "groove_center_chase",
         "groove_center_burst_retract",
+        "rt_groove_heartbeat",
     ),
     "Buildup": (
         "buildup_ramp_1",
@@ -135,6 +155,7 @@ RENDER_GROUPS: dict[str, tuple[str, ...]] = {
         "buildup_white_zone_strobe",
         "buildup_white_half_strobe",
         "buildup_freestyle_nebula",
+        "buildup_balloon_comet",
     ),
     "Drop": (
         "beat_strobe",
@@ -150,6 +171,7 @@ RENDER_GROUPS: dict[str, tuple[str, ...]] = {
         "rt_drop_chase",
         "rt_drop_nebula",
         "rt_drop_center_burst",
+        "drop_strobe_colorway",
     ),
     "Post-drop": (
         "post_drop_chase_blue",
@@ -164,6 +186,7 @@ RENDER_GROUPS: dict[str, tuple[str, ...]] = {
         "rt_post_drop_nebula",
         "rt_post_drop_center_comet",
         "post_drop_firework_chase",
+        "rt_post_drop_firework_remnants",
     ),
 }
 
