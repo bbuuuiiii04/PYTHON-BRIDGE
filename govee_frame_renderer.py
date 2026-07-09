@@ -517,12 +517,10 @@ def _post_drop_nebula(beat: float, segments: int) -> Frame:
 
 
 def _drop_white_aggressive(beat: float, local_t: float, frame_index: int, params: Mapping[str, Any], segments: int, seed: int) -> Frame:
-    # Full-strip pure-white 16th-note strobe with a sharp ~25% duty cycle (1 frame ON).
-    # To prevent dropped frames at 40fps, we use a 16th-note cycle (0.25 beats) 
-    # and keep the ON time very short (0.0625 beats, which is ~1 frame).
-    # This guarantees a reliable, punchy, dark strobe effect.
-    # Cue length is owned by the bridge's drop window.
-    strobe_on = (beat % 0.25) < 0.0625
+    # AWR-156: Hz-based, frame-timing-aware strobe (AWR-153 binding ruling —
+    # time-based, never beat/BPM-subdivided). Defaults hz 6.0 / duty 0.3, the
+    # accepted reference feel. Cue length is owned by the bridge's drop window.
+    strobe_on = _hz_strobe_on(local_t, params)
     return _empty(segments, (255, 255, 255) if strobe_on else (0, 0, 0))
 
 
@@ -1008,6 +1006,10 @@ for _k in list(REALTIME_EFFECT_PARAM_KEYS):
 for _k in ("groove_chase_blue", "groove_chase_cyan", "groove_chase_red",
            "groove_chase_green", "groove_chase_cyan_white"):
     REALTIME_EFFECT_PARAM_KEYS[_k] = REALTIME_EFFECT_PARAM_KEYS[_k] | frozenset({"color"})
+# AWR-156: the rebuilt Hz-based strobe gate reads hz/duty.
+REALTIME_EFFECT_PARAM_KEYS["drop_white_aggressive"] = (
+    REALTIME_EFFECT_PARAM_KEYS["drop_white_aggressive"] | frozenset({"hz", "duty"})
+)
 
 _OVERLAP_EFFECTS = frozenset({
     "groove_chase_blue", "groove_chase_cyan", "groove_chase_red",
