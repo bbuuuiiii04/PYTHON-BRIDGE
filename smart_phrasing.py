@@ -45,6 +45,10 @@ class SmartPhrasingSnapshot:
     # AWR-170 (D.2): laser blackout beats before every chorus phrase start. 0 ⇒
     # feature off (no arm flags ever); the caller gates F2-off/scripted/no-plan to 0.
     pre_chorus_beats: float = 0.0
+    # AWR-179 D2-F1 (OLC-B): beats-before-drop at which the pre-drop dark window
+    # releases EARLY (the F2 floor-return abort). 0.0 ⇒ no early release, byte-
+    # identical to before; the caller gates F2-off/scripted/no-plan/no-abort to 0.0.
+    transition_release_beats: float = 0.0
 
 @dataclass(frozen=True)
 class SmartPhrasingState:
