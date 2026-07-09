@@ -271,6 +271,31 @@ contracts:
       - Laser Pad dry-run test-fire does not prove laser hardware behavior
       - non-loopback binding is a deliberate operator exposure decision
 
+  usb_launcher:
+    code_globs:
+      - usb_launcher*.py
+      - launch_profile*.py
+      - packaging/**
+      - scripts/ss_bridge_watcher.sh
+    inspect:
+      - docs/plans/active/usb_bridge_launcher_design.md
+      - docs/plans/active/usb_bridge_launcher_m1_codex_spec.md
+      - docs/architecture/doc_index.md
+    tests:
+      - python3 -m unittest tests.test_launch_profile
+      - python3 -m unittest tests.test_usb_launcher
+      - python3 -m unittest discover tests
+      - python3 tools/check_docs_metadata.py
+      - python3 tools/check_agent_contracts.py
+      - python3 tools/check_docs_drift.py
+    docs_update:
+      - docs/plans/active/usb_bridge_launcher_design.md
+      - docs/status/active_work_registry.md
+      - docs/validation/software_test_inventory.md
+    forbidden_assumptions:
+      - A PyInstaller software build proves packaging only, never that a bundled bridge's memory reads or lighting hardware behave identically to a source run
+      - The bundle launch profile must be verified byte-identical to the watcher env set from code, never assumed from docs
+
   laser:
     code_globs:
       - laser_config.py
