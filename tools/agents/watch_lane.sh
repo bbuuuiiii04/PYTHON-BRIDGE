@@ -28,7 +28,10 @@ while :; do
   fi
   sleep "$INTERVAL"
   cur=$(tmux capture-pane -p -t "$SESSION" -S -40 2>/dev/null)
-  if [[ -n "$SENTINEL" ]] && grep -qE "$SENTINEL" <<<"$cur"; then
+  # pane sentinel is a FALLBACK: skip while the dispatch echo is on screen
+  # ("print exactly" / "COMPLETION SIGNAL"), which false-fires it (2026-07-09).
+  if [[ -n "$SENTINEL" ]] && ! grep -qE 'print exactly|COMPLETION SIGNAL' <<<"$cur" \
+     && grep -qE "$SENTINEL" <<<"$cur"; then
     echo "SENTINEL-HIT $SESSION"
     tail -30 <<<"$cur"
     exit 0
@@ -37,10 +40,16 @@ while :; do
     [[ "$cur" != "$init" ]] && WAITBUSY=0
     continue
   fi
+  # idle = 3+ consecutive identical captures (2 catches long thinking stretches)
   if [[ -n "$prev" && "$cur" == "$prev" ]]; then
-    echo "IDLE $SESSION"
-    tail -25 <<<"$cur"
-    exit 0
+    idle_count=$((${idle_count:-0} + 1))
+    if (( idle_count >= 2 )); then
+      echo "IDLE $SESSION"
+      tail -25 <<<"$cur"
+      exit 0
+    fi
+  else
+    idle_count=0
   fi
   prev="$cur"
 done

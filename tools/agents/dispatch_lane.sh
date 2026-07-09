@@ -14,8 +14,12 @@ SIG=/tmp/rbss_lane_signals; mkdir -p "$SIG"
 rm -f "$SIG/$SESSION.$TAG.done" "$SIG/$SESSION.$TAG.blocked"
 
 if tmux has-session -t "$SESSION" 2>/dev/null; then
-  # hands-off: abort if a human (or ghost-free text) sits at the prompt
-  if tmux capture-pane -p -t "$SESSION" -S -3 | grep -E '^❯ .*[^ ]' >/dev/null; then
+  # hands-off: abort if a human sits mid-thought at the prompt. Only the LAST
+  # prompt line counts (older ❯ lines are transcript echoes), and a bare
+  # slash-command echo like "/clear" is not typed text (2026-07-09 field bug).
+  LASTPROMPT=$(tmux capture-pane -p -t "$SESSION" -S -5 | grep '^❯' | tail -1)
+  if [[ -n "$LASTPROMPT" ]] && echo "$LASTPROMPT" | grep -qE '^❯ +[^ ]' \
+     && ! echo "$LASTPROMPT" | grep -qE '^❯ +/[a-z-]+ *$'; then
     echo "ABORT: typed text at $SESSION prompt — hands off"; exit 1
   fi
 else
