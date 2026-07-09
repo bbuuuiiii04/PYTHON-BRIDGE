@@ -558,6 +558,37 @@ def _drop_strobe_colorway(beat: float, local_t: float, frame_index: int, params:
     return _empty(segments, color_a if flash_idx % 2 == 0 else color_b)
 
 
+def _buildup_balloon_comet(beat: float, local_t: float, frame_index: int, params: Mapping[str, Any], segments: int, seed: int) -> Frame:
+    """AWR-156: accepted buildup balloon comet (ported from the lab) — dual-
+    head chase whose head width lerps start_width->end_width over
+    build_beats with brightness falling to dim_floor (the room tightens and
+    darkens into the drop; the explosion is the drop look's own job). Heads
+    use the peak-normalized weight helper (_head_weights). Not a strobe."""
+    seg = max(0, int(segments))
+    cue_beat = _edm_beat(beat, params)
+    start_w = max(0.3, min(8.0, float(params.get("start_width", 4.0))))
+    end_w = max(0.3, min(8.0, float(params.get("end_width", 1.0))))
+    build_beats = max(1.0, float(params.get("build_beats", 16.0)))
+    dim_floor = max(0.05, min(1.0, float(params.get("dim_floor", 0.35))))
+    loop_beats = max(0.001, float(params.get("loop_beats", 4.0)))
+    color = _color(params.get("color"), (255, 255, 255))
+
+    progress = max(0.0, min(1.0, cue_beat / build_beats))
+    width = start_w + (end_w - start_w) * progress
+    level = 1.0 - (1.0 - dim_floor) * progress
+
+    acc = [[0.0, 0.0, 0.0] for _ in range(seg)]
+    pos1 = ((cue_beat / loop_beats) % 1.0) * seg
+    pos2 = (((cue_beat + loop_beats / 2.0) / loop_beats) % 1.0) * seg
+    for pos in (pos1, pos2):
+        for idx, w in _head_weights(pos, width, seg).items():
+            amount = w * level
+            acc[idx][0] += color[0] * amount
+            acc[idx][1] += color[1] * amount
+            acc[idx][2] += color[2] * amount
+    return [(_clamp_channel(r), _clamp_channel(g), _clamp_channel(b)) for r, g, b in acc]
+
+
 def _post_drop_white_shatter(beat: float, local_t: float, frame_index: int, params: Mapping[str, Any], segments: int, seed: int) -> Frame:
     # Per-frame full-white stroboscopic static. Each pixel is independently
     # re-randomized every render frame (keyed on frame_index) for a true
@@ -1839,6 +1870,120 @@ def _baked_breakdown_star_twinkle_sand(beat: float, local_t: float, frame_index:
     return frame
 
 
+def _slot_rt_groove_heartbeat(beat: float, local_t: float, frame_index: int,
+                              params: Mapping[str, Any], segments: int, seed: int) -> MotionField:
+    """AWR-156: accepted heartbeat groove (ported from the lab
+    groove_heartbeat_chase) — dual-head chase whose heads expand instantly on
+    every beat then contract exponentially. Peak-normalized heads
+    (_head_weights, the 0.53x dip fix). Engine-palette-fed via slots;
+    color_mode selects which slots the heads write into: 0 = both heads
+    slot 1; 1 = each head's own weight split slot1/slot3 by strip position
+    (t = pos/segments); 2 (default) = head1->slot1, head2->slot3 (matches
+    the accepted red+white feel); 3 = within each head, weight splits
+    core->edge between slot1 (core) and slot3 (edge). Slots 0-4 only; slot 5
+    stays white-reserved. Not a strobe."""
+    seg = max(0, int(segments))
+    cue_beat = _edm_beat(beat, params)
+    base_width = max(0.3, min(6.0, float(params.get("base_width", 1.5))))
+    pulse_width = max(0.0, min(8.0, float(params.get("pulse_width", 3.0))))
+    decay = max(0.05, min(1.0, float(params.get("decay", 0.30))))
+    loop_beats = max(0.001, float(params.get("loop_beats", 4.0)))
+    color_mode = int(max(0.0, min(3.0, float(params.get("color_mode", 2)))))
+
+    beat_frac = cue_beat % 1.0
+    width = base_width + pulse_width * math.exp(-beat_frac / decay)
+
+    field = _empty_motion_field(seg)
+    pos1 = ((cue_beat / loop_beats) % 1.0) * seg
+    pos2 = (((cue_beat + loop_beats / 2.0) / loop_beats) % 1.0) * seg
+    for head_i, pos in enumerate((pos1, pos2)):
+        for idx, w in _head_weights(pos, width, seg).items():
+            if color_mode == 0:
+                field[idx][1] = min(1.0, field[idx][1] + w)
+            elif color_mode == 1:
+                t = pos / max(1, seg)
+                field[idx][1] = min(1.0, field[idx][1] + w * (1.0 - t))
+                field[idx][3] = min(1.0, field[idx][3] + w * t)
+            elif color_mode == 3:
+                field[idx][1] = min(1.0, field[idx][1] + w * w)
+                field[idx][3] = min(1.0, field[idx][3] + w * (1.0 - w))
+            else:
+                slot = 1 if head_i == 0 else 3
+                field[idx][slot] = min(1.0, field[idx][slot] + w)
+    return field
+
+
+def _ember_field(local_t: float, segments: int, seed: int, *,
+                 density: float, size: float, life_s: float, num_slots: int = 5) -> MotionField:
+    """AWR-156: time-based sparkle field (ported from the lab _ember_field —
+    sparkles are continuous/time-based, never beat-tied; replaces the
+    diagnosed ~17 Hz synchronized whole-field re-roll flicker). Each ember
+    lives an independent cycle: sine fade-in/out over life_s seconds, a
+    personal gap, a fresh position + slot each cycle. Writes into MotionField
+    slots 0..num_slots-1 (palette-fed, not baked colors)."""
+    seg = max(0, int(segments))
+    field = _empty_motion_field(seg)
+    if seg == 0 or density <= 0.0:
+        return field
+    t = max(0.0, float(local_t))
+    n = max(1, int(seg * density / max(0.5, size)))
+    for k in range(n):
+        slot_rng = _rng(seed, "ember", k)
+        life = life_s * slot_rng.uniform(0.7, 1.3)
+        gap = life * slot_rng.uniform(0.2, 0.8)
+        period = life + gap
+        phase = slot_rng.uniform(0.0, period)
+        cycle_pos = (t + phase) % period
+        if cycle_pos >= life:
+            continue
+        cycle_idx = int((t + phase) / period)
+        cyc_rng = _rng(seed, "ember", k, cycle_idx)
+        center = cyc_rng.uniform(0, seg)
+        slot = cyc_rng.randrange(max(1, num_slots))
+        env = math.sin(math.pi * cycle_pos / life) * cyc_rng.uniform(0.6, 1.0)
+        for idx in range(seg):
+            w = max(0.0, 1.0 - (_distance_on_ring(idx, center, seg) / size))
+            if w > 0.0:
+                field[idx][slot] = min(1.0, field[idx][slot] + w * env)
+    return field
+
+
+def _slot_rt_post_drop_firework_remnants(beat: float, local_t: float, frame_index: int,
+                                         params: Mapping[str, Any], segments: int, seed: int) -> MotionField:
+    """AWR-156: accepted firework remnants (ported from the lab
+    post_drop_firework_remnants) — slot-5 zone-tinted white background
+    dimming 1.0->0 over dim_beats; time-based embers (_ember_field) hold full
+    until ember_hold_beats then decay linearly to 0 over ember_decay_beats
+    (accepted 8+2, done by beat 10). Embers write only slots 0-4; background
+    is the only slot-5 writer among this cue's own layers. Not a strobe
+    (embers fade on sine envelopes)."""
+    seg = max(0, int(segments))
+    cue_beat = _edm_beat(beat, params)
+    dim_beats = max(0.5, float(params.get("dim_beats", 8.0)))
+    hold_beats = max(0.0, float(params.get("ember_hold_beats", 8.0)))
+    decay_beats = max(0.25, float(params.get("ember_decay_beats", 2.0)))
+    density = max(0.0, min(0.8, float(params.get("sparkle_density", 0.35))))
+    size = max(0.5, min(3.0, float(params.get("sparkle_size", 1.0))))
+    life_s = max(0.1, min(2.0, float(params.get("sparkle_life_s", 0.8))))
+
+    dim = max(0.0, 1.0 - cue_beat / dim_beats)
+    if cue_beat <= hold_beats:
+        ember_level = 1.0
+    else:
+        ember_level = max(0.0, 1.0 - (cue_beat - hold_beats) / decay_beats)
+
+    field = _empty_motion_field(seg)
+    for idx in range(seg):
+        field[idx][5] = dim
+    if ember_level > 0.0:
+        embers = _ember_field(local_t, seg, seed, density=density, size=size, life_s=life_s)
+        for idx in range(seg):
+            for slot in range(5):
+                if embers[idx][slot] > 0.0:
+                    field[idx][slot] = min(1.0, field[idx][slot] + embers[idx][slot] * ember_level)
+    return field
+
+
 # Slot effects return a MotionField (per-pixel slot intensities) instead of a
 # Frame.  render() routes these through universal_colorizer with the injected
 # slot_colors palette.  M2.5 adds generic slotized realtime cues alongside the
@@ -1858,6 +2003,8 @@ SLOT_EFFECTS: dict[str, SlotEffectFn] = {
     "post_drop_firework_chase": _slot_post_drop_firework_chase,
     "breakdown_full_breathing": _slot_breakdown_full_breathing,
     "breakdown_star_twinkle": _slot_breakdown_star_twinkle,
+    "rt_groove_heartbeat": _slot_rt_groove_heartbeat,
+    "rt_post_drop_firework_remnants": _slot_rt_post_drop_firework_remnants,
 }
 
 # ---------------------------------------------------------------------------
@@ -1873,6 +2020,10 @@ _EFFECTS["breakdown_star_twinkle_sand"] = _baked_breakdown_star_twinkle_sand
 
 # AWR-156: fixed-colorway strobe family rides the Hz gate; baked (no palette).
 _EFFECTS["drop_strobe_colorway"] = _drop_strobe_colorway
+
+# AWR-156: accepted buildup balloon comet promotion; baked (no palette, buildup
+# language is white by design). Not a strobe.
+_EFFECTS["buildup_balloon_comet"] = _buildup_balloon_comet
 
 # Phase-2b config validation must accept slot cues + the baked sand name.
 REALTIME_EFFECT_NAMES = frozenset(_EFFECTS.keys() | SLOT_EFFECTS.keys())
@@ -1915,6 +2066,10 @@ _M2_PHASE2A_PARAM_KEYS: dict[str, frozenset[str]] = {
     "rt_twinkle": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
     "drop_strobe_colorway": (
         frozenset({"color_a", "color_b", "hz", "duty", "duration_beats"}) | _SYNC_PARAM_KEYS
+    ),
+    "buildup_balloon_comet": (
+        frozenset({"start_width", "end_width", "build_beats", "dim_floor",
+                   "loop_beats", "color", "duration_beats"}) | _SYNC_PARAM_KEYS
     ),
 }
 for _name, _keys in _M2_PHASE2A_PARAM_KEYS.items():

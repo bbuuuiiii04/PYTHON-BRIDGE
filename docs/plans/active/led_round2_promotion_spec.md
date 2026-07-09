@@ -285,6 +285,39 @@ Pure seams, no disk/subprocess:
    from drop; their drop_pairs entries gone; `step_within_section.groove`
    still true).
 
+### Task 9 (ADDENDUM, operator refinement 2026-07-08 late — implement between Tasks 7 and 8) - narrow the slot-5 zone tint to NEBULA COMETS ONLY
+
+Operator taste ruling: the zone-tinted slot-5 white applies to **nebula
+comets only**. Firework bursts and twinkle-star whites keep BAKED pure white.
+
+- Mechanism (single site, covers bridge + pad + lab injection paths alike):
+  add a module-level `BAKED_WHITE_SLOT5_EFFECTS = frozenset({"post_drop_firework_chase"})`
+  next to `SLOT_EFFECTS`; in `GoveeFrameRenderer.render()`'s slot path, right
+  where `slot_colors` is resolved (`govee_frame_renderer.py:1927-1929` at
+  spec-verification HEAD), when `str(name) in BAKED_WHITE_SLOT5_EFFECTS` and
+  the palette has ≥ 6 entries, replace index 5 with the literal
+  `(255, 255, 255)` before colorizing. Document on the set: future
+  twinkle-star white accents belong here too (none write slot 5 today —
+  knob #8 removed the breakdown stars' white; `_slot_twinkle` never had it).
+- Nebula white comets (`rt_drop_nebula` / `rt_post_drop_nebula` slot-5
+  writes) are deliberately NOT in the set — they read the zone tint once the
+  operator mirrors. The example-config `slot5_white` zone tints STAY (nebulas
+  are their consumer now).
+- Boundary note (executive visibility): this spec's new
+  `rt_post_drop_firework_remnants` uses slot 5 as its dimming BACKGROUND —
+  that is a background, not a white accent, and the refinement did not name
+  it; it stays zone-tinted. If the operator wants it pure, it is a one-line
+  addition to the set.
+- Knob #8 stands (no random white breakdown stars) — but the operator
+  summary MUST carry the flag: one line (re-adding a white entry to the
+  star-twinkle slot range or the baked set) restores occasional baked-white
+  breakdown stars if he wants them back.
+- Tests: firework-chase burst pixels render literal pure white under a
+  fully-tinted injected palette; nebula white comets render the injected
+  slot-5 tint; remnants background renders the tint.
+- T8 registry text must include: "knob #3 refined — tint scope narrowed to
+  nebula whites by operator taste 2026-07-08 late."
+
 ### Task 8 - Contract docs (final commit)
 
 `led_govee` + `config_schema` contracts (`docs/agents/change_contracts.yml`):
@@ -304,10 +337,10 @@ if claims touched), `docs/agents/task_playbooks/change_led_govee_behavior.md`,
 
 - The 200 Hz push loop and the runner thread gain no blocking I/O; the EMA is
   arithmetic on already-taken timestamps.
-- Slot vectors stay exactly 6; slot 5 stays white-reserved (zone-tinted) —
-  the heartbeat and knob-#4 rewrites write only slots 0-4; nebula white
-  comets and remnants background are the only slot-5 writers among touched
-  cues.
+- Slot vectors stay exactly 6; slot 5 stays white-reserved — zone-tinted for
+  NEBULA COMETS and the remnants background, baked pure white for effects in
+  `BAKED_WHITE_SLOT5_EFFECTS` (Task 9); the heartbeat and knob-#4 rewrites
+  write only slots 0-4.
 - An un-mirrored live config renders identically to today for every look
   whose entry it defines (all new params live in the EXAMPLE config; the
   live config lacks them → renderer defaults reproduce current behavior
