@@ -97,19 +97,24 @@ class EnvelopeTests(unittest.TestCase):
         self.assertGreater(jumped.mix, 0.0)                       # floods
         self.assertAlmostEqual(jumped.dim, CFG.dim_floor, places=6)  # and drains
 
-    def test_release_after_fire_fades_mix_and_dim_together(self) -> None:
+    def test_release_after_fire_is_sequential_flood_then_brightness(self) -> None:
+        # AWR-173 re-bloom fix: after firing, release is SEQUENTIAL, not concurrent. The
+        # moment the knob drops below thr the overlay latches released; while the flood is
+        # still up dim HOLDS at the floor and the flood drains to 0, and only THEN does
+        # brightness rise. (The old behavior ramped mix and dim together and flared the
+        # flood color back mid-release from a dark room.)
         fired = cfx_sweep_envelope(0.9, CfxEnvState(), 1.0, CFG)  # mix 1, dim floor, fired
-        # knob 0.74 is below thr 0.75: the moment it drops below thr the overlay latches
-        # released and mix + dim fade back together over release_ramp_ms.
-        half = cfx_sweep_envelope(0.74, fired, CFG.release_ramp_ms / 2000.0, CFG)
-        self.assertAlmostEqual(half.mix, 0.5, places=6)          # 1.0 -> 0.5 over half the ramp
-        self.assertAlmostEqual(
-            half.dim, CFG.dim_floor + 0.5 * (1.0 - CFG.dim_floor), places=6
-        )                                                        # floor -> 1 over the same ramp
+        half = cfx_sweep_envelope(0.74, fired, CFG.release_ramp_ms / 2000.0, CFG)  # below thr
         self.assertTrue(half.released)                           # one-way release latched
-        full = cfx_sweep_envelope(0.74, fired, CFG.release_ramp_ms / 1000.0, CFG)
-        self.assertEqual(full.mix, 0.0)
-        self.assertEqual(full.dim, 1.0)
+        self.assertAlmostEqual(half.mix, 0.5, places=6)          # flood draining 1.0 -> 0.5
+        self.assertAlmostEqual(half.dim, CFG.dim_floor, places=6)  # dim HELD (not risen) while mix > 0
+        # A full-ramp step from mix 0.5 finishes draining the flood; dim still held.
+        zeroed = cfx_sweep_envelope(0.74, half, CFG.release_ramp_ms / 1000.0, CFG)
+        self.assertEqual(zeroed.mix, 0.0)                        # flood fully gone first
+        self.assertAlmostEqual(zeroed.dim, CFG.dim_floor, places=6)  # brightness has NOT started rising
+        # Only now, with the flood already 0, does brightness rise back to 1.0.
+        restored = cfx_sweep_envelope(0.74, zeroed, CFG.release_ramp_ms / 1000.0, CFG)
+        self.assertEqual((restored.mix, restored.dim), (0.0, 1.0))
 
     def test_return_ride_parked_above_deadband_stays_released(self) -> None:
         # Operator return-ride ruling: after firing, the moment the knob drops below thr
@@ -158,6 +163,65 @@ class EnvelopeTests(unittest.TestCase):
             self.assertLessEqual(st.mix, prev_mix + 1e-9, msg=f"knob={knob} re-bloomed")
             prev_mix = st.mix
         self.assertTrue(st.released)   # a sub-thr jitter tick latched the one-way release
+
+    def test_release_from_drained_never_flares(self) -> None:
+        # Leg 1: from a fully-drained (dark) room, releasing must NOT flare the flood color
+        # back mid-release. The OLD concurrent ramp peaked mix*dim ~0.27 halfway through the
+        # release; the sequential release keeps the visible product monotonically
+        # non-increasing and never above the drained floor until the flood is fully gone,
+        # then brightness rises alone. (Numeric: old peak ~0.27 vs held <= dim_floor 0.08.)
+        drained = cfx_sweep_envelope(0.9, CfxEnvState(), 1.0, CFG)   # mix 1, dim floor, fired
+        self.assertEqual(drained.mix, 1.0)
+        self.assertAlmostEqual(drained.dim, CFG.dim_floor, places=6)
+        st = drained
+        prev_product = drained.mix * drained.dim
+        saw_mix_zero = False
+        for _ in range(400):                        # 400 * 5ms = 2s >> 2x release_ramp
+            st = cfx_sweep_envelope(0.6, st, 0.005, CFG)   # engaged, below thr -> released
+            self.assertTrue(st.released)
+            product = st.mix * st.dim
+            if st.mix > 0.0:
+                # phase A: flood draining under a HELD dark dim — product only falls, no flare
+                self.assertLessEqual(product, CFG.dim_floor + 1e-9)
+                self.assertLessEqual(product, prev_product + 1e-9)
+                self.assertAlmostEqual(st.dim, CFG.dim_floor, places=6)   # dim held while mix > 0
+            else:
+                saw_mix_zero = True
+            prev_product = product
+        self.assertTrue(saw_mix_zero)
+        self.assertEqual((st.mix, st.dim), (0.0, 1.0))  # ends neutral: flood gone, brightness back
+
+    def test_idle_from_drained_never_flares(self) -> None:
+        # Same anti-flare property when the knob drops STRAIGHT to neutral in one tick from a
+        # drained fire (enters IDLE with dim at the floor). Sequential release, no flare.
+        drained = cfx_sweep_envelope(0.9, CfxEnvState(), 1.0, CFG)   # mix 1, dim floor, fired
+        st = drained
+        prev_product = drained.mix * drained.dim
+        saw_mix_zero = False
+        for _ in range(400):
+            st = cfx_sweep_envelope(0.3, st, 0.005, CFG)   # neutral -> IDLE branch, re-armed
+            self.assertFalse(st.fired or st.released)       # neutral clears the engagement
+            product = st.mix * st.dim
+            if st.mix > 0.0:
+                self.assertLessEqual(product, CFG.dim_floor + 1e-9)
+                self.assertLessEqual(product, prev_product + 1e-9)
+                self.assertAlmostEqual(st.dim, CFG.dim_floor, places=6)
+            else:
+                saw_mix_zero = True
+            prev_product = product
+        self.assertTrue(saw_mix_zero)
+        self.assertEqual((st.mix, st.dim), (0.0, 1.0))
+
+    def test_never_fired_release_dim_stays_one(self) -> None:
+        # A sub-threshold (never-fired) flood releasing: dim is already 1.0, so the sequential
+        # release is byte-identical to the old concurrent ramp — dim never leaves 1.0, mix fades.
+        flooded = cfx_sweep_envelope(0.70, CfxEnvState(), CFG.flood_ramp_ms / 1000.0, CFG)
+        self.assertEqual((flooded.mix, flooded.dim, flooded.fired), (1.0, 1.0, False))
+        st = flooded
+        for _ in range(400):
+            st = cfx_sweep_envelope(0.3, st, 0.005, CFG)   # back to neutral
+            self.assertEqual(st.dim, 1.0)                   # dim never leaves 1.0
+        self.assertEqual((st.mix, st.dim), (0.0, 1.0))
 
     def test_dt_zero_holds_and_is_safe(self) -> None:
         st = cfx_sweep_envelope(0.9, CfxEnvState(mix=0.3, dim=0.6), 0.0, CFG)
@@ -238,18 +302,30 @@ class DispatchGatingTests(unittest.TestCase):
         ns = _sm_ns(CFG, self._engaged_snapshot(now), breakdown=True)
         self.assertIsNone(_compute(ns, 1, now))
 
-    def test_smart_drop_tactical_blackout_is_inert_and_resets_state(self) -> None:
-        # HIGH review fix: the pre-drop tactical blackout sets NO blackout owner and
-        # NO breakdown flag, yet the room is meant to be pure black. A non-empty
-        # _led_smart_drop_blackout_key must force the sweep inert AND hard-reset the
-        # envelope state (fired/released/mix/dim), or the dark-hue flood re-lights F2's
-        # intended-black drop moment.
+    def test_smart_drop_tactical_blackout_is_inert_and_latches_released(self) -> None:
+        # The pre-drop tactical blackout sets NO blackout owner and NO breakdown flag, yet
+        # the room is meant to be pure black. A non-empty _led_smart_drop_blackout_key forces
+        # the sweep OUTPUT inert (mix 0, dim 1, tuple None) so the dark-hue flood can't light
+        # F2's intended-black drop moment. AWR-173 Leg 2 correction: a FIRED engagement comes
+        # back LATCHED-RELEASED (not full-neutral) — the output is still zeroed, but the trigger
+        # stays disarmed so the flood does NOT re-bloom on the healthy tick after the blackout
+        # lifts; it re-arms only when the knob returns to neutral.
         now = 100.0
         ns = _sm_ns(CFG, self._engaged_snapshot(now), smart_drop_blackout="d1@480.0")
         ns._led_cfx_last_mono = now - 1.0
         ns._led_cfx_state = CfxEnvState(mix=0.7, dim=0.3, fired=True)  # mid-drain
         self.assertIsNone(_compute(ns, 1, now))
-        self.assertEqual(ns._led_cfx_state, CfxEnvState())   # neutral: mix 0, dim 1, not fired
+        self.assertEqual(ns._led_cfx_state, CfxEnvState(fired=True, released=True))  # zeroed output, latched
+
+    def test_smart_drop_blackout_never_fired_resets_clean(self) -> None:
+        # A blip over a PRE-FIRE flood (never fired) resets clean — knob-state behavior, so a
+        # still-engaged pre-fire flood may resume when the mask lifts (correct, not a re-bloom).
+        now = 100.0
+        ns = _sm_ns(CFG, self._engaged_snapshot(now), smart_drop_blackout="d1@480.0")
+        ns._led_cfx_last_mono = now - 1.0
+        ns._led_cfx_state = CfxEnvState(mix=0.4, dim=1.0, fired=False)  # pre-fire flood
+        self.assertIsNone(_compute(ns, 1, now))
+        self.assertEqual(ns._led_cfx_state, CfxEnvState())   # full neutral: nothing fired to latch
 
     def test_sweep_resumes_when_tactical_blackout_clears(self) -> None:
         # Key cleared (== "") on the same engaged input: the sweep floods again.
