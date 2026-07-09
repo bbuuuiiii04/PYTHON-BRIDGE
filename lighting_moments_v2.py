@@ -827,6 +827,31 @@ def transition_window_for(plan: Optional[F2TrackPlan], abs_beat: Optional[float]
     return float(dark.beats) if dark.kind in ("blackout", "perc-flick") else 0.0
 
 
+def transition_release_for(plan: Optional[F2TrackPlan], abs_beat: Optional[float],
+                           smart_drop_beats: Sequence[float]) -> float:
+    """Beats-before-drop at which pre-drop darkness releases early (OLC-B abort),
+    for the next upcoming drop. 0.0 = no early release (identical to today).
+
+    Same next-upcoming-drop selection as `transition_window_for`. Only a
+    `blackout` darkness with a computed `abort_at` releases early; every other
+    case (no plan, no abs_beat, no upcoming drop, no entry, balloon/dip/snap/
+    perc-flick, or abort_at None) returns 0.0. The release bound is expressed as
+    beats-before-drop = drop_beat - abort_at (abort_at is an absolute beat, so
+    abort_at == window start ⇒ release == window length ⇒ zero dark beats)."""
+    if plan is None or abs_beat is None:
+        return 0.0
+    upcoming = [b for b in smart_drop_beats if b >= abs_beat]
+    if not upcoming:
+        return 0.0
+    entry = plan.for_drop(min(upcoming))
+    if entry is None:
+        return 0.0
+    dark = entry.decision.darkness
+    if dark.kind != "blackout" or dark.abort_at is None:
+        return 0.0
+    return float(entry.drop_beat - dark.abort_at)
+
+
 def build_track_plan(v4: SpectralFeaturesV4, drops: Sequence[int],
                      buildups: Sequence[int], *, hotcues: Sequence[int] = (),
                      beatgrid_times_ms: Sequence[float] = ()) -> F2TrackPlan:

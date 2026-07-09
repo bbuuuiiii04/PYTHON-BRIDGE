@@ -5035,6 +5035,16 @@ class StateManager(LEDDispatchPolicyMixin):
         return lighting_moments_v2.transition_window_for(
             getattr(d.meta, "f2_plan", None), abs_beat, smart_drop_beats, default)
 
+    def _f2_transition_release_beats(self, d, abs_beat, smart_drop_beats) -> float:
+        """F2 OLC-B early-release bound for the next drop (AWR-179 D2-F1). IDENTICAL
+        gating to _f2_transition_window_beats: F2 off ⇒ 0.0 (no early release,
+        byte-identical to today); scripted ⇒ 0.0 (v2 stands down); else delegate.
+        Only rides F2's existing enable surface — no new config key."""
+        if not self._f2_enabled or getattr(d, "scripted_id", 0):
+            return 0.0
+        return lighting_moments_v2.transition_release_for(
+            getattr(d.meta, "f2_plan", None), abs_beat, smart_drop_beats)
+
     def _f2_pre_chorus_beats(self, d) -> float:
         """AWR-170 (D.2) pre-chorus laser blackout length for this deck. 0 (feature
         off) unless F2 is on, an f2 plan exists, and the track is NOT scripted (v2
@@ -5092,6 +5102,8 @@ class StateManager(LEDDispatchPolicyMixin):
             phrase_anchor_last_beat=self._os.phrase_anchor_last_beat,
             phrase_anchor_period_beats=PHRASE_ANCHOR_BEATS,
             pre_chorus_beats=self._f2_pre_chorus_beats(d),
+            transition_release_beats=self._f2_transition_release_beats(
+                d, abs_beat_pos if bpm > 0 else None, smart_drop_beats),
         )
         _sp_result = self._smart_phrasing_engine.update(_sp_snapshot)
         _sp_diag = _sp_result.diagnostics[0] if _sp_result.diagnostics else None

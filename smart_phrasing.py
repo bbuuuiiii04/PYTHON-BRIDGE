@@ -415,7 +415,13 @@ class SmartPhrasingEngine:
         new_transition_window_active = False
         if next_smart_drop_beat is not None and beats_to_next_drop is not None:
             if beats_to_next_drop <= snapshot.transition_window_beats:
-                new_transition_window_active = True
+                # OLC-B early release (AWR-179 D2-F1): once within
+                # transition_release_beats of the drop, deactivate the level so
+                # the existing falling edge below clears the mask early. 0.0 ⇒
+                # the guard is a no-op ⇒ byte-identical to before.
+                if (snapshot.transition_release_beats <= 0.0
+                        or beats_to_next_drop > snapshot.transition_release_beats):
+                    new_transition_window_active = True
 
         transition_mask_should_arm = False
         transition_mask_should_clear = False
