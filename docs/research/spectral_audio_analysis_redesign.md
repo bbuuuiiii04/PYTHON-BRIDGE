@@ -972,6 +972,22 @@ unlock if lights ever need it: a frame-rate growl-band *centroid* series (timbre
 an additive schema field + one overnight re-sweep; deferred per the operator's priority
 ruling below.
 
+**LANDED as AWR-176 (implementer p1impl, 2026-07-09; awaiting manager adversarial review +
+executive gate + operator scrub):** the frame-rate growl-band centroid series is now
+extracted and cached, with a pure derived movement measure over it. Additive only — zero
+existing fields or calibration constants changed; pre-AWR-176 entries read the field as
+`()` (no signal) until one overnight re-sweep backfills them. Computed-not-consumed: no
+consumer wired yet (the lowmid_pulse precedent). New schema field:
+
+| Field | Where | Type | Meaning |
+|---|---|---|---|
+| `growl_centroid_frames` | `SpectralFeaturesV4` (v4 cache payload) | `tuple[float, ...]` (Hz, frame-rate) | Spectral centroid of the harmonic growl band (60–500 Hz) per STFT frame — WHERE the growl tone sits, same frame clock as `growl_band_frames`. Absent ⇒ no signal. |
+
+Derived layer (`spectral_profile.py`, pure, no numpy): `growl_centroid_movement_measure`
+(span_oct / dominant c/b / concentration over a 4-beat window) and `growl_centroid_wobble_flags`;
+provisional gates `growl_centroid_min_*` in `SPECTRAL_V4_CALIBRATION` (the only numbers the
+named-track calibration pass may tune).
+
 **Operator rulings from the same session (load-bearing for Feature specs):**
 1. **Phrase markings are authoritative** — setting them correctly is the operator's own
    responsibility (he fixed Girl$'s markers during this session; the fix flowed through

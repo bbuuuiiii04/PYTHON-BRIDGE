@@ -3134,6 +3134,10 @@ class StateManager(LEDDispatchPolicyMixin):
         # Debounce concurrent arm calls
         key = (track_id, deck)
         now = time.monotonic()
+        # AWR-179 D4-F4: prune entries past the debounce window so the map can't
+        # grow one dead key per track-load over a long set. Anything older than
+        # 2.0 s already fails the debounce below, so this is behavior-identical.
+        self._arm_times = {k: v for k, v in self._arm_times.items() if now - v < 2.0}
         if now - self._arm_times.get(key, 0.0) < 2.0:
             log.debug("[SM] arm-debounce  deck=%d  id=%d  age=%.1fs",
                       deck, track_id, now - self._arm_times.get(key, 0.0))

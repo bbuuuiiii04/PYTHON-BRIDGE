@@ -1222,6 +1222,13 @@ class LedColorEngine:
         dressing = self._v2_active_dressing()
         if dressing is None:
             return
+        # ponytail: cap the once-per-identity bloom latch. After 512 distinct
+        # track identities (many hours of mixing) clear it wholesale; the worst
+        # case is one repeated track blooming once more. Bloom is a claim-ranked
+        # color breath, never a mask owner, so an extra bloom has no mask/loop
+        # consequence. Upgrade path if that's ever unwanted: an LRU/OrderedDict.
+        if len(self._v2_bloomed) >= 512:
+            self._v2_bloomed.clear()
         claim = Claim(RANKS["bloom"], now, now + self._v2_cfg.bloom_beats, "bloom")
         if not claim_allowed(claim, self._v2_claims):
             self._v2_bloomed.add(key)

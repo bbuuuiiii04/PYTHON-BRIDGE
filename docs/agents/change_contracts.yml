@@ -670,6 +670,8 @@ contracts:
       - compat_features
       - empty_floor_runs
       - lowmid_pulse_flags
+      - growl_centroid_movement_measure
+      - growl_centroid_wobble_flags
       - section_map
     inspect:
       - docs/research/spectral_audio_analysis_redesign.md
