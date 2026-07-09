@@ -43,9 +43,10 @@ at implementation HEAD before editing.
 6. [confirmed] Reusable lookahead shape: `laser_director.py:567-578` Priority-11 buildup window
    gates on `0 < sp.beats_to_next_drop <= lookahead` — the same countdown pattern (D.2 needs a NEW
    series over chorus markers, not `beats_to_next_drop`, which tracks collapsed decisions).
-7. [assumed → verify at implementation] F4 (in flight at authoring time) does not touch
-   `laser_color_engine.py`, `laser_executor.py`, `smart_rearm.py`, or `config/laser_color_map.json`
-   (its spec scope is LED-side). Confirm with `git log` at dispatch.
+7. [confirmed 2026-07-09 post-F4] F4 landed without touching `laser_color_engine.py`,
+   `laser_executor.py`, `smart_rearm.py`, or `config/laser_color_map.json` (verified by
+   `git log 5506d78..HEAD --name-only` at the F4 review). Part A cites remain valid; still
+   re-verify line numbers at implementation HEAD as standard.
 
 ## Part B - Tasks (in order, one commit each, explicit paths)
 
