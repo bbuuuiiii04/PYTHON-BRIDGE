@@ -267,14 +267,36 @@ Operator pre-play verdicts with executive data verification:
 - "Specific laser cues for certain melodic track elements" (operator idea at
   Shiny 3:12) — stems/P1-era consumer.
 
-### Open anomaly (needs a run-down, not yet a claim)
+### Part J — stale pair-queue (anomaly RESOLVED to a defect class; batch-2)
 
-- 2026-07-09 ~17:19: `rt_drop_firework_explosion` fired; the `paired_post_drop`
-  that followed was `rt_post_drop_white_shatter`, though live `drop_pairs` maps
-  the explosion to `rt_post_drop_firework_remnants` (which fired 29 s later).
-  A `[RGB] adapter-rejected look=rt_post_drop_firework_remnants` WARNING sits ~1
-  min earlier. Question: does adapter rejection reroute pairing, and why was the
-  adapter rejecting? Correlate before touching anything.
+Observed (2026-07-09 17:19, deck 1): `rt_drop_firework_explosion` fired; the
+`paired_post_drop` that followed was `rt_post_drop_white_shatter` — which is the
+configured pair of `rt_drop_white_aggressive`, a look that appears NOWHERE in the
+session log (not even in rejection warnings).
+
+Mechanism (CONFIRMED in code; the specific instance is best-fit, not log-proven):
+- `_queue_paired_post_drop` loads `self._queued_post_drop_look` at DECISION time
+  (`led_look_director.py:481` role-entry path; also `_record_decision` :549) —
+  BEFORE coordinator gates, min-dwell, blackout preemption, or adapter accept.
+- The queue is one director-global slot with no stamp: nothing ties it to the
+  drop/deck/role_key that loaded it, and nothing clears it when the loading
+  decision never dispatches.
+- Drop looks pre-selected by the tactical-blackout machinery (`next_drop=...`)
+  reach dispatch through a path that does not reload the queue.
+- Net effect: a suppressed drop decision's pair can sit stale and be consumed by
+  a LATER unrelated drop's post_drop — an operator-unsanctioned look for that
+  slot (the executive's suspected class, confirmed).
+
+Fix shape: queue the pair only on ACCEPTED drop dispatch (the same place
+`_led_note_drop_decision_accepted` commits identity), stamp it with the drop's
+role_key/anchor, validate the stamp at consumption, and clear it on drop-lifecycle
+reset / track change / deck change. Implementer must first map EVERY writer and
+reader of `_queued_post_drop_look` (role-entry :481, `_record_decision` :549,
+consumption in `_automation_decision_for_role`, any preview path) — the AWR-150
+cloud-takeover identity commit is the reference for "accepted" semantics.
+Related open question folded in: why `rt_post_drop_firework_remnants` drew an
+`adapter-rejected` at 17:18 (min-dwell vs eligibility) — answer it in the same
+round, it may be the queue's trigger in this instance.
 
 ## Round protocol
 
