@@ -1941,6 +1941,17 @@ SLOT_EFFECTS: dict[str, SlotEffectFn] = {
     "rt_post_drop_firework_remnants": _slot_rt_post_drop_firework_remnants,
 }
 
+# AWR-156 Task 9 (operator refinement 2026-07-08 late): the zone-tinted slot-5
+# white applies to NEBULA COMETS ONLY. Firework bursts and future twinkle-star
+# white accents render BAKED pure white instead -- see render()'s slot path,
+# where this set forces slot 5 to (255, 255, 255) before colorizing. Nebula
+# white comets (rt_drop_nebula / rt_post_drop_nebula) are deliberately NOT in
+# this set -- they read the zone tint once the operator mirrors the config.
+# No cue writes a white twinkle-star accent today (knob #8 removed it from
+# breakdown_star_twinkle; _slot_twinkle never had one) -- if one is added
+# later, it belongs in this set too.
+BAKED_WHITE_SLOT5_EFFECTS = frozenset({"post_drop_firework_chase"})
+
 # ---------------------------------------------------------------------------
 # M2 Phase 2a registration (ADDITIVE & C5-aware).  Runs after SLOT_EFFECTS and
 # the baked sand cue are defined so the module-level registry blocks above stay
@@ -2082,6 +2093,11 @@ class GoveeFrameRenderer:
             slot_colors = _slots(safe_params.get("slot_colors"))
             if slot_colors is None:
                 slot_colors = _DEFAULT_SLOT_COLORS
+            # AWR-156 Task 9: baked-white slot-5 effects ignore the injected
+            # zone tint at slot 5 -- their bursts are always pure white.
+            if str(name) in BAKED_WHITE_SLOT5_EFFECTS and len(slot_colors) >= 6:
+                slot_colors = list(slot_colors)
+                slot_colors[5] = (255, 255, 255)
             frame = universal_colorizer(field, slot_colors)
         else:
             effect = _EFFECTS.get(str(name))

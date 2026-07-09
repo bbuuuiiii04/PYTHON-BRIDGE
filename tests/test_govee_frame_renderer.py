@@ -953,5 +953,36 @@ class Knob4MashupDeathTests(unittest.TestCase):
         self.assertTrue(found_split, msg="expected the ordered gradient split to survive untouched")
 
 
+class Task9BakedWhiteSlot5Tests(unittest.TestCase):
+    """AWR-156 Task 9 (operator refinement): slot-5 zone tint narrowed to
+    nebula comets only; firework bursts render baked pure white."""
+
+    _TINT = [(10, 20, 30), (40, 50, 60), (70, 80, 90), (100, 110, 120),
+             (130, 140, 150), (200, 10, 220)]
+
+    def test_firework_chase_burst_pixels_render_literal_pure_white(self) -> None:
+        renderer = GoveeFrameRenderer()
+        # beat 3.5: cue_beat % 4 == 3.5 >= 3 -> the slot-5 white burst window.
+        frame = renderer.render("post_drop_firework_chase", beat_pos=3.5, local_t=0.0,
+                                 frame_index=0, params={"slot_colors": self._TINT}, segments=20, seed=1)
+        self.assertTrue(any(px == (255, 255, 255) for px in frame))
+        self.assertFalse(any(px == self._TINT[5] for px in frame))
+
+    def test_nebula_white_comets_render_the_injected_slot5_tint(self) -> None:
+        renderer = GoveeFrameRenderer()
+        for name in ("rt_drop_nebula", "rt_post_drop_nebula"):
+            with self.subTest(name=name):
+                frame = renderer.render(name, beat_pos=9.5, local_t=0.0, frame_index=0,
+                                         params={"slot_colors": self._TINT}, segments=20, seed=1)
+                self.assertTrue(any(px == self._TINT[5] for px in frame), msg=name)
+                self.assertFalse(any(px == (255, 255, 255) for px in frame), msg=name)
+
+    def test_remnants_background_renders_the_injected_slot5_tint(self) -> None:
+        renderer = GoveeFrameRenderer()
+        frame = renderer.render("rt_post_drop_firework_remnants", beat_pos=0.0, local_t=0.3,
+                                 frame_index=0, params={"slot_colors": self._TINT}, segments=20, seed=1)
+        self.assertTrue(any(px == self._TINT[5] for px in frame))
+
+
 if __name__ == "__main__":
     unittest.main()
