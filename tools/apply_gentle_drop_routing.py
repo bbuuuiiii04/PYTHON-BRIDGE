@@ -3,23 +3,25 @@
 
 Part C of docs/plans/active/rt_phase_ember_visibility_spec_2026_07_09.md.
 
-Two edits, and ONLY these two keys:
-  1. banks.default.drop  — re-add the 8 legacy `drop_diy_*` chases (they were
-     surgically removed in an earlier mirror). Legacy first, then the existing
-     modern looks, no duplicates.
-  2. f2.drop_look_routing — write the full family x tier table:
-       tier 1 (WALL/COMET/HOUSE/NEUTRAL) = 8 legacy chases + the soft rt chase
-         colorways (rt_drop_chase_{blue,cyan,red,green}) that EXIST in looks{};
-       tier 2 + tier 3 = the current modern drop bank (unchanged rotation).
+ONE key is written: f2.drop_look_routing. The banks are NOT touched — they stay
+RT-only, exactly as the operator's standing cloud-disable left them.
 
-Because drop_look_routing NARROWS the bank fail-open (an empty intersection keeps
-the full bank), the legacy names MUST stay in the bank or the tier-1 cell would
-silently no-op — hence edit 1 and edit 2 ship together.
+  f2.drop_look_routing — the full family x tier table:
+    tier 1 (WALL/COMET/HOUSE/NEUTRAL) = the soft rt chase colorways
+      (rt_drop_chase_{blue,cyan,red,green}) that EXIST in looks{};
+    tier 2 + tier 3 = the current modern drop bank (unchanged rotation).
 
-The routing table is a *selection* preference only. Whatever look it steers to
-still dispatches through led_dispatch_coordinator, so the cloud_diy rate-limit /
-min-dwell machinery keeps applying to the legacy cloud looks — this script does
-not touch it.
+The gentle set is RT-ONLY. The 8 legacy `drop_diy_*` chases are CLOUD looks;
+routing low-energy drops to them would resurrect transport fighting on every
+gentle drop (the operator disabled the cloud backend). They are excluded here
+until Template-Lab produces RT recreations of those looks — then the RT
+recreations join tier 1 by name. As a guard, any legacy cloud name that is still
+sitting in the drop bank is also filtered out of tiers 2/3, so this table never
+steers a drop to a cloud look.
+
+The routing table is a *selection* preference only, applied fail-open (an empty
+intersection keeps the full bank). It never touches dispatch, so the
+led_dispatch_coordinator dwell / cooldown machinery is unchanged.
 
 Idempotent: a second run detects the config already matches and writes nothing.
 
@@ -37,9 +39,10 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_CONFIG_PATH = _REPO_ROOT / "config" / "led_look_director.json"
 
-# The 8 legacy DIY drop chases (operator's low-energy-drop rotation), in the
-# canonical order they held in the example config before the mirror removed them.
-LEGACY_8 = [
+# The 8 legacy DIY drop chases — CLOUD looks, excluded from all routing (operator
+# cloud-disable). Kept only as the exclusion set: never re-added to a bank, never
+# routed to. Their eventual replacement is RT recreations from Template Lab.
+LEGACY_CLOUD = [
     "drop_diy_1_red_white_chase",
     "drop_diy_2_cyan",
     "drop_diy_3",
@@ -50,9 +53,9 @@ LEGACY_8 = [
     "drop_diy_rainbow_sparkle",
 ]
 
-# The soft rt chase colorways — the gentle chase class. Included in tier 1 BY NAME
+# The soft rt chase colorways — the RT gentle chase class. tier 1 = these, BY NAME
 # (allow_strobe is a permission flag, not the look's character), dropping only
-# names that are absent from looks{}.
+# names absent from looks{}.
 SOFT_QUARTET = [
     "rt_drop_chase_blue",
     "rt_drop_chase_cyan",
@@ -62,7 +65,7 @@ SOFT_QUARTET = [
 
 FAMILIES = ["WALL", "COMET", "HOUSE", "NEUTRAL"]
 
-_LEGACY_SET = set(LEGACY_8)
+_CLOUD_EXCLUDE = set(LEGACY_CLOUD)
 
 
 def _looks(data: dict) -> dict:
@@ -80,57 +83,48 @@ def _current_drop_bank(data: dict) -> list:
 
 
 def _gentle_quartet(data: dict) -> list:
-    """The soft rt chase colorways for tier 1, BY NAME — allow_strobe is a
-    permission flag, not the look's character. Drops only names absent from
-    looks{}."""
+    """The soft rt chase colorways for tier 1, BY NAME. Drops only names absent
+    from looks{}."""
     looks = _looks(data)
     return [q for q in SOFT_QUARTET if q in looks]
 
 
-def build_target(data: dict) -> tuple[list, dict]:
-    """Pure: compute the target (drop bank, routing table) for this config.
+def build_target(data: dict) -> dict:
+    """Pure: compute the f2.drop_look_routing table for this config.
 
-    Modern set = the current drop bank minus any legacy already present, so the
-    result is stable whether the bank arrives with or without the legacy 8.
+    tier 1 = the RT colorways that exist; tiers 2/3 = the current drop bank with
+    any stray legacy cloud name filtered out (RT-only guard). Banks are not
+    mutated.
     """
-    current = _current_drop_bank(data)
-    modern = [x for x in current if x not in _LEGACY_SET]
-    new_drop = LEGACY_8 + modern
-
-    tier1 = LEGACY_8 + _gentle_quartet(data)
-    routing = {
+    modern = [x for x in _current_drop_bank(data) if x not in _CLOUD_EXCLUDE]
+    tier1 = _gentle_quartet(data)
+    return {
         fam: {"1": list(tier1), "2": list(modern), "3": list(modern)}
         for fam in FAMILIES
     }
-    return new_drop, routing
 
 
 def apply(data: dict) -> bool:
-    """Mutate data in place (banks.default.drop + f2.drop_look_routing only).
+    """Mutate data in place — f2.drop_look_routing ONLY (banks untouched).
 
     Returns True if anything changed, False if already at target (no-op).
     """
-    new_drop, routing = build_target(data)
-
-    banks = data.setdefault("banks", {})
-    default = banks.setdefault("default", {})
+    routing = build_target(data)
     f2 = data.setdefault("f2", {})
-
-    changed = default.get("drop") != new_drop or f2.get("drop_look_routing") != routing
+    changed = f2.get("drop_look_routing") != routing
     if changed:
-        default["drop"] = new_drop
         f2["drop_look_routing"] = routing
     return changed
 
 
 def _summary(data: dict, label: str) -> str:
     drop = _current_drop_bank(data)
-    legacy_present = [n for n in LEGACY_8 if n in drop]
+    legacy_present = [n for n in LEGACY_CLOUD if n in drop]
     routing = data.get("f2", {}).get("drop_look_routing", {})
     fams = sorted(routing.keys()) if isinstance(routing, dict) else []
     lines = [
         f"[{label}] banks.default.drop: {len(drop)} looks "
-        f"({len(legacy_present)}/8 legacy present)",
+        f"({len(legacy_present)} legacy cloud present — bank untouched)",
         f"[{label}] f2.drop_look_routing: {len(fams)} families {fams}",
     ]
     if isinstance(routing, dict):
@@ -159,7 +153,7 @@ def main(argv: list[str]) -> int:
 
     print(_summary(data, "before"))
     quartet = _gentle_quartet(data)
-    print(f"[info] tier-1 gentle set = 8 legacy chases + {len(quartet)} soft quartet {quartet}")
+    print(f"[info] tier-1 gentle set = {len(quartet)} rt colorways {quartet} (RT-only; no cloud)")
 
     changed = apply(data)
     if not changed:

@@ -393,14 +393,6 @@
     "drop_look_routing": {
       "WALL": {
         "1": [
-          "drop_diy_1_red_white_chase",
-          "drop_diy_2_cyan",
-          "drop_diy_3",
-          "drop_diy_4_blue_cyan",
-          "drop_diy_5_red",
-          "drop_diy_green_sparkle",
-          "drop_diy_pink_red_sparkle",
-          "drop_diy_rainbow_sparkle",
           "rt_drop_chase_blue",
           "rt_drop_chase_cyan",
           "rt_drop_chase_red",
@@ -437,14 +429,6 @@
       },
       "COMET": {
         "1": [
-          "drop_diy_1_red_white_chase",
-          "drop_diy_2_cyan",
-          "drop_diy_3",
-          "drop_diy_4_blue_cyan",
-          "drop_diy_5_red",
-          "drop_diy_green_sparkle",
-          "drop_diy_pink_red_sparkle",
-          "drop_diy_rainbow_sparkle",
           "rt_drop_chase_blue",
           "rt_drop_chase_cyan",
           "rt_drop_chase_red",
@@ -481,14 +465,6 @@
       },
       "HOUSE": {
         "1": [
-          "drop_diy_1_red_white_chase",
-          "drop_diy_2_cyan",
-          "drop_diy_3",
-          "drop_diy_4_blue_cyan",
-          "drop_diy_5_red",
-          "drop_diy_green_sparkle",
-          "drop_diy_pink_red_sparkle",
-          "drop_diy_rainbow_sparkle",
           "rt_drop_chase_blue",
           "rt_drop_chase_cyan",
           "rt_drop_chase_red",
@@ -525,14 +501,6 @@
       },
       "NEUTRAL": {
         "1": [
-          "drop_diy_1_red_white_chase",
-          "drop_diy_2_cyan",
-          "drop_diy_3",
-          "drop_diy_4_blue_cyan",
-          "drop_diy_5_red",
-          "drop_diy_green_sparkle",
-          "drop_diy_pink_red_sparkle",
-          "drop_diy_rainbow_sparkle",
           "rt_drop_chase_blue",
           "rt_drop_chase_cyan",
           "rt_drop_chase_red",
@@ -1715,14 +1683,6 @@
       ],
       "pre_drop": [],
       "drop": [
-        "drop_diy_1_red_white_chase",
-        "drop_diy_2_cyan",
-        "drop_diy_3",
-        "drop_diy_4_blue_cyan",
-        "drop_diy_5_red",
-        "drop_diy_green_sparkle",
-        "drop_diy_pink_red_sparkle",
-        "drop_diy_rainbow_sparkle",
         "rt_drop_chase_freestyle_nebula",
         "rt_drop_white_aggressive",
         "rt_drop_center_burst",
