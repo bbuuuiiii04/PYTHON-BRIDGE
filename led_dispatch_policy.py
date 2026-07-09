@@ -607,7 +607,17 @@ class LEDDispatchPolicyMixin:
             return
 
         if ev.kind == Ev.LED_CLEAR_BLACKOUT:
-            self._led_blackout_owners.discard(str(ev.payload.get("reason") or "legacy"))
+            reason = ev.payload.get("reason")
+            if reason:
+                self._led_blackout_owners.discard(str(reason))
+            else:
+                # Bare clear = operator authority: it outranks every scoped
+                # machine owner (AWR-155). Machine surfaces (pad, drop
+                # presentation, ...) keep their own reasoned clears, which
+                # stay scoped and unaffected by this branch.
+                cleared = tuple(sorted(self._led_blackout_owners))
+                self._led_blackout_owners.clear()
+                log.info("[RGB] blackout-clear-all owners=%s", ",".join(cleared) or "none")
             self._led_emergency_blackout = bool(self._led_blackout_owners)
             if not self._led_blackout_active():
                 # Operator blackout hard-dims the strip via a LAN brightness command
