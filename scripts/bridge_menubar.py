@@ -1143,7 +1143,35 @@ class BridgeMenuBar(NSObject):
         else:
             button.setImage_(None)
 
+    def _toggle_bridge_frozen(self) -> None:
+        # Frozen bundle only: the menubar owns the bridge as its OWN child
+        # process (a re-exec of this binary with --run-bridge). No pkill / no
+        # pattern matching -- a frozen bridge's argv doesn't match the
+        # source-run regexes, and the exclusive flock is the real
+        # single-instance guard. M1 is launch-on-click with no auto-restart;
+        # M2 finalizes the frozen lifecycle (see the runbook).
+        proc = getattr(self, "_frozen_bridge_proc", None)
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            self._frozen_bridge_proc = None
+            return
+        # Not running: spawn one child bridge. If another bridge (source-run or
+        # bundled) already holds the flock, the child logs the refusal and exits
+        # -- coexistence is a runbook warning (quit the dev watcher first).
+        self._frozen_bridge_proc = subprocess.Popen(
+            [sys.executable, "--run-bridge"],
+            start_new_session=True,
+        )
+
     def toggleBridge_(self, _sender):
+        if getattr(sys, "frozen", False):
+            self._toggle_bridge_frozen()
+            self.refresh_(None)
+            return
         if bridge_status() != "off":
             stop_manual_launchctl_job()
             subprocess.run(["pkill", "-f", WATCHER_PATTERN])
@@ -1215,10 +1243,14 @@ class BridgeMenuBar(NSObject):
         NSApplication.sharedApplication().terminate_(self)
 
 
-if __name__ == "__main__":
+def main() -> None:
     if already_running():
-        sys.exit(0)
+        return
     app = NSApplication.sharedApplication()
     app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
-    delegate = BridgeMenuBar.alloc().init()
+    delegate = BridgeMenuBar.alloc().init()  # retained by app during run()  # noqa: F841
     app.run()
+
+
+if __name__ == "__main__":
+    main()
