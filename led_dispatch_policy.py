@@ -16,6 +16,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Optional
 
 from . import bridge_log
+from . import lighting_moments_v2
 from .config import LED_BACKSTEP_SEEK_BEATS
 from .drop_presentation import LASERS_ONLY
 from .govee_frame_renderer import REALTIME_EFFECT_PARAM_KEYS, SLOT_EFFECTS, MAX_SLOTS
@@ -38,6 +39,33 @@ LED_DEFAULT_POST_DROP_CYCLE_BEATS = 32.0
 LED_HOLD_RELEASE_BEATS = 1.0
 LED_IDLE_FREEWHEEL_BPM = 120.0
 LED_HOLD_BACKSTOP_BEATS = 16.0
+
+# F4 (AWR-164) bass-forward sparkle grain (D§5.1): the fraction of B (sustained-
+# bass) beats in a HOUSE growl-bar drop's B/K mask scales sparkle density between
+# these ends. TUNE-LIVE — the felt "growl figures" grain is an operator taste call
+# (C§6b#5). Scalar stand-in for the per-beat alternation the renderer can't
+# time-vary inside one dispatch.
+_F4_BF_SPARKLE_MIN = 0.2
+_F4_BF_SPARKLE_MAX = 0.6
+
+
+def _f4_drop_seasoning_key(family: str, texture: Any) -> str:
+    """The `variant_seasoning` table key for a drop's family + texture (D§3):
+    HOUSE stab-body (pulse-expand) vs sustained-bass growl-bar (sparkle→groove);
+    WALL trap (sparse hits) vs dense stutter by onset density. Anything else ⇒
+    '<family>_default' ⇒ the config default cell / {} ⇒ family default variant."""
+    fam = str(family or "").upper()
+    if fam == "HOUSE":
+        if getattr(texture, "stab", False):
+            return "house_stab"
+        if getattr(texture, "sustained_bass", False):
+            return "house_sustain"
+        return "house_default"
+    if fam == "WALL":
+        onset = float(getattr(texture, "onset_density_mh", 0.0))
+        thresh = lighting_moments_v2.WALL_TRAP_ONSET_MAX
+        return "wall_trap" if onset <= thresh else "wall_dense"
+    return f"{fam.lower()}_default"
 LED_HOLD_BACKSTOP_S = 8.0
 # Retry a coordinator-rejected dispatch (e.g. min-dwell gate) with the SAME decision
 # — no director re-tick — until it lands, the role_key changes, or attempts run out.
@@ -1014,6 +1042,58 @@ class LEDDispatchPolicyMixin:
                 self._led_last_error = f"color_engine_error:{type(exc).__name__}"
         return decision
 
+    def _led_f4_active_drop_entry(self) -> Any:
+        """The F2 plan entry for the CURRENT drop anchor, or None (no anchor / no
+        plan). Mirrors the anchor lookup in `_led_f2_drop_look_names`; scripted
+        tracks stand F4 down completely (D§7)."""
+        sp = getattr(self, "_last_sp_state", None)
+        anchor = getattr(sp, "active_drop_beat", None) if sp is not None else None
+        if anchor is None:
+            return None
+        d = self._deck.get(getattr(self._os, "active_deck", 0))
+        if d is None or getattr(d, "scripted_id", 0):
+            return None
+        plan = getattr(getattr(d, "meta", None), "f2_plan", None)
+        return plan.for_drop(float(anchor)) if plan is not None else None
+
+    def _led_f4_drop_seasoning(self, cfg: Any) -> dict:
+        """The variant PARAMS for the current drop from its texture (Task 2). The
+        family+texture key selects the config table cell; a HOUSE growl-bar drop's
+        bass-forward B/K mask additionally sets the sparkle grain density (D§5.1 —
+        more sustained-bass beats ⇒ denser sparkle; CSN's BKBB pattern drives it).
+        Empty ⇒ no seasoning ⇒ family default variant (containment)."""
+        entry = self._led_f4_active_drop_entry()
+        tex = getattr(entry, "texture", None)
+        if entry is None or tex is None:
+            return {}
+        key = _f4_drop_seasoning_key(entry.decision.family, tex)
+        season = dict(cfg.variant_seasoning.get(key, {}))
+        bf = str(getattr(entry.decision, "bass_forward", "") or "")
+        if entry.decision.family == "HOUSE" and bf:
+            b_frac = bf.count("B") / len(bf)
+            season["sparkle_density"] = round(
+                _F4_BF_SPARKLE_MIN + b_frac * (_F4_BF_SPARKLE_MAX - _F4_BF_SPARKLE_MIN), 3)
+        return season
+
+    def _led_inject_f4_seasoning(self, decision: Any, *, role: str) -> Any:
+        """F4 (AWR-164) variant seasoning: merge texture-selected variant PARAMS
+        into the already-selected look's params. CONTAINMENT: never touches the
+        look name, scene_ref, backend, routing, schedule, or darkness — only
+        `decision.params`. F4 off / no plan / scripted / unknown texture ⇒ the
+        decision is returned unchanged (byte-identical to F4-off)."""
+        if not getattr(self, "_f4_enabled", False):
+            return decision
+        cfg = getattr(self, "_f4_config", None)
+        if cfg is None:
+            return decision
+        season = self._led_f4_drop_seasoning(cfg) if role == "drop" else {}
+        if not season:
+            return decision
+        try:
+            return replace(decision, params={**getattr(decision, "params", {}), **season})
+        except Exception:
+            return decision
+
     def _dispatch_led_automation(
         self,
         *,
@@ -1262,6 +1342,7 @@ class LEDDispatchPolicyMixin:
             cycle=cycle,
             role_key=role_key,
         )
+        decision = self._led_inject_f4_seasoning(decision, role=role)
 
         look = str(getattr(decision, "look", ""))
         if self._led_blank_role_hold_would_engage(look=look, playing=d.playing):
