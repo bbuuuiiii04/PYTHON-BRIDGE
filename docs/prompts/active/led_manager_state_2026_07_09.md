@@ -17,7 +17,22 @@ task) / OPUS tmux orchestrators / SONNET grind subagents — NEVER Fable below
 manager. New dispatches pin the model explicitly and VERIFY on-screen
 ("Set model to Opus 4.8" + banner) BEFORE task text.
 
-## Immediate state — UPDATED post-F2 review (~04:0x)
+## Immediate state — UPDATED post-F4 review (~04:5x)
+
+- **F4 (AWR-164) IMPLEMENTED + my review = PASS zero corrections, verdict at
+  superman's desk, AWAITING GATE.** My suite: 3716 / exact six-red baseline.
+  One NON-blocking nit on record: add a color_source-preservation assert to
+  test_seasoning_changes_only_params (second compare=False field; code safe
+  via replace() at led_dispatch_policy.py:1141).
+- **AWR-170 (laser round: AWR-162 B per-tier chases + D.2 pre-chorus mask)
+  spec RELEASED with the executive edit applied (held-static-ducks-dark
+  named + pinned test); Part A-7 flipped to confirmed (F4 touched zero
+  laser files). DISPATCH NEXT on superman's F4 gate** — standard tooling,
+  claude4 after /clear, tag AWR170. Then mirror (R5).
+- F4 substrate caveats for the morning note: seasoning renders on REALTIME
+  looks only (cloud DIY ignores param merges) — operator live-tune gate.
+
+## Historical: post-F2 review state (~04:0x)
 
 - **F2 (AWR-163) IMPLEMENTED + my adversarial review = PASS, verdict sent to
   superman (queued at their prompt); AWAITING THE EXECUTIVE GATE.** All five GO
