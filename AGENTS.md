@@ -116,6 +116,8 @@ Prompt/spec authoring — one repo skill per target agent (Claude autoloads them
 
 Per-model drop-in blocks live under `docs/prompts/snippets/`. Rules across the suite: Fable/Opus reason, plan, audit, and review; Codex implements bridge code. Prompt-generation/spec-only tasks default to no tools, no shell, no broad repo search, no accidental skill invocation, and no implementation unless the generated prompt states the exact allowed access and why.
 
+Multi-agent work (any model family): `docs/agents/multi_agent_org_workflow.md` is the canonical org doctrine — executive → manager → orchestrator → implementer seats, dispatch/watch tooling (`tools/agents/`), review-chain and suite-baseline discipline, seat handoffs. Build-lane seats (Opus, GPT, any mid-tier model) additionally follow `docs/agents/opus_seat_harness.md`. Resuming the program cold: newest `docs/agents/codex_resume_state_*.md`.
+
 ## 4. Source map (modules are intentionally flat at repo root)
 
 | Area | Files | Card |

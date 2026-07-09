@@ -27,6 +27,8 @@ dist/
 !.claude/skills/codex-spec/SKILL.md
 !.claude/skills/template-lab/
 !.claude/skills/template-lab/SKILL.md
+!.claude/skills/agent-org-workflow/
+!.claude/skills/agent-org-workflow/SKILL.md
 config/laser_director.json
 config/laser_director.draft.json
 config/led_look_director.json

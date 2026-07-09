@@ -53,6 +53,9 @@ source of truth when documents conflict. A doc is *active* only if it is listed 
 | --- | --- | --- |
 | Change contracts | `docs/agents/change_contracts.md`, `docs/agents/change_contracts.yml` | CURRENT AUTHORITATIVE — what must update when code changes; enforced by checkers. |
 | Drift detection | `docs/agents/drift_detection.md` | CURRENT AUTHORITATIVE. |
+| Multi-agent org workflow | `docs/agents/multi_agent_org_workflow.md` | CURRENT AUTHORITATIVE — the executive→manager→orchestrator→implementer doctrine, dispatch/watch protocol, gate discipline; model-agnostic. |
+| Build-seat harness | `docs/agents/opus_seat_harness.md` | CURRENT AUTHORITATIVE — rails + dispatch template for orchestrator/implementer-tier models. |
+| Codex resume state | `docs/agents/codex_resume_state_2026_07_09.md` | HANDOFF SNAPSHOT (2026-07-09) — workstream transfer state; verify against registry + git log at pickup. |
 | Agent lessons | `docs/agents/lessons/*.md` | CURRENT AUTHORITATIVE — agent lessons; verify before reuse. |
 | Task playbooks | `docs/agents/task_playbooks/*.md` (8) | CURRENT AUTHORITATIVE — per-task reading routes. |
 | Subsystem cards | `docs/subsystems/{core_bridge,rekordbox_readers,soundswitch_output,laser,led_govee,runtime_commands,config,tests}.md` | CURRENT — compact, code-verified cards. |
