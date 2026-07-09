@@ -577,7 +577,25 @@ class SoloPadIntegrationTests(unittest.TestCase):
         self.assertIsNone(sm._drop_presentation_armed_key)  # one-shot, consumed
         self.assertEqual(sm._drop_presentation_learned_store.beats_for_track("content-1"), (32.0,))
 
-        # Second press with nothing pending now arms again for the NEXT drop.
+        # Second press: the window from the FIRST drop is still open (AWR-159
+        # Task 1) -- this now cancels it instead of arming the NEXT drop.
+        self.assertEqual(sm._drop_presentation_solo_feedback, "active")
+        sm._handle_event(BridgeEvent(kind=Ev.LASER_SOLO_PAD, deck=0, source="test"))
+        self.assertIsNone(sm._drop_presentation_armed_key)  # did not arm
+        self.assertTrue(sm._drop_presentation_manual_cancel)
+
+        # The very next tick consumes the cancel and fails the window open.
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(abs_beat=40.0, active_drop_beat=None, smart_drop_crossing=False,
+                                current_phrase_is_chorus=False, smart_post_drop_active=False),
+            impact_now=False,
+        )
+        self.assertFalse(sm._drop_presentation_manual_cancel)
+        self.assertIsNone(sm._drop_presentation_last_actions.presentation)
+        self.assertEqual(sm._drop_presentation_solo_feedback, "off")
+
+        # Idle press now arms for the next drop.
         sm._handle_event(BridgeEvent(kind=Ev.LASER_SOLO_PAD, deck=0, source="test"))
         self.assertEqual(sm._drop_presentation_armed_key, (1, 5))
         # Disarm: pressing again while armed clears it.

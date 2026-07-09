@@ -31,6 +31,51 @@ Audit P3 (2026-07-03):
   StateManager push-loop caller; the runner thread now performs that teardown before another frame
   is sent.
 
+LED round 3: Hz-gate migration + rainbow/firework promotions + center-burst fix (AWR-161, 2026-07-09; implemented, software-tested, hardware-unvalidated):
+- Migrated the last ten BPM-tied `int(beat*16.0)%2==0` / `int(cue_beat*16.0)%2==0` strobe gates onto
+  the AWR-156 `_hz_strobe_on(local_t, params)` wall-clock gate (hz 6.0 / duty 0.3 defaults, same
+  feel at any BPM, per-look dialable): `post_drop_center_comet_blue_cyan`, `drop_chase_blue/cyan/
+  red/green/cyan_white`, `post_drop_chase_blue/cyan/red/green/cyan_white`,
+  `post_drop_freestyle_nebula`, `drop_chase_freestyle_nebula`, and the slot cues
+  `rt_post_drop_chase`/`rt_post_drop_nebula`/`rt_drop_chase`/`rt_drop_nebula`/
+  `rt_post_drop_center_comet`. All 18 names gained `hz`/`duty` in `REALTIME_EFFECT_PARAM_KEYS` (C5
+  guard). `_post_drop_chase`/`_post_drop_nebula` gained `local_t`/`params` parameters they didn't
+  previously carry, to reach the gate. Sparkle re-seed `beat_bucket = int(beat*16.0)` uses at these
+  same sites are NOT strobe gates and were left untouched. Buildup strobes (already time-based sine
+  ramps) and `_hz_strobe_on` itself are unchanged.
+- New frame effect `rainbow_ordered` (ported from a lab prototype): hue from strip position plus a
+  slow time cycle (an ordered spectrum, not a brightness mashup), heads via the AWR-156
+  peak-normalized `_head_weights` helper. `travel_per_beat`, when present, beat-locks the head
+  advance; absent, falls back to the legacy `loop_beats` pace. Example config: `rt_rainbow_drop`
+  (drop bank, `travel_per_beat 30`) paired via `drop_pairs` to `rt_rainbow_post_drop` (post_drop
+  bank, legacy pace, accepted as-is).
+- New frame effect `drop_firework_explosion` (ported from a lab prototype, contrast-gated): a
+  beat-tied surge (the hit) resolves down to `bg_hold` (0.7) over 0.5 beat instead of staying pinned
+  at full, and a time-based ember field (`_ember_field_frame`, same independent-lifecycle timing as
+  the production `_ember_field` remnants machinery, colorized from `spark_a`/`spark_b` since this is
+  a baked Frame effect) blend-replaces into the background so embers read against it. Promoted only
+  after a renderer test measured post-surge ember contrast >= 60/255 at default params — actual
+  101/255. Example config: `rt_drop_firework_explosion` (drop bank) paired via `drop_pairs` to the
+  existing `rt_post_drop_firework_remnants` (the AWR-149 explosion->remnants arc, now real).
+- `_slot_drop_center_burst` fix: removed the `if idx % 2 != 0: continue` gate that lit only even
+  pixels, leaving gaps every other pixel on the 60-segment strip. Geometry and the main/accent
+  slot-band split (0-2 / 2-4) are otherwise unchanged.
+- Files: `govee_frame_renderer.py`, `config/led_look_director.example.json`. Tests:
+  `tests/test_govee_frame_renderer.py` (Hz-migration BPM-independence sweep across all 18 names,
+  C5-guard allowlist check, rainbow beat-lock/legacy-pace/hue tests, the firework contrast gate
+  test), `tests/test_led_color_engine_m2_patch_d.py` (center-burst all-pixel-coverage fixture
+  replacing the old even-pixels-only fixture).
+- Unaffected/unchanged: `_hz_strobe_on` itself, buildup strobes, nebula slot-5 white semantics,
+  knob #4 per-spawn mapping, AWR-149 rotation mechanics, emergency/manual/tactical blackout paths,
+  palette/slot-color injection semantics. `rb_state_reader.py`/`rb_memory.py` and
+  `state_manager.py`/`drop_presentation.py` were out of scope (parallel-lane files).
+- The live, gitignored `config/led_look_director.json` was read-only this round; an un-mirrored live
+  config runs the migrated gates at the code defaults (hz 6.0/duty 0.3) — this is the operator's
+  intended overridden change — while the two new looks and the center-burst pixel fix need the
+  mirror to appear (the fix itself is renderer-level and needs no mirror; only the new *looks* being
+  selectable needs it). The bridge stayed down the entire round. SOFTWARE-VALIDATED ONLY /
+  HARDWARE-UNVALIDATED.
+
 Darkness-fix round: blank-role hold + reader freshness (AWR-157, 2026-07-08; implemented, software-tested, hardware-unvalidated):
 - Root cause (from `docs/research/deck2_reader_diagnosis_2026_07_08.md`): a blank/none LED role
   while a deck played audibly fell through to the `utility` bank's configured blackout look for
@@ -433,7 +478,9 @@ LED round 2: strobe-gate rebuild + accepted-look promotion (AWR-156, 2026-07-08;
   on already-taken timestamps, no new I/O), laser/SoundSwitch/Rekordbox. Out of scope this round
   (verdicts pending): `drop_firework_explosion_2`, `rainbow_drop`/`rainbow_post_drop`,
   `comet_rainbow_ordered` promotion, remnants spawn-feel re-check. Round-3 residual logged, not this
-  round: `_slot_drop_center_burst` even-pixels-only gappiness.
+  round: `_slot_drop_center_burst` even-pixels-only gappiness. **All resolved in AWR-161 above** —
+  the rainbow pair and firework explosion promoted (contrast-gated), the center-burst gap fixed;
+  remnants spawn-feel re-check stayed out of scope.
 - The live, gitignored `config/led_look_director.json` was read-only for this round; an un-mirrored
   live config renders identically to today for every look it defines, EXCEPT the two locked
   behavior changes that need no config: the `_drop_white_aggressive` gate rebuild and the knob-#4
@@ -819,12 +866,14 @@ M2.5 slot cues in SLOT_EFFECTS (govee_frame_renderer.py):
 | rt_groove_heartbeat | _slot_rt_groove_heartbeat | groove | no | software-validated (AWR-156) |
 | rt_post_drop_firework_remnants | _slot_rt_post_drop_firework_remnants | post_drop | no | software-validated (AWR-156) |
 
-Non-slot (baked) frame effects added by AWR-156, registered in `_EFFECTS`:
+Non-slot (baked) frame effects added by AWR-156/AWR-161, registered in `_EFFECTS`:
 
 | Scene ref | Fn | Safety class | Strobe | Status |
 |---|---|---|---|---|
 | drop_strobe_colorway | _drop_strobe_colorway | drop | yes | software-validated (AWR-156) |
 | buildup_balloon_comet | _buildup_balloon_comet | buildup | no | software-validated (AWR-156) |
+| rainbow_ordered | _rainbow_ordered | drop / post_drop | no | software-validated (AWR-161) |
+| drop_firework_explosion | _drop_firework_explosion | drop | no | software-validated, contrast-gated (AWR-161) |
 
 AWR-156 look-name rename (config only; the `Scene ref` column above is unaffected — `scene_ref`
 never changed): the example config's `rt_drop_chase` / `rt_drop_nebula` LOOKS are now named
@@ -835,6 +884,9 @@ Patch E pairings:
 - AWR-156: rt_drop_nebula no longer pairs to rt_post_drop_nebula — the `drop_pairs` entry was
   deleted as part of the bank recast (a post_drop-role look never fires a pair). Superseded line,
   kept for history: "rt_drop_nebula pairs explicitly to rt_post_drop_nebula through `drop_pairs`."
+- AWR-161: rt_rainbow_drop pairs to rt_rainbow_post_drop; rt_drop_firework_explosion pairs to the
+  existing rt_post_drop_firework_remnants (the AWR-149 explosion->remnants arc, now real) —
+  both through `drop_pairs`.
 
 All slot cues, `random_with_mono_chance`, and Patch F bank cleanup: SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
 Phase 3 renderer params: `rt_groove_chase`/`rt_groove_nebula` accept `loop_beats`; `rt_drop_chase`/`rt_post_drop_chase`/`rt_drop_nebula`/`rt_post_drop_nebula` accept `travel_beats` and `width`; `groove_center_chase`/`post_drop_firework_chase` accept `travel_beats`. Missing params preserve previous frames.

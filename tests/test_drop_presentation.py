@@ -493,6 +493,56 @@ class ManualArmVisibilityTests(unittest.TestCase):
         self.assertFalse(actions.base_suppressed)
 
 
+class PredarkResetReasonTests(unittest.TestCase):
+    """AWR-159 Task 4: the predark->clear reset names why it reset."""
+
+    def _enter_pre_dark(self, machine: WindowMachine) -> None:
+        machine.tick(
+            WindowInputs(abs_beat=96.0, beats_to_next_drop=4.0, next_drop_beat=100.0,
+                         drop_role="none", impact_now=False, laser_visible=True),
+            pending_presentation=LASERS_ONLY, pending_reason="solo_hotcue",
+        )
+
+    def test_passed_without_drop_reason(self) -> None:
+        machine = WindowMachine(_cfg(led_predark_beats=4))
+        self._enter_pre_dark(machine)
+        with self.assertLogs("drop_presentation", level="INFO") as logs:
+            machine.tick(
+                WindowInputs(abs_beat=101.0, beats_to_next_drop=None, next_drop_beat=None,
+                             drop_role="none", impact_now=False, laser_visible=True),
+                pending_presentation=None, pending_reason="",
+            )
+        self.assertTrue(any("reason=passed_without_drop" in r.getMessage() for r in logs.records))
+        self.assertEqual(machine._phase, "idle")
+
+    def test_not_visible_gate_reason_is_named(self) -> None:
+        for gate in ("director_disabled", "base_live_false", "masked", "role"):
+            with self.subTest(gate=gate):
+                machine = WindowMachine(_cfg(led_predark_beats=4))
+                self._enter_pre_dark(machine)
+                with self.assertLogs("drop_presentation", level="INFO") as logs:
+                    machine.tick(
+                        WindowInputs(abs_beat=97.0, beats_to_next_drop=3.0, next_drop_beat=100.0,
+                                     drop_role="none", impact_now=False, laser_visible=False,
+                                     not_visible_reason=gate),
+                        pending_presentation=LASERS_ONLY, pending_reason="solo_hotcue",
+                    )
+                self.assertTrue(
+                    any(f"reason={gate}" in r.getMessage() for r in logs.records)
+                )
+
+    def test_missing_not_visible_reason_falls_back_to_generic_label(self) -> None:
+        machine = WindowMachine(_cfg(led_predark_beats=4))
+        self._enter_pre_dark(machine)
+        with self.assertLogs("drop_presentation", level="INFO") as logs:
+            machine.tick(
+                WindowInputs(abs_beat=97.0, beats_to_next_drop=3.0, next_drop_beat=100.0,
+                             drop_role="none", impact_now=False, laser_visible=False),
+                pending_presentation=LASERS_ONLY, pending_reason="solo_hotcue",
+            )
+        self.assertTrue(any("reason=not_visible" in r.getMessage() for r in logs.records))
+
+
 # ---- Required Behavior Test 8: fail-open --------------------------------
 
 
