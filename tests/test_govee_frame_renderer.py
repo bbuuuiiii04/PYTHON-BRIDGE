@@ -786,6 +786,54 @@ class BuildupBalloonCometTests(unittest.TestCase):
             self.assertEqual(px[1], px[2])
 
 
+class RainbowOrderedTests(unittest.TestCase):
+    """AWR-161 Task 2: rainbow pair promotion (comet_rainbow_ordered port)."""
+
+    def test_registered_and_not_a_strobe(self) -> None:
+        self.assertIn("rainbow_ordered", REALTIME_EFFECT_NAMES)
+        self.assertNotIn("rainbow_ordered", REALTIME_STROBE_EFFECTS)
+
+    def test_beat_locked_travel_advances_travel_per_beat_pixels_ignoring_local_t(self) -> None:
+        """travel_per_beat present -> beat-locked head advance, independent of
+        local_t (the AWR-156 movement fix: never BPM/time-tied)."""
+        renderer = GoveeFrameRenderer()
+        segments = 120
+        params = {"width": 0.5, "travel_per_beat": 30.0, "loop_beats": 4.0, "cycle_beats": 1e6}
+        # Two very different local_t values stand in for two different BPM
+        # mappings of the same beat position -- the head must land identically
+        # either way.
+        for local_t in (0.02, 5.7):
+            frame_a = renderer.render("rainbow_ordered", beat_pos=2.0, local_t=local_t,
+                                       frame_index=0, params=params, segments=segments, seed=1)
+            frame_b = renderer.render("rainbow_ordered", beat_pos=3.0, local_t=local_t,
+                                       frame_index=0, params=params, segments=segments, seed=1)
+            self.assertEqual(max(frame_a[60]), 255, msg=f"local_t={local_t}")
+            self.assertEqual(max(frame_b[90]), 255, msg=f"local_t={local_t}")
+
+    def test_legacy_pace_matches_loop_beats_formula_when_travel_per_beat_absent(self) -> None:
+        """travel_per_beat absent -> legacy loop_beats pace (the post-drop
+        look's accepted-as-is feel) survives byte-stable."""
+        renderer = GoveeFrameRenderer()
+        segments = 60
+        params = {"width": 0.5, "loop_beats": 4.0, "cycle_beats": 1e6}
+        for beat, expected_idx in ((1.0, 15), (2.0, 30), (3.0, 45)):
+            frame = renderer.render("rainbow_ordered", beat_pos=beat, local_t=0.0,
+                                     frame_index=0, params=params, segments=segments, seed=1)
+            self.assertEqual(max(frame[expected_idx]), 255, msg=f"beat={beat}")
+
+    def test_hue_ordered_by_position_value_stays_full_at_the_peak(self) -> None:
+        """Hue comes from strip position (an ordered spectrum); brightness
+        only dims value -- at the anti-aliased peak the color is full HSV
+        value/saturation."""
+        renderer = GoveeFrameRenderer()
+        segments = 40
+        params = {"width": 0.5, "rainbow_span": 1.0, "loop_beats": 1e6, "cycle_beats": 1e6}
+        frame = renderer.render("rainbow_ordered", beat_pos=0.0, local_t=0.0,
+                                 frame_index=0, params=params, segments=segments, seed=1)
+        self.assertEqual(frame[0], (255, 0, 0))
+        self.assertEqual(frame[20], (0, 255, 255))
+
+
 class HeadWeightsPeakNormalizationTests(unittest.TestCase):
     """AWR-156 Task 7.4: the 0.53x between-pixel dip regression test."""
 

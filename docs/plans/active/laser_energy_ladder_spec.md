@@ -30,12 +30,16 @@ implement, do not mention in config).
    per-drop decision; it does not compute tiers itself. Tracks WITHOUT tier
    data (no v4 cache) fall back to today's `laser_ratio` rule unchanged,
    with one log line naming the fallback.
-3. **Once-per-drop invariant [re-verified this session]:** the presentation
-   decision is made once per drop at impact and the window machine only
-   RELEASES thereafter — it never re-decides mid-window
-   (`drop_presentation.py:328` resolve path; release conditions `:701-718`;
-   AWR-159 triage cites re-confirmed untouched). So (A)'s LEDs-only verdict
-   cannot re-admit lasers mid-section. Preserve this.
+3. **Once-per-drop invariant [restated per executive review]:** the
+   presentation decision is made once PER DROP at its impact, and NO
+   re-decision ever happens WITHOUT a new drop impact — but a NEW drop's
+   impact DOES re-decide for THAT drop mid-window (AWR-138 impact
+   re-entry: `impact_now` + pending presentation → `_enter_window` with the
+   new presentation, `drop_presentation.py` ~`:703`). Consequences for (A):
+   an LEDs-only verdict can never be re-admitted to lasers without a new
+   drop impact; and when a new drop re-enters the window, its OWN tier
+   decides — a small-tier next drop must land LEDS_ONLY on re-entry too.
+   Preserve both sides.
 4. **Chase-class ground truth:**
    `docs/research/laser_ch8_ch9_operator_map_2026_07_08.md` — the red+white
    family escalates by DIVISION: 52 → 100 (⭐, "chunky starred") → 116 →
@@ -85,14 +89,22 @@ the landing. Pure CH9 speed; no CH8/phase changes.
    blackout writer — the whole room breathes together.
 2. OPERATOR ADDITION: lasers black out for the 4 beats BEFORE every chorus
    phrase start (phrase boundaries remain in the phrasing data — only drop
-   DECISIONS were merged by the marker collapse; use the phrase-start
-   lookahead the LED pre-dark already uses). Same mask writer, releases at
-   the chorus start beat.
+   DECISIONS were merged by the marker collapse). Seam, named honestly: a
+   quantized 4-beat lookahead against `phrase_roles` boundaries — an
+   interface OWNED AND DELIVERED BY F2 (the same countdown pattern as the
+   existing LED pre-dark, which counts down to known impact beats, but with
+   a NEW data source: nothing at HEAD looks ahead to phrase starts today).
+   Same mask writer, releases at the chorus start beat.
 
 ### Task 5 - Tests
 Planner tier gating (small→LEDS_ONLY, others→both; tier-less→legacy ratio
 byte-identical; finale/hotcue/manual precedence pinned); once-per-drop
-invariant regression (LEDs-only never re-admits lasers mid-window); tier
+invariant regression pinning BOTH sides: (a) an LEDs-only window is never
+re-admitted to lasers WITHOUT a new drop impact, and (b) an AWR-138 impact
+re-entry re-decides on the NEW drop's tier — a small-tier next drop lands
+LEDS_ONLY on re-entry (a test asserting "never re-decides mid-window"
+literally would either fail against AWR-138 or freeze re-entry off — do
+not write that test); tier
 chase selection (per-tier CH8, absent-tiers fallback, unknown-tier→standard);
 burn-down disabled-by-default + enabled CH9 ramp shape; mask timing for
 emphasis-sync and 4-beat pre-chorus windows (pure window-machine seams).
