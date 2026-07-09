@@ -1222,7 +1222,9 @@ def _slot_groove_chase(beat: float, local_t: float, frame_index: int,
 
     loop_beats = max(0.001, float(params.get("loop_beats", 4.0)))
     offset_beats = 2.0
-    width = 0.8
+    # AWR-156 knob #9: width is now a config knob (was hardcoded 0.8); default
+    # preserves today's behavior for an un-mirrored live config.
+    width = max(0.001, float(params.get("width", 0.8)))
 
     pos1 = ((cue_beat / loop_beats) % 1.0) * segments
     pos2 = (((cue_beat + offset_beats) / loop_beats) % 1.0) * segments
@@ -1261,7 +1263,9 @@ def _slot_groove_nebula(beat: float, local_t: float, frame_index: int,
     field = _empty_motion_field(segments)
 
     loop_beats = max(0.001, float(params.get("loop_beats", 4.0)))
-    width = 0.8
+    # AWR-156 knob #9: width is now a config knob (was hardcoded 0.8); default
+    # preserves today's behavior for an un-mirrored live config.
+    width = max(0.001, float(params.get("width", 0.8)))
 
     pos1 = ((cue_beat / loop_beats) % 1.0) * segments
     pos2 = ((1.0 - (cue_beat / loop_beats)) % 1.0) * segments
@@ -1491,7 +1495,9 @@ def _slot_post_drop_center_comet(beat: float, local_t: float, frame_index: int,
         return field
 
     center = segments / 2.0
-    comet_width = 1.0
+    # AWR-156 knob #9: width is now a config knob (was hardcoded 1.0); default
+    # preserves today's behavior for an un-mirrored live config.
+    comet_width = max(0.001, float(params.get("width", 1.0)))
 
     for age in (cue_beat % 1.0, (cue_beat % 1.0) + 1.0):
         if age > 2.0:
