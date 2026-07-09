@@ -19,6 +19,7 @@ from .govee_frame_renderer import (
 )
 from .led_models import (
     ColorEngineConfig,
+    F2Config,
     IdentityV2Config,
     LEDAutomation,
     LEDBank,
@@ -144,6 +145,23 @@ def load_drop_presentation_config(path: str | None = None) -> DropPresentationCo
     if resolved is None:
         return DropPresentationConfig()
     return _load_drop_presentation_block(resolved)
+
+
+def load_f2_config(path: str | None = None) -> F2Config:
+    """Read the top-level `/f2` block (LIGHTING ENGINE v2 Feature 2, AWR-163) from
+    the same config file, independent of the main LED validation pipeline. Absent
+    block / missing file / bad JSON ⇒ F2Config() with enabled False (the live
+    config that has no `f2` key stays byte-identical to v1 — the kill test).
+    Never raises."""
+    resolved = _resolve_path(path)
+    if resolved is None:
+        return F2Config()
+    try:
+        data = json.loads(Path(resolved).read_text(encoding="utf-8"))
+    except Exception:
+        return F2Config()
+    block = data.get("f2") if isinstance(data, dict) else None
+    return F2Config.from_dict(block)
 
 
 def _resolve_path(explicit: str | None) -> Path | None:

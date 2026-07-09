@@ -66,7 +66,7 @@ from .models import (
 from . import led_dispatch_policy as _led_dispatch_policy
 from .led_dispatch_policy import LEDDispatchPolicyMixin
 from .led_palette_control import LedPaletteControl, PaletteFeedbackWriter
-from .led_config import load_drop_presentation_config
+from .led_config import load_drop_presentation_config, load_f2_config
 from .led_identity_v2 import (
     IdentityStore,
     NORM_ANCHORS as LED_IDENTITY_NORM_ANCHORS,
@@ -770,12 +770,13 @@ class StateManager(LEDDispatchPolicyMixin):
             and _os.environ.get(SPECTRAL_ENABLE_ENV, "0") == "1"
         )
         self._wide_window_enable = _os.environ.get(WIDE_WINDOW_ENV, "1") != "0"
-        # F2 (LIGHTING ENGINE v2 moments) master switch. Wired to config in Task 5;
-        # defaults OFF so every intermediate state is byte-identical to v1 (kill test).
-        self._f2_enabled = False
-        # F2 drop_look_routing: {family: {tier: [look names]}}. Populated from
-        # config in Task 5; empty ⇒ drop looks keep today's rotation pick.
-        self._f2_drop_look_routing: dict = {}
+        # F2 (LIGHTING ENGINE v2 moments) master switch, from the `/f2` config
+        # block. Absent block ⇒ disabled ⇒ byte-identical to v1 (kill test); the
+        # example config ships enabled, activated by the operator's mirror + restart.
+        _f2_cfg = load_f2_config()
+        self._f2_config = _f2_cfg
+        self._f2_enabled = _f2_cfg.enabled
+        self._f2_drop_look_routing = _f2_cfg.drop_look_routing
         self._stop  = threading.Event()
         self._mixer_authority_enabled = bool(mixer_authority_enabled)
 

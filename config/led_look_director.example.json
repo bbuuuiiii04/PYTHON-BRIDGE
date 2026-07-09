@@ -387,6 +387,17 @@
     "record_min_drops": 5,
     "ws_handoff_enabled": false
   },
+  "f2": {
+    "enabled": true,
+    "drop_look_routing": {},
+    "balloon_perc_boundary": 0.35,
+    "dip_cap_beats": 4,
+    "flick_ms": 200,
+    "impact_burndown": {
+      "enabled": false,
+      "ease_beats": 8
+    }
+  },
   "targets": {
     "room_perimeter": {
       "label": "Bui light test",
