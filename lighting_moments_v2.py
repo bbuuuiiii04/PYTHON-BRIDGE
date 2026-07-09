@@ -393,11 +393,17 @@ def darkness_ladder(v4: SpectralFeaturesV4, drop: int, family: str,
                                 "snap-to-black flick: music slams straight in")
 
     e, run_start, raw_gap, bass_duty = scan
-    perc_build = _median_build_perc(v4, drop, buildup_beat, run_start)
+    lo = _build_window(drop, buildup_beat, run_start)
+    perc_build, lift_build = _build_medians(v4, lo, drop)
     grade = family_grade(family)
+    # A true stop = percussion done AND still audible (vocals/effects). This
+    # audibility floor is what tells a stop (→ 8) from a melodic swell (→ balloon).
+    stop = perc_build <= STOP_PERC_MAX and lift_build >= STOP_LIFT_FLOOR
 
-    # 1) BALLOON branch — melodic swell (low build percussion) shrinks, never blacks.
-    if perc_build < BALLOON_PERC_BOUNDARY:
+    # 1) BALLOON — melodic swell (low build percussion, NOT an audible vocal stop)
+    #    shrinks instead of blacking, even into a hard drop (Stereo Love), so this
+    #    is checked BEFORE the hard-16 branch.
+    if perc_build < BALLOON_PERC_BOUNDARY and not stop:
         beats = _quantize_down(raw_gap)
         return DarknessDecision(
             "balloon", beats, (drop - beats, drop), None,
@@ -406,11 +412,10 @@ def darkness_ladder(v4: SpectralFeaturesV4, drop: int, family: str,
             f"balloon-shrink: melodic build (perc {perc_build:.2f} < {BALLOON_PERC_BOUNDARY})")
 
     # 2) BLACK — quantized emphasis length, TIER-INDEPENDENT.
-    stop = true_stop(v4, drop)
-    if grade == "hard" and raw_gap >= COLLAPSE_GAP:
-        emphasis, why = 16, "true collapse into a hard/dark monster (WALL/COMET)"
-    elif stop:
+    if stop:
         emphasis, why = 8, "true stop: percussion done, vocals/effects only"
+    elif grade == "hard" and raw_gap >= COLLAPSE_GAP:
+        emphasis, why = 16, "true collapse into a hard/dark monster (WALL/COMET)"
     elif grade == "hard":
         emphasis, why = 4, "hard drop, short pickup emphasis"
     else:
