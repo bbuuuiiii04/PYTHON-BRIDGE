@@ -1438,6 +1438,9 @@ class LEDDispatchPolicyMixin:
             scripted_id=d.scripted_id,
             diy_eligible=self._led_diy_eligible_predicate(),
             look_preference=self._led_look_preference_predicate(),
+            # Part J: the accepted drop's anchor. The director only fires a queued
+            # pair whose stamp matches it (read for post_drop; ignored otherwise).
+            post_drop_stamp=self._led_drop_look_fired_anchor,
         )
         decision = None
         self._led_drop_cloud_stage_pending = None
@@ -2239,6 +2242,18 @@ class LEDDispatchPolicyMixin:
         self._led_drop_impact_until_beat = float(anchor) + duration
         self._led_active_drop_look = look
         self._led_drop_look_fired_anchor = float(anchor)
+        # Part J: queue the paired post_drop ONLY now, on accepted dispatch, and
+        # stamp it with this drop's anchor. Every accepted drop routes through
+        # here (first-try, retry, and AWR-150 cloud-takeover), so a suppressed
+        # drop never queues a pair and a later drop can't inherit a stale one.
+        queue_pair = getattr(
+            self._led_look_director, "queue_paired_post_drop_on_accept", None
+        )
+        if callable(queue_pair):
+            try:
+                queue_pair(look, stamp=float(anchor))
+            except Exception:
+                pass
 
     def _clear_led_drop_lifecycle(self) -> None:
         self._led_first_drop_anchor_beat = None

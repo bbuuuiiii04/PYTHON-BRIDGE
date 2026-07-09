@@ -105,6 +105,10 @@ class LEDLookDirector:
         self._last_source: str = "policy"
         self._role_cursors: dict[str, int] = {}
         self._queued_post_drop_look: str = ""
+        # Part J: the queued pair is stamped with the ACCEPTED drop's anchor beat.
+        # Consumption checks the stamp against the drop currently in post_drop, so a
+        # pair left over from a drop that isn't the one now playing is rejected.
+        self._queued_post_drop_stamp: float | None = None
         # AWR-149: every role starts at plan index 0 (realtime-leading) so the
         # mixed-transport rotation is deterministic across bridge relaunches --
         # no RNG in the cursor. Look variety still comes from the shuffle bags.
@@ -194,6 +198,9 @@ class LEDLookDirector:
                 role,
                 diy_eligible=(context.diy_eligible if context is not None else None),
                 look_preference=(context.look_preference if context is not None else None),
+                expected_post_drop_stamp=(
+                    context.post_drop_stamp if context is not None else None
+                ),
             )
             if decision is None:
                 self._last_decision = None
@@ -333,7 +340,8 @@ class LEDLookDirector:
         (role="drop", "realtime_razer") shuffle bag and backend cursor, and
         advances ONLY that backend cursor -- NEVER ``_role_cursors["drop"]`` (the
         plan slot was already consumed by the committed cloud pick) -- and
-        queues NO paired post_drop (the committed pick already queued its pair).
+        queues NO paired post_drop (Part J: the pair is queued when the drop
+        dispatch is ACCEPTED, under the committed cloud identity).
 
         Returns None when the drop bank has no realtime looks: a cloud-only drop
         bank is the operator's explicit config, and the caller then keeps today's
@@ -388,6 +396,7 @@ class LEDLookDirector:
         cannot leak across the teardown and fire on the next track/deck.
         """
         self._queued_post_drop_look = ""
+        self._queued_post_drop_stamp = None
 
     def paired_post_drop_look(self, drop_look: str) -> str:
         pair = self._config.drop_pairs.get(str(drop_look))
@@ -410,6 +419,7 @@ class LEDLookDirector:
         *,
         diy_eligible: Optional[Callable[[str], bool]] = None,
         look_preference: Optional[Callable[[str], bool]] = None,
+        expected_post_drop_stamp: float | None = None,
     ) -> LEDLookDecision | None:
         if role not in _AUTOMATION_ROLES:
             return None
@@ -419,8 +429,15 @@ class LEDLookDirector:
             return None
         if normalized_role == "post_drop" and self._queued_post_drop_look:
             look_name = self._queued_post_drop_look
+            stamp = self._queued_post_drop_stamp
             self._queued_post_drop_look = ""
-            if look_name in self._config.looks:
+            self._queued_post_drop_stamp = None
+            # Part J: only fire the queued pair if its stamp matches the drop
+            # currently in post_drop. A caller that passes no stamp (unit ticks,
+            # non-drop consumers) skips the check. A stale stamp -> drop the pair
+            # and fall through to normal post_drop rotation.
+            stamp_ok = expected_post_drop_stamp is None or expected_post_drop_stamp == stamp
+            if stamp_ok and look_name in self._config.looks:
                 return self._decision_for_look(
                     look_name,
                     reason="paired_post_drop",
@@ -477,8 +494,9 @@ class LEDLookDirector:
             priority=2,
             role=normalized_role,
         )
-        if normalized_role == "drop":
-            self._queue_paired_post_drop(look_name)
+        # Part J: the paired post_drop is NOT queued here (decision time). It is
+        # queued only when the drop dispatch is ACCEPTED, via
+        # queue_paired_post_drop_on_accept(), so a suppressed drop leaves no pair.
         # The role cursor advances the PLAN (which transport comes next); the
         # (role, backend) cursor advances only for the transport actually picked
         # and drives that transport's shuffle bag.
@@ -545,15 +563,24 @@ class LEDLookDirector:
         )
 
     def _record_decision(self, decision: LEDLookDecision) -> None:
-        if decision.role in {"drop", "manual"}:
-            self._queue_paired_post_drop(decision.look)
+        # Part J: no post_drop pair is queued here. Queuing is bound to accepted
+        # drop dispatch (queue_paired_post_drop_on_accept), not decision time.
         self._last_decision = decision
         self._last_reason = decision.reason
         self._last_source = decision.source
 
-    def _queue_paired_post_drop(self, drop_look: str) -> None:
-        paired = self.paired_post_drop_look(drop_look)
-        self._queued_post_drop_look = paired
+    def queue_paired_post_drop_on_accept(
+        self, drop_look: str, *, stamp: float | None = None
+    ) -> None:
+        """Queue the configured post_drop pair for a drop look that was ACCEPTED
+        (dispatched and confirmed by the coordinator). Part J: the policy calls
+        this from ``_led_note_drop_decision_accepted`` — the single point every
+        accepted drop routes through. ``stamp`` is the accepted drop's anchor beat;
+        consumption rejects the pair if the drop then in post_drop carries a
+        different stamp. A drop with no configured pair queues "" (clears any
+        prior pair), so a later unrelated drop never inherits a stale one."""
+        self._queued_post_drop_look = self.paired_post_drop_look(drop_look)
+        self._queued_post_drop_stamp = stamp
 
     def _apply_target_override(
         self,

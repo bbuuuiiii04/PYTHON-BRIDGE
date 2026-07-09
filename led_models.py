@@ -435,6 +435,10 @@ class LEDContext:
     # When None (engine off), the director applies no palette filtering.
     diy_eligible: Optional[Callable[[str], bool]] = field(default=None, compare=False)
     look_preference: Optional[Callable[[str], bool]] = field(default=None, compare=False)
+    # Part J: anchor beat of the drop currently in post_drop. The director checks
+    # it against the queued pair's stamp so a leftover pair from a different drop
+    # is rejected. None on non-post_drop ticks / unit ticks => no stamp check.
+    post_drop_stamp: Optional[float] = field(default=None, compare=False)
 
 
 @dataclass(frozen=True)

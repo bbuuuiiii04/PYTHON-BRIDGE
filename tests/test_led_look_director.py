@@ -296,9 +296,12 @@ class LEDLookDirectorPriorityTests(unittest.TestCase):
         director = LEDLookDirector(result.config)
 
         drop = director.tick(LEDContext(role="drop"))
+        # Part J happy-path pin: the pair is queued when the drop is ACCEPTED, not
+        # at decision time. The dispatch policy calls this after outcome=="accepted".
+        director.queue_paired_post_drop_on_accept(drop.look, stamp=100.0)
         preview = director.preview_role("post_drop")
-        paired = director.tick(LEDContext(role="post_drop"))
-        next_generic = director.tick(LEDContext(role="post_drop"))
+        paired = director.tick(LEDContext(role="post_drop", post_drop_stamp=100.0))
+        next_generic = director.tick(LEDContext(role="post_drop", post_drop_stamp=100.0))
 
         self.assertIsNotNone(drop)
         self.assertEqual(drop.look, "room_manual")
@@ -309,6 +312,93 @@ class LEDLookDirectorPriorityTests(unittest.TestCase):
         self.assertEqual(paired.reason, "paired_post_drop")
         self.assertIsNotNone(next_generic)
         self.assertEqual(next_generic.look, "room_safe_default")
+
+    def test_partj_suppressed_drop_decision_leaves_queue_empty(self) -> None:
+        # A drop decision is computed but never accepted (gate/blackout/reject).
+        # It must NOT queue a pair, so the next post_drop is normal rotation.
+        cfg = _director_config()
+        cfg["automation_enabled"] = True
+        cfg["looks"]["room_post_drop"] = {
+            "target": "room_perimeter",
+            "action": "scene",
+            "scene_ref": "PostDrop-A",
+            "fallback": "room_blackout",
+            "safety_class": "post_drop",
+            "brightness": 80,
+            "allow_strobe": False,
+        }
+        cfg["banks"]["default"]["post_drop"] = ["room_safe_default"]
+        cfg["drop_pairs"] = {
+            "room_manual": {"post_drop": "room_post_drop", "duration_beats": 8.0}
+        }
+        result = load_led_look_director_config_from_dict(cfg)
+        self.assertTrue(result.available, msg=result.errors)
+        director = LEDLookDirector(result.config)
+
+        drop = director.tick(LEDContext(role="drop"))  # decision only, never accepted
+        self.assertEqual(drop.look, "room_manual")
+        self.assertEqual(director._queued_post_drop_look, "")
+
+        post = director.tick(LEDContext(role="post_drop", post_drop_stamp=100.0))
+        self.assertEqual(post.look, "room_safe_default")
+        self.assertNotEqual(post.reason, "paired_post_drop")
+
+    def test_partj_stale_stamp_pair_ignored_then_next_drop_wins(self) -> None:
+        # Drop A accepted -> its pair queued with stamp A. A later post_drop that
+        # belongs to a different drop (stamp B) must NOT fire A's pair; and a drop
+        # B that is accepted overwrites the queue with B's pair.
+        cfg = _director_config()
+        cfg["automation_enabled"] = True
+        cfg["looks"]["room_post_drop"] = {
+            "target": "room_perimeter",
+            "action": "scene",
+            "scene_ref": "PostDrop-A",
+            "fallback": "room_blackout",
+            "safety_class": "post_drop",
+            "brightness": 80,
+            "allow_strobe": False,
+        }
+        cfg["looks"]["room_post_drop_b"] = {
+            "target": "room_perimeter",
+            "action": "scene",
+            "scene_ref": "PostDrop-B",
+            "fallback": "room_blackout",
+            "safety_class": "post_drop",
+            "brightness": 80,
+            "allow_strobe": False,
+        }
+        for name, ref in (("drop_a", "Drop-A"), ("drop_b", "Drop-B")):
+            cfg["looks"][name] = {
+                "target": "room_perimeter",
+                "action": "scene",
+                "scene_ref": ref,
+                "fallback": "room_blackout",
+                "safety_class": "drop",
+                "brightness": 100,
+                "allow_strobe": True,
+            }
+        cfg["banks"]["default"]["post_drop"] = ["room_safe_default"]
+        cfg["drop_pairs"] = {
+            "drop_a": {"post_drop": "room_post_drop", "duration_beats": 8.0},
+            "drop_b": {"post_drop": "room_post_drop_b", "duration_beats": 8.0},
+        }
+        result = load_led_look_director_config_from_dict(cfg)
+        self.assertTrue(result.available, msg=result.errors)
+        director = LEDLookDirector(result.config)
+
+        # Drop A accepted, stamp 100. A post_drop for a DIFFERENT drop (stamp 200)
+        # must reject A's stale pair and fall through to rotation.
+        director.queue_paired_post_drop_on_accept("drop_a", stamp=100.0)
+        stale = director.tick(LEDContext(role="post_drop", post_drop_stamp=200.0))
+        self.assertEqual(stale.look, "room_safe_default")
+        self.assertNotEqual(stale.reason, "paired_post_drop")
+        self.assertEqual(director._queued_post_drop_look, "")  # cleared on reject
+
+        # Drop B accepted overwrites the queue; its own post_drop fires B's pair.
+        director.queue_paired_post_drop_on_accept("drop_b", stamp=300.0)
+        paired_b = director.tick(LEDContext(role="post_drop", post_drop_stamp=300.0))
+        self.assertEqual(paired_b.look, "room_post_drop_b")
+        self.assertEqual(paired_b.reason, "paired_post_drop")
 
     def test_preview_role_does_not_mutate_shuffled_state(self) -> None:
         cfg = _director_config()
@@ -509,11 +599,13 @@ class LEDLookDirectorPriorityTests(unittest.TestCase):
         self.assertTrue(result.available, msg=result.errors)
         director = LEDLookDirector(result.config)
 
-        director.tick(LEDContext(role="drop"))
+        # A drop is accepted, so its pair is genuinely queued (Part J).
+        director.queue_paired_post_drop_on_accept("room_manual", stamp=100.0)
+        self.assertEqual(director._queued_post_drop_look, "room_post_drop")
         # Simulate a track/deck change / stop tearing the lifecycle down before
         # the post_drop section ever ran.
         director.clear_queued_post_drop()
-        after_teardown = director.tick(LEDContext(role="post_drop"))
+        after_teardown = director.tick(LEDContext(role="post_drop", post_drop_stamp=100.0))
 
         self.assertIsNotNone(after_teardown)
         self.assertEqual(after_teardown.look, "room_safe_default")
@@ -778,10 +870,12 @@ class LEDLookDirectorPlanRotationTests(unittest.TestCase):
         director = self._director(seed=0)
         drop = director.tick(LEDContext(role="drop"))
         self.assertEqual(drop.look, "cloud_drop")
+        # Part J: the pair is queued on accepted dispatch, not by the drop tick.
+        director.queue_paired_post_drop_on_accept(drop.look, stamp=100.0)
         role_before = dict(director._role_cursors)
         backend_before = dict(director._role_backend_cursors)
 
-        paired = director.tick(LEDContext(role="post_drop"))
+        paired = director.tick(LEDContext(role="post_drop", post_drop_stamp=100.0))
 
         self.assertEqual(paired.look, "cloud_post")
         self.assertEqual(paired.reason, "paired_post_drop")
