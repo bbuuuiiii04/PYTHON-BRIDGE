@@ -99,9 +99,15 @@ texture ⇒ family default (containment).
 
 ### Task 3 - Role-cue flavoring + simmer upgrade
 Euphoric runs add selection WEIGHT toward bright/white-end looks within the
-role's existing bank choice (a preference input to the existing
-`look_preference` predicate seam, `led_dispatch_policy.py:1670-1701` — reuse
-it, do not invent a parallel filter); simmer detection upgrades the F2
+role's existing bank choice, through the EXISTING look-preference seam —
+re-verified at HEAD 2026-07-09: the producer is
+`_led_look_preference_predicate` (`led_dispatch_policy.py:1762`, passed at
+`:1196` and `:1743`), and the consumer is the director's `look_preference`
+parameter chain (`led_look_director.py:311`/`:326`, applied at `:355-356`,
+plumbed via `context.look_preference` at `:196`). Extend the producer,
+consume through the director exactly as today — reuse this seam, do not
+invent a parallel filter. (Line numbers drift under parallel lanes:
+re-verify at implementation HEAD.) Simmer detection upgrades the F2
 sparse-dim floor trigger from section-tier to measured simmer.
 
 ### Task 4 - Kill switch + config (`led_config.py`, `led_models.py`, example)

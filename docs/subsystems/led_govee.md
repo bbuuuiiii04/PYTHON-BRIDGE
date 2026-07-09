@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 96923d3
-last_verified_date: 2026-07-08
-validation_scope: software-only; LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (lab_update/lab_switch/lab_preview), QR same-network access, pad editor unset-param-defaults, Stream Deck palette control Package 2 plus AWR-121 gesture v2, drop presentation policy Package 3, LED idle/pause ambient fix, LED pad queued-color restore, AWR-156 LED round 2 (strobe-gate rebuild + accepted-look promotion), and AWR-157 darkness-fix round (blank-role hold guard) software-tested, hardware-unvalidated
+last_verified_commit: 3733cf5
+last_verified_date: 2026-07-09
+validation_scope: software-only; LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (lab_update/lab_switch/lab_preview), QR same-network access, pad editor unset-param-defaults, Stream Deck palette control Package 2 plus AWR-121 gesture v2, drop presentation policy Package 3, LED idle/pause ambient fix, LED pad queued-color restore, AWR-156 LED round 2 (strobe-gate rebuild + accepted-look promotion), AWR-157 darkness-fix round (blank-role hold guard), and AWR-161 LED round 3 (remaining Hz-gate migration, rainbow pair + contrast-gated firework explosion promotion, center-burst pixel fix) software-tested, hardware-unvalidated
 ---
 
 # LED / Govee Subsystem

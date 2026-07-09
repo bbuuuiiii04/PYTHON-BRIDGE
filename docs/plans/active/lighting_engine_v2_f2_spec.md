@@ -104,8 +104,14 @@ and consumes the interfaces named in Task 4.
    Transport loss: suspend to v1 fallback, never a new dark-room mode.
 10. **AWR-162 interface (Task 4):** per-drop laser tier mapping — family
     NEUTRAL or damped-T1-thin → `small`; T1 → `standard`; T2 → `intense`;
-    T3 → `monster`. Plus the emphasis-blackout window feed (lasers dark the
-    same beats) and the quantized 4-beat pre-chorus phrase lookahead
+    T3 → `monster`. **FLAGGED EXECUTIVE DEFAULT, one-line operator veto
+    (same treatment as strobe_red_white side B): NEUTRAL → small silences
+    lasers on ~27% of corpus drops, and damped-T1-thin → small silences
+    early-track drops — the operator's approved (A) was ENERGY-gated;
+    NEUTRAL is a typing outcome he never ruled on. The default is kept
+    because it fails toward fewer unwanted laser fires; his one line flips
+    either mapping.** Plus the emphasis-blackout window feed (lasers dark
+    the same beats) and the quantized 4-beat pre-chorus phrase lookahead
     (chorus phrase starts from `phrase_roles`).
 
 ## Part B - Tasks (one commit each, explicit paths)
@@ -115,11 +121,11 @@ and consumes the interfaces named in Task 4.
   sentinels landed before touching `state_manager.py`/`drop_presentation.py`
   or `govee_frame_renderer.py`; shared docs fresh-read + explicit paths +
   HEAD-lock retry discipline as all night. NO bridge starts; live config
-  read-only (F2 example-config blocks ship `enabled: false`-equivalent via
-  the F2 switch default OFF until the operator's morning mirror decision —
-  wait, the operator wants F2 live for tomorrow: F2 switch ships DEFAULT ON
-  in the EXAMPLE config, live activation still requires his mirror+restart;
-  the un-mirrored live config keeps F2 OFF via absent-key default).
+  read-only.
+- F2 switch defaults: the switch ships DEFAULT ON in the EXAMPLE config;
+  an ABSENT key means OFF — so the un-mirrored live config is
+  byte-identical-off, and live activation requires the operator's mirror +
+  restart. (Task 5 states the same rule; they must match.)
 - The 200 Hz push loop gains no blocking I/O: all rule evaluation is
   plan-time (track load / anlz worker) or cheap per-tick arithmetic on
   precomputed windows.
@@ -221,5 +227,8 @@ implemented; suite (known six reds) + three hard checks.
   house) and how violent it is; builds aim at the one; the lasers follow the
   same energy tiers (small drops keep them silent) and go dark with every
   blackout and for 4 beats before each chorus; everything can be killed
-  back to today's behavior with one switch.
+  back to today's behavior with one switch. ONE-LINE VETO ITEMS for you:
+  drops the analysis calls NEUTRAL (~27%) and very-early-track drops
+  currently keep the lasers silent — say the word and either fires lasers
+  like a standard drop instead.
 - [ ] Print exactly AWR163-DONE with real suite numbers, or AWR163-BLOCKED.

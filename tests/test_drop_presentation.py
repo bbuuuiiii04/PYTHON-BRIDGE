@@ -432,18 +432,65 @@ class RequiredTest7DarknessGuard(unittest.TestCase):
         self.assertIsNone(actions.presentation)
 
     def test_guard_rechecked_at_impact_downgrades_to_both(self) -> None:
+        # AWR-159 Task 3: this is the AUTO-tier guard path (hotcue here, any
+        # non-manual reason exercises the same laser_visible check) -- it
+        # must keep today's downgrade-to-both behavior byte-identical. The
+        # MANUAL-arm equivalent no longer downgrades; see
+        # ManualArmVisibilityTests below.
         machine = WindowMachine(_cfg())
         pre_dark = WindowInputs(
             abs_beat=98.0, beats_to_next_drop=2.0, next_drop_beat=100.0,
             drop_role="none", impact_now=False, laser_visible=True,
         )
-        actions = machine.tick(pre_dark, pending_presentation=LASERS_ONLY, pending_reason="solo_manual")
+        actions = machine.tick(pre_dark, pending_presentation=LASERS_ONLY, pending_reason="solo_hotcue")
         self.assertTrue(actions.led_dark_hold)
 
         impact = _impact(100.0, laser_visible=False)
-        actions = machine.tick(impact, pending_presentation=LASERS_ONLY, pending_reason="solo_manual")
+        actions = machine.tick(impact, pending_presentation=LASERS_ONLY, pending_reason="solo_hotcue")
         self.assertEqual((actions.presentation, actions.reason), (LEDS_PLUS_LASERS, "guard_fallback_both"))
         self.assertFalse(actions.led_dark_hold)
+
+
+class ManualArmVisibilityTests(unittest.TestCase):
+    """AWR-159 Task 3: a MANUAL arm's visibility drops the Director-enabled
+    term and never silently downgrades to leds+lasers -- it fires
+    deterministically or refuses visibly."""
+
+    def test_fires_without_laser_visible_when_manual_laser_visible_true(self) -> None:
+        # laser_visible=False (e.g. Director disabled) would sink an AUTO
+        # tier to guard_fallback_both; a manual arm ignores that term and
+        # fires as long as its OWN (Director-free) visibility holds.
+        machine = WindowMachine(_cfg())
+        impact = _impact(100.0, laser_visible=False, manual_laser_visible=True)
+        actions = machine.tick(impact, pending_presentation=LASERS_ONLY, pending_reason="solo_manual")
+        self.assertEqual((actions.presentation, actions.reason), (LASERS_ONLY, "solo_manual"))
+        self.assertTrue(actions.led_dark_hold)
+
+    def test_refuses_visibly_when_manual_laser_visible_false_from_idle(self) -> None:
+        machine = WindowMachine(_cfg())
+        impact = _impact(100.0, laser_visible=True, manual_laser_visible=False)
+        actions = machine.tick(impact, pending_presentation=LASERS_ONLY, pending_reason="solo_manual")
+        self.assertEqual((actions.presentation, actions.reason), (None, "solo_refused"))
+        self.assertFalse(actions.led_dark_hold)
+        self.assertFalse(actions.base_suppressed)
+        self.assertEqual(machine._phase, "idle")
+
+    def test_refusal_restores_atomically_from_pre_dark(self) -> None:
+        # Part C invariant: "restores atomically if pre-dark already engaged."
+        machine = WindowMachine(_cfg(led_predark_beats=4))
+        pre_dark = WindowInputs(
+            abs_beat=98.0, beats_to_next_drop=2.0, next_drop_beat=100.0,
+            drop_role="none", impact_now=False, laser_visible=True,
+            manual_laser_visible=True,
+        )
+        actions = machine.tick(pre_dark, pending_presentation=LASERS_ONLY, pending_reason="solo_manual")
+        self.assertTrue(actions.led_dark_hold)
+
+        impact = _impact(100.0, laser_visible=True, manual_laser_visible=False)
+        actions = machine.tick(impact, pending_presentation=LASERS_ONLY, pending_reason="solo_manual")
+        self.assertEqual((actions.presentation, actions.reason), (None, "solo_refused"))
+        self.assertFalse(actions.led_dark_hold)
+        self.assertFalse(actions.base_suppressed)
 
 
 # ---- Required Behavior Test 8: fail-open --------------------------------
