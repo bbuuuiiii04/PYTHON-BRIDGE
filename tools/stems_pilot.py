@@ -354,11 +354,21 @@ def _pump_stat(T) -> float:
 
 
 def _rolls_stat(T) -> float:
+    """Longest run of consecutive beats whose drums-high sub-beats are ALL filled
+    (min-of-4 quarters >= track high p60). A snare/hi-hat buildup roll sustains
+    sub-beat energy across several beats; a single backbeat hit does not. Tuned
+    on the first-5 set: the labeled roll (Girl$ snare buildup) = 13, non-rolls 1-5.
+    """
     q = _quarters(T, "drums", "high")
-    if not q:
+    b = _beats(T, "drums", "high")
+    if not q or b.size == 0:
         return 0.0
-    p10 = np.percentile(_beats(T, "drums", "high"), 10) if _beats(T, "drums", "high").size else 0.0
-    return max((min(slots) - p10) for slots in q) if q else 0.0
+    p60 = float(np.percentile(b, 60))
+    best = run = 0
+    for slots in q:
+        run = run + 1 if (len(slots) == 4 and min(slots) >= p60) else 0
+        best = max(best, run)
+    return float(best)
 
 
 def _eight08s_stat(T) -> float:
@@ -393,7 +403,8 @@ def _offbeat_hats_stat(T) -> float:
 # element -> (stat function, clear threshold). vocal_axis is scored separately.
 ELEMENT_STATS = {
     "sidechain_sub": (_pump_stat, 3.0),
-    "rolls": (_rolls_stat, 6.0),
+    "rolls": (_rolls_stat, 6.0),  # >=6 consecutive all-sub-beats-filled beats
+
     "eight08s": (_eight08s_stat, 0.15),
     "screeches": (_screeches_stat, 10.0),
     "distorted_kicks": (_distorted_kicks_stat, 8.0),

@@ -272,6 +272,7 @@ def _read_runtime_anlz_data(
         try:
             data.f2_plan = lighting_moments_v2.build_track_plan(
                 v4, data.drop_beat_indices, data.buildup_beat_indices,
+                beatgrid_times_ms=beatgrid_times_ms,
             )
         except Exception:
             log.debug("[F2] plan-compute-failed", exc_info=True)

@@ -564,6 +564,133 @@ def build_move(norm_punch: float, norm_attack_low_p90: float,
 
 
 # --------------------------------------------------------------------------- #
+# Texture layer (F4 / AWR-164) — CONSUMER-ONLY over the existing v4 classes.   #
+# Pure, plan-time. Nothing here schedules, darkens, or types a drop; it only   #
+# records the texture the F4 seasoning consumer reads to pick variants/params  #
+# inside an already-selected look (design D§5.1/§5.4/§5.5, S-2 containment).   #
+# --------------------------------------------------------------------------- #
+TEXTURE_WINDOW = 16          # drop-window width the texture vector reads (D§5.1)
+SIMMER_MIN_RUN = 8           # consecutive simmer beats to record a simmer stretch
+# ponytail: per-beat simmer is a proxy for D§5.4's section-median rule (the plan
+# carries no section boundaries); a >=8-beat run stands in for "a quiet section."
+WALL_TRAP_ONSET_MAX = FAM_WALL_TRAP_ONSET_MAX   # trap (sparse hits) vs dense stutter
+
+
+def _window_majority(flags: Sequence[bool], start: int, width: int) -> bool:
+    seg = flags[start:start + width]
+    return bool(seg) and sum(1 for f in seg if f) * 2 >= len(seg)
+
+
+@dataclass(frozen=True)
+class DropTexture:
+    """Per-drop texture vector: the majority verdict of the existing
+    spectral_profile classes over the 16-beat drop window. `sustained_bass`/`stab`
+    pick the HOUSE variant; `onset_density_mh` picks the WALL trap-vs-dense variant
+    (D§3). Selection-only seasoning — never a family/tier/darkness input."""
+    stab: bool = False
+    sustained_bass: bool = False
+    growl: bool = False
+    kick_prominence: bool = False
+    thick: bool = False
+    bright_tilt: bool = False
+    onset_density_mh: float = 0.0
+
+
+_TEXTURE_CLASSES = ("stab", "sustained_bass", "growl", "kick_prominence",
+                    "thick", "bright_tilt")
+
+
+def _texture_flag_bank(v4: SpectralFeaturesV4) -> dict[str, list[bool]]:
+    """Compute each per-beat texture class ONCE per track (each is O(n_beats));
+    build_track_plan slices these per drop window instead of recomputing. Each
+    class is fail-soft: a v4 missing a series it needs yields all-False for that
+    class (→ no seasoning), never a plan-build failure — texture must never cost
+    the family/tier/darkness plan."""
+    fns = {
+        "stab": spectral_profile.stab_flags,
+        "sustained_bass": spectral_profile.sustained_bass_flags,
+        "growl": spectral_profile.growl_flags,
+        "kick_prominence": spectral_profile.kick_prominence_flags,
+        "thick": spectral_profile.thick_flags,
+        "bright_tilt": spectral_profile.bright_tilt_flags,
+    }
+    n = v4.n_beats
+    bank: dict[str, list[bool]] = {}
+    for key, fn in fns.items():
+        try:
+            bank[key] = fn(v4)
+        except Exception:
+            bank[key] = [False] * n
+    return bank
+
+
+def _drop_texture(bank: dict[str, list[bool]], onset_density_mh: float,
+                  drop: int, width: int = TEXTURE_WINDOW) -> DropTexture:
+    return DropTexture(
+        stab=_window_majority(bank["stab"], drop, width),
+        sustained_bass=_window_majority(bank["sustained_bass"], drop, width),
+        growl=_window_majority(bank["growl"], drop, width),
+        kick_prominence=_window_majority(bank["kick_prominence"], drop, width),
+        thick=_window_majority(bank["thick"], drop, width),
+        bright_tilt=_window_majority(bank["bright_tilt"], drop, width),
+        onset_density_mh=round(float(onset_density_mh), 3),
+    )
+
+
+def _runs_from_mask(mask: Sequence[bool], min_run: int) -> tuple[tuple[int, int], ...]:
+    """Half-open [start, end) beat ranges where `mask` is True for >= min_run beats."""
+    runs: list[tuple[int, int]] = []
+    start = None
+    for i, on in enumerate(list(mask) + [False]):
+        if on and start is None:
+            start = i
+        elif not on and start is not None:
+            if i - start >= min_run:
+                runs.append((start, i))
+            start = None
+    return tuple(runs)
+
+
+def euphoric_run_ranges(sustained_synth_flags: Sequence[bool],
+                        min_run: int = EUPHORIC_MIN_RUN) -> tuple[tuple[int, int], ...]:
+    """D§5.5 euphoric-eligible windows as [start, end) ranges — the runtime form of
+    `euphoric_runs`. Clean sustained-synth (source-agnostic; vocals count — NEVER
+    'synth') for >= min_run beats. Selection-only; schedules nothing."""
+    return _runs_from_mask(sustained_synth_flags, min_run)
+
+
+def simmer_run_ranges(v4: SpectralFeaturesV4,
+                      min_run: int = SIMMER_MIN_RUN) -> tuple[tuple[int, int], ...]:
+    """D§5.4 simmer stretches as [start, end) ranges. Per-beat simmer = a
+    percussion-free beat (attack_low_db < 2.5 and onset_density < 0.5); a run of
+    >= min_run stands in for the design's quiet-section median rule."""
+    try:
+        attack = v4.series["attack_low_db"]
+        onset = v4.series["onset_density_midhigh"]
+    except (KeyError, TypeError):
+        return ()
+    mask = [a < SIMMER_ATTACK_MAX and o < SIMMER_ONSET_MAX
+            for a, o in zip(attack, onset)]
+    return _runs_from_mask(mask, min_run)
+
+
+def _busy_pulse_duty(v4: SpectralFeaturesV4, beatgrid_times_ms: Sequence[float],
+                     drop: int) -> float:
+    """lowmid_pulse duty at a drop window. EXPERIMENTAL / COMPUTED-NOT-CONSUMED
+    (C§6d: fires on wobble/rolls/chugs/sirens alike; slow beat-locked wub under
+    2.5 cyc/beat is invisible). Recorded for observability only — no renderer
+    consumes it until the operator's scrub gate closes (spec Part A-2)."""
+    if not beatgrid_times_ms or len(beatgrid_times_ms) != v4.n_beats:
+        return 0.0
+    try:
+        duty, _dom, _conc = spectral_profile.lowmid_pulse_measure(
+            v4, beatgrid_times_ms, drop)
+        return round(float(duty), 3)
+    except Exception:
+        return 0.0
+
+
+# --------------------------------------------------------------------------- #
 # Per-drop convenience: family + tier from a cached window                     #
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
@@ -614,6 +741,9 @@ class DropPlanEntry:
     decision: DropDecision
     white_share: float
     buildup_beat: Optional[int]
+    # F4 texture (AWR-164) — seasoning inputs, unread unless F4 is on.
+    texture: DropTexture = field(default_factory=DropTexture)
+    busy_pulse_duty: float = 0.0   # EXPERIMENTAL / computed-not-consumed (C§6d)
 
 
 @dataclass(frozen=True)
@@ -623,6 +753,22 @@ class F2TrackPlan:
     second dedupe invented here)."""
     entries: tuple[DropPlanEntry, ...]
     build_move: str
+    # F4 texture (AWR-164) — per-track euphoric/simmer stretches as [start, end)
+    # beat ranges. Empty tuples unless F4 seasons them; consumed selection-only.
+    euphoric_runs: tuple[tuple[int, int], ...] = ()
+    simmer_runs: tuple[tuple[int, int], ...] = ()
+
+    @staticmethod
+    def _in_runs(runs: Sequence[tuple[int, int]], beat: float) -> bool:
+        return any(lo <= beat < hi for lo, hi in runs)
+
+    def is_euphoric(self, beat: float) -> bool:
+        """True when `beat` sits inside a euphoric-eligible stretch (D§5.5)."""
+        return self._in_runs(self.euphoric_runs, beat)
+
+    def is_simmer(self, beat: float) -> bool:
+        """True when `beat` sits inside a measured simmer stretch (D§5.4)."""
+        return self._in_runs(self.simmer_runs, beat)
 
     def for_drop(self, beat: float, tol: float = 1.0) -> Optional[DropPlanEntry]:
         best = None
@@ -682,12 +828,19 @@ def transition_window_for(plan: Optional[F2TrackPlan], abs_beat: Optional[float]
 
 
 def build_track_plan(v4: SpectralFeaturesV4, drops: Sequence[int],
-                     buildups: Sequence[int], *, hotcues: Sequence[int] = ()) -> F2TrackPlan:
+                     buildups: Sequence[int], *, hotcues: Sequence[int] = (),
+                     beatgrid_times_ms: Sequence[float] = ()) -> F2TrackPlan:
     """Compute the per-track F2 plan over the RAW drop list. One decision per raw
     drop, keyed by beat; consumption looks up only the selected (deduped) drops.
-    Pure — safe to call on the async identity worker (no push-loop I/O)."""
+    Pure — safe to call on the async identity worker (no push-loop I/O).
+
+    The F4 texture vector (AWR-164) rides the same pass: per-beat classes computed
+    once, sliced per drop; euphoric/simmer stretches computed once per track. These
+    fields are unread unless F4 is on, so an F4-off (or F2-only) plan is
+    behaviourally identical for family/tier/darkness/routing."""
     bu_sorted = sorted(int(b) for b in buildups)
     hot = {int(h) for h in hotcues}
+    bank = _texture_flag_bank(v4)
     entries = []
     for d in sorted({int(x) for x in drops}):
         if d < 0 or d >= v4.n_beats:
@@ -695,6 +848,18 @@ def build_track_plan(v4: SpectralFeaturesV4, drops: Sequence[int],
         bu = _nearest_preceding(bu_sorted, d)
         dec = decide_drop(v4, d, buildup_beat=bu, hotcue_tagged=(d in hot))
         ws, _ = white_share(v4, bu if bu is not None else max(0, d - 32), d)
-        entries.append(DropPlanEntry(d, dec, round(ws, 3), bu))
+        try:
+            onset = spectral_profile.drop_window_vector(
+                v4, d, width=TEXTURE_WINDOW).get("onset_density_mh", 0.0)
+        except Exception:
+            onset = 0.0
+        tex = _drop_texture(bank, onset, d)
+        bp = _busy_pulse_duty(v4, beatgrid_times_ms, d)
+        entries.append(DropPlanEntry(d, dec, round(ws, 3), bu, tex, bp))
     move = _track_build_move(v4, entries[0].drop_beat) if entries else "swell"
-    return F2TrackPlan(tuple(entries), move)
+    try:
+        euphoric = euphoric_run_ranges(spectral_profile.sustained_synth_flags(v4))
+    except Exception:
+        euphoric = ()
+    simmer = simmer_run_ranges(v4)
+    return F2TrackPlan(tuple(entries), move, euphoric, simmer)
