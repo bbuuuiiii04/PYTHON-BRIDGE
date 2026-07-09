@@ -877,5 +877,91 @@ class SlotFiveWhiteKnobTests(unittest.TestCase):
         )
 
 
+class Awr156Round2ConfigTests(unittest.TestCase):
+    """AWR-156 Task 7.6: colorway/promotion looks, knob #9 widths, bank recast."""
+
+    _COLORWAY_LOOKS = (
+        "rt_drop_strobe_blue", "rt_drop_strobe_cyan", "rt_drop_strobe_green",
+        "rt_drop_strobe_red", "rt_drop_strobe_red_white",
+        "rt_drop_strobe_blue_cyan", "rt_drop_strobe_cyan_white",
+    )
+
+    def test_example_config_loads_clean(self) -> None:
+        result = load_led_look_director_config_from_dict(_example_config())
+        self.assertTrue(result.available, msg=result.errors)
+        self.assertEqual(result.errors, ())
+
+    def test_seven_colorway_looks_validate(self) -> None:
+        result = load_led_look_director_config_from_dict(_example_config())
+        self.assertTrue(result.available, msg=result.errors)
+        for name in self._COLORWAY_LOOKS:
+            with self.subTest(name=name):
+                look = result.config.looks[name]
+                self.assertEqual(look.scene_ref, "drop_strobe_colorway")
+                self.assertTrue(look.allow_strobe)
+                self.assertIn(look.scene_ref, REALTIME_STROBE_EFFECTS)
+                self.assertIn(look.scene_ref, REALTIME_EFFECT_NAMES)
+                self.assertEqual(look.color_source, "baked")
+
+    def test_strobe_red_white_side_b_restored_to_white(self) -> None:
+        cfg = _example_config()
+        params = cfg["looks"]["rt_drop_strobe_red_white"]["params"]
+        self.assertEqual(params["color_b"], [255, 255, 255])
+
+    def test_strobe_cyan_white_keeps_his_periwinkle_dial(self) -> None:
+        cfg = _example_config()
+        params = cfg["looks"]["rt_drop_strobe_cyan_white"]["params"]
+        self.assertEqual(params["color_b"], [100, 105, 255])
+
+    def test_promoted_looks_present_with_accepted_params(self) -> None:
+        result = load_led_look_director_config_from_dict(_example_config())
+        self.assertTrue(result.available, msg=result.errors)
+        looks = result.config.looks
+        self.assertIn("rt_buildup_balloon_comet", looks)
+        self.assertIn("rt_groove_heartbeat", looks)
+        self.assertIn("rt_post_drop_firework_remnants", looks)
+        self.assertEqual(looks["rt_groove_heartbeat"].color_source, "engine")
+        self.assertEqual(looks["rt_post_drop_firework_remnants"].color_source, "engine")
+        self.assertEqual(looks["rt_buildup_balloon_comet"].color_source, "baked")
+
+    def test_bank_membership_colorways_and_promotions_present(self) -> None:
+        result = load_led_look_director_config_from_dict(_example_config())
+        self.assertTrue(result.available, msg=result.errors)
+        banks = result.config.banks["default"]
+        for name in self._COLORWAY_LOOKS:
+            self.assertIn(name, banks.drop)
+        self.assertIn("rt_buildup_balloon_comet", banks.buildup)
+        self.assertIn("rt_groove_heartbeat", banks.groove)
+        self.assertIn("rt_post_drop_firework_remnants", banks.post_drop)
+
+    def test_bank_recast_drop_chase_and_nebula_moved_to_post_drop(self) -> None:
+        result = load_led_look_director_config_from_dict(_example_config())
+        self.assertTrue(result.available, msg=result.errors)
+        banks = result.config.banks["default"]
+        self.assertIn("rt_drop_chase", banks.post_drop)
+        self.assertIn("rt_drop_nebula", banks.post_drop)
+        self.assertNotIn("rt_drop_chase", banks.drop)
+        self.assertNotIn("rt_drop_nebula", banks.drop)
+
+    def test_bank_recast_drop_pairs_entries_removed(self) -> None:
+        result = load_led_look_director_config_from_dict(_example_config())
+        self.assertTrue(result.available, msg=result.errors)
+        self.assertNotIn("rt_drop_chase", result.config.drop_pairs)
+        self.assertNotIn("rt_drop_nebula", result.config.drop_pairs)
+
+    def test_knob_five_no_op_step_within_section_groove_still_true(self) -> None:
+        cfg = _example_config()
+        self.assertTrue(cfg["color_engine"]["step_within_section"]["groove"])
+
+    def test_knob_nine_widths_present(self) -> None:
+        cfg = _example_config()
+        looks = cfg["looks"]
+        for name in ("rt_drop_chase", "rt_drop_nebula", "rt_post_drop_chase",
+                     "rt_post_drop_nebula", "rt_post_drop_center_comet"):
+            self.assertEqual(looks[name]["params"]["width"], 4)
+        for name in ("rt_groove_chase", "rt_groove_nebula"):
+            self.assertEqual(looks[name]["params"]["width"], 2.5)
+
+
 if __name__ == "__main__":
     unittest.main()

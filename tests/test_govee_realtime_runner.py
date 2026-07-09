@@ -964,6 +964,9 @@ class FramePeriodInjectionTests(unittest.TestCase):
                 # already run by the time sleep_fn call #4 fires.
                 ema_after_stall = runner._frame_period_ema
             proceed.set()
+        # Unblock whatever sleep_fn call is currently waiting so stop()'s join
+        # doesn't have to ride out the Event's own timeout.
+        proceed.set()
         runner.stop()
 
         self.assertIsNotNone(ema_after_stall)
