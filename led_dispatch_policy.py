@@ -83,9 +83,10 @@ def cfx_sweep_envelope(
 
     State machine (thr = cfg.bloom_threshold_norm, engaged = knob > 0.5 + deadband):
       IDLE  (knob <= 0.5 + deadband = neutral): clears the whole engagement (not
-            fired, not released); mix ramps to 0 and dim restores to 1.0. This is the
-            ONLY place the trigger re-arms — a fresh clockwise sweep from here floods
-            and can fire again, exactly like the first time.
+            fired, not released); the flood drains to 0 first (dim held), THEN brightness
+            restores to 1.0 (sequential — see LATCHED-RELEASE). This is the ONLY place the
+            trigger re-arms — a fresh clockwise sweep from here floods and can fire again,
+            exactly like the first time.
       FLOOD (engaged, not yet fired, knob <= thr): mix ramps to 1 over flood_ramp_ms;
             dim 1.0. A sweep that never crosses thr floods up and releases at the
             deadband, unchanged from before.
@@ -93,11 +94,13 @@ def cfx_sweep_envelope(
             below deadband to above thr): fired -> True. Flood = swell.
       FIRED (fired, not released, knob > thr): dim ramps 1.0 -> dim_floor over
             drain_ms, then holds; knob position above thr has NO further effect.
-      LATCHED-RELEASE (fired, knob drops below thr → released latches True): mix -> 0
-            AND dim -> 1.0 together over release_ramp_ms — the whole overlay lets go
-            cleanly and STAYS released for the entire ride down, no matter how long the
-            knob parks anywhere above the deadband. It does NOT re-flood or re-fire even
-            if the knob wanders back above thr; only a return to neutral re-arms.
+      LATCHED-RELEASE (fired, knob drops below thr → released latches True): the flood
+            drains to 0 FIRST (dim held at its current drained value over release_ramp_ms),
+            THEN brightness rises to 1.0 over release_ramp_ms — sequential, not concurrent,
+            so from a drained dark room the flood color never flares back mid-release. The
+            overlay STAYS released for the entire ride down, no matter how long the knob
+            parks anywhere above the deadband. It does NOT re-flood or re-fire even if the
+            knob wanders back above thr; only a return to neutral re-arms.
     """
     knob = knob_norm if knob_norm == knob_norm else 0.5          # NaN -> neutral
     knob = 0.0 if knob < 0.0 else (1.0 if knob > 1.0 else knob)
@@ -121,21 +124,28 @@ def cfx_sweep_envelope(
         released = True         # one-way latch: dropped back below thr → release to neutral
 
     dim_span = 1.0 - cfg.dim_floor
-    if released:
-        # LATCHED-RELEASE: let the whole overlay go together and stay released until neutral.
-        mix = _cfx_approach(prev_mix, 0.0, dt, cfg.release_ramp_ms, 1.0)
-        dim = _cfx_approach(prev_dim, 1.0, dt, cfg.release_ramp_ms, dim_span)
+    if released or not engaged:
+        # LATCHED-RELEASE / IDLE — head to neutral. SEQUENTIAL to kill the release flare
+        # (AWR-173 re-bloom fix): while the flood is still up, HOLD dim and drain mix to 0;
+        # only once mix == 0 does brightness rise back to 1.0. From a drained (dark) room the
+        # visible product mix*dim only falls — no mid-release flare of the flood color — and a
+        # never-fired release (dim already 1.0) is byte-identical to the old concurrent ramp.
+        # Both `released` (fired, dropped below thr) and IDLE (knob back at/below neutral,
+        # which also cleared fired/released above) land here, incl. a one-tick drop to neutral
+        # straight from a drained fire.
+        if prev_mix > 0.0:
+            mix = _cfx_approach(prev_mix, 0.0, dt, cfg.release_ramp_ms, 1.0)
+            dim = prev_dim
+        else:
+            mix = 0.0
+            dim = _cfx_approach(prev_dim, 1.0, dt, cfg.release_ramp_ms, dim_span)
     elif fired:
         # FIRED (still above thr, not yet returned): peak-then-drain to the floor.
         mix = _cfx_approach(prev_mix, 1.0, dt, cfg.flood_ramp_ms, 1.0)
         dim = _cfx_approach(prev_dim, cfg.dim_floor, dt, cfg.drain_ms, dim_span)
-    elif engaged:
-        # FLOOD (not yet fired this engagement): flood in, no dimming yet.
-        mix = _cfx_approach(prev_mix, 1.0, dt, cfg.flood_ramp_ms, 1.0)
-        dim = _cfx_approach(prev_dim, 1.0, dt, cfg.release_ramp_ms, dim_span)
     else:
-        # IDLE (knob at/below 12): decay flood to 0, restore brightness.
-        mix = _cfx_approach(prev_mix, 0.0, dt, cfg.release_ramp_ms, 1.0)
+        # FLOOD (engaged, not yet fired this engagement): flood in, no dimming yet.
+        mix = _cfx_approach(prev_mix, 1.0, dt, cfg.flood_ramp_ms, 1.0)
         dim = _cfx_approach(prev_dim, 1.0, dt, cfg.release_ramp_ms, dim_span)
 
     return CfxEnvState(mix=mix, dim=dim, fired=fired, released=released)
