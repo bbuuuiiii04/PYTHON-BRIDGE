@@ -112,9 +112,65 @@ status) are allowed during boot; mutations are not.
 - Pre-drop tease: no verdict ever given.
 - Full veto list + parked items: resume doc "Undecided operator items" row.
 
-## FINAL-STATE (patched ~21:00 — trust git log over this if they diverge)
+## FINAL-STATE (patched ~21:05, the last superman4 write — git log wins on divergence)
 
-PATCH-PENDING: A165 spec (specbank, TAG A165), AWR-185 guard round (ledfix3,
-TAG A184B), usb stick-sweep pilot, bounce #4 decision, final commit hash, retro
-disposition. If you are reading this unpatched, the 21:00 patch did not land —
-reconstruct from `git log --oneline -30` + the registry + lane panes.
+**Bridge: OFF, by the operator's own hand** ("MIX DONE, bridge OFF" ~20:15). Do NOT
+start it — his menubar owns starts. **STAGED, loads automatically at next start:**
+AWR-185 stop-precedence guard (gated PASS) + the filter lane's two-leg AWR-173
+re-bloom fix (sequential release + fired-latch preservation on inert paths; 211
+targeted green; its own full-suite proof was finishing at handoff with
+flag-on-deviation promised — check the filter state brief). His ride-home CFX test
+= first attended item next session.
+
+**Suite board at handoff:** 3889 tests, 4F+1E — same signature as the by-name
+reconcile earlier tonight (the named five environmental, repo-root run); every
+round since verified green at file scope at the executive desk. patch_f equality
+re-pin (1bdf18d) holds.
+
+**Tonight's landed rounds (all executive-gated, software-tested only):** AWR-179
+CLOSED PASS; AWR-183 verified (DMG 17:59, app adhoc-signed); AWR-184 rung LIVE
+since the 19:05:52 bounce (operator ear-check pending); AWR-185 staged (see
+above); AWR-175 F3 spec banked; AWR-165 Codex spec banked (39713f1 — note: it
+swept the filter lane's led_dispatch_policy.py leg-1 diff, misattribution
+recorded, content verified); AWR-182 labels corpus + blast-radius sweep (104
+drops/80 tracks; TWO suspect classes — bo16 long-tails ≥30-beat quiet stretches +
+intro/mix-in firings at 0:12-0:15 — await operator ear verdicts in the corpus =
+the successor's first labels batch).
+
+**Overnight compute running at handoff (nohup, survives everything):** P1 backfill
+sweep PID 78394/78396, log `local/sweep_p1_20260709.log` (acceptance when done:
+Sexy 3:38 separates from its 7 siblings; capochino 1:01.7; Girl$ 1:16.1/2:25.6 —
+commands in the resume doc). **Stick pre-warm sweep: deliberately KILLED 5 min in**
+— the operator is RENAMING the stick; a /Volumes/USB-keyed run would write 567
+dead-path entries (the 4 it wrote were scrubbed; library cache untouched).
+RE-FIRE after his rename, from the repo root:
+`nohup caffeinate -i nice -n 10 python3 tools/spectral_stick_sweep.py "/Volumes/<NEW-NAME>" --jobs 2 > local/sweep_stick_20260709.log 2>&1 &`
+
+**usb M2 program (operator directive, captured verbatim at
+`docs/plans/active/usb_launcher_m2_operator_directive_2026_07_09.md`):** M2 spec =
+spec-tonight-bank-for-Jul-11 (authoring at the 21:00 cut — check its registry row
+for the honest-marker state); install.command/purge.command stick helpers approved
+as the labeled Saturday interim (purge REQUIRES typed confirmation, only removes
+installer-created paths); R5 (read stick inside the RX3 slot) re-answered
+IMPOSSIBLE per the settled AWR-167 dual-confirmed verdict — do not re-open.
+M2 spec must carry the secrets-on-stick security line; his default YES stands,
+veto open.
+
+**Open operator items at close:** M2 secrets veto; ride-home CFX test; AWR-184
+Utopia ear-check (1:27 + 3:00 must read as blackouts); blast-radius verdicts;
+D1-F1 phantom-load (still operator-DEFERRED); pre-drop tease (still no verdict);
+17:48 bridge stop (closed-probable: his own menubar pattern — he stopped the
+bridge himself at mix end the same way).
+
+**Environment notes:** codex-cli v0.144.0 (org-doc hook mechanics were verified on
+0.142.5 — retest pre_tool_use firing Jul 11, see org doc §10); a `ghidra` MCP
+server fails to start in the codex session (unrelated tooling, ignore); Codex
+session runs YOLO permissions by the operator's choice. Retro: skipped-by-clock
+tonight; next session's /retro takes this evening in scope (raw material lives in
+these docs).
+
+**Session purge:** superman4's last act was killing every tmux session except
+`codex` (operator order) — career, superman3/4, all attended + worker lanes. Lane
+state = on-disk briefs (`docs/prompts/active/*_state_*.md`) + the registry, not
+panes. Claude-side transcripts persist on disk and are resumable, but treat repo
+docs as the only current truth.
