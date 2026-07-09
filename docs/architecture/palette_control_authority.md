@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: operator-authoritative target behavior
-last_verified_commit: daa8804
-last_verified_date: 2026-07-04
+last_verified_commit: 96923d3
+last_verified_date: 2026-07-08
 validation_scope: Package 2 plus AWR-121 gesture v2 implemented and software-tested; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
