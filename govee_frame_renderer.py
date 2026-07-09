@@ -364,6 +364,20 @@ def _edm_beat(beat: float, params: Mapping[str, Any]) -> float:
     return beat % duration
 
 
+def _hz_strobe_on(local_t: float, params: Mapping[str, Any]) -> bool:
+    """Time-based strobe gate (AWR-153 binding ruling): hz + duty in the
+    seconds domain, BPM-free. Frame-timing-aware: the ON window is widened
+    to at least ~1.6 rendered frames so every cycle lands at least one ON
+    frame at any achievable fps (the 40fps-designed beat gate missed ~31%
+    of cycles under jitter)."""
+    hz = max(0.5, min(10.0, float(params.get("hz", 6.0))))
+    duty = max(0.05, min(0.5, float(params.get("duty", 0.3))))
+    frame_period = max(1e-4, float(params.get("frame_period_s", 1.0 / 40.0)))
+    cycle_s = 1.0 / hz
+    on_s = max(duty * cycle_s, min(cycle_s * 0.9, 1.6 * frame_period))
+    return (max(0.0, float(local_t)) % cycle_s) < on_s
+
+
 def _groove_chase(name: str, beat: float, segments: int) -> Frame:
     color1, color2 = _edm_color_for_look(name, beat)
     return _dual_chase(
