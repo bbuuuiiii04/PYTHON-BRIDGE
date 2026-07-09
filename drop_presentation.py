@@ -567,14 +567,15 @@ class WindowInputs:
 
     __slots__ = (
         "abs_beat", "beats_to_next_drop", "next_drop_beat", "drop_role",
-        "impact_now", "laser_visible", "scripted_mode", "stopped",
-        "track_changed", "active_deck_changed", "manual_interaction",
+        "impact_now", "laser_visible", "manual_laser_visible", "scripted_mode",
+        "stopped", "track_changed", "active_deck_changed", "manual_interaction",
     )
 
     def __init__(
         self, *, abs_beat: Optional[float], beats_to_next_drop: Optional[float],
         next_drop_beat: Optional[float], drop_role: str, impact_now: bool,
-        laser_visible: bool, scripted_mode: bool = False, stopped: bool = False,
+        laser_visible: bool, manual_laser_visible: bool = True,
+        scripted_mode: bool = False, stopped: bool = False,
         track_changed: bool = False, active_deck_changed: bool = False,
         manual_interaction: bool = False,
     ) -> None:
@@ -584,6 +585,12 @@ class WindowInputs:
         self.drop_role = drop_role
         self.impact_now = impact_now
         self.laser_visible = laser_visible
+        # AWR-159 Task 3: a MANUAL arm's own visibility -- base_live AND not
+        # masked AND role in {drop, post_drop} -- deliberately WITHOUT the
+        # laser_director.is_enabled() term `laser_visible` carries for auto
+        # tiers (the physical lasers run on the SoundSwitch pack path
+        # independent of the Director's enable flag).
+        self.manual_laser_visible = manual_laser_visible
         self.scripted_mode = scripted_mode
         self.stopped = stopped
         self.track_changed = track_changed
@@ -625,6 +632,10 @@ class WindowActions:
 
 
 _IDLE_ACTIONS = WindowActions(led_dark_hold=False, base_suppressed=False, presentation=None, reason="")
+# AWR-159 Task 3: a refused manual arm restores/stays exactly like idle (no
+# dark hold, no suppression) but carries a distinguishable reason so
+# state_manager.py can clear the arm and surface the refusal to the operator.
+_REFUSED_ACTIONS = WindowActions(led_dark_hold=False, base_suppressed=False, presentation=None, reason="solo_refused")
 
 
 class WindowMachine:
@@ -684,6 +695,9 @@ class WindowMachine:
             # happened), not an idle reset (which would mean no drop happened).
             if inputs.impact_now:
                 presentation, reason = self._guarded(pending_presentation, pending_reason, inputs)
+                if reason == "solo_refused":
+                    self._reset()
+                    return _REFUSED_ACTIONS
                 self._enter_window(presentation, reason, inputs.abs_beat)
                 return self._window_actions()
             passed_without_drop = (
@@ -701,6 +715,9 @@ class WindowMachine:
         if self._phase == "in_window":
             if inputs.impact_now and pending_presentation is not None:
                 presentation, reason = self._guarded(pending_presentation, pending_reason, inputs)
+                if reason == "solo_refused":
+                    self._reset()
+                    return _REFUSED_ACTIONS
                 self._enter_window(presentation, reason, inputs.abs_beat)
                 return self._window_actions()
 
@@ -721,6 +738,9 @@ class WindowMachine:
         # phase == "idle"
         if inputs.impact_now and pending_presentation is not None:
             presentation, reason = self._guarded(pending_presentation, pending_reason, inputs)
+            if reason == "solo_refused":
+                self._reset()
+                return _REFUSED_ACTIONS
             self._enter_window(presentation, reason, inputs.abs_beat)
             return self._window_actions()
 
@@ -742,10 +762,19 @@ class WindowMachine:
     @staticmethod
     def _guarded(
         pending_presentation: str, pending_reason: str, inputs: WindowInputs,
-    ) -> tuple[str, str]:
+    ) -> tuple[Optional[str], str]:
         """Darkness guard re-checked at impact (authority doc): a `lasers_only`
         verdict downgrades to `leds_plus_lasers` when lasers are not actually
-        visible right now."""
-        if pending_presentation == LASERS_ONLY and not inputs.laser_visible:
+        visible right now. AWR-159 Task 3: a MANUAL arm is checked against its
+        own Director-flag-free visibility and never silently downgrades to
+        leds+lasers -- when even that fails it comes back as ("solo_refused",
+        None) so the caller refuses instead of rendering anything."""
+        if pending_presentation != LASERS_ONLY:
+            return pending_presentation, pending_reason
+        if pending_reason == "solo_manual":
+            if not inputs.manual_laser_visible:
+                return None, "solo_refused"
+            return pending_presentation, pending_reason
+        if not inputs.laser_visible:
             return LEDS_PLUS_LASERS, "guard_fallback_both"
         return pending_presentation, pending_reason

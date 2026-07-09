@@ -593,6 +593,11 @@ class StateManager(LEDDispatchPolicyMixin):
         # WindowInputs.manual_interaction=True the very next tick and clears it,
         # regardless of that tick's impact_now value.
         self._drop_presentation_manual_cancel: bool = False
+        # One-tick "just refused" flag (AWR-159 Task 3): set when a manual arm
+        # refuses at impact, read+cleared by _drop_presentation_update_solo_feedback
+        # so the pad shows a brief distinct "refused" state instead of jumping
+        # straight back to idle/armed.
+        self._drop_presentation_solo_refused_flash: bool = False
         # Set by _drive_pack_output each tick: pack live AND the latest autoloop
         # base render had no diagnostic (Task 4 items 3-4's darkness-guard input).
         self._drop_presentation_base_live: bool = False
@@ -2672,12 +2677,29 @@ class StateManager(LEDDispatchPolicyMixin):
         laser_enabled = bool(
             self._laser_director is not None and self._laser_director.is_enabled()
         )
+        role_visible = role in ("drop", "post_drop")
         laser_visible = (
             self._drop_presentation_base_live
-            and role in ("drop", "post_drop")
+            and role_visible
             and not laser_masked
             and laser_enabled
         )
+        # AWR-159 Task 3: a MANUAL arm's own visibility never depends on the
+        # Laser Director's enable flag -- the physical lasers run on the
+        # SoundSwitch pack path independent of it (triage Defect 1). Also
+        # precompute which single gate would refuse it, for the operator-
+        # facing log if the guard ends up refusing at impact.
+        manual_laser_visible = (
+            self._drop_presentation_base_live and role_visible and not laser_masked
+        )
+        if not self._drop_presentation_base_live:
+            manual_refuse_reason = "base_live_false"
+        elif laser_masked:
+            manual_refuse_reason = "masked"
+        elif not role_visible:
+            manual_refuse_reason = "role"
+        else:
+            manual_refuse_reason = ""
 
         inputs = WindowInputs(
             abs_beat=sp_state.abs_beat,
@@ -2686,6 +2708,7 @@ class StateManager(LEDDispatchPolicyMixin):
             drop_role=role,
             impact_now=presentation_impact,
             laser_visible=laser_visible,
+            manual_laser_visible=manual_laser_visible,
             stopped=not d.playing,
             track_changed=track_changed,
             active_deck_changed=active_deck_changed,
@@ -2708,6 +2731,20 @@ class StateManager(LEDDispatchPolicyMixin):
                 # (AWR-159 Task 2) -- the arm targeted "the next true drop",
                 # which has now happened.
                 self._drop_presentation_armed_key = None
+            if actions.reason == "solo_refused":
+                # AWR-159 Task 3: never a silent downgrade -- log which gate
+                # refused it and flash a distinct feedback state for one
+                # transition. LEDs/base are untouched (the guard refused
+                # before darkening; WindowMachine's _REFUSED_ACTIONS carries
+                # no dark hold or suppression).
+                bridge_log.perf(
+                    "override", "[LASER] solo-refused reason=%s", manual_refuse_reason,
+                    data={
+                        "surface": "laser", "action": "solo_refused",
+                        "reason": manual_refuse_reason,
+                    },
+                )
+                self._drop_presentation_solo_refused_flash = True
             if decision is not None:
                 if auto_solo_fired:
                     session.mark_auto_solo_used(track_key)
@@ -2782,7 +2819,12 @@ class StateManager(LEDDispatchPolicyMixin):
 
     def _drop_presentation_update_solo_feedback(self) -> None:
         last_actions = self._drop_presentation_last_actions
-        if last_actions is not None and last_actions.presentation == LASERS_ONLY:
+        if self._drop_presentation_solo_refused_flash:
+            # AWR-159 Task 3: one-tick distinct flash, highest priority --
+            # a refusal always has something concrete for the operator to see
+            # even though it never darkens anything.
+            state = "refused"
+        elif last_actions is not None and last_actions.presentation == LASERS_ONLY:
             state = "active"
         elif self._drop_presentation_armed_key is not None:
             state = "armed"
@@ -2807,6 +2849,7 @@ class StateManager(LEDDispatchPolicyMixin):
             )
             if self._led_palette_control is not None:
                 self._led_palette_control.maybe_publish()
+        self._drop_presentation_solo_refused_flash = False
 
     def _drop_presentation_solo_pad_pressed(self) -> None:
         """Ev.LASER_SOLO_PAD: arm / disarm / veto / cancel-active per the

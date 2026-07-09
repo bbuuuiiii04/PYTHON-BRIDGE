@@ -629,6 +629,11 @@ class LedPaletteControl:
             state = "active" if active else "inactive"
             if key == "laser_solo" and str(snap.get("laser_solo")) in ("armed", "pending"):
                 state = "queued"
+            elif key == "laser_solo" and str(snap.get("laser_solo")) == "refused":
+                # AWR-159 Task 3: a refused manual arm is distinct from a
+                # firing/queued solo -- pass it through rather than folding it
+                # into the generic active/inactive bucket.
+                state = "refused"
             controls[key] = {
                 "name": label,
                 "note": int(note),
