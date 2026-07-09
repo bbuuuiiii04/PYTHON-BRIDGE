@@ -102,6 +102,15 @@ BALLOON_PERC_BOUNDARY = 0.35   # build-window perc_full < this → balloon-shrin
 COLLAPSE_GAP = 16              # a true collapse = a sub-only run this long. 16
                                # fires ONLY for hard family (WALL/COMET) over a
                                # collapse this deep; melodic/mainstage never 16.
+PERC_ALIVE_16 = 0.42         # Part H2 (AWR-180): a snare-driven build carries NO
+                             # sub, so tolerant_scan reads it as a long collapse —
+                             # but the percussion is still pounding. perc_build
+                             # ABOVE this on the 16 rung demotes to the short (4)
+                             # hard-drop emphasis: big blackouts require ACTUAL
+                             # quiet. Sits ABOVE the balloon split (a genuine
+                             # sub-gone collapse still shows some perc to clear it)
+                             # and BELOW a loud snare wall (Sexy ~0.44).
+                             # Desk-calibrated.
 BUSY_DUTY = 0.85              # bass_duty above this = drums driving the build
 DRIVING_PERC = 0.55          # OR build perc_full above this = driving → 4-black
 SOFT_GROOVE_MAX = 2          # soft family, music-runs-straight-in → 1-2 beats
@@ -460,7 +469,15 @@ def darkness_ladder(v4: SpectralFeaturesV4, drop: int, family: str,
     if stop:
         emphasis, why = 8, "true stop: percussion done, vocals/effects only"
     elif grade == "hard" and raw_gap >= COLLAPSE_GAP:
-        emphasis, why = 16, "true collapse into a hard/dark monster (WALL/COMET)"
+        if perc_build > PERC_ALIVE_16:
+            # Part H2 perc-alive guard: the sub is gone but the percussion is still
+            # pounding (a snare-driven build reads as a long collapse). The biggest
+            # blackout requires ACTUAL quiet — demote to the short hard-drop
+            # emphasis so pounding builds stay lit.
+            emphasis, why = 4, ("hard collapse but percussion still pounding "
+                                f"(perc {perc_build:.2f} > {PERC_ALIVE_16}) → short emphasis")
+        else:
+            emphasis, why = 16, "true collapse into a hard/dark monster (WALL/COMET)"
     elif grade == "hard":
         emphasis, why = 4, "hard drop, short pickup emphasis"
     else:
