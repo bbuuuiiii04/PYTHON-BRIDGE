@@ -79,6 +79,10 @@ _PLAY_WARMUP_POLLS = 3
 _LIVEPOS_LOG_INTERVAL_S = 5.0
 _LIVEPOS_RESET_SAMPLES = 10_000   # below this after being above → track reset
 _PLAY_EVIDENCE_POLLS = 2
+# AWR-160: consecutive identical title reads required before a candidate load
+# is trusted enough to emit ANLZ_PATH + TRACK_LOADED. Browse-cursor churn
+# (phantom loads) rarely holds one title this long; a real load trivially does.
+_LOAD_STABLE_TICKS = 3
 RB_MASTER_REFRESH_INTERVAL_S = RB_MASTER_STALE_AFTER_S / 2.0
 _TRACK_INFO_FIELD_RE = re.compile(r"(?:^|\n)\s*(?:[A-Za-z]\s+)?Title:\s*(.*?)(?:\r?\n|$)")
 
@@ -166,6 +170,10 @@ class RBStateReader(threading.Thread):
         self._pending_playing_count: dict[int, int] = {}
         self._last_anlz: dict[int, str] = {}
         self._last_livepos_log: dict[int, float] = {}
+        # AWR-160: per-deck load-stability gate state (candidate title being
+        # confirmed, and how many consecutive ticks it has read identically).
+        self._candidate_title: dict[int, str] = {}
+        self._candidate_ticks: dict[int, int] = {}
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -339,15 +347,33 @@ class RBStateReader(threading.Thread):
         assert offs is not None
         bridge = _bridge_deck(d)
 
-        # ANLZ path must be observed before TRACK_LOADED so StateManager
-        # consumes the fresh path for the same load generation.
+        # ANLZ path is read here but its emission is held for the same
+        # stability gate as the title below, so the two always land in the
+        # same tick, ANLZ_PATH first, for a single confirmed load (AWR-160).
         anlz = self._follow_pointer_string(task, base, offs.anlz_path_per_deck[d])
-        if anlz is not None:
-            prev_anlz = self._last_anlz.get(d)
-            if anlz != prev_anlz:
-                self._last_anlz[d] = anlz
-                if anlz:
-                    self._anlz_readable_this_tick.add(bridge)
+        if anlz:
+            self._anlz_readable_this_tick.add(bridge)
+
+        # Track-info string from RB's packed 500-byte buffer.
+        track_info = self._follow_string(task, base, offs.track_info_per_deck[d], 500)
+        title = extract_track_title(track_info) if track_info is not None else ""
+        if track_info is not None and track_info:
+            self._title_readable_this_tick.add(bridge)
+
+        if title:
+            if title == self._candidate_title.get(d):
+                self._candidate_ticks[d] = min(
+                    self._candidate_ticks.get(d, 0) + 1, _LOAD_STABLE_TICKS)
+            else:
+                self._candidate_title[d] = title
+                self._candidate_ticks[d] = 1
+
+            if (
+                self._candidate_ticks[d] >= _LOAD_STABLE_TICKS
+                and title != self._last_track.get(d)
+            ):
+                if anlz and anlz != self._last_anlz.get(d):
+                    self._last_anlz[d] = anlz
                     if self._shadow_logs_enabled or Ev.ANLZ_PATH in self._authoritative_kinds:
                         log.info("[ANLZ][DIRECT] deck=%d path=%s", bridge, anlz)
                     self._enqueue(BridgeEvent(
@@ -356,16 +382,6 @@ class RBStateReader(threading.Thread):
                         payload={'anlz_path': anlz, 'rb_raw_deck': d},
                         source='rb_state',
                     ))
-            elif anlz:
-                self._anlz_readable_this_tick.add(bridge)
-
-        # Track-info string from RB's packed 500-byte buffer.
-        track_info = self._follow_string(task, base, offs.track_info_per_deck[d], 500)
-        if track_info is not None:
-            if track_info:
-                self._title_readable_this_tick.add(bridge)
-            title = extract_track_title(track_info)
-            if title and title != self._last_track.get(d):
                 self._last_track[d] = title
                 if self._shadow_logs_enabled or Ev.TRACK_LOADED in self._authoritative_kinds:
                     log.info("[TITLE][DIRECT] deck=%d rb_idx=%d title=%r", bridge, d, title)
@@ -375,8 +391,10 @@ class RBStateReader(threading.Thread):
                     payload={'title': title, 'rb_raw_deck': d},
                     source='rb_state',
                 ))
-            elif not title:
-                self._last_track.pop(d, None)
+        else:
+            self._candidate_title.pop(d, None)
+            self._candidate_ticks.pop(d, None)
+            self._last_track.pop(d, None)
 
         # Live BPM (post-sync, post-tempo).
         bpm = self._follow_float(task, base, offs.bpm_per_deck[d])
