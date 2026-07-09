@@ -514,8 +514,126 @@ class PlanAndTickIntegrationTests(unittest.TestCase):
         self.assertEqual(sm._led_blackout_owners, set())
         self.assertEqual(sm._drop_presentation_last_pending[:2], (LEDS_PLUS_LASERS, "plan_unavailable"))
 
+    def test_manual_armed_decision_none_at_impact_resolves_solo_manual(self) -> None:
+        # AWR-159 Task 2: an explicit manual override is honored even without
+        # an exact plan-beat match -- unlike the unarmed case above, which
+        # stays plan_unavailable/no-window.
+        sm = _make_sm()
+        _enable_drop_presentation(sm)
+        d = _deck_state(load_gen=9)
+        sm._deck = {1: d}
+        sm._os = SimpleNamespace(active_deck=1, lighting_mode="autoloop")
+        sm._drop_presentation_armed_key = (1, 9)
+        sm._drop_presentation_base_live = True
+        laser_director = mock.Mock()
+        laser_director.is_enabled.return_value = True
+        sm._laser_director = laser_director
+        # Deliberately do NOT build a plan.
+        sm._drop_presentation_tick(
+            active=1, d=d, sp_state=_sp_state(), impact_now=True,
+        )
+        self.assertEqual(sm._drop_presentation_last_actions.presentation, LASERS_ONLY)
+        self.assertEqual(sm._drop_presentation_last_actions.reason, "solo_manual")
+        self.assertIsNone(sm._drop_presentation_armed_key)  # one-shot, consumed
+
+    def test_manual_arm_fires_without_laser_director_enabled(self) -> None:
+        # AWR-159 Task 3: manual visibility drops the Director term -- this
+        # would be a guard_fallback_both (or worse, silent) for an auto tier.
+        sm, d = self._sm_with_plan(drops=(64.0,))
+        sm._drop_presentation_armed_key = (1, 3)
+        sm._drop_presentation_base_live = True
+        sm._laser_director = None  # never configured / disabled
+
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(abs_beat=64.0, active_drop_beat=64.0, smart_drop_crossing=True),
+            impact_now=True,
+        )
+        self.assertEqual(sm._drop_presentation_last_actions.presentation, LASERS_ONLY)
+        self.assertEqual(sm._drop_presentation_last_actions.reason, "solo_manual")
+        self.assertIsNone(sm._drop_presentation_armed_key)
+
+    def test_manual_arm_refuses_visibly_when_base_live_false(self) -> None:
+        sm, d = self._sm_with_plan(drops=(64.0,))
+        sm._drop_presentation_armed_key = (1, 3)
+        sm._drop_presentation_base_live = False  # genuinely unpresentable
+
+        with self.assertLogs("perf.override", level="INFO") as logs:
+            sm._drop_presentation_tick(
+                active=1, d=d,
+                sp_state=_sp_state(abs_beat=64.0, active_drop_beat=64.0, smart_drop_crossing=True),
+                impact_now=True,
+            )
+        self.assertIsNone(sm._drop_presentation_last_actions.presentation)
+        self.assertEqual(sm._drop_presentation_last_actions.reason, "solo_refused")
+        self.assertFalse(sm._drop_presentation_last_actions.led_dark_hold)
+        self.assertFalse(sm._drop_presentation_last_actions.base_suppressed)
+        self.assertIsNone(sm._drop_presentation_armed_key)  # refused arm is cleared
+        self.assertEqual(sm._led_blackout_owners, set())  # never darkened
+        self.assertFalse(sm._drop_presentation_base_suppressed_held)
+        self.assertEqual(sm._drop_presentation_solo_feedback, "refused")
+        refusal_records = [
+            record for record in logs.records
+            if (getattr(record, "data", None) or {}).get("action") == "solo_refused"
+        ]
+        self.assertEqual(len(refusal_records), 1)
+        self.assertEqual(refusal_records[0].data["reason"], "base_live_false")
+        self.assertIn("solo-refused", refusal_records[0].getMessage())
+
 
 class SoloPadIntegrationTests(unittest.TestCase):
+    def test_press_while_active_cancels_not_role_exit(self) -> None:
+        # AWR-159 Task 1: isolate the cancel mechanism from a coincidental
+        # role exit -- drop_role stays "post_drop" (a WINDOW_ACTIVE_ROLE)
+        # across the cancel tick, so only manual_interaction can be resetting
+        # the window; a role-exit reset would be a false-positive pass.
+        sm = _make_sm()
+        _enable_drop_presentation(sm)
+        d = _deck_state(load_gen=5, smart_drops=[32, 96])
+        sm._deck = {1: d}
+        sm._os = SimpleNamespace(active_deck=1, lighting_mode="autoloop")
+        sm._drop_presentation_anlz_ready[1] = 5
+        sm._drop_presentation_tags_ready[1] = 5
+        sm._drop_presentation_tag_beats[1] = ()
+        sm._drop_presentation_learned_store._entries["content-1"] = []
+        sm._build_phrase_segments = lambda _d: ()
+        sm._maybe_build_drop_plan(1)
+        sm._drop_presentation_base_live = True
+        sm._laser_director = mock.Mock()
+        sm._laser_director.is_enabled.return_value = True
+
+        sm._handle_event(BridgeEvent(kind=Ev.LASER_SOLO_PAD, deck=0, source="test"))
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(abs_beat=32.0, active_drop_beat=32.0, smart_drop_crossing=True),
+            impact_now=True,
+        )
+        self.assertEqual(sm._drop_presentation_last_actions.presentation, LASERS_ONLY)
+        self.assertEqual(sm._drop_presentation_solo_feedback, "active")
+
+        sm._handle_event(BridgeEvent(kind=Ev.LASER_SOLO_PAD, deck=0, source="test"))
+        self.assertTrue(sm._drop_presentation_manual_cancel)
+
+        with self.assertLogs("perf.override", level="INFO") as logs:
+            sm._drop_presentation_tick(
+                active=1, d=d,
+                sp_state=_sp_state(
+                    abs_beat=33.0, active_drop_beat=32.0, smart_drop_crossing=False,
+                    current_phrase_is_chorus=True, smart_post_drop_active=True,
+                ),
+                impact_now=False,
+            )
+        self.assertIsNone(sm._drop_presentation_last_actions.presentation)
+        self.assertFalse(sm._drop_presentation_last_actions.led_dark_hold)
+        self.assertFalse(sm._drop_presentation_last_actions.base_suppressed)
+        self.assertFalse(sm._drop_presentation_manual_cancel)
+        self.assertNotEqual(sm._drop_presentation_solo_feedback, "active")
+        self.assertTrue(any(
+            "solo-cancelled" in r.getMessage() for r in logs.records
+        ) or any(
+            (getattr(r, "data", None) or {}).get("action") == "solo_cancel" for r in logs.records
+        ))
+
     def test_solo_arm_then_disarm_logs_feedback_transitions(self) -> None:
         sm = _make_sm()
         _enable_drop_presentation(sm)
