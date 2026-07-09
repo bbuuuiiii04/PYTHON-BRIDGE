@@ -201,5 +201,37 @@ class TestKnownTierFailures(unittest.TestCase):
                                  f"{label}: current corpus-absolute tier drifted")
 
 
+class TestTrackPlan(unittest.TestCase):
+    """Task 2: build_track_plan over a real-shaped v4 (uses the sibling _v4)."""
+
+    def _v4(self, n=48):
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from test_spectral_profile import _v4 as mk
+        v4 = mk(n_beats=n, scalars_overrides={"loudness_ref_db": 16.0})
+        v4.series["sub_db"] = tuple(20.0 if not (28 <= i < 32) else 1.0 for i in range(n))
+        v4.series["perc_full"] = tuple(0.6 for _ in range(n))
+        v4.series["full_db"] = tuple(10.0 for _ in range(n))
+        v4.series["bass_db"] = tuple(2.0 for _ in range(n))
+        return v4
+
+    def test_plan_has_one_entry_per_drop(self):
+        plan = M.build_track_plan(self._v4(), drops=[16, 32], buildups=[0, 16])
+        self.assertEqual(len(plan.entries), 2)
+        e = plan.for_drop(32)
+        self.assertIsNotNone(e)
+        self.assertIn(e.decision.tier, (1, 2, 3))
+        self.assertGreaterEqual(e.white_share, M.WHITE_MIN)
+        self.assertIsNotNone(plan.for_drop(33, tol=1))   # tolerance lookup
+        self.assertIsNone(plan.for_drop(40))
+
+    def test_empty_drops_is_empty_plan(self):
+        plan = M.build_track_plan(self._v4(), drops=[], buildups=[])
+        self.assertEqual(plan.entries, ())
+
+    def test_summary_string(self):
+        plan = M.build_track_plan(self._v4(), drops=[16, 32], buildups=[0, 16])
+        self.assertIn("drops=2", plan.summary())
+
+
 if __name__ == "__main__":
     unittest.main()

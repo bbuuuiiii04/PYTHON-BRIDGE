@@ -49,6 +49,9 @@ class TrackMetadata:
     anlz_buildups: list[int] = field(default_factory=list)
     anlz_mood: int = 0
     smart_drop_energy_shadow: list[SmartDropEnergyShadow] = field(default_factory=list)
+    # F2 per-track plan (lighting_moments_v2.F2TrackPlan); None when F2 off or no
+    # v4 cache. Typed Any to keep models.py free of a lighting-engine import.
+    f2_plan: Optional[Any] = None
 
     def clear(self) -> None:
         self.filepath = ""
@@ -68,6 +71,7 @@ class TrackMetadata:
         self.anlz_buildups = []
         self.anlz_mood = 0
         self.smart_drop_energy_shadow = []
+        self.f2_plan = None
 
     def is_empty(self) -> bool:
         return not self.filepath

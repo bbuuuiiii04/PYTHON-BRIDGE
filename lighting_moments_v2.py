@@ -581,3 +581,87 @@ def decide_drop(v4: SpectralFeaturesV4, drop: int, *, buildup_beat: Optional[int
     bf = bass_forward_pattern(v4, drop)
     reason = f"{fam} T{tier} (v{viol:.3f}); {dark.reason}"
     return DropDecision(drop, fam, round(viol, 4), tier, dark, bf, reason)
+
+
+# --------------------------------------------------------------------------- #
+# Per-track F2 PLAN (Task 2): the immutable record published per (deck,load_gen) #
+# --------------------------------------------------------------------------- #
+# build_move is corpus-normalised. We reuse the violence-score clip idiom
+# (clip01(attack/16), clip01(onset/4)) rather than invent new calibration, and
+# punch/onset norms are TUNE-LIVE anchors — build travel is TUNE-LIVE anyway.
+MOVE_PUNCH_FULL = 1.0        # TUNE-LIVE: punch coeff-of-variation → 1.0 normalises
+MOVE_ATTACK_FULL = 16.0      # matches violence_score's attack scale
+MOVE_ONSET_FULL = 4.0        # matches violence_score's onset scale
+
+
+@dataclass(frozen=True)
+class DropPlanEntry:
+    drop_beat: int
+    decision: DropDecision
+    white_share: float
+    buildup_beat: Optional[int]
+
+
+@dataclass(frozen=True)
+class F2TrackPlan:
+    """Immutable per-track F2 plan. Keyed by drop beat; the existing
+    select_smart_drops collapse decides which beats are looked up (A.4 — no
+    second dedupe invented here)."""
+    entries: tuple[DropPlanEntry, ...]
+    build_move: str
+
+    def for_drop(self, beat: float, tol: float = 1.0) -> Optional[DropPlanEntry]:
+        best = None
+        best_d = tol + 1
+        for e in self.entries:
+            d = abs(e.drop_beat - beat)
+            if d <= tol and d < best_d:
+                best, best_d = e, d
+        return best
+
+    def summary(self) -> str:
+        fams = "/".join(e.decision.family[0] for e in self.entries) or "-"
+        tiers = "/".join(str(e.decision.tier) for e in self.entries) or "-"
+        dark = "/".join(f"{e.decision.darkness.kind[:3]}{e.decision.darkness.beats}"
+                        for e in self.entries) or "-"
+        return f"drops={len(self.entries)} families={fams} tiers={tiers} darkness={dark}"
+
+
+def _nearest_preceding(sorted_beats: Sequence[int], drop: int) -> Optional[int]:
+    prev = None
+    for b in sorted_beats:
+        if b < drop:
+            prev = b
+        else:
+            break
+    return prev
+
+
+def _track_build_move(v4: SpectralFeaturesV4, first_drop: int) -> str:
+    """D§9 per-track move from the track's identity punch + the first drop's
+    character. Selection-only; travel is TUNE-LIVE."""
+    axes = spectral_profile.identity_axes(v4)
+    vec = spectral_profile.drop_window_vector(v4, first_drop, width=16)
+    norm_punch = _clip01(float(axes.get("punch", 0.0)) / MOVE_PUNCH_FULL)
+    norm_attack = _clip01(vec.get("attack_low_p90", 0.0) / MOVE_ATTACK_FULL)
+    norm_onset = _clip01(vec.get("onset_density_mh", 0.0) / MOVE_ONSET_FULL)
+    return build_move(norm_punch, norm_attack, norm_onset, vec.get("low_swing_db", 0.0))
+
+
+def build_track_plan(v4: SpectralFeaturesV4, drops: Sequence[int],
+                     buildups: Sequence[int], *, hotcues: Sequence[int] = ()) -> F2TrackPlan:
+    """Compute the per-track F2 plan over the RAW drop list. One decision per raw
+    drop, keyed by beat; consumption looks up only the selected (deduped) drops.
+    Pure — safe to call on the async identity worker (no push-loop I/O)."""
+    bu_sorted = sorted(int(b) for b in buildups)
+    hot = {int(h) for h in hotcues}
+    entries = []
+    for d in sorted({int(x) for x in drops}):
+        if d < 0 or d >= v4.n_beats:
+            continue
+        bu = _nearest_preceding(bu_sorted, d)
+        dec = decide_drop(v4, d, buildup_beat=bu, hotcue_tagged=(d in hot))
+        ws, _ = white_share(v4, bu if bu is not None else max(0, d - 32), d)
+        entries.append(DropPlanEntry(d, dec, round(ws, 3), bu))
+    move = _track_build_move(v4, entries[0].drop_beat) if entries else "swell"
+    return F2TrackPlan(tuple(entries), move)

@@ -148,6 +148,7 @@ class TrackAnlzData:
     energy_shadow: list[SmartDropEnergyShadow] = field(default_factory=list)
     waveform_context: Optional[WaveformContext] = None
     led_identity: Optional[dict[str, Any]] = None
+    f2_plan: Optional[Any] = None   # lighting_moments_v2.F2TrackPlan, or None
 
 
 def read_smart_drop_energy_shadow(

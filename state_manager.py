@@ -123,6 +123,7 @@ from .session_phase_trace import AutoloopPhaseTracer, build_autoloop_phase_row
 from .sound_switch_engine import SoundSwitchEngine
 from . import spectral_cache
 from . import spectral_profile
+from . import lighting_moments_v2
 from .audio_spectral_features import (
     extract_spectral_features,
     extract_spectral_features_v4,
@@ -232,6 +233,7 @@ def _read_runtime_anlz_data(
     identity_key: str = "",
     identity_config: IdentityV2Config | None = None,
     wide_window: bool = False,
+    f2_enabled: bool = False,
 ) -> TrackAnlzData:
     data = read_anlz_drops(anlz_path)
     ctx = data.waveform_context
@@ -261,6 +263,19 @@ def _read_runtime_anlz_data(
             key=identity_key,
             cfg=identity_config,
         )
+
+    # F2 per-track plan (family/tier/darkness/white-share/build-move). Pure and
+    # cheap, on this worker thread — never the push loop. Gated by f2_enabled so
+    # F2-off computes NOTHING (kill-test byte-identity). Missing v4/markers ⇒ no
+    # plan ⇒ F2 no-ops downstream (fail toward today's behavior).
+    if f2_enabled and v4 is not None and data.drop_beat_indices:
+        try:
+            data.f2_plan = lighting_moments_v2.build_track_plan(
+                v4, data.drop_beat_indices, data.buildup_beat_indices,
+            )
+        except Exception:
+            log.debug("[F2] plan-compute-failed", exc_info=True)
+            data.f2_plan = None
 
     if spectral_enabled and ctx is not None and data.drop_beat_indices:
         if not beatgrid_times_ms:
@@ -755,6 +770,9 @@ class StateManager(LEDDispatchPolicyMixin):
             and _os.environ.get(SPECTRAL_ENABLE_ENV, "0") == "1"
         )
         self._wide_window_enable = _os.environ.get(WIDE_WINDOW_ENV, "1") != "0"
+        # F2 (LIGHTING ENGINE v2 moments) master switch. Wired to config in Task 5;
+        # defaults OFF so every intermediate state is byte-identical to v1 (kill test).
+        self._f2_enabled = False
         self._stop  = threading.Event()
         self._mixer_authority_enabled = bool(mixer_authority_enabled)
 
@@ -1470,6 +1488,10 @@ class StateManager(LEDDispatchPolicyMixin):
                         meta.smart_breakdowns = next_smart_breakdowns
                         meta.anlz_buildups = raw_buildups
                         meta.anlz_mood = raw_mood
+                        f2_plan = ev.payload.get("f2_plan")
+                        meta.f2_plan = f2_plan
+                        if f2_plan is not None:
+                            log.info("[F2] plan deck=%d %s", ev.deck, f2_plan.summary())
                     meta.smart_drop_energy_shadow = new_shadow
                     if markers_changed or shadow_changed:
                         log.info("[SM] smart-transition-select  deck=%d  drops=%d  smart_drops=%d  bd=%d  smart_bd=%d  up=%d  source=%s",
@@ -2182,6 +2204,7 @@ class StateManager(LEDDispatchPolicyMixin):
         identity_key: str = "",
         identity_config: IdentityV2Config | None = None,
         wide_window: bool = False,
+        f2_enabled: bool = False,
     ) -> None:
         eq = self._eq
         source = "anlz_spectral" if spectral_enabled else ("anlz_identity" if identity_enabled else "anlz")
@@ -2196,6 +2219,7 @@ class StateManager(LEDDispatchPolicyMixin):
                     identity_key=identity_key,
                     identity_config=identity_config,
                     wide_window=wide_window,
+                    f2_enabled=f2_enabled,
                 )
             except Exception:
                 log.debug("[SM] anlz-worker-error", exc_info=True)
@@ -2210,6 +2234,7 @@ class StateManager(LEDDispatchPolicyMixin):
                         "buildup_beat_indices": result.buildup_beat_indices,
                         "mood": result.mood,
                         "energy_shadow": result.energy_shadow,
+                        "f2_plan": result.f2_plan,
                         "load_gen": gen,
                         "source": source,
                     },
@@ -2436,6 +2461,7 @@ class StateManager(LEDDispatchPolicyMixin):
                         "audio_filepath": meta.filepath,
                         "spectral_enabled": self._spectral_enable,
                         "wide_window": self._wide_window_enable,
+                        "f2_enabled": self._f2_enabled,
                     }
                     if self._v2_identity_enabled:
                         worker_kwargs.update(
