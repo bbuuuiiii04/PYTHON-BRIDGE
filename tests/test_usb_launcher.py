@@ -107,5 +107,54 @@ class RunBridgeEnvTests(unittest.TestCase):
             self.assertEqual(os.environ["RBSS_LASER_CONFIG"], "/custom/laser.json")
 
 
+class GoveeEnvSourcingTests(unittest.TestCase):
+    def test_parse_tolerates_export_comments_blanks_quotes(self) -> None:
+        text = (
+            "# a comment\n"
+            "\n"
+            "export GOVEE_API_KEY=abc123\n"
+            'GOVEE_DEVICE="AA:BB:CC"\n'
+            "  SPACED = 7 \n"
+            "notanassignment\n"
+        )
+        parsed = usb_launcher._parse_env_file(text)
+        self.assertEqual(parsed["GOVEE_API_KEY"], "abc123")
+        self.assertEqual(parsed["GOVEE_DEVICE"], "AA:BB:CC")
+        self.assertEqual(parsed["SPACED"], "7")
+        self.assertNotIn("notanassignment", parsed)
+
+    def test_load_sets_keys_from_file(self) -> None:
+        import tempfile
+
+        with tempfile.NamedTemporaryFile("w", suffix=".env", delete=False) as fh:
+            fh.write("GOVEE_API_KEY=fromfile\n")
+            path = fh.name
+        env: dict[str, str] = {}
+        usb_launcher._load_govee_env(env=env, path=path)
+        self.assertEqual(env["GOVEE_API_KEY"], "fromfile")
+
+    def test_existing_env_key_wins(self) -> None:
+        import tempfile
+
+        with tempfile.NamedTemporaryFile("w", suffix=".env", delete=False) as fh:
+            fh.write("GOVEE_API_KEY=fromfile\n")
+            path = fh.name
+        env = {"GOVEE_API_KEY": "already_set"}
+        usb_launcher._load_govee_env(env=env, path=path)
+        self.assertEqual(env["GOVEE_API_KEY"], "already_set")
+
+    def test_missing_file_is_noop(self) -> None:
+        env: dict[str, str] = {}
+        usb_launcher._load_govee_env(env=env, path="/no/such/govee.env")
+        self.assertEqual(env, {})
+
+    def test_run_bridge_sources_govee_env(self) -> None:
+        with mock.patch.dict(os.environ, {}, clear=False), \
+             mock.patch.object(usb_launcher, "_load_govee_env") as loader, \
+             mock.patch("rb_ss_bridge_v2.__main__.main"):
+            usb_launcher._run_bridge()
+        loader.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()
