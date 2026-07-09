@@ -678,6 +678,38 @@ class PackDriverTests(unittest.TestCase):
         sm._drive_pack_output()
         self.assertEqual(be.frames[-1][0], 200)
 
+    # AWR-170 (D.2) Part C CHOSEN BEHAVIOR: a held laser Static Override ducks dark
+    # while the "pre_chorus" blackout mask is held, and restores when it releases —
+    # mask precedence beats the manual overlay (statics lose to blackout masks).
+    def test_held_static_ducks_dark_during_pre_chorus_then_restores(self):
+        from rb_ss_bridge_v2.laser_config import LaserConfig
+        from rb_ss_bridge_v2.laser_executor import LaserSceneExecutor
+
+        be = _FakeBackend()
+        inp = _FakeInput(held_layer_slot=8)
+        sm = _make_sm(player=LaserPackPlayer(_pack()), backend=be, midi_input=inp)
+        sm._laser_executor = LaserSceneExecutor(
+            config=LaserConfig(
+                enabled=True, dry_run=True, smart_drop_mode="blackout_mask",
+                midi_output_port="", scenes={}, personalities={},
+                default_personality="", startup_scene="", stop_scene="",
+                stale_scene="", emergency_scene="", fallback_scene="",
+            ),
+            backend=mock.Mock(), personality=None,
+        )
+        _set(sm, ssid=SSID, playing=True, scripted_id=0)
+        # No mask: the held static renders.
+        sm._drive_pack_output()
+        self.assertEqual(be.frames[-1][0], 200)
+        # pre_chorus window opens (mask held): the static ducks fully dark.
+        sm._laser_executor.hold_blackout_mask("pre_chorus")
+        sm._drive_pack_output()
+        self.assertEqual(be.frames[-1], ZERO_FRAME)
+        # Window closes (mask released): the held static restores.
+        sm._laser_executor.release_blackout_mask("pre_chorus")
+        sm._drive_pack_output()
+        self.assertEqual(be.frames[-1][0], 200)
+
     # RW-3 R7
     def test_pause_hold_not_resurrected_by_scripted_id_change(self):
         be = _FakeBackend()

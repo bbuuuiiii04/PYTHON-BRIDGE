@@ -151,6 +151,11 @@ Frame engine child process (AWR-146, 2026-07-08; implemented, software-tested, h
   of the in-process runner; it is a drop-in from the coordinator's point of view (same duck-typed
   methods, same `stop() -> bool`). The client spawns/supervises the child (`FrameEngineHost` in
   `govee_frame_engine.py`) over an `AF_UNIX` `SOCK_STREAM` socketpair.
+- Frozen-aware spawn (AWR-122 M1 Task 4). `_child_argv(frozen, fd)` is the pure argv seam: source runs
+  keep the byte-identical `[sys.executable, -m rb_ss_bridge_v2.govee_frame_engine, --fd N]` + the
+  package-parent `cwd` pin; under a PyInstaller bundle (`sys.frozen`) it re-execs the app binary as
+  `[sys.executable, --run-frame-engine, --fd N]` with no `cwd` pin (`usb_launcher` dispatches
+  `--run-frame-engine` before any AppKit import). Socketpair/`pass_fds`/lifecycle unchanged.
 - IPC protocol. Newline-framed JSON (`encode_msg`/`decode_buffer`). Parent→child: `init`, `anchor`
   (explicit `null` propagates pause/unpermitted), `set_desired`, `fire_trigger`, `activate_assert`,
   `brightness`, `emergency_stop`, `force_deactivate`, `shutdown`. Child→parent: a `hb` heartbeat every

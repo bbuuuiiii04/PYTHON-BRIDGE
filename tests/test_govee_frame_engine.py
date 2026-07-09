@@ -21,7 +21,10 @@ from rb_ss_bridge_v2.govee_frame_engine import (  # noqa: E402
     decode_buffer,
     encode_msg,
 )
-from rb_ss_bridge_v2.govee_frame_engine_client import GoveeFrameEngineClient  # noqa: E402
+from rb_ss_bridge_v2.govee_frame_engine_client import (  # noqa: E402
+    GoveeFrameEngineClient,
+    _child_argv,
+)
 from rb_ss_bridge_v2.govee_frame_renderer import GoveeFrameRenderer  # noqa: E402
 from rb_ss_bridge_v2.govee_realtime_runner import EffectSpec, GoveeRealtimeRunner  # noqa: E402
 from rb_ss_bridge_v2.led_models import BeatAnchor  # noqa: E402
@@ -852,6 +855,50 @@ class LEDDispatchPolicyWhitelistTests(unittest.TestCase):
         self.assertEqual(rt["band_nsactivity"], False)
         self.assertEqual(rt["band_darwin_prio"], 0)
         self.assertNotIn("secret_ip", rt)
+
+
+class ChildArgvTests(unittest.TestCase):
+    def test_source_run_argv_is_byte_identical(self) -> None:
+        # frozen=False must equal the historical spawn argv exactly.
+        self.assertEqual(
+            _child_argv(False, 7),
+            [sys.executable, "-m", "rb_ss_bridge_v2.govee_frame_engine", "--fd", "7"],
+        )
+
+    def test_frozen_argv_re_execs_the_bundle(self) -> None:
+        self.assertEqual(
+            _child_argv(True, 7),
+            [sys.executable, "--run-frame-engine", "--fd", "7"],
+        )
+
+    def test_default_spawn_selects_by_frozen_flag(self) -> None:
+        from unittest import mock
+
+        import rb_ss_bridge_v2.govee_frame_engine_client as engc
+
+        for frozen in (False, True):
+            captured: dict = {}
+
+            def fake_child_argv(fz, fd, _cap=captured):
+                _cap["frozen"] = fz
+                return [sys.executable, "--fd", str(fd)]
+
+            def fake_popen(argv, _cap=captured, **kw):
+                _cap["cwd"] = kw.get("cwd")
+                return object()
+
+            client = GoveeFrameEngineClient(_init())
+            with mock.patch.object(engc, "_child_argv", fake_child_argv), \
+                 mock.patch.object(engc.subprocess, "Popen", fake_popen), \
+                 mock.patch.object(engc.sys, "frozen", frozen, create=True):
+                _proc, sock = client._default_spawn(_init())
+            sock.close()
+
+            self.assertEqual(captured["frozen"], frozen)
+            if frozen:
+                self.assertIsNone(captured["cwd"])          # cwd pin dropped in a bundle
+            else:
+                self.assertIsNotNone(captured["cwd"])       # cwd pin kept for -m source run
 
 
 if __name__ == "__main__":

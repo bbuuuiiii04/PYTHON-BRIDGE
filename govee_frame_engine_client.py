@@ -38,6 +38,20 @@ CHILD_SURVIVE_RESET_S = 30.0  # a child alive this long resets the backoff to 0.
 _LOG = logging.getLogger("govee_frame_engine_client")
 
 
+def _child_argv(frozen: bool, fd: int) -> list[str]:
+    """Argv to spawn the Govee frame-engine child (pure -- the test seam).
+
+    Frozen (PyInstaller bundle): ``sys.executable`` is the app binary, not a
+    Python interpreter, so the ``-m`` module form can't work -- re-exec the
+    bundle with ``--run-frame-engine`` (``usb_launcher`` dispatches it before any
+    AppKit import). Source run: the ``-m`` module form, byte-identical to the
+    historical spawn.
+    """
+    if frozen:
+        return [sys.executable, "--run-frame-engine", "--fd", str(fd)]
+    return [sys.executable, "-m", "rb_ss_bridge_v2.govee_frame_engine", "--fd", str(fd)]
+
+
 class GoveeFrameEngineClient:
     def __init__(
         self,
@@ -452,11 +466,13 @@ class GoveeFrameEngineClient:
         import socket
         parent_sock, child_sock = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
         child_fd = child_sock.fileno()
+        frozen = getattr(sys, "frozen", False)
         proc = subprocess.Popen(
-            [sys.executable, "-m", "rb_ss_bridge_v2.govee_frame_engine",
-             "--fd", str(child_fd)],
+            _child_argv(frozen, child_fd),
             pass_fds=(child_fd,),
-            cwd=str(Path(__file__).resolve().parent.parent),
+            # The cwd pin exists only so the -m source run imports the package
+            # from its parent; inside a bundle it's meaningless -- drop it.
+            cwd=None if frozen else str(Path(__file__).resolve().parent.parent),
             stdout=subprocess.DEVNULL,
             stderr=None,  # inherit the bridge's stderr → child lines in the watcher
         )
