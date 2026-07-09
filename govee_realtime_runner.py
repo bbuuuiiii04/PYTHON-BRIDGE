@@ -79,6 +79,11 @@ class GoveeRealtimeRunner:
         self._grace_s = max(0.0, float(grace_s))
         self._time_fn = time_fn or time.monotonic
         self._sleep_fn = sleep_fn or time.sleep
+        # AWR-156: EMA (alpha=0.2) of actual inter-tick gaps, runner-thread-only
+        # (read+written only from _loop/_compose_frame). Injected into render params
+        # so the strobe gate can widen its ON window to match real achieved fps.
+        self._frame_period_ema = 1.0 / self._fps
+        self._last_tick_at: float | None = None
         # Optional per-thread hook (child process sets frame-thread QoS here,
         # AWR-146). Default None = today's behavior exactly.
         self._on_thread_start = on_thread_start
@@ -253,6 +258,11 @@ class GoveeRealtimeRunner:
         with bridge_log.thread_guard("GoveeRealtimeRunner"):
             while not self._stop.is_set():
                 now = self._time_fn()
+                if self._last_tick_at is not None:
+                    dt = now - self._last_tick_at
+                    if dt > 0:
+                        self._frame_period_ema = 0.2 * dt + 0.8 * self._frame_period_ema
+                self._last_tick_at = now
                 provider = None
                 with self._lock:
                     provider = self._beat_provider
@@ -425,6 +435,7 @@ class GoveeRealtimeRunner:
         if not instances:
             return self._renderer.blank(segments)
         params = resolve_fade(spec.params, abs_pos, anchor_beat)
+        params = {**params, "frame_period_s": self._frame_period_ema}
         if is_comet_effect(spec.effect_name):
             # Comet effects always render through the traveling-head primitive.
             # In retrigger/continuous there is only one instance; overlap folds
