@@ -144,6 +144,9 @@ class LaserContext:
     # SmartPhrasing state produced by StateManager each tick and consumed by
     # LaserDirector / LaserSceneExecutor for phrase policy and transition-mask behavior.
     smart_phrasing: Optional[SmartPhrasingState] = None
+    # Bridge-defined buildup markers (meta.anlz_buildups) for the active track's deck.
+    # Part I laser runway gate reads these: empty ⇒ no analysis / none found ⇒ fail-open.
+    anlz_buildups: tuple[int, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)

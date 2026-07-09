@@ -5226,6 +5226,7 @@ class StateManager(LEDDispatchPolicyMixin):
             smart_drop_blackout_arm=smart_drop_blackout_arm,
             smart_phrasing_blackout_arm=smart_phrasing_blackout_arm,
             smart_phrasing=sp_state,
+            anlz_buildups=tuple(d.meta.anlz_buildups),
         )
 
     # ── Stop / resume helpers ─────────────────────────────────────────────────

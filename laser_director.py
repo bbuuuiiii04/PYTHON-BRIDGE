@@ -326,6 +326,38 @@ class LaserDirector:
             return True
         return False
 
+    @staticmethod
+    def _laser_runway_ok(anlz_buildups, drop_beat: float) -> bool:
+        """Part I: a drop earns laser drop scenes only if a bridge-defined buildup
+        marker sits strictly before it. Fail-open when the track has NO buildup
+        markers at all — an absent analysis and a genuinely marker-free track both
+        leave meta.anlz_buildups empty, so an empty list can never mean 'suppress'.
+        """
+        if not anlz_buildups:
+            return True
+        return any(float(b) < drop_beat for b in anlz_buildups)
+
+    def _laser_drop_runway_suppressed(self, ctx: LaserContext, sp, previous_abs_beat) -> bool:
+        """True only on a NEW drop crossing whose drop beat has no buildup marker
+        before it. Mirrors the two drop-fire paths' crossing detection. Returns
+        False on the first smart tick (no crossing fires there) and whenever the
+        track has no buildup data (fail-open)."""
+        if previous_abs_beat is None:
+            return False
+        if self._drop_lifecycle is not None and self._drop_lifecycle_mirror:
+            drop_beat = self._drop_lifecycle.drop_anchor(sp)
+        elif sp.smart_drop_crossing:
+            drop_beat = (
+                float(sp.active_drop_beat)
+                if sp.active_drop_beat is not None
+                else max(ctx.abs_beat, 0.0)
+            )
+        else:
+            drop_beat = None
+        if drop_beat is None:
+            return False
+        return not self._laser_runway_ok(ctx.anlz_buildups, drop_beat)
+
     def reset_runtime_state(self, reason: str) -> None:
         del reason  # accepted for call-site symmetry / logging only
         if self._drop_lifecycle is not None:
@@ -473,7 +505,16 @@ class LaserDirector:
 
         # Priority 9 + 10: gated drop lifecycle (mirror) OR the original ungated path.
         drop_lifecycle_mirror_on = self._drop_lifecycle_mirror
-        if self._drop_lifecycle is not None and drop_lifecycle_mirror_on:
+        # Part I laser runway gate: a NEW drop crossing whose beat has no bridge-
+        # defined buildup marker strictly before it earns no laser drop scene.
+        # Skipping the whole drop region means the lifecycle never arms, so the
+        # suppression holds for the entire window (no drop_cycle, no post_drop) and
+        # the laser falls through to the buildup / phrase-default branches below.
+        # Fail-open when the track has no buildup markers at all. LED drop looks are
+        # unaffected — this is the laser director only.
+        if self._laser_drop_runway_suppressed(ctx, sp, previous_abs_beat):
+            in_post_drop_hold = False
+        elif self._drop_lifecycle is not None and drop_lifecycle_mirror_on:
             res = self._drop_lifecycle.resolve(sp, mutate=True)  # full LED drop region, one call
             # Preserve today's priority-9 guards (:433): do NOT emit the immediate at-anchor
             # drop_crossing on the first smart tick after a reset (previous_abs_beat is None) or

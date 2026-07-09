@@ -98,6 +98,7 @@ def _ctx(
         scripted_id=scripted_id,
         smart_drop_blackout_active=smart_drop_blackout_active,
         smart_phrasing=smart_phrasing,
+        anlz_buildups=tuple(int(b) for b in anlz_buildups),
     )
 
 
@@ -1136,6 +1137,72 @@ class SmartObservationTests(unittest.TestCase):
         )
         self.assertEqual(ld.status()["current_scene"], "drop")
         self.assertEqual(ld.status()["last_reason"], "drop_crossing")
+
+    # ── Part I: laser runway gate ─────────────────────────────────────────────
+    def test_runway_gate_suppresses_drop_with_no_preceding_buildup(self) -> None:
+        # Operator Shiny 0:29 / Sexy 0:14-0:29: a drop before the FIRST buildup
+        # marker earns no lasers. drop at beat 63, first buildup at 128 -> no fire.
+        ld = _director(default_scene="d", drop_scene="drop")
+        ld.tick(_ctx(abs_beat=62.5, anlz_buildups=(128,), smart_drops=(63,)), now=_now())
+        ld.tick(
+            _ctx(
+                abs_beat=63.1,
+                anlz_buildups=(128,),
+                smart_phrasing=_sp(smart_drop_crossing=True, active_drop_beat=63.0),
+            ),
+            now=_now(),
+        )
+        self.assertNotEqual(ld.status()["current_scene"], "drop")
+        self.assertNotEqual(ld.status()["last_reason"], "drop_crossing")
+
+    def test_runway_gate_allows_drop_with_preceding_buildup(self) -> None:
+        # Do-not-regress (Shiny 1:58 / 3:12 class): a drop with a buildup before it
+        # fires exactly as today.
+        ld = _director(default_scene="d", drop_scene="drop")
+        ld.tick(_ctx(abs_beat=63.5, anlz_buildups=(32,), smart_drops=(64,)), now=_now())
+        ld.tick(
+            _ctx(
+                abs_beat=64.1,
+                anlz_buildups=(32,),
+                smart_phrasing=_sp(smart_drop_crossing=True, active_drop_beat=64.0),
+            ),
+            now=_now(),
+        )
+        self.assertEqual(ld.status()["current_scene"], "drop")
+        self.assertEqual(ld.status()["last_reason"], "drop_crossing")
+
+    def test_runway_gate_fail_open_when_no_buildup_markers(self) -> None:
+        # Empty anlz_buildups (analysis absent OR none found — indistinguishable in
+        # meta) must fail-open and fire, never suppress.
+        ld = _director(default_scene="d", drop_scene="drop")
+        ld.tick(_ctx(abs_beat=63.5, anlz_buildups=(), smart_drops=(64,)), now=_now())
+        ld.tick(
+            _ctx(
+                abs_beat=64.1,
+                anlz_buildups=(),
+                smart_phrasing=_sp(smart_drop_crossing=True, active_drop_beat=64.0),
+            ),
+            now=_now(),
+        )
+        self.assertEqual(ld.status()["current_scene"], "drop")
+        self.assertEqual(ld.status()["last_reason"], "drop_crossing")
+
+    def test_runway_gate_suppression_holds_after_crossing(self) -> None:
+        # A suppressed drop must not resurface as drop_cycle: the lifecycle never
+        # armed, so the sustained ticks stay off the drop scene.
+        ld = _director(default_scene="d", drop_scene="drop")
+        ld.tick(_ctx(abs_beat=62.5, anlz_buildups=(128,), smart_drops=(63,)), now=_now())
+        ld.tick(
+            _ctx(
+                abs_beat=63.1,
+                anlz_buildups=(128,),
+                smart_phrasing=_sp(smart_drop_crossing=True, active_drop_beat=63.0),
+            ),
+            now=_now(),
+        )
+        ld.tick(_ctx(abs_beat=64.0, anlz_buildups=(128,)), now=_now())
+        ld.tick(_ctx(abs_beat=65.0, anlz_buildups=(128,)), now=_now())
+        self.assertNotEqual(ld.status()["current_scene"], "drop")
 
     def test_post_drop_uses_post_drop_hold_beats(self) -> None:
         ld = _director(
