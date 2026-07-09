@@ -88,6 +88,10 @@ manager. New dispatches pin the model explicitly and VERIFY on-screen
 - `claude6` = ANOTHER MANAGER'S seat (USB workstream, paper-only, reports
   to superman) — HANDS OFF; its docs-only surface may contend on registry/
   doc_index; sequencing at superman's desk.
+- `claude7` = THIRD MANAGER'S seat (Fable xhigh, spectral-analysis audit,
+  read-only report + registry/doc_index rows, reports to superman) — HANDS
+  OFF. Contention throttle order if it appears: claude6 pauses first, then
+  claude7; MY lane and any in-flight micro-round never pause.
 - `superman` = executive.
 
 ## In-head nuance (the expensive lessons)
