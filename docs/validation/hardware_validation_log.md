@@ -1,8 +1,8 @@
 ---
 doc_status: current-incomplete
 truth_level: code-and-config-grounded
-last_verified_commit: 56c5f90
-last_verified_date: 2026-07-03
+last_verified_commit: 23d5c4a
+last_verified_date: 2026-07-08
 validation_scope: software-validated only, except the Govee/LED color-engine, realtime-comet, and beat-sync paths (AWR-101–104) which carry operator hardware sign-off on Home Govee (2026-06-29); SoundSwitch / laser / Enttec remain hardware-unvalidated
 ---
 
