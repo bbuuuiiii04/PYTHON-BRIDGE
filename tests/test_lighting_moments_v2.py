@@ -87,12 +87,14 @@ class TestDarknessLadder(unittest.TestCase):
 
     def test_16_hard_collapse_only(self):
         # kidstopbreathing / Satisfaction / Age Of Love: hard family + long run.
-        # perc 0.38 = a genuine sub-gone collapse (just clears the balloon split,
-        # below the Part-H2 perc-alive guard PERC_ALIVE_16). The old fixture's 0.5
-        # was arbitrary "> balloon boundary"; with the guard it would demote, so
-        # this now represents the quieter-than-a-snare-wall collapse that earns 16.
-        r = self._ladder("WALL", gap=16, perc=0.38)
+        # A GENUINE quiet collapse (perc ~0, full band silent) earns the full
+        # 16-beat blackout via the Part-H true-silence branch. That is the only
+        # path to a 16 now: PERC_ALIVE_16 (0.30) sits below the balloon split, so
+        # every audible sub-gone collapse either balloons (perc<0.35) or reaches
+        # the 16 rung and demotes (perc>=0.35). perc is far under 0.30 here.
+        r = self._ladder("WALL", gap=16, perc=0.0, full=-30.0)
         self.assertEqual((r.kind, r.beats), ("blackout", 16))
+        self.assertTrue(r.cap_inputs.get("silence"))
 
     def test_soft_deep_never_16(self):
         # FE!N -12 dB: soft family, deep+quiet, non-driving → 2, NEVER 16.
@@ -455,22 +457,33 @@ class TestPercAliveGuard(unittest.TestCase):
     small rungs; a genuinely quiet collapse still earns 16; the Part-H true-silence
     case (perc ~0) still gets its full-span blackout — the two rules compose."""
 
-    def _ladder(self, perc):
+    def _ladder(self, perc, full=10.0):
         n = 48
         drop = n - 4
-        v4 = mk_v4(n=n, perc_full=[perc] * n, full_db=[10.0] * n, bass_db=[2.0] * n)
+        v4 = mk_v4(n=n, perc_full=[perc] * n, full_db=[full] * n, bass_db=[2.0] * n)
         gone_run(v4, drop, 16)            # sub gone 16 beats → hard collapse gap
         return M.darkness_ladder(v4, drop, "WALL", buildup_beat=drop - 16)
 
+    def test_sexy_1_27_founding_case_demotes(self):
+        # FOUNDING CASE. Executive-measured: Sexy 1:27 ladder window [128,192)
+        # perc_full median = 0.386 (a heavy loud snare-filled build, no sub, so
+        # tolerant_scan reads it as a long collapse). Hard family + 16-beat
+        # sub-gone run reaches the 16 rung; the perc-alive guard demotes it → 4.
+        r = self._ladder(0.386)
+        self.assertEqual((r.kind, r.beats), ("blackout", 4))
+
     def test_snare_wall_demotes_to_four(self):
-        # Sexy 1:27 / Shiny 3:12 heavy loud snare build (perc_build ~0.45) → NOT 16.
+        # Louder snare wall (perc_build 0.45) → also demoted, NOT 16.
         r = self._ladder(0.45)
         self.assertEqual((r.kind, r.beats), ("blackout", 4))
 
-    def test_genuinely_quiet_collapse_still_16(self):
-        # sub gone, minimal perc (0.38, just clears the balloon split) → still 16.
-        r = self._ladder(0.38)
+    def test_genuinely_quiet_collapse_earns_16_via_silence(self):
+        # A genuine quiet collapse (perc ~0, full band silent) still earns a
+        # 16-beat blackout — through the Part-H true-silence branch (checked before
+        # the rung), so the perc guard never touches it. The two rules compose.
+        r = self._ladder(0.0, full=-30.0)
         self.assertEqual((r.kind, r.beats), ("blackout", 16))
+        self.assertTrue(r.cap_inputs.get("silence"))
 
     def test_killa_true_silence_still_full_span_with_guard(self):
         # The Part-H silence branch runs BEFORE the 16 rung, so the perc guard
