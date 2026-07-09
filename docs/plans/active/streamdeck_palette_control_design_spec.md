@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified for Packages 2-3 and AWR-121; design-intent for anything still unimplemented
-last_verified_commit: e28ce6c
+last_verified_commit: 96923d3
 last_verified_date: 2026-07-08
 validation_scope: Packages 2-3 plus AWR-121 gesture v2 software-tested; hardware-unvalidated
 ---
@@ -625,3 +625,11 @@ surface: mirror-strip cloud send failures/recoveries now log once per transition
 and stale `circuit_open` degraded status clears after a successful send. It does
 not change palette input, feedback-file semantics, mutes, Solo, Rainbow, or light
 output.
+
+AWR-157 (2026-07-08) is a `led_govee` + `rekordbox_readers` + `config_schema`
+darkness-fix round adjacent to this surface only through the shared `led_govee`
+contract: a new `blank_role_hold` config knob suppresses the automation
+blackout dispatch while a deck is audibly playing (`led_dispatch_policy.py`),
+plus a deck-2 rekordbox chain-freshness gate (`rb_memory.py`). It does not
+change palette input, feedback-file semantics, mutes, Solo, Rainbow, or the
+Stream Deck surface this doc specifies.
