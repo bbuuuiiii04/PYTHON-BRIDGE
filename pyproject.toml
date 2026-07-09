@@ -22,6 +22,16 @@ dev = [
 ]
 spectral = ["librosa>=0.10.2,<0.11", "soundfile>=0.12,<1.0"]
 analysis = ["numpy", "scipy>=1.10"]
+# Runtime deps imported by the code but historically undeclared (AWR-124 R5 /
+# USB-launcher M1). Grouped as the bundle extra so a PyInstaller build (or a
+# `pip install .[bundle]`) pulls the full rig. Import names differ from dist
+# names: streamdeck->StreamDeck, python-rtmidi->rtmidi, pyserial->serial.
+bundle = [
+    "streamdeck>=0.9",
+    "Pillow>=10",
+    "python-rtmidi>=1.5",
+    "pyserial>=3.5",
+]
 
 [tool.setuptools]
 package-dir = { "rb_ss_bridge_v2" = "." }
