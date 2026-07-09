@@ -19,6 +19,7 @@ from rb_ss_bridge_v2.govee_frame_renderer import (  # noqa: E402
     _hz_strobe_on,
     _slot_breakdown_star_twinkle,
     _slot_drop_center_burst,
+    _slot_drop_chase,
     _slot_drop_nebula,
     _slot_groove_chase,
     _slot_groove_nebula,
@@ -717,6 +718,83 @@ class DropStrobeColorwayTests(unittest.TestCase):
     def test_registered_as_strobe_effect(self) -> None:
         self.assertIn("drop_strobe_colorway", REALTIME_EFFECT_NAMES)
         self.assertIn("drop_strobe_colorway", REALTIME_STROBE_EFFECTS)
+
+
+class Awr161HzMigrationCoverageTests(unittest.TestCase):
+    """AWR-161 Task 5: every remaining beat-tied strobe gate migrated onto
+    _hz_strobe_on (Task 1) flashes at the hz-derived rate independent of
+    BPM, its hz/duty knobs are dialable, and every migrated effect carries
+    the allowlist entries (the C5 guard -- an un-allowlisted static param
+    disables all LED)."""
+
+    _NON_SLOT_NAMES = (
+        "post_drop_center_comet_blue_cyan",
+        "drop_chase_blue", "drop_chase_cyan", "drop_chase_red",
+        "drop_chase_green", "drop_chase_cyan_white",
+        "post_drop_chase_blue", "post_drop_chase_cyan", "post_drop_chase_red",
+        "post_drop_chase_green", "post_drop_chase_cyan_white",
+        "post_drop_freestyle_nebula",
+        "drop_chase_freestyle_nebula",
+    )
+    _SLOT_FNS = {
+        "rt_post_drop_chase": _slot_post_drop_chase,
+        "rt_post_drop_nebula": _slot_post_drop_nebula,
+        "rt_drop_chase": _slot_drop_chase,
+        "rt_drop_nebula": _slot_drop_nebula,
+        "rt_post_drop_center_comet": _slot_post_drop_center_comet,
+    }
+
+    def test_non_slot_effects_flash_on_the_hz_gate_independent_of_bpm(self) -> None:
+        renderer = GoveeFrameRenderer()
+        for name in self._NON_SLOT_NAMES:
+            # beat_pos varies (standing in for two different BPM mappings of
+            # the same wall-clock moment) -- the on/off split must come from
+            # local_t alone, per every migrated effect.
+            for beat_pos in (0.0, 9.0):
+                with self.subTest(name=name, beat_pos=beat_pos):
+                    on_frame = renderer.render(name, beat_pos=beat_pos, local_t=0.0,
+                                                frame_index=0, params={}, segments=20, seed=5)
+                    off_frame = renderer.render(name, beat_pos=beat_pos, local_t=0.1,
+                                                 frame_index=0, params={}, segments=20, seed=5)
+                    self.assertEqual(off_frame, [(0, 0, 0)] * 20, msg=f"{name} not dark off-gate")
+                    self.assertGreater(sum(sum(px) for px in on_frame), 0, msg=f"{name} dark on-gate")
+
+    def test_slot_effects_flash_on_the_hz_gate_independent_of_bpm(self) -> None:
+        for name, fn in self._SLOT_FNS.items():
+            for beat_pos in (0.0, 9.0):
+                with self.subTest(name=name, beat_pos=beat_pos):
+                    on_field = fn(beat_pos, 0.0, 0, {}, 20, 5)
+                    off_field = fn(beat_pos, 0.1, 0, {}, 20, 5)
+                    self.assertEqual(sum(sum(row) for row in off_field), 0.0, msg=f"{name} not dark off-gate")
+                    self.assertGreater(sum(sum(row) for row in on_field), 0.0, msg=f"{name} dark on-gate")
+
+    def test_hz_duty_params_are_dialable(self) -> None:
+        renderer = GoveeFrameRenderer()
+        # hz=1.0 duty=0.5 -> cycle 1.0s, ON for [0, 0.5).
+        params = {"hz": 1.0, "duty": 0.5}
+        on = renderer.render("drop_chase_blue", beat_pos=9.0, local_t=0.4,
+                              frame_index=0, params=params, segments=20, seed=1)
+        off = renderer.render("drop_chase_blue", beat_pos=9.0, local_t=0.6,
+                               frame_index=0, params=params, segments=20, seed=1)
+        self.assertGreater(sum(sum(px) for px in on), 0)
+        self.assertEqual(off, [(0, 0, 0)] * 20)
+
+        on_field = _slot_drop_chase(9.0, 0.4, 0, params, 20, 1)
+        off_field = _slot_drop_chase(9.0, 0.6, 0, params, 20, 1)
+        self.assertGreater(sum(sum(row) for row in on_field), 0.0)
+        self.assertEqual(sum(sum(row) for row in off_field), 0.0)
+
+    def test_c5_guard_hz_duty_allowlisted_for_every_migrated_effect(self) -> None:
+        for name in self._NON_SLOT_NAMES:
+            with self.subTest(name=name):
+                allowed = REALTIME_EFFECT_PARAM_KEYS.get(name, frozenset())
+                self.assertIn("hz", allowed, msg=name)
+                self.assertIn("duty", allowed, msg=name)
+        for name in self._SLOT_FNS:
+            with self.subTest(name=name):
+                allowed = REALTIME_EFFECT_PARAM_KEYS.get(name, frozenset())
+                self.assertIn("hz", allowed, msg=name)
+                self.assertIn("duty", allowed, msg=name)
 
 
 class Awr156ParamAllowlistTests(unittest.TestCase):
