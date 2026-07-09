@@ -782,9 +782,17 @@ Runtime flow:
   `hardware-unvalidated`): when the operator turns the CFX FILTER knob clockwise
   from 12 o'clock (low→high only; counterclockwise does nothing), the strips
   flood toward the track's darkest v2 hue (`LedColorEngine.v2_darkest_rgb()` =
-  `Dressing.slot_rgbs[0]`) and, past an ear-calibrated bloom threshold, dim
-  continuously with knob travel. The per-tick pure envelope
-  `cfx_sweep_envelope` (in `led_dispatch_policy.py`) returns `(mix, dim)`;
+  `Dressing.slot_rgbs[0]`). **Crossing an ear-calibrated bloom threshold TRIGGERS
+  a one-shot timed drain** (operator re-ruled at the desk 2026-07-09): the flood
+  swells, then the room dims 1.0→`dim_floor` over `drain_ms` and holds — the dim
+  is NOT knob-tracked, and holding the knob past the bloom does nothing extra.
+  Riding back below the threshold releases the whole overlay (mix→0 and dim→1.0
+  together over `release_ramp_ms`) — the flood does not re-appear while riding down;
+  a fresh push past the threshold re-triggers, and `rearm_hysteresis` stops jitter
+  at the threshold from re-firing. The per-tick pure envelope `cfx_sweep_envelope`
+  (in `led_dispatch_policy.py`) carries a small frozen
+  `CfxEnvState(mix, dim, armed, fired)` across ticks (`fired` clears only at idle,
+  so a fresh sweep floods again);
   `StateManager._compute_led_cfx_sweep` stores an atomic tuple that
   `get_active_beat_anchor` attaches to the ~20 ms `BeatAnchor` pump, and the
   frame-engine child applies `scale(lerp(px, cfx_rgb, cfx_mix), cfx_dim)` per
@@ -809,8 +817,10 @@ Config:
 - `cfx_sweep` is optional and default-off (AWR-173). Absent/malformed/out-of-range block ⇒ disabled
   (`CfxSweepConfig()`), so an un-mirrored live config never floods. Fields: `enabled`,
   `engage_deadband`, `bloom_threshold_norm` (desk-calibrated), `flood_ramp_ms`, `release_ramp_ms`,
-  `dim_floor`. Loader validates `0 < bloom_threshold_norm < 1`, `0.5 + engage_deadband <
-  bloom_threshold_norm`, ramps `> 0`, `0 <= dim_floor < 1`; any violation disables the whole block.
+  `dim_floor`, `drain_ms` (drain feel — dim 1.0→floor after the trigger), `rearm_hysteresis`.
+  Loader validates `0 < bloom_threshold_norm < 1`, `0.5 + engage_deadband <
+  bloom_threshold_norm`, ramps `> 0`, `0 <= dim_floor < 1`, `drain_ms > 0`,
+  `0 <= rearm_hysteresis < 0.2`; any violation disables the whole block.
 - `color_engine.v2` is optional and default-off. When present and valid it defines v2 zone ramps,
   bass normalization anchors, the local identity store path, soft-flip, palate-reset, bloom, and
   motion/travel thresholds. The current tracked example/default `bass_norm` anchors are

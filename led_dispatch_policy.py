@@ -12,7 +12,7 @@ import logging
 import os as _os
 import re
 import time
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Optional
 
 from . import bridge_log
@@ -45,51 +45,98 @@ LED_HOLD_BACKSTOP_BEATS = 16.0
 CFX_ANCHOR_DEAD_S = 0.5
 
 
+@dataclass(frozen=True)
+class CfxEnvState:
+    """AWR-173 envelope machine state carried across push ticks. Neutral default
+    (mix 0, dim 1, armed, not fired) is also the hard-reset every inert/gating path
+    snaps to. `armed` is the fire latch; `fired` marks the post-trigger regime and
+    only clears when the knob returns to idle (a fresh engagement floods again)."""
+    mix: float = 0.0      # flood strength of the dark hue (0..1)
+    dim: float = 1.0      # brightness scale (dim_floor..1)
+    armed: bool = True    # True ⇒ crossing the threshold will fire the drain
+    fired: bool = False   # True ⇒ already fired this engagement (drain / release regime)
+
+
+def _cfx_approach(prev: float, target: float, dt_s: float, ramp_ms: float, span: float) -> float:
+    """Linear approach of `prev` toward `target`; a full `span` of travel takes ramp_ms."""
+    if ramp_ms <= 0.0 or dt_s <= 0.0:
+        return target if ramp_ms <= 0.0 else prev
+    step = (dt_s * 1000.0 / ramp_ms) * span
+    if target >= prev:
+        return min(target, prev + step)
+    return max(target, prev - step)
+
+
 def cfx_sweep_envelope(
     knob_norm: float,
-    prev_mix: float,
+    state: CfxEnvState,
     dt_s: float,
     cfg: CfxSweepConfig,
-) -> tuple[float, float]:
-    """AWR-173 CFX filter-sweep envelope. Returns (mix, dim). Low-to-high ONLY.
+) -> CfxEnvState:
+    """AWR-173 CFX filter-sweep envelope, trigger semantics (operator re-ruled at the
+    desk 2026-07-09). Returns the next CfxEnvState. Low-to-high ONLY.
 
     Pure — no I/O, no time reads; the caller passes dt_s. Robust to dt_s == 0,
-    out-of-range / NaN knob, and knob jitter at exactly 0.5.
+    out-of-range / NaN knob, and knob jitter at exactly 0.5 or exactly the threshold.
 
-    mix (0..1): how strongly the track's darkest hue floods in.
-      knob <= 0.5 + engage_deadband -> ramps toward 0 over release_ramp_ms
-      knob >  0.5 + engage_deadband -> ramps toward 1 over flood_ramp_ms
-    dim (dim_floor..1): brightness scale, a CONTINUOUS function of knob position
-    (dims going up past the bloom threshold, refills coming back down):
-      knob <= bloom_threshold_norm  -> 1.0 (no dimming)
-      knob >  bloom_threshold_norm  -> 1 - (knob-thr)/(1-thr) * (1 - dim_floor)
-
-    Counterclockwise (knob < 0.5) is identical to neutral — the operator's final
-    ruling, not a default: mix decays to 0, dim stays 1.0.
+    State machine (thr = cfg.bloom_threshold_norm, engaged = knob > 0.5 + deadband):
+      IDLE  (knob <= 0.5 + deadband): resets the engagement (armed, not fired); mix
+            ramps to 0 over release_ramp_ms; dim restores to 1.0.
+      FLOOD (engaged, not yet fired, knob <= thr): mix ramps to 1 over flood_ramp_ms;
+            dim 1.0.
+      FIRE  (armed AND knob > thr — edge-triggered, incl. a single-tick jump from
+            below deadband to above thr): armed -> False, fired -> True. Flood = swell.
+      FIRED (fired, knob > thr): dim ramps 1.0 -> dim_floor over drain_ms, then holds;
+            knob position above thr has NO further effect.
+      RELEASE-AFTER-FIRE (fired, knob <= thr): mix -> 0 AND dim -> 1.0 together over
+            release_ramp_ms — the whole overlay lets go cleanly. The flood does NOT
+            come back while riding down; only a fresh push past thr (once re-armed)
+            re-fires, and only a return to idle re-enables a fresh FLOOD.
+    Re-arm only once knob < thr - rearm_hysteresis, so jitter at the threshold cannot
+    machine-gun the trigger. Counterclockwise (knob < 0.5) is identical to neutral.
     """
     knob = knob_norm if knob_norm == knob_norm else 0.5          # NaN -> neutral
     knob = 0.0 if knob < 0.0 else (1.0 if knob > 1.0 else knob)
-    prev = prev_mix if prev_mix == prev_mix else 0.0
-    prev = 0.0 if prev < 0.0 else (1.0 if prev > 1.0 else prev)
+    prev_mix = state.mix if state.mix == state.mix else 0.0
+    prev_mix = 0.0 if prev_mix < 0.0 else (1.0 if prev_mix > 1.0 else prev_mix)
+    prev_dim = state.dim if state.dim == state.dim else 1.0
+    prev_dim = cfg.dim_floor if prev_dim < cfg.dim_floor else (1.0 if prev_dim > 1.0 else prev_dim)
+    armed = bool(state.armed)
+    fired = bool(state.fired)
     dt = dt_s if (dt_s == dt_s and dt_s > 0.0) else 0.0
 
-    if knob > (0.5 + cfg.engage_deadband):
-        ramp = cfg.flood_ramp_ms
-        step = (dt * 1000.0 / ramp) if ramp > 0.0 else 1.0
-        mix = min(1.0, prev + step)
-    else:
-        ramp = cfg.release_ramp_ms
-        step = (dt * 1000.0 / ramp) if ramp > 0.0 else 1.0
-        mix = max(0.0, prev - step)
-
     thr = cfg.bloom_threshold_norm
-    if knob <= thr or thr >= 1.0:
-        dim = 1.0
+    engaged = knob > (0.5 + cfg.engage_deadband)
+
+    if not engaged:
+        armed = True            # IDLE resets the whole engagement — a fresh sweep floods
+        fired = False
     else:
-        frac = (knob - thr) / (1.0 - thr)
-        frac = 0.0 if frac < 0.0 else (1.0 if frac > 1.0 else frac)
-        dim = 1.0 - frac * (1.0 - cfg.dim_floor)
-    return mix, dim
+        if knob < thr - cfg.rearm_hysteresis:
+            armed = True        # re-arm the fire latch; `fired` persists until idle
+        if armed and knob > thr:
+            armed = False       # edge-triggered fire on crossing the bloom
+            fired = True
+
+    dim_span = 1.0 - cfg.dim_floor
+    if fired and knob > thr:
+        # FIRED: automatic timed drain to the floor; knob position above thr is irrelevant.
+        mix = _cfx_approach(prev_mix, 1.0, dt, cfg.flood_ramp_ms, 1.0)
+        dim = _cfx_approach(prev_dim, cfg.dim_floor, dt, cfg.drain_ms, dim_span)
+    elif fired:
+        # RELEASE-AFTER-FIRE (knob back below thr): let the whole overlay go together.
+        mix = _cfx_approach(prev_mix, 0.0, dt, cfg.release_ramp_ms, 1.0)
+        dim = _cfx_approach(prev_dim, 1.0, dt, cfg.release_ramp_ms, dim_span)
+    elif engaged:
+        # FLOOD (not yet fired this engagement): flood in, no dimming yet.
+        mix = _cfx_approach(prev_mix, 1.0, dt, cfg.flood_ramp_ms, 1.0)
+        dim = _cfx_approach(prev_dim, 1.0, dt, cfg.release_ramp_ms, dim_span)
+    else:
+        # IDLE (knob at/below 12): decay flood to 0, restore brightness.
+        mix = _cfx_approach(prev_mix, 0.0, dt, cfg.release_ramp_ms, 1.0)
+        dim = _cfx_approach(prev_dim, 1.0, dt, cfg.release_ramp_ms, dim_span)
+
+    return CfxEnvState(mix=mix, dim=dim, armed=armed, fired=fired)
 
 # F4 (AWR-164) bass-forward sparkle grain (D§5.1): the fraction of B (sustained-
 # bass) beats in a HOUSE growl-bar drop's B/K mask scales sparkle density between
@@ -218,7 +265,7 @@ class LEDDispatchPolicyMixin:
         # attached to the pumped anchor. (mix, dim, flood_rgb, captured_monotonic).
         # None = inert (the room renders exactly as it does today).
         self._led_cfx_sweep: tuple[float, float, tuple[int, int, int], float] | None = None
-        self._led_cfx_prev_mix: float = 0.0
+        self._led_cfx_state: CfxEnvState = CfxEnvState()
         self._led_cfx_last_mono: float = 0.0
         self._led_idle_freewheel_since: Optional[float] = None
         self._led_color_engine_status: dict[str, Any] = {

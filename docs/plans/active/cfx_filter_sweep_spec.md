@@ -15,10 +15,14 @@ validation_scope: >
 
 Operator-confirmed feature (final ruling, binding): when the CFX FILTER knob sweeps
 **low-to-high (clockwise / high-pass) only**, the Govee strips flood quick-but-not-instant
-with the track's **darkest v2 palette hue**; past an **ear-calibrated bloom threshold** the
-flood **dims continuously with knob travel**; riding the knob back toward 12 o'clock fades
-the room back in; at 12 everything is normal. **Counterclockwise / low-pass does NOTHING —
-no mirror variant, ever.**
+with the track's **darkest v2 palette hue**. **Crossing an ear-calibrated bloom threshold
+TRIGGERS a one-shot timed drain** — the flood swells, then the room dims from 1.0 to
+`dim_floor` over `drain_ms` and holds there; **the dim is NOT knob-tracked, and holding the
+knob past the bloom does nothing extra** (peak-then-drain, operator re-ruled at the desk
+2026-07-09). Riding the knob **back below the threshold releases the whole overlay** — the
+flood and the dim both fade back to the normal look over `release_ramp_ms`, as if nothing
+was interrupted; a fresh push past the threshold re-triggers. At 12 everything is normal.
+**Counterclockwise / low-pass does NOTHING — no mirror variant, ever.**
 
 Build order (executive-ruled): (1) CFX runtime read — the first runtime consumer of the
 mixer RE evidence; (2) LED behavior on top; (3) desk calibration session with the operator
@@ -231,28 +235,41 @@ class CfxSweepConfig:
     bloom_threshold_norm: float = 0.75 # DESK-CALIBRATED (Part F); placeholder until then
     flood_ramp_ms: float = 250.0       # TUNE-LIVE: "quick but not instant" flood-in
     release_ramp_ms: float = 400.0     # TUNE-LIVE: flood-out when knob returns to 12
-    dim_floor: float = 0.08            # brightness at knob = 1.0 (never fully black)
+    dim_floor: float = 0.08            # brightness at the drained floor (never fully black)
+    drain_ms: float = 800.0            # TUNE-LIVE: drain feel — dim 1.0 -> floor after the trigger
+    rearm_hysteresis: float = 0.02     # knob must fall below thr - this before it can re-fire
 ```
 
 Example JSON: add the block with `"enabled": false` to
 `config/led_look_director.example.json`. Loader returns `CfxSweepConfig()` (disabled) on
 absent/malformed block; validate numeric ranges (`0 < bloom_threshold_norm < 1`,
-`0.5 + engage_deadband < bloom_threshold_norm`, ramps `> 0`, `0 <= dim_floor < 1`).
+`0.5 + engage_deadband < bloom_threshold_norm`, ramps `> 0`, `0 <= dim_floor < 1`,
+`drain_ms > 0`, `0 <= rearm_hysteresis < 0.2`).
 
-**Envelope** — module-level pure functions in `led_dispatch_policy.py` (pure-function
-test seam, no I/O, no time reads — caller passes `dt_s`):
+**Envelope** — module-level pure function + a tiny frozen `CfxEnvState(mix, dim, armed)`
+carried across ticks, in `led_dispatch_policy.py` (pure-function test seam, no I/O, no
+time reads — caller passes `dt_s`):
 
 ```python
-def cfx_sweep_envelope(knob_norm, prev_mix, dt_s, cfg) -> tuple[float, float]:
-    """Returns (mix, dim). Low-to-high ONLY:
-    knob <= 0.5 + engage_deadband  -> mix ramps toward 0 over release_ramp_ms; dim = 1.0
-    engaged (knob above deadband)  -> mix ramps toward 1 over flood_ramp_ms
-    knob <= bloom_threshold_norm   -> dim = 1.0
-    knob >  bloom_threshold_norm   -> dim = 1.0 - (knob - thr) / (1.0 - thr) * (1.0 - dim_floor)
-    Dim tracks the knob CONTINUOUSLY in both directions past the threshold (dims going
-    up, refills coming down) — that is the operator's ruling. Counterclockwise
-    (knob < 0.5) is identical to neutral: mix decays to 0, dim 1.0. Never negative,
-    never > 1, robust to dt_s == 0 and to knob jitter at exactly 0.5."""
+def cfx_sweep_envelope(knob_norm, state, dt_s, cfg) -> CfxEnvState:
+    """Trigger semantics (operator re-ruled at the desk 2026-07-09). Low-to-high ONLY.
+    CfxEnvState carries (mix, dim, armed, fired): `armed` = fire latch, `fired` = the
+    post-trigger regime, which persists until the knob returns to idle.
+    IDLE  (knob <= 0.5 + deadband): resets the engagement (armed, not fired); mix ramps
+          to 0 over release_ramp_ms; dim -> 1.0.
+    FLOOD (engaged, NOT yet fired this engagement, knob <= thr): mix ramps to 1 over
+          flood_ramp_ms; dim = 1.0.
+    FIRE  (armed AND knob > thr — edge-triggered, incl. a single-tick jump from below the
+          deadband to above thr): armed -> False, fired -> True. The flood IS the swell.
+    FIRED (fired, knob > thr): dim ramps 1.0 -> dim_floor over drain_ms, then HOLDS; knob
+          position above thr has NO further effect.
+    RELEASE-AFTER-FIRE (fired, knob <= thr): mix -> 0 AND dim -> 1.0 together over
+          release_ramp_ms — the whole overlay lets go. The flood does NOT come back while
+          riding down; only a fresh push past thr (once re-armed) re-fires, and only a
+          return to idle re-enables a fresh FLOOD.
+    Re-arm only once knob < thr - rearm_hysteresis, so jitter at the threshold cannot
+    machine-gun the trigger. Counterclockwise (knob < 0.5) is identical to neutral.
+    Never negative, never > 1, robust to dt_s == 0 and to jitter at exactly 0.5 / thr."""
 ```
 
 **Per-tick wiring** — in the LED dispatch path (the same code that maintains
@@ -349,12 +366,14 @@ harness (`tests/test_rb_offsets.py`).
    deck 2 unreadable); **the isolation pin: CFX chains broken + mixer chains healthy ⇒
    `MIXER_STATE` snapshots stay `valid=True`**; `Ev.CFX_STATE` never lands in
    `_authoritative_kinds`.
-3. Envelope unit tests (new `tests/test_led_cfx_sweep.py` or inside the led dispatch test
-   module): knob 0.0/0.3/0.49/0.5 ⇒ exactly neutral (CCW ruling); engage ramps mix 0→1
-   at `flood_ramp_ms`; below-threshold dim is exactly 1.0; above-threshold dim is
-   continuous and monotonic in knob travel, hits `dim_floor` at 1.0, refills on the way
-   back down; release ramps mix →0 at `release_ramp_ms`; dt=0 and out-of-range knob
-   inputs are safe; boundary continuity at `bloom_threshold_norm` (no dim jump).
+3. Envelope unit tests (`tests/test_led_cfx_sweep.py`), TRIGGER semantics: knob
+   0.0/0.3/0.49/0.5 ⇒ exactly neutral (CCW ruling); flood-only below threshold ramps mix
+   0→1 at `flood_ramp_ms` with dim 1.0 and stays armed; crossing the threshold fires the
+   drain exactly once (dim 1.0→`dim_floor` over `drain_ms`, then holds); three different
+   held knob values above threshold ⇒ same dim (knob position has no effect); single-tick
+   jump 0.4→0.95 both floods and fires; release-after-fire fades mix AND dim together at
+   `release_ramp_ms`, and a re-push re-triggers only after re-arm hysteresis; threshold
+   jitter does not re-fire while not re-armed; dt=0 and out-of-range knob inputs are safe.
 4. Gating tests (led dispatch): feature off / blackout / F2-darkness hold / v2 off /
    stale snapshot / invalid active-deck reading / active_deck 0 each force the stored
    tuple inert; the freewheel anchor branch always carries neutral cfx; a stale stored
@@ -397,11 +416,13 @@ which docs each contract required and that each was updated.
 
 Plain-language operator summary to include: "The bridge can now see your filter knob
 (Rekordbox 7.2.11 only). With the switch ON and a track's v2 palette active, turning the
-knob clockwise from 12 floods the strips with the track's darkest color; past your
-calibrated bloom point they dim with the knob; riding back refills; at 12 everything is
-normal. Counterclockwise does nothing. Blackouts, emergency, and drop darkness always
-win. The switch ships OFF; nothing changes until your desk session sets the bloom point.
-Software-tested only — your desk run is the live gate."
+knob clockwise from 12 floods the strips with the track's darkest color; the moment you
+cross your calibrated bloom point the room swells then dims itself down over about a
+second and holds there — holding the knob past that point does nothing more; ride the knob
+back below the bloom and the whole thing fades back to normal, as if nothing happened. At
+12 everything is normal. Counterclockwise does nothing. Blackouts, emergency, and drop
+darkness always win. The switch ships OFF; nothing changes until your desk session sets
+the bloom point. Software-tested only — your desk run is the live gate."
 
 ## Part F - Desk calibration runbook (operator in session)
 
@@ -420,12 +441,12 @@ Step 0 happens BEFORE trusting any LED behavior; the bridge is not needed for st
 3. **Feel pass.** Start the bridge via the menubar watcher only (never raw
    `python3 -m rb_ss_bridge_v2`); verify exactly one process
    (`pgrep -f rb_ss_bridge_v2 | wc -l` == 1). Ride the knob: flood speed
-   (`flood_ramp_ms`), return feel (`release_ramp_ms`), bottom brightness (`dim_floor`).
-   Also watch the hard-snap transient: `dim` tracks the knob instantly while the flood
-   ramps over `flood_ramp_ms`, so snapping straight to full briefly dims (~250 ms) before
-   the dark-hue flood arrives. Judge it by ear — if you dislike the momentary dip, the
-   `flood_ramp_ms` / `dim_floor` knobs are the fix.
-   Each adjustment = edit live config + menubar restart + single-process check.
+   (`flood_ramp_ms`), return feel (`release_ramp_ms`), bottom brightness (`dim_floor`),
+   and **`drain_ms` — the drain feel knob**: how long the room takes to dim from the
+   swell down to the floor once you cross the bloom. Both the flood and the drain are now
+   timed ramps (no hard-snap transient — that note is moot under the trigger semantics),
+   so crossing the bloom swells then drains smoothly regardless of how fast you snap the
+   knob. Each adjustment = edit live config + menubar restart + single-process check.
 4. **Safety spot-checks at the desk:** trigger a blackout mid-sweep (masks must win);
    sweep during a drop's dark moment (F2 owns it); sweep counterclockwise (nothing);
    deselect FILTER for another CFX effect and turn the knob (nothing).

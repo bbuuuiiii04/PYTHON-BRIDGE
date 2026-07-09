@@ -197,19 +197,26 @@ pure software tests (mach/live/socket-free):
   unreadable), `Ev.CFX_STATE` never entering `_authoritative_kinds`, and the
   **isolation pin**: broken CFX chains + healthy mixer chains leave
   `MixerAuthoritySnapshot.valid == True`.
-- `tests/test_led_cfx_sweep.py` covers the pure `cfx_sweep_envelope`
-  (counterclockwise/neutral produce exactly `(0.0, 1.0)`; flood/release ramps at
-  `flood_ramp_ms`/`release_ramp_ms`; continuous monotonic dim past the bloom
-  threshold hitting `dim_floor` at knob=1.0; boundary continuity; dt=0 / NaN /
-  out-of-range safety), dispatch gating (feature-off, blackout, F2-darkness hold,
-  v2-off, stale snapshot, invalid active-deck reading, and active_deck 0 each
-  force the stored tuple inert), the anchor provider (freewheel always neutral,
-  fresh tuple attached, a tuple older than 0.5 s neutralized), the frame-engine
-  child overlay (`_parse_cfx_rgb`, wire round-trip, frozen-child skew defaults,
-  `scale(lerp(px, rgb, mix), dim)` parity, runner permitted-path applies vs
-  emergency-path emits no overlay frame), and the config loader (absent/malformed
-  disabled; range validation rejects `bloom_threshold_norm <= 0.5 +
-  engage_deadband` and out-of-range values).
+- `tests/test_led_cfx_sweep.py` covers the pure `cfx_sweep_envelope` under the
+  TRIGGER semantics (operator re-ruled at the desk 2026-07-09): counterclockwise/
+  neutral produce exactly the neutral `CfxEnvState`; flood-only below the threshold
+  ramps mix at `flood_ramp_ms` with dim 1.0 and stays armed, releasing at the
+  deadband; crossing the bloom fires the one-shot drain exactly once (dim
+  1.0→`dim_floor` over `drain_ms`, then holds); three different held knob values
+  above the threshold give the same dim (knob position has no effect); a single-tick
+  jump 0.4→0.95 both floods and fires; release-after-fire fades mix AND dim together
+  at `release_ramp_ms` and a re-push re-triggers only after re-arm hysteresis;
+  threshold jitter does not re-fire while not re-armed; dt=0 / NaN / out-of-range
+  safety. Dispatch gating (feature-off, blackout, F2-darkness hold, smart-drop
+  tactical blackout, v2-off, stale snapshot, invalid active-deck reading, and
+  active_deck 0 each force the stored tuple inert and hard-reset the `CfxEnvState`),
+  the anchor provider (freewheel always neutral, fresh tuple attached, a tuple older
+  than 0.5 s neutralized), the frame-engine child overlay (`_parse_cfx_rgb`, wire
+  round-trip, frozen-child skew defaults, `scale(lerp(px, rgb, mix), dim)` parity,
+  runner permitted-path applies vs emergency-path emits no overlay frame), and the
+  config loader (absent/malformed disabled; range validation rejects
+  `bloom_threshold_norm <= 0.5 + engage_deadband`, out-of-range values, and the two
+  new fields `drain_ms` / `rearm_hysteresis`).
 
 This is software validation only. The direction mapping (`param0 > 0.5` =
 clockwise) and the bloom threshold + ramps are pending the operator's desk

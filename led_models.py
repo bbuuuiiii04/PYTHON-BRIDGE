@@ -231,13 +231,20 @@ class CfxSweepConfig:
     """AWR-173 CFX filter-sweep LED overlay config (`/cfx_sweep` block). Absent or
     malformed block ⇒ enabled False ⇒ the overlay never renders (kill test). The
     bloom threshold and ramps are DESK-CALIBRATED (Part F) — the shipped values are
-    placeholders. Any out-of-range value fails the WHOLE block back to disabled."""
+    placeholders. Any out-of-range value fails the WHOLE block back to disabled.
+
+    Trigger semantics (operator re-ruled at the desk 2026-07-09): crossing the bloom
+    threshold TRIGGERS a one-shot timed drain (dim 1.0 -> dim_floor over drain_ms),
+    then holds; the dim is NOT knob-tracked. Riding back below the threshold releases
+    the whole overlay. `rearm_hysteresis` stops jitter at the threshold from re-firing."""
     enabled: bool = False              # kill switch; example config ships false
     engage_deadband: float = 0.02      # knob must exceed 0.5 + this to do ANYTHING
     bloom_threshold_norm: float = 0.75 # DESK-CALIBRATED (Part F); placeholder until then
     flood_ramp_ms: float = 250.0       # TUNE-LIVE: "quick but not instant" flood-in
     release_ramp_ms: float = 400.0     # TUNE-LIVE: flood-out when knob returns to 12
-    dim_floor: float = 0.08            # brightness at knob = 1.0 (never fully black)
+    dim_floor: float = 0.08            # brightness at the drained floor (never fully black)
+    drain_ms: float = 800.0            # TUNE-LIVE: drain feel — dim 1.0->floor after the trigger
+    rearm_hysteresis: float = 0.02     # knob must fall below thr - this before it can re-fire
 
     @classmethod
     def from_dict(cls, data: Any) -> "CfxSweepConfig":
@@ -251,6 +258,8 @@ class CfxSweepConfig:
                 flood_ramp_ms=float(data.get("flood_ramp_ms", 250.0)),
                 release_ramp_ms=float(data.get("release_ramp_ms", 400.0)),
                 dim_floor=float(data.get("dim_floor", 0.08)),
+                drain_ms=float(data.get("drain_ms", 800.0)),
+                rearm_hysteresis=float(data.get("rearm_hysteresis", 0.02)),
             )
         except (TypeError, ValueError):
             return cls()
@@ -264,6 +273,8 @@ class CfxSweepConfig:
             and self.flood_ramp_ms > 0.0
             and self.release_ramp_ms > 0.0
             and 0.0 <= self.dim_floor < 1.0
+            and self.drain_ms > 0.0
+            and 0.0 <= self.rearm_hysteresis < 0.2
         )
 
 

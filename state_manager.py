@@ -64,7 +64,7 @@ from .models import (
     PositionSnapshot, SmartDropEnergyShadow, TrackMetadata, CfxFilterSnapshot,
 )
 from . import led_dispatch_policy as _led_dispatch_policy
-from .led_dispatch_policy import LEDDispatchPolicyMixin, cfx_sweep_envelope
+from .led_dispatch_policy import LEDDispatchPolicyMixin, cfx_sweep_envelope, CfxEnvState
 from .led_palette_control import LedPaletteControl, PaletteFeedbackWriter
 from .led_config import (
     load_drop_presentation_config, load_f2_config, load_f4_config,
@@ -2146,7 +2146,7 @@ class StateManager(LEDDispatchPolicyMixin):
         self._led_rt_permitted = False
         self._led_rt_beat = None
         self._led_cfx_sweep = None
-        self._led_cfx_prev_mix = 0.0
+        self._led_cfx_state = CfxEnvState()
         self._led_cfx_last_mono = 0.0
         self._led_last_auto_role_key = ""
         self._led_last_idle_role_key = ""
@@ -4948,14 +4948,14 @@ class StateManager(LEDDispatchPolicyMixin):
             or self._os.breakdown_active                 # F2 smart-breakdown sections own their frames
             or bool(self._led_smart_drop_blackout_key)   # smart-drop pre-drop tactical blackout wins
         ):
-            self._led_cfx_prev_mix = 0.0
+            self._led_cfx_state = CfxEnvState()
             self._led_cfx_sweep = None
             return
 
         engine = self._led_color_engine
         rgb = engine.v2_darkest_rgb() if engine is not None else None
         if rgb is None:                          # v2 identity off / no active dressing
-            self._led_cfx_prev_mix = 0.0
+            self._led_cfx_state = CfxEnvState()
             self._led_cfx_sweep = None
             return
 
@@ -4964,13 +4964,15 @@ class StateManager(LEDDispatchPolicyMixin):
         if snap is not None and (now - snap.updated_at) <= CFX_STALE_AFTER_S:
             reading = snap.deck.get(active_deck)
         if reading is None or not reading.valid:
-            self._led_cfx_prev_mix = 0.0
+            self._led_cfx_state = CfxEnvState()
             self._led_cfx_sweep = None
             return
 
-        mix, dim = cfx_sweep_envelope(reading.filter_norm, self._led_cfx_prev_mix, dt_s, cfg)
-        self._led_cfx_prev_mix = mix
-        self._led_cfx_sweep = None if (mix <= 0.0 and dim >= 1.0) else (mix, dim, rgb, now)
+        st = cfx_sweep_envelope(reading.filter_norm, self._led_cfx_state, dt_s, cfg)
+        self._led_cfx_state = st
+        self._led_cfx_sweep = (
+            None if (st.mix <= 0.0 and st.dim >= 1.0) else (st.mix, st.dim, rgb, now)
+        )
 
     def _f2_laser_tiers(self, d, drop_beats):
         """AWR-162 (A): {drop_beat: energy tier} from the F2 plan for these drops,
