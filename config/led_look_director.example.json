@@ -427,8 +427,7 @@
     "flood_ramp_ms": 250.0,
     "release_ramp_ms": 400.0,
     "dim_floor": 0.08,
-    "drain_ms": 800.0,
-    "rearm_hysteresis": 0.02
+    "drain_ms": 800.0
   },
   "targets": {
     "room_perimeter": {

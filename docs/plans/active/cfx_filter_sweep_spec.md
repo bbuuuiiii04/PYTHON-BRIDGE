@@ -237,38 +237,37 @@ class CfxSweepConfig:
     release_ramp_ms: float = 400.0     # TUNE-LIVE: flood-out when knob returns to 12
     dim_floor: float = 0.08            # brightness at the drained floor (never fully black)
     drain_ms: float = 800.0            # TUNE-LIVE: drain feel — dim 1.0 -> floor after the trigger
-    rearm_hysteresis: float = 0.02     # knob must fall below thr - this before it can re-fire
 ```
 
 Example JSON: add the block with `"enabled": false` to
 `config/led_look_director.example.json`. Loader returns `CfxSweepConfig()` (disabled) on
-absent/malformed block; validate numeric ranges (`0 < bloom_threshold_norm < 1`,
+absent/malformed block, and IGNORES unknown keys (the live config still carries the
+removed `rearm_hysteresis`); validate numeric ranges (`0 < bloom_threshold_norm < 1`,
 `0.5 + engage_deadband < bloom_threshold_norm`, ramps `> 0`, `0 <= dim_floor < 1`,
-`drain_ms > 0`, `0 <= rearm_hysteresis < 0.2`).
+`drain_ms > 0`).
 
-**Envelope** — module-level pure function + a tiny frozen `CfxEnvState(mix, dim, armed)`
-carried across ticks, in `led_dispatch_policy.py` (pure-function test seam, no I/O, no
-time reads — caller passes `dt_s`):
+**Envelope** — module-level pure function + a tiny frozen `CfxEnvState(mix, dim, fired,
+released)` carried across ticks, in `led_dispatch_policy.py` (pure-function test seam, no
+I/O, no time reads — caller passes `dt_s`):
 
 ```python
 def cfx_sweep_envelope(knob_norm, state, dt_s, cfg) -> CfxEnvState:
-    """Trigger semantics (operator re-ruled at the desk 2026-07-09). Low-to-high ONLY.
-    CfxEnvState carries (mix, dim, armed, fired): `armed` = fire latch, `fired` = the
-    post-trigger regime, which persists until the knob returns to idle.
-    IDLE  (knob <= 0.5 + deadband): resets the engagement (armed, not fired); mix ramps
-          to 0 over release_ramp_ms; dim -> 1.0.
+    """Trigger semantics with one-way return (operator re-ruled at the desk 2026-07-09,
+    return-ride corrected same day). Low-to-high ONLY. CfxEnvState carries (mix, dim,
+    fired, released): `fired` = post-trigger regime, `released` = the one-way return
+    latch. BOTH clear only when the knob returns to neutral.
+    IDLE  (knob <= 0.5 + deadband = neutral): clears fired + released; mix ramps to 0
+          over release_ramp_ms; dim -> 1.0. This is the ONLY place the trigger re-arms.
     FLOOD (engaged, NOT yet fired this engagement, knob <= thr): mix ramps to 1 over
           flood_ramp_ms; dim = 1.0.
-    FIRE  (armed AND knob > thr — edge-triggered, incl. a single-tick jump from below the
-          deadband to above thr): armed -> False, fired -> True. The flood IS the swell.
-    FIRED (fired, knob > thr): dim ramps 1.0 -> dim_floor over drain_ms, then HOLDS; knob
-          position above thr has NO further effect.
-    RELEASE-AFTER-FIRE (fired, knob <= thr): mix -> 0 AND dim -> 1.0 together over
-          release_ramp_ms — the whole overlay lets go. The flood does NOT come back while
-          riding down; only a fresh push past thr (once re-armed) re-fires, and only a
-          return to idle re-enables a fresh FLOOD.
-    Re-arm only once knob < thr - rearm_hysteresis, so jitter at the threshold cannot
-    machine-gun the trigger. Counterclockwise (knob < 0.5) is identical to neutral.
+    FIRE  (NOT fired AND knob > thr — edge-triggered, incl. a single-tick jump from below
+          the deadband to above thr): fired -> True. The flood IS the swell.
+    FIRED (fired, NOT released, knob > thr): dim ramps 1.0 -> dim_floor over drain_ms,
+          then HOLDS; knob position above thr has NO further effect.
+    LATCHED-RELEASE (fired, knob drops below thr -> released latches): mix -> 0 AND
+          dim -> 1.0 together over release_ramp_ms, and STAYS released for the whole ride
+          down no matter where the knob parks above the deadband — it does NOT re-flood or
+          re-fire even if the knob wanders back above thr. Only a return to neutral re-arms.
     Never negative, never > 1, robust to dt_s == 0 and to jitter at exactly 0.5 / thr."""
 ```
 

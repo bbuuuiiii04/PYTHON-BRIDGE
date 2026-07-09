@@ -215,8 +215,8 @@ pure software tests (mach/live/socket-free):
   round-trip, frozen-child skew defaults, `scale(lerp(px, rgb, mix), dim)` parity,
   runner permitted-path applies vs emergency-path emits no overlay frame), and the
   config loader (absent/malformed disabled; range validation rejects
-  `bloom_threshold_norm <= 0.5 + engage_deadband`, out-of-range values, and the two
-  new fields `drain_ms` / `rearm_hysteresis`).
+  `bloom_threshold_norm <= 0.5 + engage_deadband`, out-of-range values, and
+  `drain_ms <= 0`; unknown keys such as the removed `rearm_hysteresis` are ignored).
 
 This is software validation only. The direction mapping (`param0 > 0.5` =
 clockwise) and the bloom threshold + ramps are pending the operator's desk

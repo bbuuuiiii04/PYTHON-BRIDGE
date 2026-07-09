@@ -786,13 +786,16 @@ Runtime flow:
   a one-shot timed drain** (operator re-ruled at the desk 2026-07-09): the flood
   swells, then the room dims 1.0→`dim_floor` over `drain_ms` and holds — the dim
   is NOT knob-tracked, and holding the knob past the bloom does nothing extra.
-  Riding back below the threshold releases the whole overlay (mix→0 and dim→1.0
-  together over `release_ramp_ms`) — the flood does not re-appear while riding down;
-  a fresh push past the threshold re-triggers, and `rearm_hysteresis` stops jitter
-  at the threshold from re-firing. The per-tick pure envelope `cfx_sweep_envelope`
+  Riding back below the threshold LATCHES a one-way release of the whole overlay
+  (mix→0 and dim→1.0 together over `release_ramp_ms`) that STAYS released for the
+  entire ride down (operator return-ride ruling 2026-07-09) — the flood does not
+  re-appear no matter where the knob parks above the deadband, and it cannot re-fire
+  even if the knob wanders back above the threshold. Re-firing needs a fresh sweep
+  from neutral (knob ≤ 0.5 + `engage_deadband`), so the return ride never re-blooms.
+  The per-tick pure envelope `cfx_sweep_envelope`
   (in `led_dispatch_policy.py`) carries a small frozen
-  `CfxEnvState(mix, dim, armed, fired)` across ticks (`fired` clears only at idle,
-  so a fresh sweep floods again);
+  `CfxEnvState(mix, dim, fired, released)` across ticks (`fired` + `released` both
+  clear only at neutral, so a fresh sweep floods again);
   `StateManager._compute_led_cfx_sweep` stores an atomic tuple that
   `get_active_beat_anchor` attaches to the ~20 ms `BeatAnchor` pump, and the
   frame-engine child applies `scale(lerp(px, cfx_rgb, cfx_mix), cfx_dim)` per
@@ -815,12 +818,13 @@ Config:
 - `color_engine.slot_mono_chance_by_look` is an optional object mapping look names to numeric probabilities in `[0, 1]`; it defaults to `{}` and only affects looks using `random_with_mono_chance`.
 - `color_engine.locked_palette_by_look` is an optional object mapping look names to existing palette names. Locked looks resolve color and slot-color injection from that palette's full p-interval without changing the color-engine journey palette, dwell, focus, or RNG state. (AWR-152: the per-palette `white` blend knob was removed — every palette shipped `white: 0.0` in practice, so `Palette` no longer has a `white` field.)
 - `cfx_sweep` is optional and default-off (AWR-173). Absent/malformed/out-of-range block ⇒ disabled
-  (`CfxSweepConfig()`), so an un-mirrored live config never floods. Fields: `enabled`,
+  (`CfxSweepConfig()`), so an un-mirrored live config never floods; unknown keys are IGNORED (the
+  live config still carries a now-removed `rearm_hysteresis`). Fields: `enabled`,
   `engage_deadband`, `bloom_threshold_norm` (desk-calibrated), `flood_ramp_ms`, `release_ramp_ms`,
-  `dim_floor`, `drain_ms` (drain feel — dim 1.0→floor after the trigger), `rearm_hysteresis`.
+  `dim_floor`, `drain_ms` (drain feel — dim 1.0→floor after the trigger).
   Loader validates `0 < bloom_threshold_norm < 1`, `0.5 + engage_deadband <
-  bloom_threshold_norm`, ramps `> 0`, `0 <= dim_floor < 1`, `drain_ms > 0`,
-  `0 <= rearm_hysteresis < 0.2`; any violation disables the whole block.
+  bloom_threshold_norm`, ramps `> 0`, `0 <= dim_floor < 1`, `drain_ms > 0`;
+  any violation disables the whole block.
 - `color_engine.v2` is optional and default-off. When present and valid it defines v2 zone ramps,
   bass normalization anchors, the local identity store path, soft-flip, palate-reset, bloom, and
   motion/travel thresholds. The current tracked example/default `bass_norm` anchors are
