@@ -241,9 +241,20 @@ becomes brightness only (write `field[idx][slot] += intensity`, clamped).
    `rt_groove_chase` and `rt_groove_nebula`. **FLAG: the groove 2.5 default
    is veto-able (his comet_width dial never reported a final number); drop/
    post_drop 4 is his stated request.**
-4. **Bank recast (f)**: move `rt_drop_chase` and `rt_drop_nebula` from
-   `banks.default.drop` into `banks.default.post_drop` (operator verbatim:
-   "Current sparkling cues can play the role of the sparkling remnants");
+4. **Bank recast (f)** — AMENDED by operator 2026-07-08 late (rename, not
+   just move): the demoted looks are RENAMED so their names read as
+   post-drop remnant/sparkle material — implementer picks the names (e.g.
+   `rt_post_drop_remnant_chase` / `rt_post_drop_remnant_nebula`; MUST NOT
+   collide with the existing `rt_post_drop_chase` / `rt_post_drop_nebula`).
+   The rename is a LOOK-name rename only — each look's renderer `scene_ref`
+   stays exactly what it is. Propagate the new names everywhere the look
+   name appears: look definitions, bank lists, tests, and any remaining
+   references (the drop_pairs entries are deleted by this same task). The
+   operator summary must note that the config mirror carries the rename so
+   his live-config equivalents map cleanly. Then: move the renamed looks
+   from `banks.default.drop` into `banks.default.post_drop` (operator
+   verbatim: "Current sparkling cues can play the role of the sparkling
+   remnants");
    delete their `drop_pairs` entries (`rt_drop_chase` → `rt_post_drop_chase`,
    `rt_drop_nebula` → `rt_post_drop_nebula`) — a post_drop-role look never
    fires a pair, and the AWR-149 drop→post_drop pairing will carry
