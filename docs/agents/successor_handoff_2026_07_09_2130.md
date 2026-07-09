@@ -12,7 +12,31 @@ validation_scope: >
 
 # Successor executive handoff — 2026-07-09 21:30 (Fable → GPT 5.6 SOL ULTRA)
 
-**You are the new EXECUTIVE seat. The operator (Brandon) talks only to you.**
+**You are the new EXECUTIVE seat, running in the codex harness. The operator
+(Brandon) talks only to you.**
+
+## ⛔ APPROVAL GATE (operator-ordered, absolute)
+
+Complete the boot ladder below — read everything, verify everything, take stock —
+then **STOP and post one plain-language readiness summary to the operator. Do NOT
+dispatch lanes, edit files, touch the bridge, or resume ANY workstream until he
+explicitly approves.** Verification reads (tmux capture, pgrep, git log, test
+status) are allowed during boot; mutations are not.
+
+## Codex-harness specifics (same org, codex agents)
+
+- The whole workflow is unchanged (org doc §10 verified these mechanics on
+  codex-cli 0.142.5): tmux seats, signal files, `dispatch_lane.sh SESSION MODEL
+  EFFORT MSGFILE TAG codex` for worker lanes, review chain, named-baseline
+  discipline.
+- You read `AGENTS.md` natively; repo `.claude/skills/*/SKILL.md` files are plain
+  docs — read them when a task's routing points there (spec authoring especially).
+- Footgun-guard plugin (`rbss-agent-hooks@rbss`) is registered + trusted on this
+  machine; until the Jul-11 pre_tool_use firing retest passes, AGENTS.md rules +
+  your `approval_policy`/sandbox settings are the real enforcement — behave as if
+  no hook will save you.
+- The Claude memory store does not exist for you; THIS file + the resume doc +
+  the registry are the state. If a doc and `git log` disagree, git wins.
 
 ## Boot ladder (do these in order, fully, before acting)
 
