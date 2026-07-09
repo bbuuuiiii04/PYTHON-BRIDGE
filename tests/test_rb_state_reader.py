@@ -367,14 +367,15 @@ class TickEventTests(unittest.TestCase):
         self.assertEqual(len(masters), 1)
         self.assertEqual(masters[0].deck, 2)
 
-    # ── track loaded ────────────────────────────────────────────────────────
+    # ── track loaded (AWR-160 stability gate) ───────────────────────────────
     def test_track_loaded_emits_with_title(self) -> None:
         self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
         title = "Some Track - Some Artist"
         # Replace deck 1 (B → bridge 2) leaf with a real title.
         endpoint = self.mem.install_chain(
             self.base, self.offs.track_info_per_deck[1], payload=title.encode("utf-8") + b"\x00")
-        self.reader._tick(0xCAFE, self.base)
+        for _ in range(mod._LOAD_STABLE_TICKS):
+            self.reader._tick(0xCAFE, self.base)
         loaded = [e for e in _drain(self.q) if e.kind == Ev.TRACK_LOADED]
         self.assertEqual(len(loaded), 1)
         self.assertEqual(loaded[0].deck, 2)
@@ -393,7 +394,8 @@ class TickEventTests(unittest.TestCase):
             self.base, self.offs.track_info_per_deck[0],
             payload=blob.encode("utf-8") + b"\x00",
         )
-        self.reader._tick(0xCAFE, self.base)
+        for _ in range(mod._LOAD_STABLE_TICKS):
+            self.reader._tick(0xCAFE, self.base)
         loaded = [e for e in _drain(self.q) if e.kind == Ev.TRACK_LOADED]
         self.assertEqual(len(loaded), 1)
         self.assertEqual(loaded[0].payload["title"], "We Could Be Love (Odd Mob Extended Remix)")
@@ -403,8 +405,117 @@ class TickEventTests(unittest.TestCase):
         self.mem.install_chain(
             self.base, self.offs.track_info_per_deck[0],
             payload=b"Steady\x00")
+        for _ in range(mod._LOAD_STABLE_TICKS + 2):
+            self.reader._tick(0xCAFE, self.base)
+        loaded = [e for e in _drain(self.q) if e.kind == Ev.TRACK_LOADED]
+        self.assertEqual(len(loaded), 1)
+
+    def test_load_requires_stability_window_not_immediate(self) -> None:
+        # Fewer than _LOAD_STABLE_TICKS identical reads must never emit —
+        # this is the gate itself, not just a dedup check.
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
+        self.mem.install_chain(
+            self.base, self.offs.track_info_per_deck[0],
+            payload=b"Almost Stable\x00")
+        for _ in range(mod._LOAD_STABLE_TICKS - 1):
+            self.reader._tick(0xCAFE, self.base)
+        self.assertEqual([e for e in _drain(self.q) if e.kind == Ev.TRACK_LOADED], [])
+
+    def test_browse_storm_of_churning_titles_emits_nothing_and_counts_suppressed(self) -> None:
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
+        endpoint = self.mem.install_chain(
+            self.base, self.offs.track_info_per_deck[0], payload=b"Browse 0\x00")
+        self.reader._tick(0xCAFE, self.base)  # establishes the first candidate
+        # Sub-_LOAD_STABLE_TICKS churn: a new title every tick, never the
+        # same identity twice in a row — the real-world "9 tracks in ~2s"
+        # browse-cursor bleed from the phantom-load triage.
+        for i in range(1, 10):
+            self.mem.update_leaf(endpoint, f"Browse {i}\x00".encode("utf-8"))
+            self.reader._tick(0xCAFE, self.base)
+        self.assertEqual([e for e in _drain(self.q) if e.kind == Ev.TRACK_LOADED], [])
+        self.assertEqual([e for e in _drain(self.q) if e.kind == Ev.ANLZ_PATH], [])
+        # Every discarded candidate after the first counts as suppressed
+        # (the very first title has no prior candidate to discard).
+        self.assertEqual(self.reader._phantom_suppressed_count.get(0, 0), 9)
+
+    def test_stable_new_track_never_playing_still_emits_fein_case(self) -> None:
+        # FEIN case: a track loads and is never played (position never
+        # moves). Stability alone must gate the load — readiness/playing
+        # must never be a requirement.
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
+        self.mem.install_chain(
+            self.base, self.offs.track_info_per_deck[0],
+            payload=b"Loaded Never Played\x00")
+        # live_pos stays frozen at the setUp default (0) the whole time —
+        # play/pause inference never fires for this deck.
+        for _ in range(mod._LOAD_STABLE_TICKS + 5):
+            self.reader._tick(0xCAFE, self.base)
+        loaded = [e for e in _drain(self.q) if e.kind == Ev.TRACK_LOADED]
+        self.assertEqual(len(loaded), 1)
+        self.assertEqual(loaded[0].payload["title"], "Loaded Never Played")
+        self.assertEqual(
+            [e for e in _drain(self.q) if e.kind in (Ev.PLAY, Ev.PAUSE)], [])
+
+    def test_a_then_quickly_b_only_b_emits(self) -> None:
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
+        endpoint = self.mem.install_chain(
+            self.base, self.offs.track_info_per_deck[0], payload=b"Track A\x00")
         self.reader._tick(0xCAFE, self.base)
+        self.reader._tick(0xCAFE, self.base)  # A only reaches 2 ticks
+        self.mem.update_leaf(endpoint, b"Track B\x00")
+        for _ in range(mod._LOAD_STABLE_TICKS):
+            self.reader._tick(0xCAFE, self.base)
+        loaded = [e for e in _drain(self.q) if e.kind == Ev.TRACK_LOADED]
+        self.assertEqual(len(loaded), 1)
+        self.assertEqual(loaded[0].payload["title"], "Track B")
+        self.assertEqual(self.reader._phantom_suppressed_count.get(0, 0), 1)
+
+    def test_unload_after_stable_load_behaves_as_today(self) -> None:
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
+        endpoint = self.mem.install_chain(
+            self.base, self.offs.track_info_per_deck[0], payload=b"Loaded Track\x00")
+        for _ in range(mod._LOAD_STABLE_TICKS):
+            self.reader._tick(0xCAFE, self.base)
+        self.assertEqual(
+            len([e for e in _drain(self.q) if e.kind == Ev.TRACK_LOADED]), 1)
+
+        self.mem.update_leaf(endpoint, b"\x00")  # deck ejects, title clears
         self.reader._tick(0xCAFE, self.base)
+        self.assertNotIn(0, self.reader._last_track)
+
+        # Reloading the SAME title afterward must emit again immediately
+        # once stable — unload cleared the "already loaded" memory exactly
+        # as it does today, the gate did not suppress recognition of it.
+        self.mem.update_leaf(endpoint, b"Loaded Track\x00")
+        for _ in range(mod._LOAD_STABLE_TICKS):
+            self.reader._tick(0xCAFE, self.base)
+        reloaded = [e for e in _drain(self.q) if e.kind == Ev.TRACK_LOADED]
+        self.assertEqual(len(reloaded), 1)
+        self.assertEqual(reloaded[0].payload["title"], "Loaded Track")
+
+    def test_deck_1_and_deck_2_stability_gate_symmetric(self) -> None:
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
+        # RB raw deck 0 → bridge 1, RB raw deck 1 → bridge 2.
+        self.mem.install_chain(
+            self.base, self.offs.track_info_per_deck[0], payload=b"Deck One Track\x00")
+        self.mem.install_chain(
+            self.base, self.offs.track_info_per_deck[1], payload=b"Deck Two Track\x00")
+        for _ in range(mod._LOAD_STABLE_TICKS):
+            self.reader._tick(0xCAFE, self.base)
+        loaded = {e.deck: e.payload["title"]
+                  for e in _drain(self.q) if e.kind == Ev.TRACK_LOADED}
+        self.assertEqual(loaded, {1: "Deck One Track", 2: "Deck Two Track"})
+
+    def test_stable_load_emits_exactly_once_per_confirmed_track(self) -> None:
+        # Proxy for "load_gen advances only on emission" at the reader
+        # level: StateManager bumps load_gen exactly once per TRACK_LOADED
+        # it consumes, so one emission per genuine load is the invariant
+        # this layer owns.
+        self.mem.install_chain(self.base, self.offs.master_deck, payload=b"\xff")
+        self.mem.install_chain(
+            self.base, self.offs.track_info_per_deck[0], payload=b"One Load\x00")
+        for _ in range(mod._LOAD_STABLE_TICKS * 3):
+            self.reader._tick(0xCAFE, self.base)
         loaded = [e for e in _drain(self.q) if e.kind == Ev.TRACK_LOADED]
         self.assertEqual(len(loaded), 1)
 
