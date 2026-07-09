@@ -640,7 +640,10 @@ Drop presentation policy (Package 3, AWR-119, 2026-07-04):
   `"drop_spotlight"`) — a set union, so it never clears a separately-held manual mute owner and is
   never touched by presentation decisions itself (suppression is not blackout). `led_palette_control.py`
   gained an optional `get_laser_solo` callback (pulled fresh on every feedback publish, mirroring the
-  existing `get_laser_blackout` pattern) surfacing the Solo pad's `off`/`armed`/`active` state.
+  existing `get_laser_blackout` pattern) surfacing the Solo pad's state, extended by AWR-159
+  (2026-07-09) from three values to five: `off`/`armed`/`pending`/`active`/`refused` (`pending` =
+  an auto tier queued for the next drop, distinct from a manual `armed` press; `refused` = a
+  one-tick flash when a manual arm could not be honored).
   `soundswitch_midi_input.py` gained the `laser_solo_pad` binding kind (note-on emits
   `Ev.LASER_SOLO_PAD`, note-off no-ops, same as the other three Stream Deck pad kinds), built from
   Package 2's already-reserved `laser_solo_note` config key. `enabled: false` in the new
@@ -821,10 +824,12 @@ Tests:
 - The shared `tools/pad_access.py` LAN-access payload (used by both pads' `GET /api/access`) is covered by `tests/test_pad_access.py` (pure-function, loopback/specific-IP/`0.0.0.0` detection cases), plus one HTTP smoke test each in `tests/test_led_pad_service.py` and `tests/test_laser_pad_web.py`.
 - Drop presentation policy Package 3 coverage lives in `tests/test_drop_presentation.py` (pure
   planner/ladder/session/learned-store/window-machine logic; the authority doc's Required Behavior
-  Tests 1-9 verbatim plus additional coverage), `tests/test_state_manager_drop_presentation.py`
+  Tests 1-9 verbatim plus additional coverage, including AWR-159's manual-arm-visibility/refusal and
+  predark reset-reason tests), `tests/test_state_manager_drop_presentation.py`
   (state_manager wiring integration: plan build, per-tick ladder/window, LED blackout owner
-  `"drop_spotlight"` engage/release, Solo pad arm/disarm/veto/learn via real event dispatch, darkness
-  guard, damper, the `enabled: false` byte-identity regression gate), `tests/test_led_config.py`
+  `"drop_spotlight"` engage/release, Solo pad arm/disarm/veto/learn/cancel via real event dispatch,
+  darkness guard, damper, the `enabled: false` byte-identity regression gate, and AWR-159's
+  arm-key-staleness/feedback-truth coverage), `tests/test_led_config.py`
   (the `/drop_presentation` loader), `tests/test_led_palette_control.py` (the `get_laser_solo`
   feedback callback), and `tests/test_soundswitch_midi_input.py` (the `laser_solo_pad` binding kind).
 - broad command: `python -m unittest discover tests`

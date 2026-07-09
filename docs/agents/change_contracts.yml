@@ -378,6 +378,7 @@ contracts:
       - docs/status/active_work_registry.md
     tests:
       - python3 -m unittest tests.test_drop_presentation
+      - python3 -m unittest tests.test_state_manager_drop_presentation
       - python3 -m unittest tests.test_filepath_resolver_hotcue_tags tests.test_soundswitch_laser_player tests.test_state_manager_pack_driver tests.test_led_palette_control tests.test_soundswitch_midi_input
       - python3 -m unittest discover tests
       - python3 tools/check_docs_metadata.py
