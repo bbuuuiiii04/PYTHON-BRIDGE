@@ -69,12 +69,17 @@ validation_scope: >
   `LaserColorStateManagerHoldTests` ABSENT (filter lane's fix landed).
   Lesson stamped: mid-round lane notes go through paste-buffer + separate
   Enter + nudge-until-clear, never bare send-keys.
-- [ ] Executive gate: batched full-suite re-run (or accept the lane's
-  pre-throttle run — his call) + gate ruling.
-- [ ] Workflow snag routed: opt-in pre-commit hook hangs on advisory
-  `check_docs_staleness.py` (hard checks pass in <1s first) — owner:
-  whoever owns `tools/git-hooks/pre-commit`; lane used `--no-verify` +
-  explicit hard checks, correctly.
+- [x] **EXECUTIVE GATE PASS (superman3, ~17:0x):** field + tolerant read +
+  length validation verified at his desk at HEAD; consumer check clean (the
+  symbol lives only in the three analysis modules); scoped tests OK. Full-suite
+  reconcile rides his consolidated ~18:30 window with the other lanes. Sweep
+  command + acceptance checks logged for after-20:00 execution at his desk.
+- [x] Workflow snag CLOSED by the ledtune lane mid-day (root-cause fix:
+  single `--name-only` call; hook now ~3s). Executive order: stop using
+  `--no-verify` — the opt-in pre-commit hook is safe again.
+- [x] SPECBANK LANE STANDING DOWN to standby (executive order). Round record
+  complete; remaining boxes (18:30 suite window, 20:00 sweep, named-track
+  checks incl. Sexy 3:38, operator scrub) are executive/operator-owned.
 - [x] Close-out report to executive + staged sweep command + signal P1BUILD.
 
 ## Named baseline (repo root, from the resume doc + executive addendum)
