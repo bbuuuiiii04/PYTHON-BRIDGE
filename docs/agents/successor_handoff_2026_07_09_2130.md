@@ -133,9 +133,18 @@ since the 19:05:52 bounce (operator ear-check pending); AWR-185 staged (see
 above); AWR-175 F3 spec banked; AWR-165 Codex spec banked (39713f1 — note: it
 swept the filter lane's led_dispatch_policy.py leg-1 diff, misattribution
 recorded, content verified); AWR-182 labels corpus + blast-radius sweep (104
-drops/80 tracks; TWO suspect classes — bo16 long-tails ≥30-beat quiet stretches +
-intro/mix-in firings at 0:12-0:15 — await operator ear verdicts in the corpus =
-the successor's first labels batch).
+drops/80 tracks; both suspect classes CLEARED by operator ear ~21:05 — intro
+firings benign because ANLZ intro drop MARKERS aren't real drops to his ear
+(marker quality, not rule defect), and breakdown-tail bo16 is "fine, could even
+warrant a 32-beat blackout" — a possible cap-raise taste datum, the rung currently
+caps at 16. NO void-threshold round needed. The successor's first labels batch
+instead: (1) first true tier misread — Scary Monsters (Levex) plans T3 WALL, his
+ear says ~T1/bass-house (F2 tier-scorer evidence, AWR-163 territory); (2) REWIND
+(Ray Volpe/Sullivan King) — he fixed a 2-beat rekordbox beatgrid misalignment
+mid-review, orphaning its grid-keyed v4 entry; his ear-truth: "one of the most
+aggressive tracks in my library, wall tier 3, 4 bar blackout" — check whether the
+post-fix re-extraction alone recovers that read. Corpus entries committed by the
+labels lane).
 
 **Overnight compute running at handoff (nohup, survives everything):** P1 backfill
 sweep PID 78394/78396, log `local/sweep_p1_20260709.log` (acceptance when done:
