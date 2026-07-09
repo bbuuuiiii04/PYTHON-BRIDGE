@@ -233,6 +233,17 @@ what the engine chose, and your hands always win.
 
 ---
 
+> **F2 IMPLEMENTED 2026-07-09** (AWR-163 Tasks 1-6; §§3-5/7-9 land in
+> `lighting_moments_v2.py` + the dispatch/config wiring). Two deltas from this
+> design, both recorded in the AWR-163 registry row: (1) the intensity tier ships
+> on the CURRENT corpus-absolute grading — the family-aware redesign hypothesised
+> in the F2 spec was measured against the corpus and REJECTED (0/5 fixtures;
+> redesign of record = era/loudness normalization); the darkness ladder is
+> deliberately tier-INDEPENDENT (family-grade + collapse only). (2) The §4 pre-drop
+> blackout drives the SHARED `transition_window`/`pre_drop_blackout_beats` (LED +
+> laser together), not the laser-solo `led_predark_beats` — code wins over the
+> §7 kill-matrix's `led_predark_beats` note. F2-off is byte-identical to v1.
+
 ## 3. Drop families and intensity tiers (authority §4.2 + charter item 11)
 
 **What the room does.** Every drop cue is fired by your Rekordbox marker — never by the

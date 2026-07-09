@@ -3,7 +3,7 @@ doc_status: current
 truth_level: code-verified
 last_verified_date: 2026-07-09
 last_verified_commit: HEAD-2026-07-09-overnight
-validation_scope: implementation spec for LIGHTING ENGINE v2 Feature 2 (moments/darkness/drop-typing), authored from the locked design (docs/architecture/LIGHTING_ENGINE_V2_DESIGN.md §§3-5, 7-9) with the AWR-147 desk-calibration SUPERSESSIONS applied (41 verdicts, 5 rounds — the quantized emphasis-blackout ladder REPLACES §4.1's gap-mirror sizing) and tonight's operator design inputs folded in; AWR-162 (Energy Ladder) rides this round; awaiting executive review, nothing implemented
+validation_scope: implementation spec for LIGHTING ENGINE v2 Feature 2 (moments/darkness/drop-typing), authored from the locked design (docs/architecture/LIGHTING_ENGINE_V2_DESIGN.md §§3-5, 7-9) with the AWR-147 desk-calibration SUPERSESSIONS applied (41 verdicts, 5 rounds — the quantized emphasis-blackout ladder REPLACES §4.1's gap-mirror sizing) and tonight's operator design inputs folded in; AWR-162 (Energy Ladder) rides this round; IMPLEMENTED 2026-07-09 (Tasks 1-6, Opus orchestrator) — tier ships on the CURRENT corpus-absolute grading (the family-percentile redesign was measured against the corpus and REJECTED, 0/5 fixtures; redesign hypothesis of record = era/loudness normalization; see the AWR-163 registry row for verbatim evidence); darkness ladder is tier-independent; AWR-162 (A)+(D.1) delivered, (B)/(C) config-seeded/live-tuned, (D.2) deferred; F2-off byte-identical (kill test green)
 ---
 
 # Codex Implementation Spec - LIGHTING ENGINE v2 F2: moments, darkness, drop typing (AWR-163)
@@ -231,4 +231,12 @@ implemented; suite (known six reds) + three hard checks.
   drops the analysis calls NEUTRAL (~27%) and very-early-track drops
   currently keep the lasers silent — say the word and either fires lasers
   like a standard drop instead.
+  **KNOCK-ON (executive condition 3, plain words): the hardest old-school-techno
+  and big-room drops may read one aggression notch low until the tier redesign
+  lands — the lasers still fire (standard tier) and the chase is one class
+  chunkier, but the blackout SIZING is unaffected (the darkness ladder never
+  reads the tier). This is because the current tier reads perceived hardness a
+  notch soft on older/quieter masters; the family-percentile fix was rejected
+  (0/5 fixtures — see the AWR-163 registry row) and the redesign of record is
+  era/loudness normalization.**
 - [ ] Print exactly AWR163-DONE with real suite numbers, or AWR163-BLOCKED.
