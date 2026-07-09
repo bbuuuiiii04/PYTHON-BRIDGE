@@ -68,45 +68,85 @@ The bundled bridge must behave **identically** to today's source-run bridge: eve
 same launch profile. This is a hard parity requirement, not "mostly works." Three concrete parts,
 all `confirmed` against `scripts/ss_bridge_watcher.sh`:
 
-**(a) Same launch profile.** Today the watcher's AUTO path (`ss_bridge_watcher.sh:122-145`) launches
-the bridge with: `RBSS_GOVEE_REALTIME=1`, `RBSS_LIVE_BPM_FOLLOW=1`, `RBSS_ANLZ_DIRECT=1`,
-`RBSS_POS_CHAIN_DIRECT=1`, `RBSS_POS_CHAIN_SKIP_OBJC=1`, `RBSS_MASTER_SEED_DIRECT=1`,
-`RBSS_MASTER_DIRECT=1`, `RBSS_PLAY_DIRECT=1`, `RBSS_TRACK_LOAD_DIRECT=1`, `RBSS_SCRIPTED_DIRECT=1`,
-`RBSS_SCRIPTED_SHOWFILE_DIRECT=1`, `RBSS_SMART_REARM_EXPERIMENT=1`, `RBSS_SMART_DROP=1`,
-`RBSS_SMART_BREAKDOWN=1`, **`RBSS_LED_PHRASE_MONOTONIC=1`, `RBSS_LED_MIN_DWELL=1`,
-`RBSS_LED_CANCEL_PENDING=1`, `RBSS_LED_RT_RECONCILE=1`, `RBSS_LED_TRANSPORT_STICKY=1`,
-`RBSS_LED_TRANSPORT_COOLDOWN=0`**, plus `RBSS_LASER_CONFIG` and the Govee env. The bundle's
+**(a) Same launch profile.** Today the watcher launches the bridge from ONE shared
+`start_bridge()` function used by BOTH auto and manual modes (`ss_bridge_watcher.sh:130-175`;
+the `exec env` block at `:147-169`) with: `RBSS_GOVEE_REALTIME=1`, `RBSS_LIVE_BPM_FOLLOW=1`,
+`RBSS_ANLZ_DIRECT=1`, `RBSS_POS_CHAIN_DIRECT=1`, `RBSS_POS_CHAIN_SKIP_OBJC=1`,
+`RBSS_MASTER_SEED_DIRECT=1`, `RBSS_MASTER_DIRECT=1`, `RBSS_PLAY_DIRECT=1`,
+`RBSS_TRACK_LOAD_DIRECT=1`, `RBSS_SCRIPTED_DIRECT=1`, `RBSS_SCRIPTED_SHOWFILE_DIRECT=1`,
+`RBSS_SMART_REARM_EXPERIMENT=1`, `RBSS_SMART_DROP=1`, `RBSS_SMART_BREAKDOWN=1`,
+**`RBSS_LED_PHRASE_MONOTONIC=1`, `RBSS_LED_MIN_DWELL=1`, `RBSS_LED_CANCEL_PENDING=1`,
+`RBSS_LED_RT_RECONCILE=1`, `RBSS_LED_TRANSPORT_COOLDOWN=0`**, plus
+`RBSS_LASER_CONFIG="$LASER_CONFIG_PATH"`, the Govee env (sourced at `:139-144`), and an
+optional `$TRUTH_ENV` Art-Net truth-check injection (`RBSS_BRIDGE_TRUTH=1` opt-in, `:22-28` —
+dev/validation only, not a bundle feature). All `confirmed` 2026-07-09. The bundle's
 `--run-bridge` mode **must reproduce this exact set**.
-> **Live evidence for the no-drift decision (found in review, 2026-07-04):** the watcher's own
-> MANUAL path (`ss_bridge_watcher.sh:161`) already omits the six `RBSS_LED_*` flags the auto path
-> sets — the two hand-maintained lists inside ONE script have drifted. `confirmed` harmless today
-> only because all six happen to match their code defaults (five default on; `TRANSPORT_COOLDOWN`
-> defaults off and the watcher sets 0). Any future default change breaks manual-mode parity
-> silently.
-> **Design decision — one launch profile, no drift:** extract this env set + config paths into a
-> single shared source (a small `launch_profile` module or a JSON the app loads) that **both**
-> `ss_bridge_watcher.sh` and the bundle read. Parity is then guaranteed by construction — one source
-> of truth instead of hand-maintained flag lists that have already diverged once.
+> **Re-verified 2026-07-09 — two changes since `8abccdf`.** (1) `RBSS_LED_TRANSPORT_STICKY=1`
+> was REMOVED from the launch env by AWR-149 (2026-07-08): the deterministic transport
+> rotation (`plan_backend_sequence()` in `led_look_director.py`) replaced the WI-7 sticky
+> latch that flag gated. Do not resurrect it in the bundle profile. (2) The 2026-07-04
+> manual/auto env drift is FIXED structurally: the manual-only
+> `start_manual_terminal_bridge()` function (with its own shorter, drifted env list) was
+> deleted; manual mode now calls the same `start_bridge()` (invoked in the `MANUAL_MODE`
+> branch, `:323` region). One env list — the two-hand-maintained-lists failure mode can no
+> longer recur INSIDE the watcher. Manual mode also changed shape: the bridge always runs as
+> a background subprocess now, and the visible Terminal is a read-only `bridge_view.py`
+> JSONL viewer (AWR-125) — closing it never kills the bridge in either mode.
+> **Design decision — one launch profile, no drift (STANDS):** extract this env set + config
+> paths into a single shared source (a small `launch_profile` module or a JSON the app loads)
+> that **both** `ss_bridge_watcher.sh` and the bundle read. The watcher unification fixed
+> watcher-internal drift; watcher-vs-bundle would still be two hand-maintained lists without
+> this. Parity is then guaranteed by construction — one source of truth.
 
 **(b) Every subsystem in the bundle.** OS2L/SoundSwitch (`python-osc`, `zeroconf` discovery), MIDI
-(`mido` + `python-rtmidi`), lasers, LEDs/Govee (cloud HTTPS **and** LAN), Stream Deck, `pyrekordbox`,
-ANLZ reading. Nothing silently dropped by PyInstaller's static scanner (see §5 hidden-imports).
-> **Watcher scope (found in review):** "port the watch logic" is bigger than adopt/restart/backoff.
-> `confirmed` at HEAD, `ss_bridge_watcher.sh` today ALSO: sources the Govee env (`:114-119`),
-> creates + force-enables the laser config (`ensure_laser_config`, `:73-95`, sets `enabled=true`,
-> `dry_run=false`), **starts and stops the Stream Deck script** (`start_streamdeck`/`stop_streamdeck`,
-> `:59-69`, invoked at `:300,315`), and opens the log-monitor Terminal. The bundle runner must state a
-> disposition for EACH: Govee env + laser config = port (resolved per §2(c)); Stream Deck runner =
-> port (a bundled `--run-streamdeck` entrypoint or equivalent — without it the §2 bar's "Stream Deck"
-> line fails; note `streamdeck_midi.py` already guards itself with `_acquire_singleton_lock`);
-> monitor Terminal = replace with menubar status/log access (dropping the auto-opened Terminal is
-> fine, say so in the runbook).
+(`mido` + `python-rtmidi`), lasers, LEDs/Govee (cloud HTTPS **and** LAN, **plus the AWR-146
+frame-engine child process — see below**), Stream Deck (`python-elgato-streamdeck` + `Pillow`,
+both **undeclared** in `pyproject.toml` — §5), `pyrekordbox`, ANLZ reading. Nothing silently
+dropped by PyInstaller's static scanner (see §5 hidden-imports).
+> **Watcher scope (re-verified 2026-07-09):** "port the watch logic" is bigger than
+> adopt/restart/backoff. `confirmed` at HEAD, `ss_bridge_watcher.sh` today ALSO: sources the
+> Govee env (`:139-144`, path var at `:38`), creates + force-enables the laser config
+> (`ensure_laser_config`, `:79-101`, sets `enabled=true`, `dry_run=false` at `:97-98`, called
+> at `:138`), **starts and stops the Stream Deck script** (`start_streamdeck`/`stop_streamdeck`,
+> `:63-75`, started at `:326,:344`, stopped with a reason argument at `:296,:304`), and opens
+> the log-monitor Terminal (`open_monitor`, `:234-254` — now a read-only `bridge_view.py`
+> JSONL viewer per AWR-125, not a `tail -F`). The bundle runner must state a disposition for
+> EACH: Govee env + laser config = port (resolved per §2(c)); Stream Deck runner = port (a
+> bundled `--run-streamdeck` entrypoint or equivalent — without it the §2 bar's "Stream Deck"
+> line fails; note `streamdeck_midi.py` still guards itself with `_acquire_singleton_lock`,
+> `:69`, lock at `/tmp/streamdeck_midi.lock`, `:38`); monitor Terminal = replace with menubar
+> status/log access (dropping the auto-opened Terminal is fine, say so in the runbook).
+> Dev-only watcher features NOT ported (state so in the runbook): the `RBSS_BRIDGE_TRUTH=1`
+> Art-Net truth-check injection (`:22-28`) and the `WATCHER_NO_LOOP` test hook (`:311,:354`).
+> **NEW subsystem since 2026-07-04 — the Govee frame-engine child (AWR-146).** `confirmed`:
+> the bridge now spawns a second process of itself —
+> `govee_frame_engine_client.py:454-461` runs `subprocess.Popen([sys.executable, "-m",
+> "rb_ss_bridge_v2.govee_frame_engine", "--fd", ...])` over a socketpair, `cwd` pinned to the
+> package's parent dir. There is NO `sys.frozen` handling anywhere in that path — under
+> PyInstaller, `sys.executable` is the frozen app binary, not a Python interpreter, so this
+> spawn breaks unfixed. The bundle must give the frozen binary a re-exec-self path for the
+> frame-engine child (the standard PyInstaller pattern). Added to §6 risky bits; proving it
+> is Milestone-1 scope (§7.1) because realtime LED output depends on this child.
 
-**(c) Config + secrets from the stick.** `confirmed`: today config resolves to host paths —
-`GOVEE_ENV_FILE="$HOME/Library/Application Support/RBSS Bridge/govee.env"`, laser config from the repo,
-host `/opt/homebrew/bin/python3`. On a foreign Mac none of those exist. The bundle must resolve config,
-`govee.env`, laser/LED config, and SoundSwitch packs from the **stick** (temporary) or the installed
-copy (permanent) — never a hardcoded host path.
+**(c) Config + secrets from the stick.** `confirmed` (re-verified 2026-07-09): today config
+resolves to host paths — `GOVEE_ENV_FILE="$HOME/Library/Application Support/RBSS Bridge/govee.env"`
+(`ss_bridge_watcher.sh:38`), laser config from the repo, host `/opt/homebrew/bin/python3`
+(now override-capable `${PYTHON:-...}` at `:19`; resolves to Python 3.14.6 today). On a
+foreign Mac none of those exist. The bundle must resolve config, `govee.env`, laser/LED
+config, and SoundSwitch packs from the **stick** (temporary) or the installed copy
+(permanent) — never a hardcoded host path.
+> **Config surface additions found at re-verification (all `confirmed`):** the LED v2
+> identity store and the laser-solo learned store resolve **cwd-relative**
+> (`local/state/led_identity_v2.json`, `led_models.py:87`; `local/state/laser_solo_learned.json`,
+> `drop_presentation.py:51`) — the live bridge's cwd is the repo's PARENT dir, so today they
+> live at `~/local/state/…`. A bundle that changes cwd silently relocates (or loses) them;
+> the bundle must pin these into its stick/scratch config surface explicitly. The spectral
+> caches live at `~/Library/Application Support/RBSS Bridge/spectral_cache/` (+`/v4/`),
+> relocatable via `RBSS_SPECTRAL_CACHE_DIR` (`spectral_cache.py:32-34,215-217`). The Stream
+> Deck helper reads a repo-relative canonical pack + MIDI-binding sidecar
+> (`streamdeck/streamdeck_midi.py:41-42`). Track-identity portability itself (same track,
+> different path ⇒ same lighting identity) is a separate design:
+> `track_identity_move_invariance_design.md`.
 
 **Verification of the bar:** a bundled run must produce the same observable outputs as a watcher run —
 SoundSwitch rotation, MIDI look-selection, laser output, LED/Govee frames, Stream Deck — checked on
@@ -135,16 +175,24 @@ entrypoint runs the bridge in-bundle with the §2(a) launch profile. The bash wa
 (wait for Rekordbox + SoundSwitch present, adopt/restart exactly one process, backoff — plus the §2(b)
 watcher-scope items) ports into the app. Purpose: run exactly one bridge. `ss_bridge_watcher.sh` stays
 untouched for the current dev workflow.
-> **One-process invariant under a bundle (both reviews converged here; flock fact re-verified):**
-> `confirmed`: the INVARIANT itself is already safe — the bridge takes an exclusive flock on
-> `/tmp/rb_ss_bridge_v2.lock` and a second bridge of ANY form refuses to start
-> (`__main__.py:772-785`, refusal in `main()` at `:1082-1084`). Command-line-agnostic: it holds
-> across any mix of source-run and bundled bridges. What BREAKS under a bundle is observability and
-> control: the operator check (`pgrep -f rb_ss_bridge_v2`), the watcher's `bridge_pids()` regex
-> (`ss_bridge_watcher.sh:97-99`), and the menubar's own patterns/start/stop
-> (`bridge_menubar.py:35-36` + `pkill -f`) all match the SOURCE-RUN command line only — a frozen
-> binary is invisible to every one of them (menubar shows "off" while the bundled bridge runs; the
-> stop button can't stop it). Requirements:
+> **One-process invariant under a bundle (both reviews converged here; flock fact re-verified
+> 2026-07-09):** `confirmed`: the INVARIANT itself is already safe — the bridge takes an
+> exclusive flock on `/tmp/rb_ss_bridge_v2.lock` and a second bridge of ANY form refuses to
+> start (`__main__.py:614-629`, refusal in `main()` at `:930-933`). Command-line-agnostic: it
+> holds across any mix of source-run and bundled bridges. What BREAKS under a bundle is
+> observability and control: the operator check (`pgrep -f rb_ss_bridge_v2`), the watcher's
+> `bridge_pids()` regex (`ss_bridge_watcher.sh:103-105`; `kill_bridge_processes` `:107-109`),
+> and the menubar's own patterns/start/stop (`bridge_menubar.py:35-38` + `pkill -f`,
+> stop/start mechanics in `toggleBridge_` `:1146-1163`) all match the SOURCE-RUN command line
+> only — a frozen binary is invisible to every one of them (menubar shows "off" while the
+> bundled bridge runs; the stop button can't stop it).
+> **Process-count nuance (new since 2026-07-04):** with the v2 realtime engine on, the bridge
+> legitimately runs TWO processes — itself plus the AWR-146 frame-engine child, whose argv
+> (`-m rb_ss_bridge_v2.govee_frame_engine`) matches the operator's loose
+> `pgrep -f rb_ss_bridge_v2` but NOT the watcher/menubar anchored regexes
+> (`…rb_ss_bridge_v2$`). The bundle's status surface must count bridges by the anchored
+> convention (or flock/status liveness), never by the loose substring — and the runbook's
+> "exactly one process" language needs the same footnote. Requirements:
 > 1. **Discoverability:** name the bundled binary so its argv contains `rb_ss_bridge_v2` — the
 >    operator's one check then counts both forms.
 > 2. **Bundle-mode control is owned-child-pid based** (the menubar spawned `--run-bridge`; it holds
@@ -159,9 +207,13 @@ untouched for the current dev workflow.
 Mac?) and the two install modes (§4). Purpose: manage where the app lives + its lifecycle. Depends on:
 filesystem, `launchd`, and the reader-spec's memory-grant step (invoked, not designed here).
 
-**3.4 Menubar UI** — extend the existing PyObjC app `scripts/bridge_menubar.py` (`confirmed`: it's raw
-AppKit/`NSStatusBar`, not rumps). Adds a Setup section (Run temporarily / Install permanently /
-Uninstall) above the current status display. Purpose: surface Setup + status.
+**3.4 Menubar UI** — extend the existing PyObjC app `scripts/bridge_menubar.py` (`confirmed`
+re-verified 2026-07-09: raw AppKit/`NSStatusBar`, not rumps; 1224 lines). Adds a Setup section
+(Run temporarily / Install permanently / Uninstall) above the current status display. Purpose:
+surface Setup + status. Since 2026-07-04 the menubar also gained a temporary "LED Engine v2"
+checkbox item + a nested-status read fix (`7d58acf`; `_led_color_engine_status` `:417-427`,
+item wiring `:839,:930-936`) — v2-rollout surface, expected to be removed later; the Setup
+design is unaffected.
 
 ## 4. The two modes
 
@@ -178,10 +230,31 @@ logs/cache/config/`govee.env` for the run live under the same stable `rbss-` pre
 - **Yank / force-eject mid-set:** non-event by construction (bridge runs from internal disk). A
   scratch left behind by a crash is swept by the next run's stale-`rbss-*` sweep or the OS's own
   `$TMPDIR` cleanup.
-- **Fixed `/tmp` state (AWR-123 F8):** the runtime also writes fixed `/tmp` paths outside any
-  scratch dir (status/commands IPC `runtime_status.py:16-17`, the instance lock, Govee caches,
-  palette state, logs). Cleanup must delete an enumerated fixed-path list, or a later milestone
-  threads one `RBSS_RUNTIME_DIR` knob through the launch profile (the Windows-shaped fix).
+- **Fixed-path state outside any scratch dir (AWR-123 F8, inventory re-swept 2026-07-09):**
+  the enumerated cleanup list, all `confirmed` at HEAD:
+  - `/tmp/rb_ss_bridge_v2.lock` (instance flock, `__main__.py:614`);
+    `/tmp/rb_ss_bridge_v2_status.json` + `/tmp/rb_ss_bridge_v2_commands.jsonl` (IPC,
+    `runtime_status.py:17-18`); `/tmp/rb_ss_bridge_v2_palette_state.json`
+    (`led_palette_control.py:42`); `/tmp/rbss-session-<ts>.jsonl` (session-recorder default,
+    `__main__.py:1416`); `/tmp/rbss_artnet_truth_frames.jsonl` (`artnet_truth.py:30`);
+    `/tmp/rbss_os2l_inject.jsonl` (`os2l_injector.py:22`); `/tmp/streamdeck_midi.lock`
+    (`streamdeck/streamdeck_midi.py:38`); `/tmp/govee_h612d_devices.json` +
+    `/tmp/govee_h612d_scenes.json` (Govee LAN caches, `govee_runtime_sender.py:29-30`).
+  - **Logs are NO LONGER under `/tmp`** — AWR-125 moved them to `~/Library/Logs/rb_ss_bridge/`
+    (`bridge_log.py:329-334`): per-run `bridge-<ts>.jsonl` pruned to the newest 20, a
+    `current.jsonl` symlink, a `viewer_acks.json` sidecar (`bridge_view.py:987`), plus a
+    legacy `/tmp/bridge-events.jsonl` compat symlink created only when `RBSS_RUNTIME_DIR` is
+    unset (`bridge_log.py:395-397`).
+  - Cwd-relative stores (§2(c)): `local/state/led_identity_v2.json`,
+    `local/state/laser_solo_learned.json` — persistent lighting identity/learned state, NOT
+    disposable temp; Guest-mode cleanup wipes the scratch copies, but the design must decide
+    where these live on the stick so identity persists across guest sessions (they ride the
+    stick's config payload, not `/tmp`).
+  - `RBSS_RUNTIME_DIR` **now exists but covers logs only** (`bridge_log.py` is its sole
+    consumer, `confirmed` by grep) — every `/tmp` path above is still a hardcoded literal.
+    So cleanup must delete the enumerated list above, until a later milestone threads
+    `RBSS_RUNTIME_DIR` through the remaining fixed paths (the Windows-shaped fix — the knob
+    exists now, its coverage doesn't).
 Residual trace, restated honestly: the OS memory-permission grant (admin, sticky) and TCC entries
 persist (accepted); all bridge FILES are removed by End Set (or the next run's sweep after a crash).
 
@@ -193,11 +266,20 @@ in the installed location, not the stick.
 > **`StartOnMount` caveat** (`confirmed` behavior): it fires on **any** volume mount, not just this
 > stick. The agent must be cheap and **idempotent** — check "is my menubar already running?" and no-op
 > if so; ideally confirm the mounted volume is the bridge stick before acting. Folds into the
-> one-process invariant.
+> one-process invariant. Re-verified 2026-07-09: still no `StartOnMount` usage anywhere in the
+> repo or the live LaunchAgents — design-only, `assumed` until built.
+> **LaunchAgent lesson learned since design (AWR-151, `confirmed` live 2026-07-08): any plist
+> this feature generates MUST set `ProcessType=Interactive`.** A ProcessType-less LaunchAgent
+> gets macOS's background-QoS throttle — the live bridge ran at 28.1 fps until the flip
+> proved 60.0. All 4 live plists now carry it, and the advisory checker
+> `tools/check_launch_agents.py` (new since `8abccdf`) guards regressions — run it against
+> any generated plist template. Also: `~/Library/LaunchAgents/com.bbui.ss-bridge-watcher.plist.disabled`
+> points at a path that no longer exists (`/Users/bbui/ss_bridge_watcher.sh`) — never copy it
+> as a template.
 
 ## 5. Foreign-Mac "operate normally" gaps to handle
 
-- **MIDI port creation.** `confirmed`: laser/legacy MIDI opens a port **by name** — `MidiOutput(port_name=cfg.midi_output_port…)` (`__main__.py:417,429`), default IAC Bus 1; MTC fallback also reads RB over IAC Bus 1 (`__main__.py:1737`). A fresh Mac has no IAC bus enabled. **Fix:** on a machine without the named port, create a **virtual** port instead (Stream Deck already does exactly this — `mido.open_output(PORT_NAME, virtual=True)`, `streamdeck/streamdeck_midi.py:654` at `8abccdf`), or have Setup enable/create the IAC bus. Decide at implementation; the virtual-port path is the lazier and host-agnostic one.
+- **MIDI port creation.** `confirmed` (re-verified 2026-07-09): laser/legacy MIDI opens a port **by name** — `MidiOutput(port_name=cfg.midi_output_port…)` (`__main__.py:221-224` primary, `:233-236` dual-trigger); the default name is **config data, not code** — `"IAC Driver Bus 1"` in `config/laser_director.json` and `.example.json`. The MTC fallback also reads RB over IAC Bus 1 (`__main__.py:1626`). A fresh Mac has no IAC bus enabled. **Fix:** on a machine without the named port, create a **virtual** port instead (Stream Deck already does exactly this — `mido.open_output(PORT_NAME, virtual=True)`, `streamdeck/streamdeck_midi.py:928`, `PORT_NAME` at `:34`), or have Setup enable/create the IAC bus. Decide at implementation; the virtual-port path is the lazier and host-agnostic one.
 - **SoundSwitch host-side.** The rig is a given, but note once: SoundSwitch itself must be installed on the host and its MIDI input pointed at the bridge's port, and its project/packs present. If the MTC fallback matters on that host, Rekordbox's MIDI/MTC output over the bridge-visible port is a runbook item too. Out of scope to automate; name both in the operator runbook.
 - **Config/secrets resolution** — §2(c).
 - **Permission cascade (AWR-123 F4, adopted):** the foreign-Mac first run hits more than the memory
@@ -206,27 +288,50 @@ in the installed location, not the stick.
   Monitoring** for Stream Deck HID (sometimes no automatic prompt at all), the macOS 13+
   "Background Items Added" notification for the permanent-mode LaunchAgent, and ad-hoc signing
   re-triggering the whole cascade on every rebuild (TCC keys grants to the per-build cdhash).
-  Setup needs a permission inventory + plain-language concierge screens; a timeboxed Milestone-1
-  experiment: sign with a free personal-team Apple Development cert for a stable TCC identity.
-  Detail + sources: AWR-123 review F4.
-- **MIDI port map (AWR-123 F7):** three IAC-coupled endpoints in two directions (laser/look-select
-  OUT via laser config name; MTC IN `mtc_reader.py:30`; SoundSwitch pack MIDI IN hardcoded
-  `soundswitch_midi_input.py:88`) — the Codex plan carries a port-map table (endpoint, direction,
-  name source, consumer, foreign-Mac strategy). Default strategy: bridge-created virtual ports
-  (Stream Deck precedent); "enable IAC in Audio MIDI Setup" is runbook fallback only, never a code
-  path (it would fork the launch path Mac-only — portability ruling).
+  Setup needs a permission inventory + plain-language concierge screens; the timeboxed
+  free-Apple-Development-cert experiment for a stable TCC identity is §1's OPEN operator
+  decision (Part 2 idea 8) — operator-gated, not adopted. Detail + sources: AWR-123 review F4.
+- **MIDI port map (AWR-123 F7, corrected 2026-07-09):** three IAC-coupled endpoints in two
+  directions (laser/look-select OUT via laser config name; MTC IN `mtc_reader.py:31`,
+  `_PORT_SUBSTR = "IAC Driver Bus 1"`; SoundSwitch pack MIDI IN — **correction:** the
+  `soundswitch_midi_input.py` "hardcoded IAC" cite was a docstring illustration (now `:90`).
+  The real runtime port selection is `SoundSwitchMidiInputGroup` (`:592-643`): one adapter
+  per controller device name auto-derived from `pack.learned_midi_bindings`, with per-device
+  overrides via the `midi_input_aliases` config key — so this endpoint's foreign-Mac story is
+  config-driven, not a code literal). The Codex plan carries a port-map table (endpoint,
+  direction, name source, consumer, foreign-Mac strategy). Default strategy: bridge-created
+  virtual ports (Stream Deck precedent); "enable IAC in Audio MIDI Setup" is runbook fallback
+  only, never a code path (it would fork the launch path Mac-only — portability ruling).
 - **Memory grant** — reader-spec dependency; Setup invokes it. `unknown` until that spec lands whether the grant works cleanly on a foreign Mac (the top open risk, carried from `cross_platform_portability_plan.md` §7).
+- **Dependency manifest gap (re-swept 2026-07-09, `confirmed`):** `pyproject.toml` declares
+  only `mido, pyobjc-framework-Cocoa, pyrekordbox, python-osc, zeroconf` (+ optional
+  spectral/analysis extras: `librosa`, `soundfile`, `numpy`, `scipy`) and has ZERO diff since
+  `8abccdf` — but the runtime also imports **`python-elgato-streamdeck`** (+ its `hidapi`),
+  **`Pillow`** (`streamdeck/streamdeck_midi.py`), **`python-rtmidi`** (mido's backend), and
+  `pyserial` (Enttec, AWR-124 R5). The PyInstaller spec needs either the manifest fixed or an
+  explicit hidden-imports list covering all of these. External system binaries the runtime
+  shells out to (inventory for entitlement/runbook purposes): `vmmap` (`rb_memory.py:140-143`),
+  `pgrep` (`rb_memory.py:129-132`), `lsof` (`filepath_resolver.py:83-95`).
 
 ## 6. Risky bits (Milestone 1 must prove)
 
 - **Bundling the PyObjC menubar** with PyInstaller — feasible but AppKit can need hooks. `assumed`.
 - **Running the bridge in-bundle** without host Python and without the parent-dir import trick. `assumed` — this is the biggest unknown.
-- **PyInstaller × Python version.** `confirmed`: PyInstaller is not currently installed; the local
-  runtime is Python 3.14 (CI is 3.11). Whether PyInstaller supports 3.14 at build time is `unknown` —
-  the bundle may need a pinned 3.12/3.13 build environment, and whichever interpreter gets bundled
-  must be one the test suite passes on. Milestone 1 resolves this first.
-- **Memory reads under an ad-hoc-signed bundle, on Brandon's OWN Mac.** `confirmed`: the reader uses
-  `task_for_pid` + `mach_vm_read_overwrite` (`rb_memory.py:60-72`); code-signing state can change
+- **The frame-engine child under a frozen bundle (NEW since 2026-07-04, AWR-146).** `confirmed`
+  at HEAD: `govee_frame_engine_client.py:454-461` spawns `sys.executable -m
+  rb_ss_bridge_v2.govee_frame_engine` with no `sys.frozen` handling — this exact invocation
+  cannot work inside a PyInstaller bundle (frozen `sys.executable` is not a Python
+  interpreter). The bundle needs a re-exec-self path; realtime LED output depends on it.
+  Milestone 1 must prove the child spawns, streams frames over its socketpair, and dies with
+  its parent, under the frozen binary.
+- **PyInstaller × Python version.** `confirmed` (re-verified 2026-07-09): PyInstaller is still
+  not installed; the local runtime is Python 3.14.6 (CI is 3.11). Whether PyInstaller supports
+  3.14 at build time is `unknown` — the bundle may need a pinned 3.12/3.13 build environment,
+  and whichever interpreter gets bundled must be one the test suite passes on. Milestone 1
+  resolves this first.
+- **Memory reads under an ad-hoc-signed bundle, on Brandon's OWN Mac.** `confirmed` (re-verified
+  2026-07-09): the reader uses
+  `task_for_pid` + `mach_vm_read_overwrite` (`rb_memory.py:58-70`); code-signing state can change
   `task_for_pid` behavior. So Milestone 1 can hit the memory wall BEFORE any foreign-Mac work and
   before the reader/authorization spec exists. Milestone 1's rule: if the bundled bridge's memory
   reads behave differently from a source-run bridge, STOP and report — do not improvise
@@ -239,7 +344,8 @@ in the installed location, not the stick.
 
 1. **Bundle the existing menubar + bridge; run it off the stick on Brandon's own Mac.** Proves it
    packages and runs with no host Python, PyObjC menubar works bundled, `--run-bridge` launches the
-   full bridge, one-process invariant holds. **Verify:** subsystem-parity check (§2) vs a watcher run.
+   full bridge, the AWR-146 frame-engine child spawns under the frozen binary (§6), and the
+   one-process invariant holds. **Verify:** subsystem-parity check (§2) vs a watcher run.
    Kills the biggest unknown for $0.
 2. **Temporary mode** — stage-to-scratch launch + the §4 "stick is a key" model + End Set cleanup.
    **Verify:** stick pulled mid-run → bridge keeps running (a literal yank test); End Set → scratch
