@@ -77,10 +77,32 @@ First match wins, evaluated per true drop. Auto-solo tiers (4-6) fire at most
 **Manual arm (tier 2).** Pressing the Solo pad arms the *next* drop impact on
 the active deck — not the current beat, and a press during an already-playing
 drop arms the following one. Manual arm is an explicit operator override, so it
-can fire even when that marker has no runway. Arming auto-clears on track
-change (an armed solo never carries into a track the operator didn't aim it
-at). Pressing while armed disarms. The pad pulses whenever ANY tier has a solo
-pending, and that press-to-cancel is the single veto gesture for all of them.
+can fire even when that marker has no runway, and even when
+`plan.decision_for(beat)` has no exact match for the live beat (AWR-159 Task 2
+— the plan-unavailable fallback stays for non-manual tiers only). Arming
+auto-clears on track change and active-deck change, and on a stop (the arm
+KEY and the pad feedback are explicitly cleared, each with one log line —
+AWR-159 Task 5; before that fix the pad could keep showing "armed"
+indefinitely after the deck it targeted changed). Pressing while armed
+disarms. The pad pulses whenever ANY tier has a solo pending (feedback state
+`pending`), and that press-to-cancel is the single veto gesture for all of
+them. **Pressing while a solo window is already open (feedback state
+`active`) cancels it** instead of arming the next drop (AWR-159 Task 1): the
+window fails open on the very next tick exactly like any other fail-open
+trigger — LEDs restore, base suppression releases — additively, never
+replacing the existing automatic release conditions. Four states from the
+pad's perspective: arm / disarm / veto-pending / cancel-active.
+
+**Manual visibility and refusal (AWR-159 Task 3).** Unlike auto tiers, a
+manual arm's darkness guard does not require the Laser Director enabled —
+only `base_live` AND not masked AND role ∈ {drop, post_drop}. When even that
+fails at the actual impact (lasers genuinely unpresentable), the arm never
+silently downgrades to `leds_plus_lasers`: it refuses visibly instead — the
+arm clears, one operator-facing log names the failing gate
+(`base_live_false` / `masked` / `role`), and the pad shows a one-tick distinct
+`refused` state. The refusal always happens before anything darkens (or
+restores atomically if pre-dark had already engaged) — never a stuck-dark
+window.
 
 **Hot-cue tag (tier 3).** A hot cue whose name contains the marker
 (case-insensitive), matched to the nearest smart drop within ±2 beats, makes
@@ -127,24 +149,34 @@ suppressed (damper), and tracks without phrase data are invisible to this tier.
   (`laser_blackout_authority.md`). Suppression must be indistinguishable from
   "no drop autoloop selected."
 - **`lasers_only` choreography:** pre-dark for the final `led_predark_beats` →
-  impact with Govees dark, lasers alone → automatic restore at window end.
+  impact with Govees dark, lasers alone → automatic restore at window end. A
+  pre-dark that resets before impact (`predark → clear`) logs why
+  (AWR-159 Task 4): `passed_without_drop` when the beat sailed past the
+  target without an impact tick, otherwise which visibility gate failed
+  (`director_disabled` / `base_live_false` / `masked` / `role`).
 - A true-drop impact that lands while a window is already open asserts its own
   planned presentation and restarts the backstop from that impact beat. A
   runway-less marker inside the open window keeps the current section's
   presentation, while laser drop/post-drop look cycling still runs normally.
   Known limit: a `lasers_only` solo reached this way skips the LED pre-dark
   countdown and fires at impact, because pre-dark only arms from idle.
-- **Darkness guard (all solo sources):** before the Govees are cut — checked
-  at pre-dark start AND at impact — the bridge must verify lasers will
-  actually be visible: laser output live and rendering a drop autoloop, no
-  laser blackout/mute held, laser enabled. Failing the guard falls back to
+- **Darkness guard (auto tiers):** before the Govees are cut — checked at
+  pre-dark start AND at impact — the bridge must verify lasers will actually
+  be visible: laser output live and rendering a drop autoloop, no laser
+  blackout/mute held, Laser Director enabled. Failing the guard falls back to
   `leds_plus_lasers`. Only the beat-capped pre-dark may ever be a fully dark
   room, and it hard-restores at impact.
+- **Darkness guard (manual arm, AWR-159 Task 3):** the same check MINUS the
+  Director-enabled term — `base_live` AND not masked AND role ∈ {drop,
+  post_drop}. Failing THIS guard never falls back to `leds_plus_lasers`; it
+  refuses visibly instead (see Solo Source Contracts above).
 - **Fail-open, always:** LEDs restore and suppression releases on ANY of:
   window end, drop role change, track change, active-deck change, stop,
-  manual interaction, laser-output loss mid-window, or a predicted impact
-  passing without a confirmed drop. A stuck drop/post-drop role is bounded by
-  the 192-beat cap. The policy can never latch a fixture dark.
+  manual interaction (a Solo-pad press while `active` — reachable since
+  AWR-159 Task 1; the WindowMachine-level trigger predates it but had no
+  caller), laser-output loss mid-window, or a predicted impact passing
+  without a confirmed drop. A stuck drop/post-drop role is bounded by the
+  192-beat cap. The policy can never latch a fixture dark.
 - `enabled: false` restores pre-policy behavior exactly (every drop
   `leds_plus_lasers`); the mute and Solo pads keep working regardless.
 
@@ -185,10 +217,14 @@ unmatched hot-cue markers seen.
 
 The bridge log must also leave an operator-visible trail for Solo pad handling:
 DEBUG records mark each pad event when the bridge receives it, `perf.override`
-records mark Solo feedback transitions (`off`/`armed`/`active`), and a separate
-`perf.override` record marks veto presses, including whether a learned solo was
-actually unlearned. These records are observability only; they must not change
-presentation, learned-store, or feedback behavior.
+records mark Solo feedback transitions across all five states
+(`off`/`armed`/`pending`/`active`/`refused` — `pending` and `refused` added
+2026-07-09, AWR-159 Task 3/5), and separate `perf.override` records mark veto
+presses (including whether a learned solo was actually unlearned), cancel
+presses (`[LASER] solo-cancelled by=pad`), refusals (`[LASER] solo-refused
+reason=<gate>`), and stale-arm clears (`[LASER] solo-arm-cleared
+reason=track_changed|deck_changed|stopped`). These records are observability
+only; they must not change presentation, learned-store, or feedback behavior.
 
 ## Required Behavior Tests
 
@@ -205,11 +241,17 @@ presentation, learned-store, or feedback behavior.
    resets runway contiguity; records tracked under damper without firing.
 6. Damper: blocks tiers 5-6 and personality lasers for the first 3 counted
    tracks; manual/hot-cue/learned fire anyway; track-counting threshold obeyed.
-7. Darkness guard: laser mute held → solo falls back to `leds_plus_lasers` and
-   no pre-dark occurs; guard re-checked at impact.
+7. Darkness guard: laser mute held → an AUTO-tier solo falls back to
+   `leds_plus_lasers` and no pre-dark occurs; guard re-checked at impact. A
+   MANUAL arm ignores the Director-enabled term and fires anyway when
+   base_live/unmasked/role hold; when its own (narrower) guard still fails at
+   impact it refuses visibly instead of falling back (AWR-159 Task 3) — arm
+   cleared, LEDs/suppression untouched, one log line naming the gate.
 8. Every fail-open trigger restores LEDs and releases suppression; a held
    manual LED mute survives all of them; a held laser static override survives
-   an `leds_only` drop.
+   an `leds_only` drop. Pressing the Solo pad while a window is open
+   (`active`) is now one of these triggers (AWR-159 Task 1) — additive to the
+   existing automatic releases, never replacing them.
 9. Scripted tracks: zero policy activity end-to-end; arm survives into the
    next autoloop track only via the allowed path.
 

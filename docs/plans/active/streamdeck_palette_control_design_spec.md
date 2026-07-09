@@ -234,9 +234,15 @@ the gesture is pure state:
   gitignored path), atomically (`tmp` + `rename`), from a **dedicated writer thread** in the
   coordinator — event-driven on palette-state change, debounced ~50 ms. **Never from the 200 Hz
   push loop** (no-filesystem-I/O invariant, AGENTS §6).
-- **Schema (v1):** `{v: 1, lock: bool, led_blackout: bool, laser_blackout: bool,
-  laser_solo: "off"|"armed"|"active", rainbow: bool,
+- **Schema (v1, extended AWR-159 2026-07-09):** `{v: 1, lock: bool, led_blackout: bool,
+  laser_blackout: bool,
+  laser_solo: "off"|"armed"|"pending"|"active"|"refused", rainbow: bool,
   palettes: [{name, note, rgb: [r,g,b], state: "active"|"queued"|"inactive"|"fading"}], seq: int}`
+  — `pending` is an AUTO tier queued for the next drop (distinct from a manual `armed` press;
+  `_control_payload` displays both as `queued`); `refused` is a one-tick flash when a manual arm
+  could not be honored (Task 3) — the deck script has no bespoke visual for it yet, so today it
+  renders via the same dim/inactive bucket as `off` (a real gap: the operator sees the log line
+  and the arm visibly clearing, but not yet a distinct pad flash).
   — list order = display order (5 palettes then `white_sand`); `rgb` = representative swatch
   computed by the engine (`_palette_center`/`_p_to_rgb` derivation); `seq` monotonic for staleness
   checks.
