@@ -270,10 +270,13 @@ class PatchE1ConfigTests(unittest.TestCase):
         bank = result.config.banks.get("default")
         self.assertIsNotNone(bank)
         self.assertIn("rt_groove_nebula", bank.groove)
-        # AWR-156 bank recast (f): rt_drop_nebula moved drop -> post_drop
-        # ("current sparkling cues can play the role of the sparkling remnants").
-        self.assertIn("rt_drop_nebula", bank.post_drop)
+        # AWR-156 bank recast (f), T6.4 amended (rename not just move):
+        # rt_drop_nebula moved drop -> post_drop AND renamed to
+        # rt_post_drop_remnant_nebula ("current sparkling cues can play the
+        # role of the sparkling remnants"); scene_ref stays rt_drop_nebula.
+        self.assertIn("rt_post_drop_remnant_nebula", bank.post_drop)
         self.assertNotIn("rt_drop_nebula", bank.drop)
+        self.assertNotIn("rt_post_drop_remnant_nebula", bank.drop)
         self.assertIn("rt_post_drop_nebula", bank.post_drop)
 
     def test_drop_nebula_pairs_to_post_drop_nebula(self) -> None:
@@ -283,6 +286,7 @@ class PatchE1ConfigTests(unittest.TestCase):
         self.assertTrue(result.available, f"config not available: {result.reason}")
         self.assertEqual(tuple(result.errors), ())
         self.assertIsNone(result.config.drop_pairs.get("rt_drop_nebula"))
+        self.assertIsNone(result.config.drop_pairs.get("rt_post_drop_remnant_nebula"))
 
 
 class PatchE1SlotSmokeTests(unittest.TestCase):

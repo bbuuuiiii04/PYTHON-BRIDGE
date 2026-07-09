@@ -69,7 +69,9 @@ _EXPECTED_DEFAULT_GENERICS = {
 }
 _GENERIC_ENGINE_LOOKS = (
     "rt_groove_chase",
-    "rt_drop_chase",
+    # AWR-156 T6.4: renamed rt_drop_chase -> rt_post_drop_remnant_chase
+    # (LOOK-name rename only; scene_ref stays rt_drop_chase).
+    "rt_post_drop_remnant_chase",
     "rt_post_drop_chase",
     "rt_drop_center_burst",
     "rt_post_drop_center_comet",
@@ -150,11 +152,13 @@ class PatchFBankCleanupTests(unittest.TestCase):
             self.assertEqual(result.config.looks[look_name].color_source, "engine")
 
     def test_drop_pairs_resolve_and_generic_chase_pair_exists(self) -> None:
-        # AWR-156 bank recast (f): rt_drop_chase moved to the post_drop bank,
-        # so it no longer fires a drop_pairs entry -- rt_drop_center_burst is
-        # the remaining generic (non-legacy-suffixed) drop pair.
+        # AWR-156 bank recast (f), T6.4 amended: rt_drop_chase moved to the
+        # post_drop bank AND renamed to rt_post_drop_remnant_chase, so it no
+        # longer fires a drop_pairs entry -- rt_drop_center_burst is the
+        # remaining generic (non-legacy-suffixed) drop pair.
         result = _load()
         self.assertIsNone(result.config.drop_pairs.get("rt_drop_chase"))
+        self.assertIsNone(result.config.drop_pairs.get("rt_post_drop_remnant_chase"))
         pair = result.config.drop_pairs.get("rt_drop_center_burst")
         self.assertIsNotNone(pair)
         self.assertEqual(pair.post_drop, "rt_post_drop_center_comet")

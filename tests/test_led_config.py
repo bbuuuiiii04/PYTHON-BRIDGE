@@ -934,20 +934,34 @@ class Awr156Round2ConfigTests(unittest.TestCase):
         self.assertIn("rt_groove_heartbeat", banks.groove)
         self.assertIn("rt_post_drop_firework_remnants", banks.post_drop)
 
-    def test_bank_recast_drop_chase_and_nebula_moved_to_post_drop(self) -> None:
+    def test_bank_recast_drop_chase_and_nebula_renamed_and_moved_to_post_drop(self) -> None:
+        # AWR-156 T6.4 amendment (operator, late): a LOOK-name rename, not
+        # just a bank move -- the demoted looks read as post-drop remnant
+        # material now. scene_ref stays rt_drop_chase/rt_drop_nebula.
         result = load_led_look_director_config_from_dict(_example_config())
         self.assertTrue(result.available, msg=result.errors)
+        looks = result.config.looks
         banks = result.config.banks["default"]
-        self.assertIn("rt_drop_chase", banks.post_drop)
-        self.assertIn("rt_drop_nebula", banks.post_drop)
+        self.assertIn("rt_post_drop_remnant_chase", looks)
+        self.assertIn("rt_post_drop_remnant_nebula", looks)
+        self.assertEqual(looks["rt_post_drop_remnant_chase"].scene_ref, "rt_drop_chase")
+        self.assertEqual(looks["rt_post_drop_remnant_nebula"].scene_ref, "rt_drop_nebula")
+        self.assertIn("rt_post_drop_remnant_chase", banks.post_drop)
+        self.assertIn("rt_post_drop_remnant_nebula", banks.post_drop)
+        self.assertNotIn("rt_drop_chase", looks)
+        self.assertNotIn("rt_drop_nebula", looks)
         self.assertNotIn("rt_drop_chase", banks.drop)
         self.assertNotIn("rt_drop_nebula", banks.drop)
+        self.assertNotIn("rt_post_drop_remnant_chase", banks.drop)
+        self.assertNotIn("rt_post_drop_remnant_nebula", banks.drop)
 
     def test_bank_recast_drop_pairs_entries_removed(self) -> None:
         result = load_led_look_director_config_from_dict(_example_config())
         self.assertTrue(result.available, msg=result.errors)
         self.assertNotIn("rt_drop_chase", result.config.drop_pairs)
         self.assertNotIn("rt_drop_nebula", result.config.drop_pairs)
+        self.assertNotIn("rt_post_drop_remnant_chase", result.config.drop_pairs)
+        self.assertNotIn("rt_post_drop_remnant_nebula", result.config.drop_pairs)
 
     def test_knob_five_no_op_step_within_section_groove_still_true(self) -> None:
         cfg = _example_config()
@@ -956,8 +970,8 @@ class Awr156Round2ConfigTests(unittest.TestCase):
     def test_knob_nine_widths_present(self) -> None:
         cfg = _example_config()
         looks = cfg["looks"]
-        for name in ("rt_drop_chase", "rt_drop_nebula", "rt_post_drop_chase",
-                     "rt_post_drop_nebula", "rt_post_drop_center_comet"):
+        for name in ("rt_post_drop_remnant_chase", "rt_post_drop_remnant_nebula",
+                     "rt_post_drop_chase", "rt_post_drop_nebula", "rt_post_drop_center_comet"):
             self.assertEqual(looks[name]["params"]["width"], 4)
         for name in ("rt_groove_chase", "rt_groove_nebula"):
             self.assertEqual(looks[name]["params"]["width"], 2.5)
