@@ -2289,53 +2289,66 @@ class StateManager(LEDDispatchPolicyMixin):
         source = "anlz_spectral" if spectral_enabled else ("anlz_identity" if identity_enabled else "anlz")
 
         def _anlz_worker(path: str, bridge_deck: int, gen: int) -> None:
-            try:
-                result = _read_runtime_anlz_data(
-                    path,
-                    audio_filepath=audio_filepath,
-                    spectral_enabled=spectral_enabled,
-                    identity_enabled=identity_enabled,
-                    identity_key=identity_key,
-                    identity_config=identity_config,
-                    wide_window=wide_window,
-                    f2_enabled=f2_enabled,
-                )
-            except Exception:
-                log.debug("[SM] anlz-worker-error", exc_info=True)
-                return
-            try:
-                eq.put_nowait(BridgeEvent(
-                    kind=Ev.ANLZ_DATA,
-                    deck=bridge_deck,
-                    payload={
-                        "drop_beat_indices": result.drop_beat_indices,
-                        "breakdown_beat_indices": result.breakdown_beat_indices,
-                        "buildup_beat_indices": result.buildup_beat_indices,
-                        "mood": result.mood,
-                        "energy_shadow": result.energy_shadow,
-                        "f2_plan": result.f2_plan,
-                        "load_gen": gen,
-                        "source": source,
-                    },
-                    source=source,
-                ))
-            except queue.Full:
-                log.warning("[SM] queue-full  event=anlz-data  deck=%d", bridge_deck)
-            if result.led_identity is not None:
+            # ponytail: BoundedSemaphore(2) caps concurrent extractions; parked
+            # daemon threads are cheap and a stale one exits in microseconds via
+            # the load_gen skip below. Upgrade path if 2 is ever too tight: raise
+            # the cap. Do NOT switch to ThreadPoolExecutor — its interpreter-exit
+            # join can delay shutdown behind an in-flight ~16 s extraction.
+            with self._anlz_extract_gate:
+                # Benign racy int read: a track loaded after this worker was
+                # queued makes the extraction pointless, so skip it instead of
+                # running ~16 s of work the consumer would discard anyway. Worst
+                # case the read races and we extract; the consumer-side load_gen
+                # guard still drops the stale result (today's behavior).
+                if self._deck[bridge_deck].load_gen != gen:
+                    return
+                try:
+                    result = _read_runtime_anlz_data(
+                        path,
+                        audio_filepath=audio_filepath,
+                        spectral_enabled=spectral_enabled,
+                        identity_enabled=identity_enabled,
+                        identity_key=identity_key,
+                        identity_config=identity_config,
+                        wide_window=wide_window,
+                        f2_enabled=f2_enabled,
+                    )
+                except Exception:
+                    log.debug("[SM] anlz-worker-error", exc_info=True)
+                    return
                 try:
                     eq.put_nowait(BridgeEvent(
-                        kind=Ev.LED_TRACK_IDENTITY,
+                        kind=Ev.ANLZ_DATA,
                         deck=bridge_deck,
                         payload={
-                            "deck": bridge_deck,
+                            "drop_beat_indices": result.drop_beat_indices,
+                            "breakdown_beat_indices": result.breakdown_beat_indices,
+                            "buildup_beat_indices": result.buildup_beat_indices,
+                            "mood": result.mood,
+                            "energy_shadow": result.energy_shadow,
+                            "f2_plan": result.f2_plan,
                             "load_gen": gen,
-                            "key": identity_key,
-                            "record": result.led_identity,
+                            "source": source,
                         },
                         source=source,
                     ))
                 except queue.Full:
-                    log.warning("[SM] queue-full  event=led-track-identity  deck=%d", bridge_deck)
+                    log.warning("[SM] queue-full  event=anlz-data  deck=%d", bridge_deck)
+                if result.led_identity is not None:
+                    try:
+                        eq.put_nowait(BridgeEvent(
+                            kind=Ev.LED_TRACK_IDENTITY,
+                            deck=bridge_deck,
+                            payload={
+                                "deck": bridge_deck,
+                                "load_gen": gen,
+                                "key": identity_key,
+                                "record": result.led_identity,
+                            },
+                            source=source,
+                        ))
+                    except queue.Full:
+                        log.warning("[SM] queue-full  event=led-track-identity  deck=%d", bridge_deck)
 
         threading.Thread(
             target=_anlz_worker,

@@ -105,5 +105,76 @@ class GrowlCentroidExtractionTests(unittest.TestCase):
             self.assertEqual(getattr(first, field), getattr(second, field), field)
 
 
+class GrowlCentroidCacheTests(unittest.TestCase):
+    """Part D items 6-8 — tolerant read, strict shape, round-trip."""
+
+    def _with_cache(self):
+        td = tempfile.TemporaryDirectory()
+        patcher = patch.dict(os.environ, {"RBSS_SPECTRAL_CACHE_DIR": td.name})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(td.cleanup)
+        return Path(td.name)
+
+    def _audio_file(self, directory: Path) -> Path:
+        path = directory / "track.wav"
+        path.write_bytes(b"audio")
+        return path
+
+    def test_legacy_payload_without_key_round_trips(self) -> None:
+        # Item 6: a v4 entry written before the field existed still parses;
+        # the field reads as ().
+        cache_dir = self._with_cache()
+        audio = self._audio_file(cache_dir)
+        grid = [0.0, 250.0, 500.0]
+        n = len(grid) - 1
+        feats = _v4(growl_band_frames=(1.0,), n_beats=n)
+        spectral_cache.put_cached_v4(str(audio), grid, feats)
+        # Strip the key from the written payload to simulate a legacy entry.
+        cache_file = next((cache_dir / "v4").glob("*.json"))
+        import json
+        payload = json.loads(cache_file.read_text())
+        del payload["growl_centroid_frames"]
+        cache_file.write_text(json.dumps(payload))
+
+        cached = spectral_cache.get_cached_v4(str(audio), grid)
+        self.assertIsNotNone(cached)
+        self.assertEqual(cached.growl_centroid_frames, ())
+
+    def test_present_but_wrong_length_is_a_miss(self) -> None:
+        # Item 7: field present with a length that disagrees with the level
+        # series fails closed to None (re-extract).
+        cache_dir = self._with_cache()
+        audio = self._audio_file(cache_dir)
+        grid = [0.0, 250.0, 500.0]
+        n = len(grid) - 1
+        feats = _v4(growl_band_frames=(1.0, 2.0), n_beats=n)
+        spectral_cache.put_cached_v4(str(audio), grid, feats)
+        cache_file = next((cache_dir / "v4").glob("*.json"))
+        import json
+        payload = json.loads(cache_file.read_text())
+        payload["growl_centroid_frames"] = [100.0]  # len 1 vs level len 2
+        cache_file.write_text(json.dumps(payload))
+
+        self.assertIsNone(spectral_cache.get_cached_v4(str(audio), grid))
+
+    def test_round_trip_preserves_the_field(self) -> None:
+        # Item 8: write with the field -> read back equal.
+        cache_dir = self._with_cache()
+        audio = self._audio_file(cache_dir)
+        grid = [0.0, 250.0, 500.0]
+        n = len(grid) - 1
+        feats = _v4(
+            growl_band_frames=(1.0, 2.0),
+            growl_centroid_frames=(120.5, 240.0),
+            n_beats=n,
+        )
+        spectral_cache.put_cached_v4(str(audio), grid, feats)
+        cached = spectral_cache.get_cached_v4(str(audio), grid)
+        self.assertIsNotNone(cached)
+        self.assertEqual(cached.growl_centroid_frames, (120.5, 240.0))
+        self.assertEqual(cached, feats)
+
+
 if __name__ == "__main__":
     unittest.main()

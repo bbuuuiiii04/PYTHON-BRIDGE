@@ -243,6 +243,9 @@ def _features_v4_from_payload(payload: dict) -> Optional[SpectralFeaturesV4]:
         }
         scalars = {key: float(payload["scalars"][key]) for key in V4_SCALAR_KEYS}
         frames = tuple(float(v) for v in payload["growl_band_frames"])
+        # Tolerant read: pre-AWR-176 entries lack this key and parse as () — no
+        # signal. Present-but-wrong-length fails closed below (treated as a miss).
+        cframes = tuple(float(v) for v in payload.get("growl_centroid_frames", ()))
         for field, values in compat.items():
             if len(values) != n_beats:
                 raise ValueError(f"compat length mismatch: {field}")
@@ -252,6 +255,8 @@ def _features_v4_from_payload(payload: dict) -> Optional[SpectralFeaturesV4]:
         for key, slots in sub4.items():
             if len(slots) != n_beats or any(len(s) != 4 for s in slots):
                 raise ValueError(f"sub4 shape mismatch: {key}")
+        if cframes and len(cframes) != len(frames):
+            raise ValueError("growl_centroid length mismatch")
         return SpectralFeaturesV4(
             sr=int(payload["sr"]),
             schema_version=SCHEMA_VERSION_V4,
@@ -262,6 +267,7 @@ def _features_v4_from_payload(payload: dict) -> Optional[SpectralFeaturesV4]:
             sub4=sub4,
             growl_band_frames=frames,
             scalars=scalars,
+            growl_centroid_frames=cframes,
             **compat,
         )
     except (KeyError, TypeError, ValueError) as exc:
@@ -295,6 +301,7 @@ def _payload_v4_for_write(
         },
         "scalars": {key: float(features.scalars[key]) for key in V4_SCALAR_KEYS},
         "growl_band_frames": list(features.growl_band_frames),
+        "growl_centroid_frames": list(features.growl_centroid_frames),
     }
     for field in _COMPAT_FIELDS:
         payload[field] = list(getattr(features, field))
