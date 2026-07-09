@@ -105,9 +105,23 @@ class PatchFBankCleanupTests(unittest.TestCase):
         self.assertEqual(tuple(result.errors), ())
 
     def test_default_bank_contains_no_moved_legacy_color_suffix_looks(self) -> None:
+        # f0b40ba (AWR-180 Part C, operator-gated 2026-07-09): the four gentle
+        # rt_drop_chase colorways returned to banks.default.drop as the tier-1
+        # gentle-drop routing set — the ONLY approved re-entries. They also stay
+        # in legacy_color_suffix (that bank's roster is unchanged; the sibling
+        # test still pins it exactly). Any other moved look reappearing in the
+        # default bank is still a regression this tripwire must catch.
+        approved_part_c_quartet = {
+            "rt_drop_chase_blue",
+            "rt_drop_chase_cyan",
+            "rt_drop_chase_red",
+            "rt_drop_chase_green",
+        }
         result = _load()
         default_names = _bank_names(result.config.banks["default"])
-        self.assertFalse(default_names & _MOVED_LEGACY_LOOKS)
+        self.assertEqual(
+            default_names & _MOVED_LEGACY_LOOKS, approved_part_c_quartet
+        )
 
     def test_legacy_color_suffix_bank_contains_exactly_moved_looks(self) -> None:
         result = _load()
