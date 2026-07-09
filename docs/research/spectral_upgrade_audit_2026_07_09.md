@@ -221,8 +221,31 @@ semantics ⇒ new key or v5 subdir (this is the F-9 identity-drift concern made 
   chorus-softness (§1.2-3) its most plausible ingredients (vocal-led + layer-thin);
   drums-stem envelopes replace the HPSS `perc_full` proxy where it misreads melodic
   plucks as percussive; drums+bass stems see the sidechained kick directly (§1.2-4).
-- **Cost (measured against THIS machine — Apple M2 base, 8 GB RAM, Python 3.14.6):**
-  [PENDING-RESEARCH]
+- **Cost (researched 2026-07-09 against THIS machine — Apple M2 base, 8 GB RAM,
+  macOS 15, Python 3.14.6, no torch installed):** feasible, with one unmeasured number.
+  - **Model:** HTDemucs single model (MIT code + weights; 9.0 dB SDR — over-qualified for
+    coarse envelopes; the `_ft` bag is 4× compute for nothing here). RoFormer-class SOTA
+    buys nothing for envelopes and its strong community weights are unclearly licensed.
+    Upstream `facebookresearch/demucs` is archived (2025-01-01); maintained line is the
+    author's fork. Spleeter is dead; Open-Unmix is ~3 dB behind — neither is worth it.
+  - **Runtime:** PyTorch's MPS backend does not run Demucs reliably on Apple Silicon
+    (falls back to CPU). The practical paths: (a) **MLX port** (`demucs-mlx` /
+    `mlx-audio-separator`, MIT, M-series GPU, fp16) — extrapolated **~15–30 s per 4-min
+    track on a base M2 → roughly 3–6 h for ~700 tracks, one overnight** (extrapolated
+    from a published M4 Max anchor; order-of-magnitude only); (b) fallback **torch-CPU
+    with `--segment ~7.8`** (stock peaks ~7 GB — must segment on an 8 GB box) —
+    extrapolated ~3–5 min/track → ~35–50 h over several resumable nights; torch 2.13
+    (2026-07-08) ships a cp314 arm64 wheel requiring macOS 14+, which this Mac (macOS 15)
+    satisfies; (c) fallback **demucs.cpp** (C++/ggml fp16, no Python at inference,
+    lowest RAM). All isolated in offline tooling (own venv/binary) — the bridge's
+    3.14 + librosa runtime is untouched.
+  - **Disk:** near-zero — stems are discarded per track; stored envelopes are a few
+    KB/track (well under +10 MB total). **The one number to measure before committing:**
+    actual MLX inference RAM for a full track on the 8 GB box (undocumented; mitigated by
+    segment length or fallbacks).
+  - **Spec churn:** a new sweep tool + new cache fields/namespace + new derived classes +
+    their calibration rounds — the real cost is not compute, it is **new operator
+    listening rounds** to validate every stem-derived class before anything consumes it.
 - **Calibration risk:** additive if stored as new fields in a separate namespace (stems
   fields must never share keys with v4 measures; own subdir or tolerant keys) — the 41
   verdicts stand because no v4 field changes. But every stem-derived class starts
@@ -236,7 +259,13 @@ semantics ⇒ new key or v5 subdir (this is the F-9 identity-drift concern made 
   calibration :229); (ii) drums-stem envelope flags the sidechained four-on-floor beats
   the attack measure missed (1/28 → majority); (iii) a chorus-softness measure built on
   vocal-share + layer-thickness ranks CSN chorus-3 softer than drop-1, matching his ear.
-- **Verdict on stems:** [PENDING-RESEARCH]
+- **Verdict on stems:** feasible on this machine and the only path to a vocal axis —
+  **not a strawman, a real future addition** — but it loses the "one change now" ranking
+  on sequencing: no current or specced consumer (F2/F4) reads a vocal or per-stem
+  channel, every stem-derived class starts ear-unvalidated (listening time is the
+  scarcest resource), and the two gaps it shares with cheaper proposals (sidechain kick,
+  perc proxy) have derived-layer or single-field answers that risk nothing. Right second
+  move, wrong first move.
 
 ### P5 — Replace the measurement layer with learned audio embeddings (the "something else" pole)
 
@@ -266,13 +295,64 @@ semantics ⇒ new key or v5 subdir (this is the F-9 identity-drift concern made 
 
 ## 4. Recommendation
 
-[PENDING-RESEARCH]
+**Recommend P1 — the frame-rate growl-band centroid series.** Reasoning, ranked against
+the alternatives:
+
+1. **It closes the gap the operator has personally heard the system miss**, on named
+   tracks, repeatedly (capochino 1:01.7, Girl$ 1:16.1/2:25.6) — and it is a structural
+   blindness, not a threshold miss: no amount of re-tuning the existing fields can see
+   filter movement. P2/P3 refine signals that already partially work and ship as
+   weak/experimental-unconsumed anyway; they are also cheap enough to ride along any
+   future round without needing this recommendation slot.
+2. **It is the design doc's own named unlock** (redesign :971-973) — "an additive schema
+   field + one overnight re-sweep" — on infrastructure already proven at library scale.
+   The 2026-07-05 deferral was a priority ruling ("what really matters is how the lights
+   capitalize"), not a rejection; tonight's ask re-opens the analysis question, and with
+   F2 landing and F4 next, the texture layer that would consume a wobble class is
+   arriving — this field makes the analysis ready for it.
+3. **It is the lowest-risk change on the table:** no new dependencies, no consumer
+   change, no F2 interaction, identity axes untouched (no F-9 color drift), all 41
+   AWR-147 verdicts preserved by construction. Stems (P4) is real and feasible — the
+   right *second* move once any consumer wants vocal awareness — and P5 (replacement) is
+   rejected: it burns the ear-validated bedrock for unproven, unexplainable axes.
+
+Sequencing note for the executive: P2 and P3 are pure derived-layer additions (zero
+re-sweep, zero cache change, zero calibration risk) that can be bundled into the same
+Codex spec as P1 or any later round at near-zero marginal cost; they are not competing
+with P1, they are riders. Implementation of any of this gates on operator approval — and
+the P1 re-sweep can double as the backfill run if the executive wants the new field
+strict-keyed rather than tolerant-read.
 
 ---
 
 ## 5. Plain-English summary (operator-readable, relay verbatim)
 
-[PENDING-RESEARCH]
+I audited the audio analysis system end to end — the code that listens to your tracks,
+the cache it fills, and the two big evidence docs from the calibration rounds you did.
+Verdict: **keep it.** It's well built, it survived all 41 of your listening verdicts at
+full-library scale without a single number needing to change, and the lights work
+(F2/F4) is already wired to consume it. Swapping it for something else would throw away
+everything your ear already validated.
+
+But it has one blind spot you've personally caught it missing: the "wow wow wow" filter
+wobble in tracks like capochino and Girl$. The system measures how LOUD the bass growl
+is, and during those wows the loudness barely moves — what's moving is the *tone* of the
+sound as the filter sweeps. It literally cannot see that today. My recommendation is the
+one change the original design already named for exactly this: also record WHERE the
+growl's tone sits, moment to moment, not just how loud it is. That's one new field in
+the analysis, one overnight re-run of the library sweep, no new software installed, zero
+risk to anything your ear already signed off — and once F2/F4 are in, the lights can
+finally ride those wobbles.
+
+On STEMS, since you asked: I researched it seriously, and it's genuinely doable on your
+Mac — splitting every track into drums/bass/vocals/other overnight and keeping just the
+loudness curves of each. It's the only way the system will ever tell vocals apart from
+synths, which none of the current measurements can do even in principle. I'm not
+recommending it *first* because nothing in the lighting engine consumes vocal
+information yet, and every new stems-based measurement would need fresh listening rounds
+from you before the lights could trust it. It's the right second upgrade, not the first
+one. The other ideas I priced (a smarter kick detector and a slow-wobble detector using
+data we already have) are nearly free and can ride along with any future round.
 
 ---
 
