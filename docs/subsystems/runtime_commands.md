@@ -29,6 +29,26 @@ Reason-carrying LED blackout clear (AWR-154, 2026-07-08; implemented, software-t
   `led_dispatch_policy.py`'s `_led_blackout_owners` set could never be discarded (that discard line
   was already correct — `ev.payload.get("reason") or "legacy"` — it just never received the reason).
   `led_dispatch_policy.py` itself is unchanged by this fix.
+- Superseded by AWR-155 below: bare-clear semantics changed from "clears only `legacy`" to
+  "clears every owner" (operator-authority fail-open). The reason-threading plumbing described
+  above (`parse_command`, `CommandReader`, `_led_clear_blackout`) is unchanged.
+
+Fail-open bare LED blackout clear (AWR-155, 2026-07-08; implemented, software-tested, hardware-unvalidated):
+- Executive-approved: a bare `led_clear_blackout` (no `reason`) is operator authority and now
+  clears every blackout owner in `led_dispatch_policy.py`'s `_led_blackout_owners` set at once, not
+  just `legacy`. A reasoned clear is unchanged — it still discards only the named owner, so machine
+  surfaces (LED Pad, drop presentation, smart-drop) keep their own scoped clears (AWR-154's
+  pattern).
+- On the no-reason path, the handler snapshots the owner set, clears it, and emits one INFO outcome
+  log (`[RGB] blackout-clear-all owners=...`) naming what was cleared — not a per-tick log, only on
+  an actual bare-clear command. The reasoned path's discard line is byte-identical to before AWR-155.
+- Accepted, not guarded against: a bare operator clear during a lasers-only solo window also clears
+  the `drop_spotlight` owner and lights the LEDs mid-solo. That is the intended override — operator
+  authority outranks the presentation window's hold. The window's own later release discard becomes
+  a no-op on an already-empty set (`set.discard` on a missing element is always safe).
+- This is a code change, not a runtime action: it takes effect at the next bridge start after the
+  one it was written during. No restart, live-config edit, or strip-touching action was performed
+  while implementing it.
 
 Audit P1 (2026-07-03):
 - `toggle_smart_drop` and `toggle_smart_breakdown` callbacks now report queue-full failures through
