@@ -8,10 +8,13 @@ proves the watcher actually reads this module.
 """
 from __future__ import annotations
 
+import sys
 import unittest
 from pathlib import Path
 
-from rb_ss_bridge_v2.launch_profile import (
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from rb_ss_bridge_v2.launch_profile import (  # noqa: E402
     BRIDGE_ENV,
     LASER_CONFIG_ENV,
     bridge_argv,
