@@ -630,6 +630,31 @@ LIGHTING ENGINE v2 F1 identity surface (AWR-128, 2026-07-06):
   bridge restart, live Rekordbox, SoundSwitch, laser, LED/Govee, MIDI-device, DMX, Enttec, or
   hardware-visible output validation was performed.
 
+LIGHTING ENGINE v2 F4 texture layer (AWR-164, 2026-07-09):
+- F4 is a **consumer-only** seasoning layer over the existing v4 spectral classes (`spectral_profile.py`
+  unchanged — no new analysis). It picks WHICH variant/params of an already-selected look play; it
+  **never** touches scheduling, darkness, family, tier, or look routing. S-2 containment is proven by
+  `tests/test_lighting_moments_v2_f4.py` (F4-on seasoning changes only `decision.params`; F4-off/F2-off/
+  scripted → no-op; the euphoric look-preference term only narrows within the bank, fail-open).
+- `lighting_moments_v2.build_track_plan` records the texture into the F2 plan: per drop a majority-vote
+  texture vector (stab / sustained-bass / growl / kick-prominence / thick / bright-tilt + onset density
+  for the WALL trap-vs-dense split) and per track the euphoric (sustained-synth ≥8) and simmer
+  (attack_low<2.5 & onset<0.5, ≥8-run) beat ranges, plus the EXPERIMENTAL `lowmid_pulse` busy-pulse duty.
+  Pure, fail-soft, on the async worker; unread unless F4 is on.
+- `led_dispatch_policy._led_inject_f4_seasoning` merges the texture-selected variant params into the
+  drop cue's `decision.params` (family+texture key → `f4.variant_seasoning` cell; a HOUSE growl-bar drop's
+  bass-forward B/K mask scales sparkle density — a scalar stand-in, not literal per-beat alternation). It
+  also seasons quiet role cues with sparse-dim `simmer_seasoning` params during a measured simmer.
+  Euphoric windows add a bright/white-end preference through the EXISTING `_led_look_preference_predicate`.
+- Kill switch: the `/f4` config block, example-ON / absent-OFF (`led_config.load_f4_config` /
+  `led_models.F4Config`), so an un-mirrored live config stays byte-identical to F2-only. `busy_pulse`
+  is COMPUTED-NOT-CONSUMED behind `busy_pulse_experimental` (renders nothing; C§6d). `sustained_synth`
+  is the clean-euphoric proxy (counts vocals) and is **never surfaced as "synth."**
+- HONEST scope: seasoning VALUES are TUNE-LIVE config defaults, cloud DIY looks ignore the param merge
+  (only realtime looks render it), and F2 never wired a section-rung floor — the simmer "upgrade" seasons
+  the selected floor look's params rather than driving a rung-2→rung-4 renderer. Live-tuning is the
+  operator gate. No bridge/hardware validation was performed.
+
 Drop presentation policy (Package 3, AWR-119, 2026-07-04):
 - The implemented behavior authority is `docs/architecture/drop_presentation_authority.md`; the
   `drop_presentation` change contract covers it. The pure ladder/session/learned-store/window-machine

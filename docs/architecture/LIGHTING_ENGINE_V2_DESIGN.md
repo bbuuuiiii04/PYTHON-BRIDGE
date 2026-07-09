@@ -585,7 +585,7 @@ owning switch; flips take effect at the next look boundary.
 | Standalone relative-dip cuts (§5.6, §6 rank 3) | F2 | no dips; looks ride uncut |
 | Breakdown sparse-and-dim floor (§4.1-7, OLC-A) | F2 | v1 breakdown looks as today (never black either way); note: this floor is F2's darkness behavior and survives F4-off — with F4 off it renders the zone's dimmest look at rung 2 without simmer detection |
 | Blend painter: accents-first entry, base morph, resolve, dipless, abandon breathing (authority §7) | **F3 blend** | handover = F1's soft flip only |
-| Texture classes (kick-prominence, thick/thin, tilt, stab/sustain, darkness, simmer §5.4, euphoric §5.5, bass-forward §5.1, busy-pulse) | **F4 texture** | role cues untouched by construction (containment); drop cues use family default variant |
+| Texture classes (kick-prominence, thick/thin, tilt, stab/sustain, darkness, simmer §5.4, euphoric §5.5, bass-forward §5.1, busy-pulse) | **F4 texture** — *implemented AWR-164* (`led_config.F4Config` / `/f4` block; consumer-only seasoning — `led_dispatch_policy._led_inject_f4_seasoning` params + euphoric `_led_look_preference_predicate` narrowing; busy-pulse computed-not-consumed) | role cues untouched by construction (containment); drop cues use family default variant; F4 seasons ONLY `decision.params` + within-bank look preference — never scheduling/darkness/family/tier/routing (byte-identity proven, `tests/test_lighting_moments_v2_f4.py`) |
 | WILD OUT / SET mode (authority §9) | mode toggle (not a kill) | n/a — WILD OUT is default; SET withholds slot-5/strobe/span on T1–T2 drops |
 | Laser personality-by-zone + complement pairs (§11) | laser director config (existing enable/dry-run) | today's alias/default resolution (`personality_resolver.py`) |
 

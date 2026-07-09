@@ -127,6 +127,9 @@ contracts:
     key_symbols:
       - F2Config
       - F2TrackPlan
+      - F4Config
+      - DropTexture
+      - build_track_plan
       - StateManager
       - LEDDispatchPolicyMixin
       - LEDConfig
@@ -622,8 +625,10 @@ contracts:
     key_symbols:
       - load_laser_director_config
       - load_led_look_director_config
+      - load_f4_config
       - LaserConfig
       - LEDConfig
+      - F4Config
     inspect:
       - docs/subsystems/config.md
       - docs/setup/configuration.md
@@ -673,6 +678,8 @@ contracts:
     docs_update:
       - docs/research/spectral_audio_analysis_redesign.md
       - AGENTS.md
+    consumers:
+      - "LIGHTING ENGINE v2 F4 texture layer (AWR-164) is a pure CONSUMER of the v4 classes (stab/sustained_bass/growl/sustained_synth/kick_prominence/bright_tilt/thick/bottom_gone/roll/lowmid_pulse); it added ZERO analysis code here (spectral_profile.py unchanged). sustained_synth is the clean-euphoric proxy (counts vocals) and must never be surfaced as 'synth'; lowmid_pulse ships computed-not-consumed."
     forbidden_assumptions:
       - analysis outputs describe sound; no output may time or trigger a cue (worst-case wrong analysis = wrong seasoning, never a missed or phantom cue)
       - v4 code must never modify or delete v3 cache entries, the Rekordbox DB, ANLZ files, or audio files

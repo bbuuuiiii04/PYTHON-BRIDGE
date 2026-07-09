@@ -106,6 +106,16 @@ Config:
   via `drop_pairs` to the existing `rt_post_drop_firework_remnants`). Local ignored
   `config/led_look_director.json` was not touched by this round — mirror with explicit operator
   approval, same as Patch F/AWR-156.
+- LIGHTING ENGINE v2 top-level blocks, both example-ON / absent-OFF so an un-mirrored live config
+  stays byte-identical: `f2` (AWR-163, moments/darkness/drop-typing — `load_f2_config`/`F2Config`) and
+  `f4` (AWR-164, texture seasoning — `load_f4_config`/`F4Config`). The `f4` block has `enabled`,
+  `busy_pulse_experimental` (default false — `lowmid_pulse` stays computed-not-consumed),
+  `variant_seasoning` (`{family+texture key: {param: value}}` merged into the drop cue's params —
+  `house_stab`/`house_sustain`/`wall_trap`/`wall_dense`/`<fam>_default`), `euphoric_bright_looks`
+  (look names preferred inside euphoric windows, fail-open), and `simmer_seasoning` (sparse-dim params
+  for a measured simmer). Validation fails closed (non-finite/bool/nested param values dropped),
+  unknown legacy keys are ignored. Seasoning values are TUNE-LIVE; mirror to live config with operator
+  approval only. Local ignored `config/led_look_director.json` was not touched by this round.
 - LED `color_engine.v2.zones.*.slot5_white` (AWR-152) is an optional per-zone RGB list (3 ints,
   0-255); absent defaults to pure white `(255, 255, 255)`, malformed fails closed with an error and
   disables only the v2 sub-block. It replaces the removed `ZoneRampConfig.white` key (parsed,
