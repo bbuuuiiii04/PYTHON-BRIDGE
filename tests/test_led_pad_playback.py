@@ -73,7 +73,7 @@ class LedPadPlaybackTests(unittest.TestCase):
         self.assertEqual(len(appended), 2)
 
         gate.release()
-        self.assertEqual(appended[-1], {"cmd": "led_clear_blackout"})
+        self.assertEqual(appended[-1], {"cmd": "led_clear_blackout", "reason": "led_pad"})
         self.assertEqual(gate.state, "free")
 
     def test_ownership_gate_bridge_down_writes_nothing_on_takeover(self) -> None:

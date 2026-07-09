@@ -838,6 +838,40 @@ class LEDStateManagerTests(unittest.TestCase):
         self.assertEqual(adapter.trigger_calls[-1].look, "room_drop_a")
         self.assertEqual(len(adapter.trigger_calls), 3)
 
+    def test_pad_clear_blackout_removes_only_pad_owner(self) -> None:
+        """AWR-154: pad release (reason=led_pad) must discard exactly the
+        led_pad owner, leaving any other owner's claim on the darkness."""
+        director = _StubLEDLookDirector(enabled=True)
+        adapter = _StubLEDAdapter()
+        sm = _make_sm(director=director, adapter=adapter)
+        sm._handle_event(BridgeEvent(kind=Ev.LED_SCENE, deck=0, payload={"look": "room_drop_a"}, source="test"))
+        sm._handle_event(BridgeEvent(kind=Ev.LED_BLACKOUT, deck=0, payload={"reason": "led_pad"}, source="test"))
+        sm._handle_event(BridgeEvent(kind=Ev.LED_BLACKOUT, deck=0, payload={}, source="test"))
+        self.assertEqual(sm._led_blackout_owners, {"led_pad", "legacy"})
+
+        sm._handle_event(BridgeEvent(kind=Ev.LED_CLEAR_BLACKOUT, deck=0, payload={"reason": "led_pad"}, source="test"))
+
+        self.assertEqual(sm._led_blackout_owners, {"legacy"})
+        status = sm.led_status_provider()
+        self.assertTrue(status["emergency_blackout"])
+
+    def test_bare_clear_blackout_still_removes_only_legacy(self) -> None:
+        """A bare led_clear_blackout (no reason) must stay byte-identical to
+        today: it discards only the "legacy" owner, never a named owner."""
+        director = _StubLEDLookDirector(enabled=True)
+        adapter = _StubLEDAdapter()
+        sm = _make_sm(director=director, adapter=adapter)
+        sm._handle_event(BridgeEvent(kind=Ev.LED_SCENE, deck=0, payload={"look": "room_drop_a"}, source="test"))
+        sm._handle_event(BridgeEvent(kind=Ev.LED_BLACKOUT, deck=0, payload={"reason": "led_pad"}, source="test"))
+        sm._handle_event(BridgeEvent(kind=Ev.LED_BLACKOUT, deck=0, payload={}, source="test"))
+        self.assertEqual(sm._led_blackout_owners, {"led_pad", "legacy"})
+
+        sm._handle_event(BridgeEvent(kind=Ev.LED_CLEAR_BLACKOUT, deck=0, payload={}, source="test"))
+
+        self.assertEqual(sm._led_blackout_owners, {"led_pad"})
+        status = sm.led_status_provider()
+        self.assertTrue(status["emergency_blackout"])
+
     def test_blackout_brightness_backstop_fires_on_accept_only(self) -> None:
         """AWR-146 Task 6: an accepted LED_BLACKOUT dims via the adapter's
         blackout_brightness; a cloud-only adapter without the method is a safe

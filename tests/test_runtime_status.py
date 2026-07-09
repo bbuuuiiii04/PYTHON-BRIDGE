@@ -222,9 +222,17 @@ class LEDCommandParseTests(unittest.TestCase):
         command = parse_command('{"cmd":"led_clear_blackout"}')
         self.assertEqual(command["cmd"], "led_clear_blackout")
 
-    def test_parse_command_rejects_led_clear_blackout_payload(self) -> None:
+    def test_parse_command_accepts_led_clear_blackout_with_reason(self) -> None:
+        command = parse_command('{"cmd":"led_clear_blackout","reason":"led_pad"}')
+        self.assertEqual(command["reason"], "led_pad")
+
+    def test_parse_command_rejects_led_clear_blackout_invalid_reason(self) -> None:
         with self.assertRaises(ValueError):
-            parse_command('{"cmd":"led_clear_blackout","reason":"nope"}')
+            parse_command('{"cmd":"led_clear_blackout","reason":""}')
+
+    def test_parse_command_rejects_led_clear_blackout_unknown_field(self) -> None:
+        with self.assertRaises(ValueError):
+            parse_command('{"cmd":"led_clear_blackout","foo":"bar"}')
 
     def test_parse_command_accepts_led_clear_scene_override(self) -> None:
         command = parse_command('{"cmd":"led_clear_scene_override"}')
@@ -379,6 +387,26 @@ class LEDCommandCallbackTests(unittest.TestCase):
         reader.handle_command({"cmd": "led_blackout", "reason": "operator"})
 
         self.assertIn("callback returned False", reader.status()["last_error"])
+
+    def test_led_clear_blackout_callback_receives_reason(self) -> None:
+        callback = Mock(return_value=True)
+        reader = CommandReader(
+            Mock(),
+            led_clear_blackout_callback=callback,
+        )
+
+        reader.handle_command({"cmd": "led_clear_blackout", "reason": "led_pad"})
+        callback.assert_called_once_with("led_pad")
+
+    def test_led_clear_blackout_callback_receives_none_when_reason_absent(self) -> None:
+        callback = Mock(return_value=True)
+        reader = CommandReader(
+            Mock(),
+            led_clear_blackout_callback=callback,
+        )
+
+        reader.handle_command({"cmd": "led_clear_blackout"})
+        callback.assert_called_once_with(None)
 
     def test_led_palette_callback_receives_command_and_name(self) -> None:
         callback = Mock(return_value=True)
