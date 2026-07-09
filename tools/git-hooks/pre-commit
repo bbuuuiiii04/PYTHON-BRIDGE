@@ -31,7 +31,26 @@ if [[ "$fail" -ne 0 ]]; then
   exit 1
 fi
 
-# Advisory only — never blocks the commit.
-"$PY" tools/check_docs_staleness.py || true
+# Advisory only — never blocks OR WEDGES the commit (2026-07-09 fix: under
+# multi-lane load the advisory step's per-file git-log fan-out ran for minutes
+# and presented as a deadlock; 3+ incidents in one night). Three guards:
+#  1. Foreign index.lock present => another lane is mid-commit; skip. (Verified:
+#     our own commit does NOT hold index.lock while pre-commit runs, so this
+#     can only fire on real contention.)
+#  2. Hard 20s timeout => slow-crawl under CPU load skips instead of wedging.
+#  3. GIT_OPTIONAL_LOCKS=0 => no child git takes opportunistic index locks.
+if [[ -e "$(git rev-parse --git-dir)/index.lock" ]]; then
+  echo "pre-commit: index contended (another lane mid-commit); skipping advisory staleness check — hard checks above already passed." >&2
+else
+  GIT_OPTIONAL_LOCKS=0 "$PY" - <<'PYEOF' || true
+import subprocess, sys
+try:
+    subprocess.run([sys.executable, "tools/check_docs_staleness.py"], timeout=20)
+except subprocess.TimeoutExpired:
+    print("pre-commit: advisory staleness check timed out (20s, likely CPU/lock contention); skipped — hard checks already passed.", file=sys.stderr)
+except Exception as e:
+    print(f"pre-commit: advisory staleness check skipped ({e}); hard checks already passed.", file=sys.stderr)
+PYEOF
+fi
 
 exit 0

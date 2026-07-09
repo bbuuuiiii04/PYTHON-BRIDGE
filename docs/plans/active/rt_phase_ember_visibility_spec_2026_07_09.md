@@ -193,6 +193,44 @@ that warrant a laser drop. violence tier is also a factor." Any eventual
 laser-gate consumer (post-P1) is multi-factor (tier AND growl AND future earned
 elements), never growl-only.
 
+## BATCH 2 (post-16:25-restart scope; staged toward the NEXT batched restart)
+
+### Part G — palette-cycling comet (rainbow generalization; design first)
+
+Operator verdict: the rainbow comet chase must not be hardcoded — it becomes a
+COLOR-CYCLING comet chase that cycles within the track's palette; rainbow-classified
+tracks carry a rainbow palette, so the same effect goes rainbow there. End state
+kills the bespoke `rt_rainbow_*` renderers. Design deliverables before any build:
+- the palette-cycling primitive (how a slot-based comet walks the palette slots
+  per cycle/segment — deterministic, seeded, works for any palette length);
+- how the rainbow classifier feeds a rainbow palette into v2 dressing (a palette,
+  not a renderer branch);
+- migration map for existing rt_rainbow_* uses (post_drop rotation etc.).
+
+### Part H — true-silence blackout branch (ladder addition; ACCEPTANCE = Killa 513-521)
+
+Executive diagnosis, verified at HEAD against `lighting_moments_v2.py`:
+- CONFIRMED the stop discriminator requires residual audibility
+  (`lift_build >= STOP_LIFT_FLOOR` = ref−10, :112/:415). TRUE silence fails it,
+  `stop=False`, silence passes `perc_build < BALLOON_PERC_BOUNDARY`, and the
+  balloon branch (:421-423) quantizes DOWN and anchors `(drop - beats, drop)` —
+  the FRONT of the silence stays lit (Killa (Original Mix): full_db
+  −4.6/−14/−23/−30/−36.7 over beats 513-517, WALL T3 drop at 521 → balloon/4b
+  window (517,521)).
+- Rule shape: a TRUE-SILENCE branch checked BEFORE stop/balloon — when full_db
+  sits below an absolute silence floor across the scan window, return a full
+  blackout anchored at the silence START for the WHOLE measured span (run_start →
+  drop; raw span, not quantized down).
+- Constraints: purely ADDITIVE (new constants only; every existing pinned
+  constant untouched — AWR-147 discipline); general across the library, never
+  per-track; corpus regression gate = the calibration corpus re-check must show
+  ZERO decision changes outside genuinely-true-silence windows; pin Killa
+  beats 513-521 as the named acceptance case (blackout window starts at silence
+  onset, covers the span to the drop).
+- Ownership note: darkness-ladder tuning is otherwise haze-session-owned;
+  this branch is executive-routed to AWR-180 batch 2 — coordinate with haze,
+  don't double-own the ladder constants.
+
 ## Round protocol
 
 1. Implement Bug 1 now; Bug 2 after the flavor verdict lands in this spec.
