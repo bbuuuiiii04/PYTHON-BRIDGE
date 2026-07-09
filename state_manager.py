@@ -2119,6 +2119,12 @@ class StateManager(LEDDispatchPolicyMixin):
         if self._laser_director is not None:
             self._laser_director.reset_runtime_state(reason=reason)
         self._reset_native_autoloop()
+        # Fail-open any held drop-presentation LED dark hold: every idle-no-audible
+        # entry routes through here, so a resolver-to-0 mid-solo-window can't leave
+        # the room latched dark (the active_deck=0 early-return in _push_tick_inner
+        # means nothing downstream would ever tick the window machine free again).
+        # Runs before the idle-ambient dispatch below so the room re-renders lit.
+        self._drop_presentation_release_on_stop()
         deck = self._last_audible_deck if self._last_audible_deck in (1, 2) else 1
         self._dispatch_led_idle_ambient(
             active=deck,
