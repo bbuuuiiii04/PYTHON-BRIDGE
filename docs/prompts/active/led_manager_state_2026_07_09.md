@@ -94,6 +94,17 @@ manager. New dispatches pin the model explicitly and VERIFY on-screen
   claude7; MY lane and any in-flight micro-round never pause.
 - `superman` = executive.
 
+## Standard lane tooling (executive, 2026-07-09 03:32)
+
+- **All FUTURE dispatches use `tools/agents/dispatch_lane.sh`** (full ritual:
+  hands-off check, model+effort pins verified before task text, paste-trap
+  clearing, run-straight-through clause, mandatory SENTINEL FILE instruction)
+  and **`tools/agents/watch_lane.sh`** (file-first:
+  `/tmp/rbss_lane_signals/<session>.<TAG>.done|.blocked` beats pane-scraping —
+  immune to scrolled viewports, echo false-fires, checkpoint idles).
+- Every IN-FLIGHT lane keeps its current print-sentinel contract unchanged
+  (F2 on claude4 stays AWR163-DONE/BLOCKED pane sentinel).
+
 ## In-head nuance (the expensive lessons)
 
 - **Watchers must detect IDLE, not just sentinels** (executive save #2:
