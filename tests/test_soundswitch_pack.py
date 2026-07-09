@@ -1708,6 +1708,49 @@ class PublishPackCliTests(unittest.TestCase):
             self.assertFalse(any(destination.rglob("*.source.json")))
             self.assertNotIn(str(Path.home()), sidecar.read_text(encoding="utf-8"))
 
+    def test_canonical_publish_threads_single_generator_commit_read(self):
+        """One canonical publish reads the generator commit exactly ONCE and
+        threads the SAME value to both the manifest (compile) and the source
+        sidecar, so an auto-sync commit landing mid-publish can't split
+        provenance (AWR-179 D4-F3). A counting side effect returns a different
+        value per call: if the code read twice, manifest and sidecar would
+        disagree and this test would fail."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source.ssproj"
+            source.mkdir()
+            (source / "project.ssfile").write_bytes(b"source bytes")
+            destination = root / "pack"
+
+            commits = iter(f"{i:040x}" for i in range(1, 100))
+            compiled = {}
+
+            def fake_compile(decoded, *, generator_commit, parity_registry):
+                compiled["generator_commit"] = generator_commit
+                return {"manifest.json": b"{}\n"}
+
+            decoded = SimpleNamespace(resolved_controls=())
+            with mock.patch.object(export_module, "CANONICAL_SOURCE_PROJECT", source), \
+                 mock.patch.object(export_module, "CANONICAL_PACK_DIR", destination), \
+                 mock.patch.object(export_module, "decode_project", return_value=decoded), \
+                 mock.patch.object(export_module, "compile_pack_artifacts",
+                                   side_effect=fake_compile), \
+                 mock.patch.object(export_module, "verify_pack",
+                                   return_value={"manifest_sha256": "a" * 64,
+                                                 "artifact_count": 1}), \
+                 mock.patch.object(export_module, "_generator_commit",
+                                   side_effect=lambda: next(commits)) as gen:
+                result = export_module._canonical_publish_result()
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(gen.call_count, 1,
+                             "generator commit must be read exactly once per publish")
+            sidecar = export_module._sidecar_path(destination)
+            payload = json.loads(sidecar.read_text(encoding="utf-8"))
+            self.assertEqual(payload["generator_commit"], compiled["generator_commit"],
+                             "manifest and sidecar must record the SAME generator commit")
+            self.assertEqual(payload["generator_commit"], f"{1:040x}")
+
     def test_opaque_source_paths_keeps_recordable_dat_visible(self):
         with tempfile.TemporaryDirectory() as tmp:
             destination = Path(tmp) / "pack"

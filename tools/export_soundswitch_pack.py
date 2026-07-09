@@ -121,7 +121,7 @@ def _recomputed_parity_registries(
 
 
 def _compile_and_stage_with_self_healed_parity(
-    decoded, parent: Path, destination_name: str,
+    decoded, parent: Path, destination_name: str, *, generator_commit: str | None = None,
 ) -> tuple[Path, list[dict[str, str]]]:
     """Compile+stage the pack, self-healing its parity registries from the
     committed capture fixtures before the pack can ever verify or publish.
@@ -139,7 +139,8 @@ def _compile_and_stage_with_self_healed_parity(
     the pass-1 staging is returned unchanged and no second compile happens.
     """
     stale_registries = _load_parity_registries()
-    generator_commit = _generator_commit()
+    if generator_commit is None:
+        generator_commit = _generator_commit()
     artifacts = compile_pack_artifacts(
         decoded, generator_commit=generator_commit, parity_registry=stale_registries,
     )
@@ -266,14 +267,19 @@ def _opaque_source_paths(pack_dir: Path) -> frozenset[str]:
     )
 
 
-def _write_source_sidecar(destination: Path, source: Path, manifest_sha256: str) -> None:
+def _write_source_sidecar(
+    destination: Path, source: Path, manifest_sha256: str,
+    *, generator_commit: str | None = None,
+) -> None:
     ignored = _opaque_source_paths(destination)
     fingerprint = _source_content_fingerprint(source, ignore=ignored)
     if fingerprint is None:
         return  # cannot fingerprint -> leave no sidecar; detection stays "changes"
+    if generator_commit is None:
+        generator_commit = _generator_commit()
     payload = {
         "source_fingerprint": fingerprint,
-        "generator_commit": _generator_commit(),
+        "generator_commit": generator_commit,
         "pack_manifest_sha256": manifest_sha256,
         "ignored_paths": sorted(ignored),
     }
@@ -586,7 +592,7 @@ def _assert_publishable_parity(pack: Path, *, allow_unverified_parity: bool) -> 
 
 def publish_pack(
     project: str | os.PathLike[str], destination_path: str | os.PathLike[str],
-    *, allow_unverified_parity: bool = False,
+    *, allow_unverified_parity: bool = False, generator_commit: str | None = None,
 ) -> dict[str, object]:
     source = Path(project).expanduser()
     destination = Path(destination_path).expanduser()
@@ -602,8 +608,13 @@ def publish_pack(
             raise ValueError("destination must be a real directory or absent")
         first_export = not destination.exists()
         decoded = decode_project(source)
+        # Read the generator commit ONCE per publish and thread it to both the
+        # manifest (compile) and the source sidecar, so an auto-sync commit
+        # landing mid-publish can't split provenance (AWR-179 D4-F3).
+        if generator_commit is None:
+            generator_commit = _generator_commit()
         staging, retirements = _compile_and_stage_with_self_healed_parity(
-            decoded, parent, destination.name,
+            decoded, parent, destination.name, generator_commit=generator_commit,
         )
         try:
             result = verify_pack(staging, source_project=source)
@@ -641,6 +652,7 @@ def publish_pack(
             **result,
             "first_export": first_export,
             "parity_evidence_retired": retirements,
+            "generator_commit": generator_commit,
         }
 
 
@@ -700,6 +712,7 @@ def _canonical_publish_result() -> dict[str, object]:
             CANONICAL_PACK_DIR,
             CANONICAL_SOURCE_PROJECT,
             str(result["manifest_sha256"]),
+            generator_commit=result.get("generator_commit"),
         )
     except Exception:
         pass
