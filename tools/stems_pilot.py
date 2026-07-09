@@ -807,7 +807,7 @@ def _load_labels() -> dict[str, dict]:
     raw = json.loads(LABELS_PATH.read_text())
     out = {}
     for cid, t in (raw.get("tracks") or {}).items():
-        if t.get("wobble_moments") or t.get("vocal_free_windows"):
+        if t.get("wobble_moments") or t.get("wobble_spans") or t.get("vocal_free_windows"):
             out[str(cid)] = t
     return out
 

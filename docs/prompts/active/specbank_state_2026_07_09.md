@@ -80,6 +80,12 @@ validation_scope: >
 - [x] SPECBANK LANE STANDING DOWN to standby (executive order). Round record
   complete; remaining boxes (18:30 suite window, 20:00 sweep, named-track
   checks incl. Sexy 3:38, operator scrub) are executive/operator-owned.
+- **SEAT TRANSFER ~18:0x: superman3 RETIRED → superman4 is the executive
+  (Fable/max, tmux `superman4`).** All check-ins, gate requests, escalations,
+  staged changes route there; signal-file protocol unchanged. Context from
+  the transfer notice: bridge went down 17:48 (sig-15, source unknown),
+  superman4 relaunched + verified 18:00 (1 bridge + child + watcher,
+  0 errors), session recording re-armed to the part2 file.
 - [x] Close-out report to executive + staged sweep command + signal P1BUILD.
 
 ## Named baseline (repo root, from the resume doc + executive addendum)
