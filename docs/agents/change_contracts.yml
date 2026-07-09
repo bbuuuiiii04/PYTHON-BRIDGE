@@ -278,6 +278,7 @@ contracts:
     code_globs:
       - usb_launcher*.py
       - launch_profile*.py
+      - launch_agent_plist.py
       - replay_event_source.py
       - packaging/**
       - scripts/ss_bridge_watcher.sh
@@ -288,6 +289,7 @@ contracts:
     tests:
       - python3 -m unittest tests.test_launch_profile
       - python3 -m unittest tests.test_usb_launcher
+      - python3 -m unittest tests.test_launch_agent_plist
       - python3 -m unittest discover tests
       - python3 tools/check_docs_metadata.py
       - python3 tools/check_agent_contracts.py
