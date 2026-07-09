@@ -280,13 +280,62 @@ DEBUG).
 
 ## 12. Evidence appendix — measured blend shapes (2026-07-09 live session)
 
-**PENDING — the session recording (`local/sessions/f3_live_feedback_20260709.jsonl`,
-schema 2) is still being written as of this commit (operator mixing live). This section
-is filled by the analysis pass immediately after the mix ends; the design above states
-which constants it informs (§2–§3 TUNE-LIVE values). Analysis seams:
-`session_replayer.py` / `session_phase_trace.py`; the recording carries full
-`mixer_state` snapshots (verified: `kind":"mixer_state"` events with per-deck
-upfader/low norms and labels).**
+Source: `local/sessions/f3_live_feedback_20260709.jsonl` (schema 2, 423 MB, gitignored),
+recorded from the operator's real afternoon mix; analyzed immediately after it ended.
+84,247 valid `mixer_state` snapshots over 3,266 s (54.4 min) at 25.8 snapshots/s — the
+signal rate alone retires any "is the read fast enough" concern. Method: read-only
+script over the raw records; **β below is computed through §2's own formula**
+(`LOW_FLOOR = 0.35`, relative share), so β-numbers describe how the *proposed* scalar
+would have read his hands — they are calibration evidence, not resolver facts. Episode =
+both decks playing with upfaders above `down`, ≥ 1 s, gaps < 2 s merged.
+
+**Measured: 7 blend episodes — 5 completed handovers, 2 bailouts, 2 slam events.**
+
+| ep | dur | leader | β_max | β@flip | flip at | LOW-swap at | outcome |
+|---|---|---|---|---|---|---|---|
+| 0 | 29.1 s | 1→2 | 1.00 | 0.74 | +0.4 s | — | handover, long ride-out (~29 s) |
+| 1 | 24.0 s | 2 (held) | 0.16 | — | — | — | **bailout** (layering) |
+| 2 | 70.9 s | 2 (held) | 0.26 | — | — | — | **bailout** (layering) |
+| 3 | 12.4 s | 1→2 | 1.00 | 0.53 | +0.6 s | in-LOW +2.2 s | handover, fastest, 1 slam |
+| 4 | 41.1 s | 1→2 | 1.00 | 0.74 | +0.4 s | out-LOW cut at end | handover, ~41 s ride-out |
+| 5 | 76.5 s | 1→2 | 1.00 | 0.74 | +36.1 s | out +35.2 s / in +35.4 s | handover, **bass-swap-led**, 1 slam |
+| 6 | 38.5 s | 2→1 | 1.00 | 0.73 | +13.0 s | out +8.9 s / in +12.6 s | handover, **bass-swap-led**, reverse direction |
+
+What the numbers say, against the design:
+
+1. **The flip is early; the blend is long — flip ≠ commit is real.** Durations: median
+   38.5 s (12.4–76.5 s). In every completed handover the authority flip left 12–41 s of
+   genuinely dual-audible tail behind it. A resolve fired at the flip would be wrong five
+   out of five times; crossed-and-held (§3 COMMIT) is the correct trigger. β reached 1.00
+   in all five handovers, so `BETA_COMMIT = 0.85` fires in all of them, always after the
+   flip.
+2. **His flip point is consistent: β@flip ≈ 0.74 (0.73/0.74/0.74/0.74, one 0.53).**
+   Through the §2 formula, the resolver hands over right around three-quarters incoming
+   share. `BETA_MID = 0.5` therefore begins the base morph *before* the flip in his
+   normal blends — the room is already leaning incoming when authority moves. The
+   staircase between 0.10 and 0.74 has 12–76 s of body to climb in.
+3. **The bass swap precedes the flip by 0.4–4.1 s** in the two swap-led handovers (ep5:
+   LOW-out +35.2 s → LOW-in +35.4 s → flip +36.1 s; ep6: LOW-out +8.9 s → LOW-in
+   +12.6 s → flip +13.0 s). The LOW term in presence (T2, `LOW_FLOOR`) is doing real
+   work — an upfader-only scalar would have missed the move that actually decides his
+   handovers.
+4. **Bailouts are real and long**: 24.0 s at β ≤ 0.16 and 70.9 s at β ≤ 0.26 — he rides
+   a second track quietly underneath for a minute-plus without ever handing over. With
+   `BETA_ENTER = 0.10`, F3 would show step-1/2 incoming accents through these passages
+   and breathe them back out (ABANDON) — arguably the right room behavior (the layer is
+   audible; the room acknowledges it quietly). If he finds it chatty, T6 raises
+   `BETA_ENTER` above the layering band his bailouts sat in (0.16–0.26 → e.g. 0.30).
+5. **Slams exist** (2 events, ≥ 0.5 fader travel in < 0.5 s, one inside the fastest
+   12.4 s handover): the §2 slam bypass has real inputs. Cue-style episode starts
+   (3 of 5 handovers begin with the incoming fader already high — flip within 0.6 s of
+   dual-audible) mean INCOMING may be entered at high β directly; the state machine
+   handles that (entry conditions are level-based, not path-based).
+6. **Both directions occur** (ep6 is 2→1); nothing in the machine is deck-asymmetric.
+
+Honest limits: n = 5 handovers, one session, one operator (that operator is the entire
+user base, but taste varies by night); β numbers are formula-relative; episode edges
+depend on the 0.02 audible threshold. All §2–§3 constants stay TUNE-LIVE — this appendix
+sets their starting values and proves the signal shapes exist; his eyes stay the gate.
 
 ## 13. Provenance and claim labels
 
