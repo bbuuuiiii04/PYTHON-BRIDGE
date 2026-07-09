@@ -136,6 +136,36 @@ STOP_WIDTH = 16
 # drop. Sits well below any audible section; only a deep collapse trips it.
 SILENCE_FLOOR_DB = -20.0
 
+# --- Deep sub-void blackout (AWR-184 batch-1, operator-directed) — ADDITIVE, desk-calibrated ---
+# A real musical BLACKOUT that the balloon rung was mis-answering as a melodic swell.
+# Operator ear-truth (AWR-182 labels, Utopia/Dombresky): 1:27 "2 bar blackout" (drop
+# b192) and 3:00 "1 bar blackout" (drop b384) are genuine voids — the SUB collapses
+# deep AND the tonal/growl band dies with it (everything cuts to black). Both drops
+# read perc_build < 0.35, so the balloon rung fired and SHRANK instead of blacking.
+#
+# The discriminator, measured against the real spectral cache at HEAD: a deep sub void
+# ALONE does NOT separate blackout from balloon — Caramelle's −14 dB melodic swell (the
+# canonical balloon case, C§6f) voids its sub just as deep (run min −37 dB). What
+# separates them is the GROWL/tonal band: it SUSTAINS ≈18 dB through Caramelle's filtered
+# swell (the melody keeps ringing) but COLLAPSES to ≈−4 dB through Utopia's voids (nothing
+# left). So this rung fires only when BOTH the sub AND the growl band have gone dark in
+# the run ending at the drop. Measured (real cache):
+#   Utopia b192: deep run 6 beats, growl min −4.3 → blackout 8 (2 bars)
+#   Utopia b384: deep run 2 beats, growl min −4.4 → blackout 4 (1 bar)
+#   Caramelle @2:07: deep run 2 beats, growl min +18.5 → stays balloon
+#   Utopia b128 (shallow melodic drop): no deep run → stays balloon
+# Length = the deep-void run rounded UP to the nearest quantized bar rung {4,8,16}, so
+# the black holds from the void onset to the drop (his bar labels). Checked AFTER the
+# Part H true-silence rung, BEFORE the balloon split. Desk-calibrated.
+SUB_VOID_DB = -10.0        # sub_db below this = genuinely voided (far below GONE_SUB_DB's
+                           # 5.0 filter edge). Utopia voids reach −16..−28; a melodic drop
+                           # (Utopia b128) bottoms at −4 and never trips this.
+VOID_MIN_BEATS = 2         # need >= this many consecutive deep-void beats ending at the
+                           # drop (Utopia b384 = 2; a 1-beat sub dropout does not qualify).
+GROWL_DARK_DB = 5.0        # tonal-collapse gate: min growl_band_db over the deep run BELOW
+                           # this = the melody died too (Utopia ≈−4). Caramelle's sustained
+                           # ≈18 dB stays ABOVE it → balloon. ~9 dB margin either side.
+
 # --- Relative dip (D§4.1 step 5, TUNE-LIVE) ---
 DIP_SCORE_FIRE = 4.0
 DIP_SUB_ASSIST = 0.25
@@ -202,6 +232,16 @@ def _quantize_down(x: float) -> int:
         if r <= x:
             best = r
     return best
+
+
+def _round_up_rung(x: int) -> int:
+    """Smallest bar-scale rung (4/8/16 beats) at least as long as x; min 1 bar,
+    cap 16 (AWR-184). Rounds a measured deep-sub void UP to bars so the black
+    holds from the void onset to the drop (his 1-/2-bar blackout labels)."""
+    for r in (4, 8, 16):
+        if r >= x:
+            return r
+    return 16
 
 
 def family_grade(family: str) -> str:
@@ -455,6 +495,31 @@ def darkness_ladder(v4: SpectralFeaturesV4, drop: int, family: str,
             f"true-silence blackout {beats}: full band med {full_med:.1f} dB "
             f"< {SILENCE_FLOOR_DB} across the collapse "
             f"(silence onset {run_start} → drop {drop})")
+
+    # 0b) DEEP SUB-VOID BLACKOUT (AWR-184) — a real musical void the balloon rung
+    #     mis-answered as a melodic swell. Fires when the sub is genuinely voided AND
+    #     the growl/tonal band has died with it in the run ending at the drop
+    #     (everything cut to black), unlike a filtered melodic swell where the growl
+    #     keeps ringing (Caramelle → stays balloon). Checked BEFORE the stop/balloon
+    #     split; blacks the void's length rounded UP to bars, ending at the drop.
+    sub = v4.series["sub_db"]
+    deep = 0
+    b = e
+    while b >= 0 and sub[b] < SUB_VOID_DB:
+        deep += 1
+        b -= 1
+    if deep >= VOID_MIN_BEATS:
+        growl_min = min(growl[e - deep + 1:e + 1])
+        if growl_min < GROWL_DARK_DB:
+            beats = _round_up_rung(deep)
+            return DarknessDecision(
+                "blackout", beats, (drop - beats, drop), None,
+                {"raw_gap": raw_gap, "bass_duty": round(bass_duty, 3),
+                 "perc_build": round(perc_build, 3), "grade": grade, "stop": False,
+                 "sub_void": deep, "growl_min": round(growl_min, 2)},
+                f"deep-sub-void blackout {beats}: sub voided {deep} beats "
+                f"(< {SUB_VOID_DB} dB) with the growl band dark "
+                f"(min {growl_min:.1f} < {GROWL_DARK_DB}) into the drop")
 
     # A true stop = percussion done AND still audible (vocals/effects). This
     # audibility floor is what tells a stop (→ 8) from a melodic swell (→ balloon).

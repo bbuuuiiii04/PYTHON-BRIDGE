@@ -136,6 +136,53 @@ class TestDarknessLadder(unittest.TestCase):
         self.assertEqual(list(params), ["v4", "drop", "family", "buildup_beat"])
 
 
+class TestDeepSubVoidBlackout(unittest.TestCase):
+    """AWR-184 (operator-directed): a deep sub void with the growl band ALSO dead →
+    blackout, not balloon. The growl gate is what separates Utopia's real voids
+    (growl dies, everything cuts) from Caramelle's filtered melodic swell (growl
+    sustains → still balloon). Thresholds verified against the real spectral cache."""
+
+    def _v4(self, drop, void_beats, sub_val, growl_val, perc, n=48, full=3.0):
+        v4 = mk_v4(n=n, perc_full=[perc] * n, full_db=[full] * n,
+                   growl_band_db=[20.0] * n)
+        for i in range(drop - void_beats, drop):
+            v4.series["sub_db"][i] = sub_val
+            v4.series["growl_band_db"][i] = growl_val
+        return v4
+
+    def test_two_bar_void_blackouts(self):
+        # Utopia b192-shape: 6 deep beats (sub ≈−27) + growl dead → blackout, 2 bars.
+        r = M.darkness_ladder(self._v4(44, 6, -27.0, -4.0, 0.28), 44,
+                              "NEUTRAL", buildup_beat=28)
+        self.assertEqual((r.kind, r.beats), ("blackout", 8))
+        self.assertEqual(r.cap_inputs.get("sub_void"), 6)
+
+    def test_one_bar_void_blackouts(self):
+        # Utopia b384-shape: 2 deep beats (sub ≈−16) + growl dead → blackout, 1 bar.
+        r = M.darkness_ladder(self._v4(44, 2, -16.0, -4.0, 0.29), 44,
+                              "NEUTRAL", buildup_beat=28)
+        self.assertEqual((r.kind, r.beats), ("blackout", 4))
+
+    def test_growl_alive_stays_balloon(self):
+        # Caramelle @2:07-shape: sub voided just as deep (≈−30) but the growl SUSTAINS
+        # (≈18 dB, melody keeps ringing) → still balloon, never blackout.
+        r = M.darkness_ladder(self._v4(44, 6, -30.0, 18.0, 0.16), 44,
+                              "HOUSE", buildup_beat=28)
+        self.assertEqual(r.kind, "balloon")
+
+    def test_shallow_sub_stays_balloon(self):
+        # Utopia b128-shape: sub only dips to −4 (filter edge, not a void) → balloon.
+        r = M.darkness_ladder(self._v4(44, 4, -4.0, -4.0, 0.18), 44,
+                              "NEUTRAL", buildup_beat=28)
+        self.assertEqual(r.kind, "balloon")
+
+    def test_single_deep_beat_not_enough(self):
+        # A lone 1-beat deep dropout does not qualify (VOID_MIN_BEATS=2) → balloon.
+        r = M.darkness_ladder(self._v4(44, 1, -27.0, -4.0, 0.20), 44,
+                              "NEUTRAL", buildup_beat=28)
+        self.assertNotEqual(r.reason.startswith("deep-sub-void"), True)
+
+
 class TestDipAndFlick(unittest.TestCase):
     def test_perc_cut_flick(self):
         # No gone run, but growl cuts >=5 dB at D-1 → 1-beat perc-flick.
