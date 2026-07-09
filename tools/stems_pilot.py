@@ -466,6 +466,36 @@ def _wobble_labeled(T, grid: list[float], moments_ms: list[float]) -> list[dict]
     return out
 
 
+def _wobble_spans_scored(T, grid: list[float], span_windows: list[tuple[int, int]]) -> list[dict]:
+    """Score operator-labeled wobble SPANS (whole sections: 'repeats throughout
+    the drop'). Same frozen floors as moments; background = median concentration
+    over same-width windows tiled across the track (matched-scale honesty)."""
+    n = len(grid)
+    out = []
+    for lo, hi in span_windows:
+        width = max(4, hi - lo)
+        bg = []
+        best_rate, best_conc = 0.0, 0.0
+        for stem in ("bass", "other"):
+            frames = T["wobble_frames"].get(stem)
+            if not frames:
+                continue
+            for s in range(0, max(1, n - width), width):
+                _r, c = spm.modulation_strength(frames, T["frame_hop_s"], grid, (s, s + width))
+                bg.append(c)
+            rate, conc = spm.modulation_strength(frames, T["frame_hop_s"], grid, (lo, hi))
+            if conc > best_conc:
+                best_rate, best_conc = rate, conc
+        out.append({
+            "span_s": [round(grid[lo] / 1000.0, 1), round(grid[min(hi, n - 1)] / 1000.0, 1)],
+            "rate_cpb": best_rate,
+            "conc": round(best_conc, 4),
+            "background_conc": round(float(np.median(bg)) if bg else 0.0, 4),
+            "cleared": bool(0.5 <= best_rate <= 8.0 and best_conc >= WOBBLE_CONC_FLOOR),
+        })
+    return out
+
+
 def _label_windows_beats(windows, grid: list[float]) -> list[tuple[int, int]]:
     out = []
     for pair in windows or []:
