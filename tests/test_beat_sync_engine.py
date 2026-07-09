@@ -368,6 +368,61 @@ class BeatSyncEngineTests(unittest.TestCase):
         engine.fire_manual(0.1, 0.0, 120.0)
         self.assertEqual(engine.instance_count, before + 1)
 
+    def test_continuous_local_beat_grid_quantized_at_spawn(self) -> None:
+        # Continuous look dispatched at abs_beat=32.6 must render phase 0.6 on the
+        # grid at spawn, then advance with elapsed beats -- not phase-lock to the
+        # dispatch instant (Bug 1).
+        engine = BeatSyncEngine()
+        engine.configure(
+            effect_name="rt_groove_center_chase",
+            sync_mode="continuous",
+            beat_division=1.0,
+            params={},
+            seed=3,
+            now=0.0,
+            abs_beat=32.6,
+            bpm=120.0,
+        )
+        at_spawn = engine.animate(0.0)
+        self.assertAlmostEqual(at_spawn[0].local_beat % 1.0, 0.6)
+        # half a beat later (120 bpm -> 0.25 s) the grid phase advances to ~0.1
+        later = engine.animate(0.25)
+        self.assertAlmostEqual(later[0].local_beat % 1.0, 0.1)
+
+    def test_continuous_progress_stays_spawn_relative(self) -> None:
+        # progress must be elapsed/travel (0.0 at spawn), NOT the quantized origin.
+        engine = BeatSyncEngine()
+        engine.configure(
+            effect_name="rt_groove_center_chase",
+            sync_mode="continuous",
+            beat_division=1.0,
+            params={"travel_beats": 4.0},
+            seed=3,
+            now=0.0,
+            abs_beat=32.6,
+            bpm=120.0,
+        )
+        at_spawn = engine.animate(0.0)
+        self.assertAlmostEqual(at_spawn[0].progress, 0.0)
+
+    def test_retrigger_local_beat_and_progress_unchanged(self) -> None:
+        # Regression pin: quantization is continuous-only. A retrigger instance
+        # spawned off-grid keeps spawn-relative local_beat and progress.
+        engine = BeatSyncEngine()
+        engine.configure(
+            effect_name="beat_chase",
+            sync_mode="retrigger",
+            beat_division=1.0,
+            params={"travel_beats": 2.0},
+            seed=1,
+            now=0.0,
+            abs_beat=32.6,
+            bpm=120.0,
+        )
+        renders = engine.animate(0.5)  # 0.5 s -> 1.0 elapsed beat
+        self.assertAlmostEqual(renders[0].local_beat, 1.0)
+        self.assertAlmostEqual(renders[0].progress, 0.5)
+
     def test_bucket_stable_within_continuous_arc(self) -> None:
         engine = BeatSyncEngine()
         engine.configure(

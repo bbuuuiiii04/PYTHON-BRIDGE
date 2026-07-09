@@ -201,13 +201,21 @@ class BeatSyncEngine:
 
     def _render_list(self, now: float) -> list[InstanceRender]:
         out: list[InstanceRender] = []
+        quantize = self._mode == "continuous"
         for inst in self._instances:
             local_t = max(0.0, float(now) - inst.born_monotonic)
-            local_beat = local_t * (inst.born_bpm / 60.0)
+            elapsed_beats = local_t * (inst.born_bpm / 60.0)
+            # Continuous mode phase-locks cyclical animations to the beat grid:
+            # the origin is the fractional beat at spawn, so cue_beat % N tracks
+            # abs_beat, not the dispatch instant. Retrigger/overlap stay spawn-
+            # relative -- their TriggerClock spawns are already grid-locked.
+            # progress stays spawn-relative for every mode (elapsed / travel), so
+            # retrigger/overlap comets never start mid-sweep.
+            local_beat = (inst.born_abs_beat % 1.0 + elapsed_beats) if quantize else elapsed_beats
             out.append(InstanceRender(
                 local_beat=local_beat,
                 local_t=local_t,
                 bucket=inst.bucket,
-                progress=local_beat / self._travel_beats,
+                progress=elapsed_beats / self._travel_beats,
             ))
         return out
