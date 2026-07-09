@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 23d5c4a
+last_verified_commit: e28ce6c
 last_verified_date: 2026-07-08
-validation_scope: software-only; LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (lab_update/lab_switch/lab_preview), QR same-network access, pad editor unset-param-defaults, Stream Deck palette control Package 2 plus AWR-121 gesture v2, drop presentation policy Package 3, LED idle/pause ambient fix, and LED pad queued-color restore software-tested, hardware-unvalidated
+validation_scope: software-only; LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (lab_update/lab_switch/lab_preview), QR same-network access, pad editor unset-param-defaults, Stream Deck palette control Package 2 plus AWR-121 gesture v2, drop presentation policy Package 3, LED idle/pause ambient fix, LED pad queued-color restore, and AWR-156 LED round 2 (strobe-gate rebuild + accepted-look promotion) software-tested, hardware-unvalidated
 ---
 
 # LED / Govee Subsystem
@@ -313,6 +313,98 @@ LED bare-clear fail-open (AWR-155, 2026-07-08; implemented, software-tested, har
 - Effect begins at the next bridge restart after the one this was written during (the bridge had
   already been restarted once this evening for AWR-154 and was live when this landed); no restart,
   live-config edit, or strip-touching action was performed while implementing it.
+
+LED round 2: strobe-gate rebuild + accepted-look promotion (AWR-156, 2026-07-08; implemented, software-tested, hardware-unvalidated):
+- Standing promotion rules (operator-ruled, binding for future work): strobes are TIME-BASED (real
+  Hz + duty on `local_t`, never beat/BPM-subdivided — a strobe must feel identical at any BPM);
+  sparkles are TIME-BASED and continuous (independent per-sparkle lifecycles, never a synchronized
+  whole-field re-roll — that pattern was the diagnosed ~17 Hz flicker mechanism).
+- Strobe gate rebuild (`_hz_strobe_on`, `govee_frame_renderer.py`): replaces the old stateless
+  beat-domain 29 ms window (`(beat % 0.25) < 0.0625`) that missed up to ~31% of cycles under
+  runner jitter. The new gate reads `hz`/`duty` in the seconds domain and widens its ON window to
+  at least ~1.6 rendered frames using `frame_period_s` — a new runtime-injected param (the
+  `slot_colors` pattern, deliberately not on any static allowlist) that `GoveeRealtimeRunner`
+  maintains as an EMA (alpha 0.2) of actual inter-tick gaps and injects into every render call.
+  `drop_white_aggressive` now runs this gate at hz 6.0/duty 0.3 (the accepted reference feel).
+- Colorway strobe family: one new frame effect, `drop_strobe_colorway` (baked, not palette-fed) —
+  solid `color_a`, or `color_a`/`color_b` alternating per flash when `color_b` is present. Seven
+  looks ride it at the operator's dialed rates: `rt_drop_strobe_blue`/`_cyan`/`_green`/`_red` (hz
+  6.0/duty 0.3, pure colorway), `_red_white` (hz 5.5/duty 0.25, side B restored to white
+  `(255,255,255)` — his last pad dial was red; **one-line operator veto** restores it), `_blue_cyan`
+  (hz 5.0/duty 0.25, his dialed azure B `(0,135,255)`), `_cyan_white` (hz 5.0/duty 0.25, his dialed
+  periwinkle B `(100,105,255)` despite the "white" name). All seven are in `banks.default.drop`.
+- Three promotions: `buildup_balloon_comet` (frame effect, baked white) — a dual-head chase whose
+  width lerps `start_width`→`end_width` over `build_beats` with brightness falling to `dim_floor`
+  (accepted: 6→0.8 over 32 beats, dim to 0.05). `rt_groove_heartbeat` (slot effect, engine-palette) —
+  a dual-head chase whose width pulses on the beat then decays exponentially; `color_mode` (0-3)
+  selects slot routing, default 2 = head1→slot1/head2→slot3 (his accepted red+white combo feel).
+  `rt_post_drop_firework_remnants` (slot effect, engine-palette) — slot-5 background dims 1.0→0
+  over `dim_beats`; time-based embers (`_ember_field`, ported from the Template Lab reference) hold
+  full to `ember_hold_beats` then decay to 0 over `ember_decay_beats` (accepted 8+2 — done by beat
+  10). All three share a peak-normalized head-weight helper (`_head_weights`, module-level): a
+  triangle-falloff weight divided by its own max (not summed), so the brightest pixel always
+  carries the full head level — this is the fix for a measured 0.53× between-pixel brightness dip
+  that read as stutter.
+- Knob #4, the intensity-hue mashup dies: eight renderer sites used to derive a comet's slot
+  (hence its palette color) from its own brightness (`slot_coord = intensity * N`), so one comet
+  body could sweep well over 100° of hue across its own length. All eight now pick ONE fixed slot
+  per spawn — intensity is brightness only. Groove chase/nebula: the two heads take slots
+  `cycle % 5` and `(cycle + 2) % 5` (`cycle = int(cue_beat / loop_beats)`). Drop/post-drop
+  chase/nebula (palette-comet branch): `slot = spawn_idx % 5`. Post-drop center comet:
+  `slot = round(cue_beat - age) % 5`. Drop center burst: main bursts rotate slots 0-2
+  (`burst_idx % 3`), accent bursts rotate slots 2-4 (`2 + burst_idx % 3`) — the main/accent band
+  split survives, only the intra-burst hue sweep dies. Nebula white comets (slot 5) and the
+  sparkle-intro pixels are untouched — not mashup sites. `_slot_groove_center_chase` and
+  `_slot_post_drop_firework_chase` (ordered positional gradients, operator-liked) are explicitly
+  NOT mashup sites and were not touched.
+- Knob #9, role-scoped comet widths: `width` is now a real config knob for every touched cue —
+  `rt_groove_chase`/`rt_groove_nebula` previously hardcoded `width = 0.8` and
+  `rt_post_drop_center_comet` hardcoded `comet_width = 1.0`; all three now read
+  `params.get("width", <their old hardcoded value>)`, so an un-mirrored config is byte-identical.
+  Example config: width 4 on `rt_drop_chase`(renamed, see below)/`rt_drop_nebula`(renamed)/
+  `rt_post_drop_chase`/`rt_post_drop_nebula`/`rt_post_drop_center_comet` (his stated request); width
+  2.5 on `rt_groove_chase`/`rt_groove_nebula` (**veto-able** — his `comet_width` pad dial never
+  reported a final number).
+- Bank recast + rename (amended by operator mid-round from a plain move to a rename): the two
+  sparkle chases move from `banks.default.drop` to `banks.default.post_drop` ("current sparkling
+  cues can play the role of the sparkling remnants") AND their look names change to
+  `rt_post_drop_remnant_chase` / `rt_post_drop_remnant_nebula` so the name reads as post-drop
+  remnant material — their renderer `scene_ref` stays exactly `rt_drop_chase` / `rt_drop_nebula`
+  (a look-name rename only). Their `drop_pairs` entries are deleted (a post_drop-role look never
+  fires a pair); the AWR-149 drop→post_drop pairing will carry explosion→remnants arcs once the
+  explosion round lands. `rt_drop_nebula` no longer pairs to `rt_post_drop_nebula` through
+  `drop_pairs` — the "Patch E pairings" note below is stale as of this round.
+- Knob #5 explicit no-op: `step_within_section.groove` stays `true` (unchanged; reversal considered
+  and rejected).
+- Task 9 (operator refinement, same day): the zone-tinted slot-5 white now applies to NEBULA
+  COMETS ONLY. A new `BAKED_WHITE_SLOT5_EFFECTS = frozenset({"post_drop_firework_chase"})` set,
+  checked at `GoveeFrameRenderer.render()`'s slot-color resolution site, forces slot 5 to literal
+  `(255, 255, 255)` for any effect in the set before colorizing — one site covers bridge, pad, and
+  lab injection paths alike. Nebula white comets (`rt_drop_nebula`/`rt_post_drop_nebula`) are
+  deliberately NOT in the set — they read the zone tint once mirrored. `rt_post_drop_firework_remnants`'s
+  slot-5 dimming background is a background, not a white accent, and stays zone-tinted (an
+  executive-visibility boundary note, not a gap — a one-line addition if the operator wants it
+  pure). No cue writes a twinkle-star white accent today (AWR-152's knob #8 removed it from
+  `breakdown_star_twinkle`; `_slot_twinkle` never had one) — **one-line operator flag**: re-adding a
+  white entry to the star-twinkle slot range or to `BAKED_WHITE_SLOT5_EFFECTS` restores occasional
+  baked-white breakdown stars if he wants them back.
+- `ir.local_t` [assumed → confirmed while implementing]: it advances on wall-clock seconds through
+  pauses/seeks exactly as the beat-sync engine defines cue time. The Hz gate is stateless in
+  `local_t`, so a backward jump on wrap/retrigger simply re-phases the gate rather than breaking it.
+- Unaffected/unchanged: `exempt_looks` and the freestyle nebulas' bank membership, blackout/
+  emergency semantics (AWR-154 reasons + AWR-155 fail-open), AWR-150 substitute + staged takeover,
+  AWR-149 plan rotation mechanics, the 6-slot invariant, buildup cues' white-by-design palette, the
+  positional-mapping prototypes, the 200 Hz push loop (the runner's frame-period EMA is arithmetic
+  on already-taken timestamps, no new I/O), laser/SoundSwitch/Rekordbox. Out of scope this round
+  (verdicts pending): `drop_firework_explosion_2`, `rainbow_drop`/`rainbow_post_drop`,
+  `comet_rainbow_ordered` promotion, remnants spawn-feel re-check. Round-3 residual logged, not this
+  round: `_slot_drop_center_burst` even-pixels-only gappiness.
+- The live, gitignored `config/led_look_director.json` was read-only for this round; an un-mirrored
+  live config renders identically to today for every look it defines, EXCEPT the two locked
+  behavior changes that need no config: the `_drop_white_aggressive` gate rebuild and the knob-#4
+  mapping change at all eight sites. The operator mirrors the example config's new looks/widths/
+  bank-recast/rename in and restarts via the menubar to pick the rest up. Full detail:
+  `docs/plans/active/led_round2_promotion_spec.md`.
 
 LED hold starvation fix (2026-07-07):
 - Active-deck switches and active-deck track loads still protect against an
@@ -679,10 +771,25 @@ M2.5 slot cues in SLOT_EFFECTS (govee_frame_renderer.py):
 | rt_drop_center_burst | _slot_drop_center_burst | drop | no | software-validated |
 | rt_post_drop_center_comet | _slot_post_drop_center_comet | post_drop | yes | software-validated (Patch E2) |
 | rt_twinkle | _slot_twinkle | ambient | no | software-validated (Patch E3) |
+| rt_groove_heartbeat | _slot_rt_groove_heartbeat | groove | no | software-validated (AWR-156) |
+| rt_post_drop_firework_remnants | _slot_rt_post_drop_firework_remnants | post_drop | no | software-validated (AWR-156) |
+
+Non-slot (baked) frame effects added by AWR-156, registered in `_EFFECTS`:
+
+| Scene ref | Fn | Safety class | Strobe | Status |
+|---|---|---|---|---|
+| drop_strobe_colorway | _drop_strobe_colorway | drop | yes | software-validated (AWR-156) |
+| buildup_balloon_comet | _buildup_balloon_comet | buildup | no | software-validated (AWR-156) |
+
+AWR-156 look-name rename (config only; the `Scene ref` column above is unaffected — `scene_ref`
+never changed): the example config's `rt_drop_chase` / `rt_drop_nebula` LOOKS are now named
+`rt_post_drop_remnant_chase` / `rt_post_drop_remnant_nebula` and live in `banks.default.post_drop`.
 
 Patch E pairings:
-- rt_drop_nebula pairs explicitly to rt_post_drop_nebula through `drop_pairs`.
 - rt_drop_center_burst pairs explicitly to rt_post_drop_center_comet through `drop_pairs`.
+- AWR-156: rt_drop_nebula no longer pairs to rt_post_drop_nebula — the `drop_pairs` entry was
+  deleted as part of the bank recast (a post_drop-role look never fires a pair). Superseded line,
+  kept for history: "rt_drop_nebula pairs explicitly to rt_post_drop_nebula through `drop_pairs`."
 
 All slot cues, `random_with_mono_chance`, and Patch F bank cleanup: SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
 Phase 3 renderer params: `rt_groove_chase`/`rt_groove_nebula` accept `loop_beats`; `rt_drop_chase`/`rt_post_drop_chase`/`rt_drop_nebula`/`rt_post_drop_nebula` accept `travel_beats` and `width`; `groove_center_chase`/`post_drop_firework_chase` accept `travel_beats`. Missing params preserve previous frames.

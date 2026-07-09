@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified for Packages 2-3 and AWR-121; design-intent for anything still unimplemented
-last_verified_commit: daa8804
-last_verified_date: 2026-07-04
+last_verified_commit: e28ce6c
+last_verified_date: 2026-07-08
 validation_scope: Packages 2-3 plus AWR-121 gesture v2 software-tested; hardware-unvalidated
 ---
 
@@ -595,9 +595,14 @@ F1 implemented surface:
 - White sources context: `led_color_engine.py:33-38` (white_chance out of scope; AWR-152
   2026-07-08 deleted the `Palette.white`/`_blend_white` blend entirely — every palette shipped
   `white: 0.0` in practice), reserved slot-5 :609,664 (v1 hardcoded pure white, untouched; v2 slot 5
-  is now a per-zone `ZoneRampConfig.slot5_white` tint, `led_identity_v2.py:derive_dressing`); cue-
-  mandated white effects `govee_frame_renderer.py` (`drop_white_aggressive`:505,
-  `post_drop_white_shatter`:515, `buildup_white_*`:874-953).
+  is now a per-zone `ZoneRampConfig.slot5_white` tint, `led_identity_v2.py:derive_dressing`; AWR-156
+  Task 9, 2026-07-08, narrowed this tint to NEBULA COMETS ONLY — a new `BAKED_WHITE_SLOT5_EFFECTS`
+  set forces `post_drop_firework_chase`'s slot 5 to literal pure white, checked at
+  `GoveeFrameRenderer.render()`'s slot-color resolution site); cue-mandated white effects
+  `govee_frame_renderer.py` (`drop_white_aggressive`:538, `post_drop_white_shatter`:592,
+  `buildup_white_*`:~907-986 — line numbers shift with AWR-156 insertions, re-grep before citing;
+  AWR-156 also rebuilt `drop_white_aggressive`'s gate on `_hz_strobe_on` (time-domain hz/duty, not
+  the old beat-domain window) and added `buildup_balloon_comet`, a baked-white buildup promotion).
 - Scripted-mode LED gating (mechanism): `led_look_director.py:174-187`,
   `led_dispatch_policy.py:83-143`.
 - Drop presentation inputs: Smart-Drop selection `smart_phrasing.py:601-617`; drop-lifecycle

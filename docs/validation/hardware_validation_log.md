@@ -1,7 +1,7 @@
 ---
 doc_status: current-incomplete
 truth_level: code-and-config-grounded
-last_verified_commit: 23d5c4a
+last_verified_commit: e28ce6c
 last_verified_date: 2026-07-08
 validation_scope: software-validated only, except the Govee/LED color-engine, realtime-comet, and beat-sync paths (AWR-101–104) which carry operator hardware sign-off on Home Govee (2026-06-29); SoundSwitch / laser / Enttec remain hardware-unvalidated
 ---
@@ -54,6 +54,13 @@ logic WAS touched this time (the no-reason branch now clears the whole set inste
 only `legacy`) but the change's actual effect on a running process cannot be validated without a
 further restart, which was explicitly out of scope for this pass — no restart, live-config edit, or
 strip-touching action was performed.
+
+LED round 2: strobe-gate rebuild + accepted-look promotion (AWR-156, 2026-07-08): no hardware,
+Govee, or room-visible validation was performed. The Hz-based strobe gate, the 7 colorway strobes,
+the 3 promoted looks, the knob #4 mashup removal, the knob #9 widths, the bank recast + rename, and
+the Task 9 slot-5 narrowing are all software-tested only. The live, gitignored
+`config/led_look_director.json` was not touched or mirrored; the operator's config mirror + menubar
+restart + next mix is the remaining validation gate.
 
 The current exporter/importer evidence boundary is **SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED**.
 
@@ -108,6 +115,7 @@ Rollback notes:
 | pending | Govee/LED phrase-aware active-content hold | pending | current StateManager LED automation; live LED config not inspected | active deck switch and active-deck track load landing more than `1.0` beat into phrase should keep the previous look until the incoming track reaches a phrase entry; missing phrase data should release by 16 beats / 8 seconds; landing within `1.0` beat should change immediately; `[RGB] hold-engaged` / `[RGB] hold-released` and `[SP] reset-reason-change` should explain or rule out freeze windows | pending | pending | software-tested only; needs operator visual sign-off that mid-phrase switch/load no longer pops and that phrase-less holds no longer freeze for long stretches |
 | pending | Govee/LED idle-pause ambient (AWR-133) | pending | current StateManager LED automation and Govee realtime path; live LED config not inspected | pausing or fading both decks to no-audible idle should dispatch the ambient look; realtime ambient should stay alive through `[RGB] idle-freewheel-start`; if idle-grace teardown occurs, `[RGB] deactivate reason=idle_grace blackout_sent=1` should precede a dark strip instead of a leftover bright DIY scene | pending | pending | software-tested only; no bridge restart, live Govee output, or visual hardware validation performed. Firmware fallback remains hardware-assumed until an operator pause validates the room-visible result |
 | pending | Govee/LED health reporting (AWR-136) | pending | current Govee cloud sender/adapter; live LED config not inspected | If a configured mirror strip stops accepting frames, one `[RGB] mirror-send-degraded ...` warning should appear and recovery should produce one `[RGB] mirror-send-recovered ...` info line; after a cloud circuit-breaker blip, a later successful send should leave LED status non-degraded unless another fault exists | pending | pending | software-tested only (`tests/test_govee_runtime_sender.py`, `tests/test_govee_scene_adapter.py`); no bridge restart, live Govee output, or visual hardware validation performed |
+| pending | LED round 2: strobe-gate rebuild + accepted-look promotion (AWR-156) | pending | `govee_frame_renderer.py`/`govee_realtime_runner.py` at `e28ce6c`; example config only, live LED config not mirrored | after the operator mirrors the example config's new looks/widths/bank-recast/rename and restarts: the white drop strobe should flash at a steady dialed rate at any BPM with no hold/stutter; the 7 colorway strobes should join the drop rotation at their dialed rates/colors (`strobe_red_white` side B white unless vetoed); the balloon buildup, palette heartbeat groove, and firework remnants should read as real looks in their roles; comets should render as one solid palette color per spawn, no rainbow-smear; drop/post-drop comets should look fatter (width 4), grooves slightly fatter (width 2.5, veto-able); the two sparkle chases should read in the post-drop slot under their new names; firework bursts should read pure white, nebula comets should read the zone-tinted white | pending | pending | software-tested only (`tests/test_govee_frame_renderer.py`, `tests/test_govee_realtime_runner.py`, `tests/test_led_config.py`, `tests/test_led_pad_controls.py`); no bridge restart, live-config edit, or strip-touching action was performed while implementing this |
 
 ## Validation records
 

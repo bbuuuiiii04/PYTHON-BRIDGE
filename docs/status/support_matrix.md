@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 23d5c4a
+last_verified_commit: e28ce6c
 last_verified_date: 2026-07-08
 validation_scope: software-validated only plus Rekordbox 7.2.11 passive mixer RE evidence routing; hardware-unvalidated in repo evidence
 ---
@@ -74,6 +74,7 @@ Trusted publication is software-gated green; physical validation remains open.
 | LED white-knob round 1 (AWR-152 #2/#3/#6/#7/#8/#10) | implemented | `tests/test_led_identity_v2.py`; `tests/test_led_config.py`; `tests/test_led_color_engine.py`; `tests/test_color_engine_config.py`; `tests/test_led_color_engine_m2_phase1.py`; `tests/test_led_color_engine_m2_patch_s.py`; `tests/test_led_state_manager.py`; `tests/test_govee_frame_renderer.py` | Per-zone `slot5_white` tint (v2 slot 5), all-6-slot palate-reset dim, `_blend_white` removal, DIY tag filter removed under the v2 latch, and the breakdown-twinkle slot range fix are software-tested only. Live config untouched; the operator's mirror + menubar restart is the remaining gate, and room-visible white/hue rendering is not hardware-validated. |
 | LED pad blackout unlatch fix (AWR-154) | implemented | `tests/test_led_pad_playback.py`; `tests/test_runtime_status.py`; `tests/test_led_state_manager.py` | The `led_clear_blackout` reason (`led_pad`) now threads end to end from pad release through `parse_command`/`CommandReader`/`_led_clear_blackout` into the `BridgeEvent` payload, so the pad's own blackout-owner claim can be discarded instead of only ever clearing `legacy`. Software-tested only; `led_dispatch_policy.py`'s owner-set logic is untouched, and a process already latched dark needs a restart to pick this up. Superseded by AWR-155 below re: bare-clear scope. |
 | LED bare-clear fail-open (AWR-155) | implemented | `tests/test_led_state_manager.py` | A bare `led_clear_blackout` now clears every owner in `led_dispatch_policy.py`'s `_led_blackout_owners` at once (operator authority, executive-approved), not just `legacy`; reasoned clears stay scoped. One INFO outcome log names what was cleared. Software-tested only; a process already latched dark needs a restart to pick this up. |
+| LED round 2: strobe-gate rebuild + accepted-look promotion (AWR-156) | implemented | `tests/test_govee_frame_renderer.py`; `tests/test_govee_realtime_runner.py`; `tests/test_led_config.py`; `tests/test_led_pad_controls.py`; `tests/test_led_color_engine_m2_patch_b/c/d/e1/e2/f.py`; `tests/test_led_color_engine_m2_phase1.py`; `tests/test_led_color_engine_m2_phase2a.py` | Hz-based frame-timing-aware strobe gate + 7 colorway strobes; 3 promoted looks (balloon buildup, palette heartbeat, firework remnants); knob #4 intensity-hue mashup removed at all 8 sites; knob #9 role-scoped comet widths (3 previously-hardcoded sites now genuinely read `params`); bank recast + rename of the two sparkle chases to `rt_post_drop_remnant_chase`/`_nebula`; Task 9 narrows the slot-5 zone tint to nebula comets only (firework bursts bake pure white). Software-tested only; live config untouched, operator mirror + restart is the remaining gate. |
 
 ## Hardware validation state
 
