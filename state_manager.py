@@ -2628,8 +2628,10 @@ class StateManager(LEDDispatchPolicyMixin):
         armed = self._drop_presentation_armed_key == track_key
         presentation_impact = bool(
             impact_now
-            and decision is not None
-            and (decision.runway > 0.0 or decision.tagged or armed)
+            and (
+                armed
+                or (decision is not None and (decision.runway > 0.0 or decision.tagged))
+            )
         )
         if decision is not None:
             gearshift_pending = session.gearshift_pending_for(track_key)
@@ -2647,9 +2649,16 @@ class StateManager(LEDDispatchPolicyMixin):
                 vetoed=vetoed,
             )
         elif impact_now:
-            # Plan not finalized yet (ANLZ/tags still resolving) -- fail-open
-            # to today's behavior, exactly as the spec requires.
-            pending_presentation, pending_reason = LEDS_PLUS_LASERS, "plan_unavailable"
+            if armed:
+                # AWR-159 Task 2: a manual arm is an explicit operator
+                # override -- honor it even when the plan has no exact-beat
+                # match for this impact (the plan-unavailable fallback below
+                # stays for the non-manual case only).
+                pending_presentation, pending_reason = LASERS_ONLY, "solo_manual"
+            else:
+                # Plan not finalized yet (ANLZ/tags still resolving) -- fail-open
+                # to today's behavior, exactly as the spec requires.
+                pending_presentation, pending_reason = LEDS_PLUS_LASERS, "plan_unavailable"
 
         laser_masked = False
         if self._laser_executor is not None:
@@ -2692,23 +2701,25 @@ class StateManager(LEDDispatchPolicyMixin):
         self._drop_presentation_last_pending = (pending_presentation, pending_reason, eval_beat)
         self._drop_presentation_last_actions = actions
 
-        if impact_now and decision is not None:
+        if impact_now:
             if armed:
                 # One-shot: consumed by this drop's impact regardless of guard
-                # outcome (the arm targeted "the next true drop", which has now
-                # happened).
+                # outcome or whether the plan had a decision for this beat
+                # (AWR-159 Task 2) -- the arm targeted "the next true drop",
+                # which has now happened.
                 self._drop_presentation_armed_key = None
-            if auto_solo_fired:
-                session.mark_auto_solo_used(track_key)
-            if session.gearshift_pending_for(track_key):
-                session.consume_gearshift_pending(track_key)
-            if actions.reason == "solo_manual":
-                content_id = self._drop_presentation_plan_content_id
-                if content_id and self._drop_presentation_learned_store.record(content_id, decision.beat):
-                    self._drop_presentation_learned_writer.submit(
-                        self._drop_presentation_learned_store.to_dict()
-                    )
-            session.finalize_drop_observation(decision.runway, has_phrase_data=plan.has_phrase_data)
+            if decision is not None:
+                if auto_solo_fired:
+                    session.mark_auto_solo_used(track_key)
+                if session.gearshift_pending_for(track_key):
+                    session.consume_gearshift_pending(track_key)
+                if actions.reason == "solo_manual":
+                    content_id = self._drop_presentation_plan_content_id
+                    if content_id and self._drop_presentation_learned_store.record(content_id, decision.beat):
+                        self._drop_presentation_learned_writer.submit(
+                            self._drop_presentation_learned_store.to_dict()
+                        )
+                session.finalize_drop_observation(decision.runway, has_phrase_data=plan.has_phrase_data)
         # Recompute every tick (not just at impact): a cancel's fail-open, or
         # the window ending naturally, must reach the pad without waiting for
         # the next drop's impact tick or another press (AWR-159 Task 1).

@@ -629,6 +629,81 @@ def _rainbow_ordered(beat: float, local_t: float, frame_index: int, params: Mapp
     return [(_clamp_channel(r), _clamp_channel(g), _clamp_channel(b)) for r, g, b in acc]
 
 
+def _ember_field_frame(local_t: float, segments: int, seed: int, *,
+                       density: float, size: float, life_s: float, colors: tuple[RGB, RGB]) -> Frame:
+    """AWR-161: frame-native ember field for drop_firework_explosion (ported
+    from the lab _ember_field). Same independent-lifecycle timing as the
+    production slot-based _ember_field (the remnants machinery: sine fade-in/
+    out over life_s, a personal gap, fresh position + color each cycle,
+    never beat-tied) -- colorized directly from the two spark params instead
+    of writing into palette slots, since this is a baked Frame effect."""
+    seg = max(0, int(segments))
+    acc = [[0.0, 0.0, 0.0] for _ in range(seg)]
+    if seg == 0 or density <= 0.0:
+        return [(0, 0, 0)] * seg
+    t = max(0.0, float(local_t))
+    n = max(1, int(seg * density / max(0.5, size)))
+    for k in range(n):
+        slot_rng = _rng(seed, "ember", k)
+        life = life_s * slot_rng.uniform(0.7, 1.3)
+        gap = life * slot_rng.uniform(0.2, 0.8)
+        period = life + gap
+        phase = slot_rng.uniform(0.0, period)
+        cycle_pos = (t + phase) % period
+        if cycle_pos >= life:
+            continue
+        cycle_idx = int((t + phase) / period)
+        cyc_rng = _rng(seed, "ember", k, cycle_idx)
+        center = cyc_rng.uniform(0, seg)
+        color = colors[cyc_rng.randrange(len(colors))]
+        env = math.sin(math.pi * cycle_pos / life) * cyc_rng.uniform(0.6, 1.0)
+        for idx in range(seg):
+            w = max(0.0, 1.0 - (_distance_on_ring(idx, center, seg) / size))
+            if w > 0.0:
+                for c in range(3):
+                    acc[idx][c] += color[c] * w * env
+    return [(_clamp_channel(r), _clamp_channel(g), _clamp_channel(b)) for r, g, b in acc]
+
+
+def _drop_firework_explosion(beat: float, local_t: float, frame_index: int, params: Mapping[str, Any], segments: int, seed: int) -> Frame:
+    """AWR-161: ported from the lab drop_firework_explosion_2 (RENDER-
+    REGRESSION FIX verified in lab: the surge now resolves DOWN to bg_hold
+    over 0.5 beat after the hit, and embers BLEND-REPLACE (not add) so they
+    read against the bright background -- measured ember contrast 164/255,
+    was 35/invisible before the fix). Beat-tied surge (the hit itself) plus
+    a time-based ember field (never beat-tied, the AWR-153 sparkle ruling)."""
+    seg = max(0, int(segments))
+    surge_beats = max(0.1, float(params.get("surge_beats", 0.5)))
+    bg_level = max(0.2, min(1.0, float(params.get("bg_level", 1.0))))
+    density = max(0.0, min(0.8, float(params.get("sparkle_density", 0.35))))
+    size = max(0.5, min(3.0, float(params.get("sparkle_size", 1.0))))
+    life_s = max(0.1, min(2.0, float(params.get("sparkle_life_s", 0.35))))
+    bg = _color(params.get("color_a"), (255, 240, 220))
+    spark_a = _color(params.get("spark_a"), (255, 170, 60))
+    spark_b = _color(params.get("spark_b"), (255, 240, 220))
+
+    bg_hold = max(0.2, min(1.0, float(params.get("bg_hold", 0.7)))) * bg_level
+    if beat <= surge_beats:
+        level = max(0.0, min(1.0, beat / surge_beats)) * bg_level
+    else:
+        settle = max(0.0, min(1.0, (beat - surge_beats) / 0.5))
+        level = bg_level + (bg_hold - bg_level) * settle
+    base = [(bg[0] * level, bg[1] * level, bg[2] * level) for _ in range(seg)]
+    layer = _ember_field_frame(local_t, seg, seed, density=density, size=size,
+                               life_s=life_s, colors=(spark_a, spark_b))
+    out: Frame = []
+    for i in range(seg):
+        w = max(0.0, min(1.0, max(layer[i]) / 255.0))
+        r0, g0, b0 = base[i]
+        if w > 0.0:
+            lr, lg, lb = layer[i]
+            px = (r0 * (1.0 - w) + lr, g0 * (1.0 - w) + lg, b0 * (1.0 - w) + lb)
+        else:
+            px = (r0, g0, b0)
+        out.append((_clamp_channel(px[0]), _clamp_channel(px[1]), _clamp_channel(px[2])))
+    return out
+
+
 def _post_drop_white_shatter(beat: float, local_t: float, frame_index: int, params: Mapping[str, Any], segments: int, seed: int) -> Frame:
     # Per-frame full-white stroboscopic static. Each pixel is independently
     # re-randomized every render frame (keyed on frame_index) for a true
@@ -2031,6 +2106,11 @@ _EFFECTS["buildup_balloon_comet"] = _buildup_balloon_comet
 # injected palette). Not a strobe.
 _EFFECTS["rainbow_ordered"] = _rainbow_ordered
 
+# AWR-161: contrast-gated firework explosion promotion (see the renderer
+# contrast test); baked (spark_a/spark_b are literal RGB params, not an
+# injected palette). Not a strobe -- the surge is a smooth resolve, not a gate.
+_EFFECTS["drop_firework_explosion"] = _drop_firework_explosion
+
 # Phase-2b config validation must accept slot cues + the baked sand name.
 REALTIME_EFFECT_NAMES = frozenset(_EFFECTS.keys() | SLOT_EFFECTS.keys())
 
@@ -2081,6 +2161,11 @@ _M2_PHASE2A_PARAM_KEYS: dict[str, frozenset[str]] = {
     "rainbow_ordered": (
         frozenset({"width", "cycle_beats", "rainbow_span", "travel_per_beat",
                    "loop_beats", "duration_beats"}) | _SYNC_PARAM_KEYS
+    ),
+    "drop_firework_explosion": (
+        frozenset({"surge_beats", "bg_level", "bg_hold", "color_a",
+                   "spark_a", "spark_b", "sparkle_density", "sparkle_size",
+                   "sparkle_life_s", "duration_beats"}) | _SYNC_PARAM_KEYS
     ),
     "rt_groove_heartbeat": (
         frozenset({"base_width", "pulse_width", "decay", "loop_beats",
