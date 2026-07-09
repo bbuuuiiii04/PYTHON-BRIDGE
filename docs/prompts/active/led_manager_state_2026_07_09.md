@@ -170,6 +170,18 @@ manager. New dispatches pin the model explicitly and VERIFY on-screen
 - **Flagged one-line operator vetoes outstanding:** strobe_red_white side B
   (=white), groove comet width 2.5, F2's NEUTRAL→small + damped-thin→small
   laser silences (~27% of drops), AWR-162 burn-down OFF pending haze
-  session; pre-drop tease = parked morning item (never spec it).
+  session, balloon gray-zone knob (0.35 pinned; one-liner moves 0.30-0.35
+  into the black band — exec put it on the morning veto list); pre-drop
+  tease = parked morning item (never spec it).
+- **Standard-tooling bugs found at F4 dispatch (reported to superman):**
+  (a) dispatch_lane.sh hands-off check false-positives on the freshly-
+  cleared pane's own "❯ /clear" echo (C-l/resize don't clear it) — manual
+  ritual is the workaround; (b) watch_lane.sh pane fallback matches the
+  ECHOED dispatch text (fired SENTINEL-HIT seconds after dispatch) and its
+  IDLE fires on 2 static captures (long thinks are static longer) — use the
+  signal FILES + my guarded pane regex. F2 gate PASSED; F4 building on
+  claude4 (Opus/high, tag AWR164, signal files + hardened watcher).
+  (B)+(D.2) = ONE follow-up, small dedicated laser round AFTER F4, I spec
+  it. Pack-race hygiene = AWR-169.
 - Remaining program after F2/F4: mirror (R5) → morning summary for Brandon
   (superman sends ship notices; my reports feed them).
