@@ -1232,6 +1232,24 @@ class BridgeMenuBar(NSObject):
         if self is not None:
             self.refresh_(None)
 
+    def testLights_(self, _sender):
+        # Test the Lights: replay the newest recorded session through the full
+        # rig. Live-safety guards fail closed with a visible message; the
+        # launcher re-checks them too (defense in depth).
+        if rekordbox_running():
+            _notify("Quit Rekordbox first — Test the Lights replays a recorded set and can't run against live decks.")
+            return
+        path = newest_recorded_session()
+        if not path:
+            _notify("No test session recorded yet. Record one from this menu during a real set, then Test the Lights.")
+            return
+        if getattr(sys, "frozen", False):
+            argv = [sys.executable, "--replay-session", path]
+        else:
+            argv = [sys.executable, str(REPO_ROOT / "usb_launcher.py"), "--replay-session", path]
+        subprocess.Popen(argv, start_new_session=True)
+        _notify(f"Test the Lights: replaying {Path(path).name} — watch the rig.")
+
     def mapLasers_(self, _sender):
         open_browser_url(LASER_PAD_URL)
 

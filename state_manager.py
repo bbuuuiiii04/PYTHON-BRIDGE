@@ -4824,10 +4824,10 @@ class StateManager(LEDDispatchPolicyMixin):
 
     def _f2_laser_tiers(self, d, drop_beats):
         """AWR-162 (A): {drop_beat: energy tier} from the F2 plan for these drops,
-        or None when F2 off / no plan ⇒ legacy laser_ratio selection, byte-identical
-        (kill test). small (NEUTRAL/thin) → lasers silent; else lasers fire."""
-        if not self._f2_enabled:
-            return None
+        or None when F2 off / scripted / no plan ⇒ legacy laser_ratio selection,
+        byte-identical (kill test). small (NEUTRAL/thin) → lasers silent."""
+        if not self._f2_enabled or getattr(d, "scripted_id", 0):
+            return None    # scripted tracks: v2 stands down completely (D§7)
         plan = getattr(d.meta, "f2_plan", None)
         if plan is None:
             return None
@@ -4842,8 +4842,9 @@ class StateManager(LEDDispatchPolicyMixin):
     def _f2_transition_window_beats(self, d, abs_beat, smart_drop_beats, default):
         """F2 pre-drop dark-window length for the next drop (Task 3.1). F2 off ⇒
         the fixed default, byte-identical to v1 (kill test). Shared LED+laser
-        window, so the whole room breathes together (AWR-162 Task 4.1)."""
-        if not self._f2_enabled:
+        window, so the whole room breathes together (AWR-162 Task 4.1). Scripted
+        tracks: v2 stands down completely → the fixed default (D§7)."""
+        if not self._f2_enabled or getattr(d, "scripted_id", 0):
             return default
         return lighting_moments_v2.transition_window_for(
             getattr(d.meta, "f2_plan", None), abs_beat, smart_drop_beats, default)

@@ -1775,7 +1775,9 @@ class LEDDispatchPolicyMixin:
         if anchor is None:
             return None
         d = self._deck.get(getattr(self._os, "active_deck", 0))
-        plan = getattr(getattr(d, "meta", None), "f2_plan", None) if d is not None else None
+        if d is None or getattr(d, "scripted_id", 0):
+            return None    # scripted tracks: v2 stands down completely (D§7)
+        plan = getattr(getattr(d, "meta", None), "f2_plan", None)
         entry = plan.for_drop(float(anchor)) if plan is not None else None
         if entry is None:
             return None

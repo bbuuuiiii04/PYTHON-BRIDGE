@@ -324,5 +324,72 @@ class TestTransitionWindow(unittest.TestCase):
         self.assertEqual(M.transition_window_for(plan, None, [32], default=4.0), 4.0)  # no beat
 
 
+class TestKillSwitchByteIdentity(unittest.TestCase):
+    """MANDATORY kill test (Part C): with F2 OFF, every F2 hook passes through to
+    the v1 default even when a plan is present — so F2-off is byte-identical to v1.
+    Scripted tracks stand down the same way (D§7). Exercised via the real
+    StateManager methods (the OFF / scripted branch early-returns before any heavy
+    state), so this pins the actual gating code, not a copy."""
+
+    def _plan(self):
+        dark = M.DarknessDecision("blackout", 16, (16, 32), None, {}, "x")
+        dec = M.DropDecision(32, "WALL", 0.7, 3, dark, "", "x")
+        return M.F2TrackPlan((M.DropPlanEntry(32, dec, 0.5, 0),), "swell")
+
+    def _deck(self, scripted_id=0):
+        return SimpleNamespace(scripted_id=scripted_id,
+                               meta=SimpleNamespace(f2_plan=self._plan()))
+
+    def _sm(self):
+        from rb_ss_bridge_v2.state_manager import StateManager
+        return StateManager
+
+    def test_f2_off_transition_window_is_the_fixed_default(self):
+        SM = self._sm()
+        off = SimpleNamespace(_f2_enabled=False)
+        # plan present, but F2 off → the fixed predark default, unchanged from v1.
+        self.assertEqual(
+            SM._f2_transition_window_beats(off, self._deck(), 20.0, [32], 4.0), 4.0)
+
+    def test_f2_off_laser_tiers_is_none_legacy(self):
+        SM = self._sm()
+        off = SimpleNamespace(_f2_enabled=False)
+        self.assertIsNone(SM._f2_laser_tiers(off, self._deck(), [32]))
+
+    def test_scripted_stands_down_even_with_f2_on(self):
+        SM = self._sm()
+        on = SimpleNamespace(_f2_enabled=True)
+        scripted = self._deck(scripted_id=7)
+        self.assertEqual(
+            SM._f2_transition_window_beats(on, scripted, 20.0, [32], 4.0), 4.0)
+        self.assertIsNone(SM._f2_laser_tiers(on, scripted, [32]))
+
+    def test_f2_on_no_plan_falls_back(self):
+        SM = self._sm()
+        on = SimpleNamespace(_f2_enabled=True)
+        no_plan = SimpleNamespace(scripted_id=0, meta=SimpleNamespace(f2_plan=None))
+        self.assertEqual(
+            SM._f2_transition_window_beats(on, no_plan, 20.0, [32], 4.0), 4.0)
+        self.assertIsNone(SM._f2_laser_tiers(on, no_plan, [32]))
+
+
+class TestBalloonBoundary(unittest.TestCase):
+    """C§6f perc split pinned at 0.35: melodic riser → balloon; drums driving → 4."""
+
+    def _ladder(self, perc):
+        n = 48
+        drop = n - 4
+        v4 = mk_v4(n=n, perc_full=[perc] * n, full_db=[8.0] * n, bass_db=[2.0] * n)
+        gone_run(v4, drop, 8)
+        return M.darkness_ladder(v4, drop, "HOUSE", buildup_beat=drop - 16)
+
+    def test_below_boundary_balloons(self):
+        self.assertEqual(self._ladder(0.30).kind, "balloon")   # melodic riser
+
+    def test_at_or_above_boundary_blacks(self):
+        self.assertEqual(self._ladder(0.35).kind, "blackout")  # gray zone → black
+        self.assertEqual(self._ladder(0.60).kind, "blackout")  # drums driving
+
+
 if __name__ == "__main__":
     unittest.main()

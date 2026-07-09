@@ -43,6 +43,34 @@ class DispatchTests(unittest.TestCase):
             rc = usb_launcher.main(["--bogus"])
         self.assertEqual(rc, 2)
 
+    def test_replay_session_dispatch_passes_path(self) -> None:
+        with mock.patch.object(usb_launcher, "_run_replay_session", return_value=0) as run:
+            self.assertEqual(usb_launcher.main(["--replay-session", "/tmp/s.jsonl"]), 0)
+        run.assert_called_once_with("/tmp/s.jsonl")
+
+    def test_replay_session_without_path_fails_closed(self) -> None:
+        self.assertEqual(usb_launcher.main(["--replay-session"]), 2)
+
+
+class ReplaySessionGuardTests(unittest.TestCase):
+    def test_preflight_refusal_blocks_bridge_and_returns_nonzero(self) -> None:
+        # Rekordbox running (or any refusal) must stop before the bridge starts.
+        with mock.patch("rb_ss_bridge_v2.replay_event_source.replay_preflight",
+                        return_value="Rekordbox is running"), \
+             mock.patch.object(usb_launcher, "_run_bridge", side_effect=AssertionError("bridge started")):
+            rc = usb_launcher._run_replay_session("/tmp/s.jsonl")
+        self.assertEqual(rc, 1)
+
+    def test_preflight_pass_sets_env_and_runs_bridge(self) -> None:
+        with mock.patch.dict(os.environ, {}, clear=False), \
+             mock.patch("rb_ss_bridge_v2.replay_event_source.replay_preflight", return_value=None), \
+             mock.patch.object(usb_launcher, "_run_bridge", return_value=0) as run:
+            os.environ.pop("RBSS_REPLAY_SESSION", None)
+            rc = usb_launcher._run_replay_session("/tmp/s.jsonl")
+            self.assertEqual(os.environ.get("RBSS_REPLAY_SESSION"), "/tmp/s.jsonl")
+        self.assertEqual(rc, 0)
+        run.assert_called_once_with()
+
 
 class FrameEngineIsolationTests(unittest.TestCase):
     def test_frame_engine_dispatch_never_loads_menubar(self) -> None:
