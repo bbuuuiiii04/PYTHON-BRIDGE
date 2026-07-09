@@ -94,6 +94,7 @@ class LEDDispatchPolicyMixin:
         self._led_scripted_mode_automation_latch = False
         self._led_blank_role_hold_latch = True
         self._led_had_accepted_automation_decision = False
+        self._led_blank_role_hold_logged = False
         self._led_scripted_default_role = "breakdown"
         self._led_scripted_role_map: dict[str, str] = {}
         self._led_last_auto_role_key = ""
@@ -1264,6 +1265,12 @@ class LEDDispatchPolicyMixin:
 
         look = str(getattr(decision, "look", ""))
         if self._led_blank_role_hold_would_engage(look=look, playing=d.playing):
+            self._led_log_blank_role_hold(
+                original_role=original_role,
+                effective_role=role,
+                scripted=scripted_led_mode,
+                active_deck=active,
+            )
             if self._led_blank_role_hold_latch:
                 self._gate_led_automation(
                     "blank_role_hold",
@@ -1273,6 +1280,8 @@ class LEDDispatchPolicyMixin:
                     rt_permitted=True,
                 )
                 return
+        else:
+            self._led_blank_role_hold_logged = False
         scene_ref = self._sanitize_led_scene_ref(getattr(decision, "scene_ref", ""))
         decision_reason = str(getattr(decision, "reason", ""))
         outcome = self._led_send_decision(
@@ -1441,6 +1450,44 @@ class LEDDispatchPolicyMixin:
             str(getattr(director, "blackout_look", "")) if director is not None else ""
         )
         return bool(blackout_look) and look == blackout_look
+
+    def _led_blank_role_hold_source(self, *, original_role: str, scripted: bool) -> str:
+        """AWR-157 Q-A: best-effort classification of which upstream path
+        produced this tick's blank-role blackout. Part A leaves the exact
+        origin as an OPEN question — this names a likely source from one
+        live session's logs, it does not prove the origin.
+        """
+        if not original_role:
+            return "phrase_none"
+        if scripted and original_role not in self._led_scripted_role_map:
+            return "scripted_map"
+        if self._led_auto_retry is not None:
+            return "adapter_reject"
+        return "other"
+
+    def _led_log_blank_role_hold(
+        self,
+        *,
+        original_role: str,
+        effective_role: str,
+        scripted: bool,
+        active_deck: int,
+    ) -> None:
+        """Edge-triggered INFO on first fire (or would-fire), DEBUG on
+        per-tick repeats — log-style rule: INFO for outcomes, not spam."""
+        source = self._led_blank_role_hold_source(
+            original_role=original_role, scripted=scripted
+        )
+        log_fn = log.debug if self._led_blank_role_hold_logged else log.info
+        log_fn(
+            "[RGB] blank-role-hold original_role=%s effective_role=%s scripted=%s active_deck=%d source=%s",
+            original_role or "-",
+            effective_role or "-",
+            scripted,
+            active_deck,
+            source,
+        )
+        self._led_blank_role_hold_logged = True
 
     def _gate_led_automation(
         self,
