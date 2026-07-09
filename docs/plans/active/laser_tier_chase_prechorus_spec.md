@@ -102,7 +102,9 @@ fallbacks + junk fail-closed. Selection: per-tier CH8 for `crimson` at standard/
 `None`-tier → standard == today's value. Window: arm/release edges for the new series incl. a
 collapsed-marker fixture (two chorus markers 32 beats apart inside one drop section → second
 marker still gets its 4-beat window); overlap-with-F2-window fixture (owner set holds both, no
-early release); every cleanup path releases `pre_chorus`. Config: absent key ⇒ 0 ⇒ no arm flags
+early release); every cleanup path releases `pre_chorus`; held-static fixture (a held laser
+Static Override + an arriving `pre_chorus` window ⇒ dark for the window, static restores after
+release — the Part C chosen behavior, pinned). Config: absent key ⇒ 0 ⇒ no arm flags
 ever; example ships 4. F2-off ⇒ no series, no flags, byte-identical.
 
 ### Task 6 - Contract docs
