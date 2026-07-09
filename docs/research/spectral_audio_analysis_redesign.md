@@ -233,6 +233,11 @@ ever matters.
   `read_anlz_drops`, extracts v4 (skips fresh cache hits), reports coverage/duration/size.
   `--jobs N` process pool (spawn; `OMP_NUM_THREADS=1` per worker — research §9). Run under
   `caffeinate -i` (documented in the tool's usage text).
+- `tools/spectral_stick_sweep.py` (AWR-183): the same `_sweep_one` worker over a mounted
+  rekordbox USB export — enumerates `PIONEER/USBANLZ` ANLZ files, reads each track's
+  device-relative audio path from the PPTH tag, and keys v4 entries by the on-stick
+  absolute path, so copying the cache folder to a foreign Mac pre-warms every stick
+  track. Labeled interim until AWR-165 content-keying lands (the root-cause fix).
 - `state_manager.py` seam (`_runtime_spectral_features`): read order v4-cache → v3-cache
   (legacy, read-only) → extract v4 + write v4 cache → return the v3-compat view in every
   path. The scorer receives identical numbers in all three paths (§6 proof). Flag gating

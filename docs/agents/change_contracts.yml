@@ -655,6 +655,7 @@ contracts:
       - spectral_cache.py
       - spectral_profile.py
       - tools/spectral_sweep.py
+      - tools/spectral_stick_sweep.py
       - tools/spectral_calibration_report.py
       - tools/stems_pilot.py
       - tools/stems_pilot_metrics.py
