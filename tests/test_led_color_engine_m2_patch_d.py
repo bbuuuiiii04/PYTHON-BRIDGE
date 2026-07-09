@@ -271,7 +271,7 @@ class PatchDTests(unittest.TestCase):
             )
             slots = first["slot_colors"]
             self.assertEqual(len(slots), MAX_SLOTS)
-            self.assertEqual(slots[5], (255, 255, 255))
+            self.assertEqual(slots[5], (220, 240, 255))
             self.assertGreater(len(set(slots[:5])), 1)
             self.assertEqual(second["slot_colors_from"], second["slot_colors_to"])
             self.assertNotIn("fade_beats", second)

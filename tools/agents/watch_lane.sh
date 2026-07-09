@@ -7,6 +7,10 @@
 # TAG scopes the signal glob to one round (2026-07-09 field bug #3: an
 # unscoped glob false-fires on consumed files from CLOSED rounds); the matched
 # signal file is CONSUMED (rm) on exit so it can never fire twice.
+# Field bug #4 (2026-07-09): after a same-tag block-and-resume, the pane
+# channel is poisoned for that tag (old TAG-BLOCKED lines in scrollback
+# false-fire even anchored patterns) — watch resumed rounds by SIGNAL FILE
+# ONLY (pass an empty sentinel regex).
 # ponytail: polling loop; launchd/fswatch if this ever needs to be evented.
 SIG_DIR=/tmp/rbss_lane_signals
 SESSION=$1; SENTINEL=${2:-}; DEADLINE=${3:-540}; WAITBUSY=${4:-0}; TAG=${5:-*}; INTERVAL=15
