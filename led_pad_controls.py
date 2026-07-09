@@ -94,6 +94,16 @@ CONTROL_META: dict[str, dict[str, Any]] = {
     "sparkle_density": _meta("Sparkle Density", "number", min=0, max=0.8, step=0.05, help="How many embers are active at once.", default=0.35),
     "sparkle_size": _meta("Sparkle Size", "number", min=0.5, max=3, step=0.1, help="How wide each ember appears.", default=1.0),
     "sparkle_life_s": _meta("Sparkle Life (s)", "number", min=0.1, max=2, step=0.05, help="How many real seconds each ember lives.", default=0.8),
+    # AWR-161 additions (defaults hand-extracted from govee_frame_renderer.py's
+    # `_rainbow_ordered` / `_drop_firework_explosion` params.get fallbacks).
+    "cycle_beats": _meta("Rainbow Cycle Beats", "number", min=1, max=64, step=0.5, help="How many beats the rainbow hue cycle takes.", default=8.0),
+    "rainbow_span": _meta("Rainbow Span", "number", min=0.1, max=2, step=0.05, help="How much of the spectrum spans the strip.", default=1.0),
+    "travel_per_beat": _meta("Travel Per Beat", "number", min=2, max=120, step=1, help="Beat-locked head advance (auto = legacy loop pace).", advanced=True, default=None),
+    "surge_beats": _meta("Surge Beats", "number", min=0.1, max=8, step=0.1, help="How many beats the explosion surge lasts.", default=0.5),
+    "bg_level": _meta("Flash Brightness", "number", min=0.2, max=1, step=0.05, help="Peak brightness of the explosion flash.", default=1.0),
+    "bg_hold": _meta("Flash Hold", "number", min=0.2, max=1, step=0.05, help="Brightness the flash settles to after the surge.", default=0.7),
+    "spark_a": _meta("Spark Color A", "rgb", help="First ember spark color."),
+    "spark_b": _meta("Spark Color B", "rgb", help="Second ember spark color."),
 }
 
 for _key, _entry in CONTROL_META.items():
@@ -172,6 +182,8 @@ RENDER_GROUPS: dict[str, tuple[str, ...]] = {
         "rt_drop_nebula",
         "rt_drop_center_burst",
         "drop_strobe_colorway",
+        "drop_firework_explosion",
+        "rainbow_ordered",
     ),
     "Post-drop": (
         "post_drop_chase_blue",
