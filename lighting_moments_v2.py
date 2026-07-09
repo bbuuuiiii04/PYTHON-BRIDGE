@@ -496,19 +496,30 @@ def darkness_ladder(v4: SpectralFeaturesV4, drop: int, family: str,
             f"< {SILENCE_FLOOR_DB} across the collapse "
             f"(silence onset {run_start} → drop {drop})")
 
+    # A true stop = percussion done AND still audible (vocals/effects). This
+    # audibility floor is what tells a stop (→ 8) from a melodic swell (→ balloon).
+    # Hoisted above rung 0b (AWR-185): the deep-sub-void rung reads no full-band
+    # audibility, so a vocal-stop shape (deep sub void + dark growl band + vocals
+    # still above the growl band) would otherwise be answered by 0b's run-length
+    # rounding instead of the calibrated 8-beat stop length. Computing stop first
+    # lets 0b yield to it (below).
+    stop = perc_build <= STOP_PERC_MAX and lift_build >= STOP_LIFT_FLOOR
+
     # 0b) DEEP SUB-VOID BLACKOUT (AWR-184) — a real musical void the balloon rung
     #     mis-answered as a melodic swell. Fires when the sub is genuinely voided AND
     #     the growl/tonal band has died with it in the run ending at the drop
     #     (everything cut to black), unlike a filtered melodic swell where the growl
-    #     keeps ringing (Caramelle → stays balloon). Checked BEFORE the stop/balloon
-    #     split; blacks the void's length rounded UP to bars, ending at the drop.
+    #     keeps ringing (Caramelle → stays balloon). Checked BEFORE the balloon split
+    #     but YIELDS to the stop rung (AWR-185): when the full band is still audible
+    #     (a vocal stop), the stop rung's calibrated length wins. Blacks the void's
+    #     length rounded UP to bars, ending at the drop.
     sub = v4.series["sub_db"]
     deep = 0
     b = e
     while b >= 0 and sub[b] < SUB_VOID_DB:
         deep += 1
         b -= 1
-    if deep >= VOID_MIN_BEATS:
+    if deep >= VOID_MIN_BEATS and not stop:
         growl_min = min(growl[e - deep + 1:e + 1])
         if growl_min < GROWL_DARK_DB:
             beats = _round_up_rung(deep)
@@ -520,10 +531,6 @@ def darkness_ladder(v4: SpectralFeaturesV4, drop: int, family: str,
                 f"deep-sub-void blackout {beats}: sub voided {deep} beats "
                 f"(< {SUB_VOID_DB} dB) with the growl band dark "
                 f"(min {growl_min:.1f} < {GROWL_DARK_DB}) into the drop")
-
-    # A true stop = percussion done AND still audible (vocals/effects). This
-    # audibility floor is what tells a stop (→ 8) from a melodic swell (→ balloon).
-    stop = perc_build <= STOP_PERC_MAX and lift_build >= STOP_LIFT_FLOOR
 
     # 1) BALLOON — melodic swell (low build percussion, NOT an audible vocal stop)
     #    shrinks instead of blacking, even into a hard drop (Stereo Love), so this

@@ -182,6 +182,21 @@ class TestDeepSubVoidBlackout(unittest.TestCase):
                               "NEUTRAL", buildup_beat=28)
         self.assertNotEqual(r.reason.startswith("deep-sub-void"), True)
 
+    def test_vocal_stop_yields_to_stop_rung(self):
+        # AWR-185: an ambiguous-class case (Cruel Summer 418-shape: 51-beat deep sub
+        # void, growl 0.3, full band still audible at ref−9.4, perc done). Rung 0b
+        # would round the 51-beat run UP to a 16-beat blackout, but the calibrated
+        # STOP rung must win → 8-beat length. ref=16 → full 6.6 gives lift −9.4.
+        v4 = mk_v4(n=480, ref=16.0, perc_full=[0.10] * 480,
+                   full_db=[6.6] * 480, growl_band_db=[20.0] * 480)
+        for i in range(418 - 51, 418):
+            v4.series["sub_db"][i] = -16.0
+            v4.series["growl_band_db"][i] = 0.3
+        r = M.darkness_ladder(v4, 418, "NEUTRAL", buildup_beat=418 - 16)
+        self.assertEqual((r.kind, r.beats), ("blackout", 8))
+        self.assertTrue(r.cap_inputs.get("stop"))
+        self.assertNotIn("sub_void", r.cap_inputs)   # 0b yielded, did not fire
+
 
 class TestDipAndFlick(unittest.TestCase):
     def test_perc_cut_flick(self):

@@ -692,6 +692,12 @@ LIGHTING ENGINE v2 F4 texture layer (AWR-164, 2026-07-09):
   8 beats, b384 "1 bar blackout" → 4 beats) measured against the real spectral cache; no existing
   constant moved. Software-tested (`tests/test_lighting_moments_v2.py`, `TestDeepSubVoidBlackout`);
   no bridge/hardware validation.
+    - Precedence guard (AWR-185, 2026-07-09): the true-stop predicate is computed BEFORE this rung
+      and the rung yields to it — when the full band is still audible (a vocal stop: deep sub void +
+      dark growl band but vocals sitting above the growl band), the calibrated 8-beat stop length
+      wins instead of this rung's run-length rounding. Utopia's voids kill the full band below
+      audibility so its b192/b384 blackouts are unchanged; no threshold moved (one guard only).
+      Software-tested (`test_vocal_stop_yields_to_stop_rung`).
 
 Drop presentation policy (Package 3, AWR-119, 2026-07-04):
 - The implemented behavior authority is `docs/architecture/drop_presentation_authority.md`; the
