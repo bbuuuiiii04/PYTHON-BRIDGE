@@ -77,6 +77,18 @@ a bug to "fix" by driving CH3/CH4.
    return (rule 6), NOT by the brightness floor** — at the menu-pick point white
    has already early-returned, so the floor only ever separates rank 1 from rank
    2 within a menu.
+1b. **Per-tier chase divisions (AWR-170 B).** A chase menu entry's `chase` may be
+   a single int (all drops render that division, byte-identical to before) OR a
+   `{"standard"|"intense"|"monster": <ch8>}` dict. When it is a dict, the drop's
+   F2 energy tier picks the division CLASS at the drop — harder drops spin the
+   chase faster (the operator's red+white 100→116→140 ladder, seeded on `crimson`
+   + `v2:EMBERCORE`); the two-color pair is unchanged. Missing tier keys fall back
+   to `standard` then to the first present value; an all-junk dict fails closed
+   (the entry is skipped, never invented). The tier is plumbed one hop from the
+   f2_plan (`state_manager._laser_color_drop_tier`, a push-loop-safe lookup);
+   `None`/unknown/`small` tier ⇒ `standard`, so F2-off / scripted / tier-less
+   drops render exactly today's single value. Every menu WITHOUT the dict form is
+   byte-identical.
 2. The quantizer's tie-breaks are deterministic (fixed preference order).
    Same inputs, same color, every time.
 3. **White is reserved.** The quantizer never outputs White from

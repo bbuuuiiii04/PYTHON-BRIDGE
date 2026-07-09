@@ -108,7 +108,9 @@ Config:
   approval, same as Patch F/AWR-156.
 - LIGHTING ENGINE v2 top-level blocks, both example-ON / absent-OFF so an un-mirrored live config
   stays byte-identical: `f2` (AWR-163, moments/darkness/drop-typing — `load_f2_config`/`F2Config`) and
-  `f4` (AWR-164, texture seasoning — `load_f4_config`/`F4Config`). The `f4` block has `enabled`,
+  `f4` (AWR-164, texture seasoning — `load_f4_config`/`F4Config`). The `f2` block also carries
+  `pre_chorus_laser_beats` (AWR-170 D.2, int; ABSENT ⇒ 0 ⇒ pre-chorus laser blackout fully off — the
+  mirror rule; the example ships `4`; junk/negative clamp to 0). The `f4` block has `enabled`,
   `busy_pulse_experimental` (default false — `lowmid_pulse` stays computed-not-consumed),
   `variant_seasoning` (`{family+texture key: {param: value}}` merged into the drop cue's params —
   `house_stab`/`house_sustain`/`wall_trap`/`wall_dense`/`<fam>_default`), `euphoric_bright_looks`

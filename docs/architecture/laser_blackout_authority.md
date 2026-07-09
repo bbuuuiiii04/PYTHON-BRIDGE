@@ -31,7 +31,7 @@ remain structurally impossible:
 | System | Owners | Purpose |
 | --- | --- | --- |
 | **Manual** — MIDI-binding refcount | laser-pad-web note; the deck's Laser mute pad | The operator holding the room dark. |
-| **Smart** — executor owner set | `breakdown`, `master_switch`, smart-drop pre-window | Automatic transition covers. |
+| **Smart** — executor owner set | `breakdown`, `master_switch`, `pre_chorus`, smart-drop pre-window | Automatic transition covers. |
 
 **Separation is by owner, not by MIDI note.** The historical notes collide in
 wire terms (a numbering-convention artifact); nothing may ever rely on note
@@ -106,3 +106,21 @@ existing single mask-writer site in StateManager's pack driver. The focused
 software regression is `tests/test_laser_blackout_rewire.py`. Live laser,
 SoundSwitch, MIDI, DMX, Enttec, Rekordbox, LED, and Govee behavior remains
 hardware-unvalidated until an operator-approved live run.
+
+**AWR-170 (D.2) — the `pre_chorus` smart owner.** Lasers black out for
+`f2.pre_chorus_laser_beats` (example 4; absent-key = 0 = off) before every chorus
+phrase start. Chorus starts are the RAW anlz-drop markers (uncollapsed — the
+AWR-131 collapse only merged drop *decisions*), so a chorus mid-drop-section that
+F2's per-drop transition window never darkens still earns its own laser breath.
+`smart_phrasing.update()` arms/clears the window on rising/falling edges (a plan
+input `pre_chorus_beats`, gated to 0 by StateManager when F2 is off / no plan /
+scripted); `smart_rearm._pre_chorus` holds/releases the `pre_chorus` owner. The
+owner is released on the marker crossing AND on any leaked exit
+(`not pre_chorus_window_active`) — scrub/loop/skip — the AWR-154 latched-dark
+guard; the `OutputState.pre_chorus_active` latch is cleared alongside
+`breakdown_active` on the shared reset paths, and `_release_all_masks` clears the
+owner itself at every lifecycle boundary. Held-static + pre_chorus window ⇒ the
+static ducks dark for the window and restores on release (Rule 9 is base
+suppression; this is a real blackout owner, so mask precedence applies —
+`tests/test_state_manager_pack_driver.py::...pre_chorus_then_restores`). Software
+seams: `tests/test_laser_tier_prechorus.py`.
