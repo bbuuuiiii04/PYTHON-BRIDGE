@@ -10,7 +10,7 @@ validation_scope: >
   (Deep Symmetry dysentery/beat-link/crate-digger documentation, cross-checked where
   possible) and are labelled per-claim: confirmed-by-source / single-source / inferred /
   unknown. Nothing here is validated against the operator's actual hardware.
-work_status: feasibility delivered 2026-07-09 — BLOCKED ON OPERATOR PINS (§1) before any further step; no implementation authorized
+work_status: PINS ANSWERED 2026-07-09 (XDJ-RX3, USB-cable connection) — P0 STOP FIRED; SHELVED-WITH-TRIGGER (reopen when the operator plays on link-capable gear: club CDJs, XDJ-XZ, XDJ-1000-family; this doc is the pickup artifact); no implementation authorized
 relates_to: usb_bridge_launcher_design.md, track_identity_move_invariance_design.md
 ---
 
@@ -31,7 +31,21 @@ family don't speak this protocol at all; the XDJ-XZ and the XDJ-1000/CDJ familie
 honest rating: **moderate ambition on compatible hardware, impossible on RX-family
 hardware in standalone mode** — details and phasing below.
 
-## 1. The gating question — operator pins (FLAG, never assume)
+## 0. CLOSE-OUT — pins answered, P0 STOP fired (2026-07-09)
+
+**Operator pins (executive relay, his words): model = XDJ-RX3, connection = USB cable.**
+Per §2's confirmed matrix row, the RX3 has no Pro DJ Link — standalone-stick playback on
+this hardware cannot feed the bridge by any known public path. **The §6 P0 STOP gate
+fires; this workstream is SHELVED WITH TRIGGER.** Trigger to reopen: the operator plays
+on link-capable gear (club CDJ rigs, XDJ-XZ, XDJ-1000-family) — the design below stays
+the pickup artifact, with §7's unknowns as the first work.
+
+**What works TODAY on the RX3, no build:** rekordbox **performance mode** over that same
+USB cable — laptop rekordbox is the player (the RX3 acts as the control surface/audio
+interface), so the existing memory reader sees everything exactly as at home; the stick
+isn't the player in that mode and isn't needed.
+
+## 1. The gating question — operator pins (ANSWERED above; kept for the record)
 
 Nothing below should be trusted for planning until these three facts land:
 
