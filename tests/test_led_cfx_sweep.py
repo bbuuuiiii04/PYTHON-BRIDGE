@@ -375,6 +375,86 @@ class DispatchGatingTests(unittest.TestCase):
         self.assertIsNotNone(_compute(ns2, 2, now))                 # deck 2 floods
 
 
+class WrapperReArmTests(unittest.TestCase):
+    """AWR-173 Leg 2: a single inert/gating BLIP mid-ride-home must NOT re-arm the trigger.
+    A fired engagement returns LATCHED-RELEASED (inert) so the next healthy tick can't
+    re-flood at full brightness; a never-fired pre-fire flood resets clean and may resume."""
+
+    def _ns(self):
+        ns = _sm_ns(CFG, None)
+        ns._led_cfx_last_mono = 0.0
+        return ns
+
+    def _tick(self, ns, active, knob, now, *, valid=True, breakdown=False, darkest=(10, 0, 40)):
+        ns._cfx_snapshot = _snapshot({active: _reading(active, knob, valid=valid)}, now)
+        ns._os = SimpleNamespace(breakdown_active=breakdown)
+        ns._led_color_engine = SimpleNamespace(v2_darkest_rgb=(lambda: darkest))
+        StateManager._compute_led_cfx_sweep(ns, active, now)
+        return ns._led_cfx_sweep
+
+    def _fire_then_ride(self, ns):
+        """Fire (cross the bloom), then step onto the ride home (knob below thr -> released)."""
+        t = 100.0
+        for _ in range(3):
+            self._tick(ns, 1, 0.9, t); t += 0.05     # engaged above thr -> fire + drain
+        self.assertTrue(ns._led_cfx_state.fired)
+        self._tick(ns, 1, 0.58, t); t += 0.05        # below thr -> latch released, flood fading
+        self.assertTrue(ns._led_cfx_state.released)
+        self.assertIsNotNone(ns._led_cfx_sweep)      # still fading (mix > 0)
+        return t
+
+    def _assert_no_reflood_then_rearm(self, ns, t):
+        for _ in range(30):                          # keep riding home: must never re-flood
+            out = self._tick(ns, 1, 0.58, t); t += 0.05
+            self.assertTrue(out is None or out[0] <= 1e-9, msg=f"re-flooded: {out}")
+        self._tick(ns, 1, 0.5, t); t += 0.05         # return to neutral re-arms
+        self.assertFalse(ns._led_cfx_state.fired or ns._led_cfx_state.released)
+        for _ in range(3):
+            self._tick(ns, 1, 0.9, t); t += 0.05     # a fresh sweep fires again like the first time
+        self.assertTrue(ns._led_cfx_state.fired)
+        self.assertIsNotNone(ns._led_cfx_sweep)
+
+    def test_gating_blip_midride_does_not_reflood(self):
+        ns = self._ns()
+        t = self._fire_then_ride(ns)
+        self._tick(ns, 1, 0.58, t, breakdown=True); t += 0.05   # ONE gating blip
+        self.assertIsNone(ns._led_cfx_sweep)                    # inert during the blip
+        self.assertTrue(ns._led_cfx_state.fired and ns._led_cfx_state.released)  # latched, not forgotten
+        self._assert_no_reflood_then_rearm(ns, t)
+
+    def test_invalid_reading_blip_midride_does_not_reflood(self):
+        ns = self._ns()
+        t = self._fire_then_ride(ns)
+        self._tick(ns, 1, 0.58, t, valid=False); t += 0.05      # ONE invalid/stale reading blip
+        self.assertIsNone(ns._led_cfx_sweep)
+        self.assertTrue(ns._led_cfx_state.fired and ns._led_cfx_state.released)
+        self._assert_no_reflood_then_rearm(ns, t)
+
+    def test_v2_off_blip_midride_does_not_reflood(self):
+        ns = self._ns()
+        t = self._fire_then_ride(ns)
+        self._tick(ns, 1, 0.58, t, darkest=None); t += 0.05     # ONE v2-off (no dressing) blip
+        self.assertIsNone(ns._led_cfx_sweep)
+        self.assertTrue(ns._led_cfx_state.fired and ns._led_cfx_state.released)
+        self._assert_no_reflood_then_rearm(ns, t)
+
+    def test_blip_during_preflood_reflows(self):
+        # A blip over a PRE-FIRE flood (engaged, below thr, never fired) resets clean; the flood
+        # resumes after the blip because the knob is still engaged — knob-state behavior, correct.
+        ns = self._ns()
+        t = 100.0
+        for _ in range(2):
+            self._tick(ns, 1, 0.70, t); t += 0.05    # engaged below thr -> flood, never fires
+        self.assertFalse(ns._led_cfx_state.fired)
+        self.assertGreater(ns._led_cfx_sweep[0], 0.0)           # flooding
+        self._tick(ns, 1, 0.70, t, breakdown=True); t += 0.05   # ONE blip
+        self.assertIsNone(ns._led_cfx_sweep)
+        self.assertFalse(ns._led_cfx_state.fired or ns._led_cfx_state.released)  # clean reset
+        out = self._tick(ns, 1, 0.70, t); t += 0.05
+        self.assertIsNotNone(out)
+        self.assertGreater(out[0], 0.0)                         # flood resumes after the blip
+
+
 class AnchorProviderTests(unittest.TestCase):
     def _anchor_ns(self, cfx_sweep, *, freewheel=False):
         now = time.monotonic()
