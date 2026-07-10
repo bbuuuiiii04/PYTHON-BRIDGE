@@ -2156,7 +2156,7 @@ def _slot_rt_post_drop_firework_remnants(beat: float, local_t: float, frame_inde
 
 def _slot_palette_comet(beat: float, local_t: float, frame_index: int,
                         params: Mapping[str, Any], segments: int, seed: int) -> MotionField:
-    """AWR-187 Part G: palette-cycling comet — _rainbow_ordered generalized
+    """AWR-188 Part G: palette-cycling comet — _rainbow_ordered generalized
     from baked hue to the track's injected palette slots (a palette, not a
     renderer branch: on rainbow-classified tracks the PALETTE is rainbow, so
     the same effect goes rainbow there). Same dual-head movement as the
@@ -2269,7 +2269,7 @@ _EFFECTS["drop_firework_explosion"] = _drop_firework_explosion
 # need allow_strobe=true + safety.allow_strobe=true (C5 validation).
 _EFFECTS["drop_firework_explosion_2"] = _drop_firework_explosion_2
 
-# AWR-187 Part G: palette-cycling comet — the rainbow generalization. A SLOT
+# AWR-188 Part G: palette-cycling comet — the rainbow generalization. A SLOT
 # effect (the point: the dispatch layer injects the track palette as
 # slot_colors), so it registers in SLOT_EFFECTS, additively per the Phase-2a
 # rule. Not a strobe.
@@ -2332,7 +2332,7 @@ _M2_PHASE2A_PARAM_KEYS: dict[str, frozenset[str]] = {
         frozenset({"width", "cycle_beats", "rainbow_span", "travel_per_beat",
                    "loop_beats", "duration_beats"}) | _SYNC_PARAM_KEYS
     ),
-    # AWR-187 Part G: same knobs as rainbow_ordered with palette_span in place
+    # AWR-188 Part G: same knobs as rainbow_ordered with palette_span in place
     # of rainbow_span. slot_colors stays runtime-injected, NOT allowlisted.
     "palette_comet": (
         frozenset({"width", "cycle_beats", "palette_span", "travel_per_beat",

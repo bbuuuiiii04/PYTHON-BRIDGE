@@ -1,4 +1,4 @@
-"""Part G (AWR-187): palette-cycling comet — renderer primitive, example-config
+"""Part G (AWR-188): palette-cycling comet — renderer primitive, example-config
 pair wiring, and the live-config staging script tools/apply_partg_palette_comet.py.
 
 The primitive generalizes the pulled BAKED-rainbow pair: a slot effect whose

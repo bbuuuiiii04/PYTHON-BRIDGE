@@ -2,7 +2,7 @@
 """Stage the Part G palette-cycling comet pair into an LED look-director config.
 
 Part G of docs/plans/active/rt_phase_ember_visibility_spec_2026_07_09.md
-(AWR-187): the palette-cycling comet replaces the pulled BAKED-rainbow pair.
+(AWR-188): the palette-cycling comet replaces the pulled BAKED-rainbow pair.
 The renderer/effect side (`palette_comet` slot effect, C5 allowlist, example
 config defs) ships in the repo; this script banks the pair into the LIVE
 config. It is delivered as a script because ledtune concurrently rewrites
