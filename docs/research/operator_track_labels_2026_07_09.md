@@ -277,7 +277,55 @@ cleared by ear, NO AWR-186; misread evidence below hands to the successor.
 
 ---
 
-## Session 1 close (19:45 hard save)
+## Review batch B2 — post-close continuation at operator order (verdicts bank as briefs)
+
+### B2-1 · TOXIC EVIL EDIT - SNAPT · 1:13.8 · blackout AGREES, tier+family MISREAD
+
+- **his words:** "toxic is having wall hits, not good, this track is like a dark
+  tech house track. blackout is perfect, definitely not a tier-3 WALL"
+- **measured:** WALL T3 bo4 (2-beat void). Ear: dark tech house — WALL presentation
+  firing is wrong (family), T3 inflated (tier).
+- **classification:** blackout AGREES; tier + family MISREAD (over-rate #2).
+- **systems:** f2, led
+
+### B2-2 · OMG (BRLLNT Remix) — NewJeans · 3:09.0 · blackout AGREES, tier MISREAD, laser exclusion
+
+- **his words:** "this is literally one of the most chill tracks i have. its a calm
+  piano track and reads more like deep house. 1 bar blackout is perfect for this.
+  wouldnt have any lasers on this track. super inflated"
+- **measured:** HOUSE T3 bo4 (2-beat void). Ear: chill/deep house, "super inflated".
+- **classification:** blackout AGREES; tier MISREAD (over-rate #3); PLUS a laser
+  BEHAVIOR VERDICT: zero lasers on this track — relayed to executive.
+- **systems:** f2, led, laser
+
+### B2-3 · BEAUZ - OCHO (LAXTER HARD EDIT) · whole-track darkness density · precise tuning verdict
+
+- **his words:** "this is a HARD techno track. 1:11 is correct, 1 bar for 1:59.6,
+  5 bar blackout for 3:24, and then before each chorus there is a 1 bar blackout
+  during the drop. darkness is warranted. btw, this track had phrase labels shifted
+  by 1 beat, just fixed it."
+- **decoded against the plan:** 1:11.6 bo16 CONFIRMED · 1:59.6 bo16 → TOO LONG,
+  should be 1 bar (16→4) · **3:24 wants a 5-bar (20-beat) blackout the system does
+  not have at all** (no firing there — successor measures what's at 3:24 post-fix) ·
+  the three 1-bar blacks into 3:47.6/3:59.6/4:11.6 CONFIRMED ("before each chorus").
+  Density verdict: five-plus blackouts in one hard techno track is RIGHT.
+- **input defect #2 (operator-fixed live):** phrase labels were shifted 1 beat; he
+  fixed them mid-review. Phrase-marker edit (not grid), so the v4 cache likely
+  survives, but ANLZ markers may be absent until Rekordbox re-analysis completes —
+  successor re-measures OCHO before trusting tonight's beat indices.
+- **classification:** PARTIAL (density + most windows right; one too-long window;
+  one wanted blackout entirely missing).
+- **systems:** f2, led
+
+### B2 emerging pattern (HYPOTHESIS — unverified, for the successor tier round)
+
+All three tier over-rates tonight (Scary Monsters, TOXIC EVIL, OMG) are drops
+approached through a deep sub void; the under-rate (REWIND) is a continuous
+wall-of-sound track. Violence terms (punch/attack) are contrast-shaped, so a
+silent approach may inflate them while sustained loudness suppresses them.
+Testable: do void-preceded drops systematically score higher violence than
+same-track non-void drops? (Selection-bias caveat: B-cases were drawn from the
+void-firing list.)
 
 14 primary entries across 3 fully-labeled tracks + 5 machine-picked review verdicts:
 AGREES 5 · PARTIAL 5 · BLIND 1 · MISREAD 2 · BEHAVIOR VERDICT 1. Shipped from
