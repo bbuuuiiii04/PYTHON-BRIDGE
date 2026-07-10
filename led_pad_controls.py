@@ -242,6 +242,30 @@ def controls_for(scene_ref: str) -> list[dict[str, Any]]:
     return controls
 
 
+def effective_lab_specs(param_specs: dict[str, Any]) -> tuple[dict[str, dict[str, Any]], list[str]]:
+    """Single-source lab slider bounds: CONTROL_META wins for shared keys.
+
+    For every key in ``param_specs`` that also exists in CONTROL_META, the
+    returned spec carries CONTROL_META's min/max/step/label (kind stays from
+    the spec). Keys whose stored bounds differ from CONTROL_META's are
+    reported in the conflicts list (surfaced, not silently absorbed). Lab-only
+    keys pass through unchanged. Pure function; input is not mutated.
+    """
+    effective: dict[str, dict[str, Any]] = {}
+    conflicts: list[str] = []
+    for raw_key, raw_spec in (param_specs or {}).items():
+        key = str(raw_key)
+        spec = dict(raw_spec) if isinstance(raw_spec, dict) else {}
+        meta = CONTROL_META.get(key)
+        if meta is not None:
+            if any(spec.get(field) != meta.get(field) for field in ("min", "max", "step")):
+                conflicts.append(key)
+            for field in ("min", "max", "step", "label"):
+                spec[field] = meta.get(field)
+        effective[key] = spec
+    return effective, conflicts
+
+
 def render_catalog() -> list[dict[str, Any]]:
     group_for: dict[str, str] = {}
     for group, names in RENDER_GROUPS.items():
