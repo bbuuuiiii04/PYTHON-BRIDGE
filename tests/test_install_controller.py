@@ -154,6 +154,90 @@ class ConfigOverrideEnvTests(unittest.TestCase):
         )
 
 
+class PerformPurgeTests(unittest.TestCase):
+    """Task 4 PURGE scoping — the tests/test_stick_commands.py discipline
+    (allowlist, '..' rejection, manifest-exactness) plus the three-root
+    removal order, against the pure helper."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.apps = root / "Applications"
+        self.support = root / "Application Support" / "RBSS Bridge"
+        self.logs = root / "Logs" / "rb_ss_bridge"
+        self.app = self.apps / "RBSS Bridge.app"
+        (self.app / "Contents").mkdir(parents=True)
+        (self.app / "Contents" / "bin").write_text("x")
+        cache = self.support / "spectral_cache" / "v4" / "a.json"
+        cache.parent.mkdir(parents=True)
+        cache.write_text("{}")
+        (self.support / "govee.env").write_text("GOVEE_API_KEY=test-key-not-real\n")
+        self.logs.mkdir(parents=True)
+        (self.logs / "current.jsonl").write_text("")
+        self.outside = root / "outside.txt"
+        self.outside.write_text("never remove me")
+        manifest = self.support / "install_manifest.txt"
+        manifest.write_text(
+            "\n".join(
+                [
+                    str(self.app),
+                    str(cache),
+                    str(self.support / "govee.env"),
+                    str(self.outside),  # outside the roots -> must be skipped
+                    str(self.apps / ".." / "escape.txt"),  # '..' -> must be skipped
+                ]
+            )
+            + "\n"
+        )
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _purge(self, own_app: Path | None = None) -> ic.PurgeResult:
+        return ic.perform_purge(
+            apps_dir=self.apps,
+            app_support=self.support,
+            logs_dir=self.logs,
+            own_app=own_app,
+        )
+
+    def test_allowlist_dotdot_and_three_roots(self) -> None:
+        result = self._purge()
+        self.assertFalse(self.app.exists())          # manifest path, apps root
+        self.assertFalse(self.support.exists())      # whole App Support dir
+        self.assertFalse(self.logs.exists())         # logs root
+        self.assertTrue(self.outside.exists())       # outside roots: untouched
+        self.assertEqual(len(result.skipped), 2)     # outside + '..' entries
+        self.assertEqual(result.failures, [])
+        self.assertIn("System Settings", result.remains_note)
+
+    def test_own_app_deferred_to_trash_step(self) -> None:
+        result = self._purge(own_app=self.app)
+        self.assertTrue(self.app.exists())  # menubar trashes it after purge
+        self.assertFalse(self.support.exists())
+        self.assertFalse(self.logs.exists())
+        self.assertEqual(result.failures, [])
+
+    def test_failure_records_and_continues(self) -> None:
+        from unittest import mock
+
+        with mock.patch.object(ic.shutil, "rmtree", side_effect=OSError("locked")):
+            result = self._purge()
+        # Every dir-removal failed but the purge kept going and reported all
+        # three (app bundle from the manifest + the two roots), never raised.
+        self.assertEqual(len(result.failures), 3)
+        self.assertTrue(any("RBSS Bridge.app" in f for f in result.failures))
+        # File-level manifest entries still removed (unlink is not rmtree).
+        self.assertFalse((self.support / "govee.env").exists())
+
+    def test_missing_manifest_still_removes_roots(self) -> None:
+        (self.support / "install_manifest.txt").unlink()
+        result = self._purge()
+        self.assertFalse(self.support.exists())
+        self.assertFalse(self.logs.exists())
+        self.assertTrue(any("manifest" in s for s in result.skipped))
+
+
 class FrozenStatePathTests(unittest.TestCase):
     """Task 3: local/state/* resolution — frozen runs move to App Support,
     source runs are byte-identical (the watcher's stores stay where they are)."""

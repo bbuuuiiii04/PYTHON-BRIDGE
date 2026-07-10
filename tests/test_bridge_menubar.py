@@ -891,6 +891,25 @@ class NativeInstallGateTests(BridgeMenubarTests):
                     f"install_controller import must never be module-level: {line!r}",
                 )
 
+    def test_purge_item_frozen_gated_and_worker_marshals_failure(self) -> None:
+        scripts_dir = Path(__file__).resolve().parents[1] / "scripts"
+        source = (scripts_dir / "bridge_menubar.py").read_text(encoding="utf-8")
+        self.assertIn("Purge RBSS Bridge…", source)
+        bridge_menubar = self._import_module()
+        worker = Mock()
+        handler = bridge_menubar.BridgeMenuBar._run_purge
+        with patch(
+            "rb_ss_bridge_v2.install_controller.perform_purge",
+            side_effect=OSError("disk gone"),
+        ), patch(
+            "rb_ss_bridge_v2.install_controller.bundle_root",
+            return_value=Path("/Users/x/Applications/RBSS Bridge.app"),
+        ):
+            handler(worker)
+        args = worker.performSelectorOnMainThread_withObject_waitUntilDone_.call_args.args
+        self.assertEqual(args[0], "finishPurge:")
+        self.assertTrue(args[1]["failures"])
+
     def test_install_worker_marshals_failure_to_dialog(self) -> None:
         bridge_menubar = self._import_module()
         worker = Mock()

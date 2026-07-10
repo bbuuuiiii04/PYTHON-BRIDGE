@@ -869,12 +869,15 @@ class BridgeMenuBar(NSObject):
         # menubars never import install_controller and stay byte-identical.
         # Shown only when running from the DMG/translocation with no manifest.
         self.install_item = None
+        self.purge_item = None
         self._install_in_progress = False
+        self._purge_in_progress = False
         if getattr(sys, "frozen", False):
             from rb_ss_bridge_v2.install_controller import (
                 APP_SUPPORT_DIR,
                 MANIFEST_NAME,
                 bundle_root,
+                running_from_read_only_location,
                 should_offer_install,
             )
 
@@ -887,6 +890,20 @@ class BridgeMenuBar(NSObject):
                 self.install_item.setTarget_(self)
                 self.menu.insertItem_atIndex_(self.install_item, 0)
                 self.menu.insertItem_atIndex_(NSMenuItem.separatorItem(), 1)
+            # PURGE (AWR-186 Task 4): installed copies only — manifest present
+            # and not running from the DMG/translocation.
+            if (
+                manifest_exists
+                and bundle is not None
+                and not running_from_read_only_location(bundle)
+            ):
+                self.purge_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                    "Purge RBSS Bridge…", "purgeBridge:", ""
+                )
+                self.purge_item.setTarget_(self)
+                self.menu.insertItem_atIndex_(
+                    self.purge_item, self.menu.indexOfItem_(self.quit_item)
+                )
         self.status_item.setMenu_(self.menu)
         self._status = None
         self._snapshot = {}
@@ -1191,6 +1208,20 @@ class BridgeMenuBar(NSObject):
         else:
             button.setImage_(None)
 
+    def _stop_frozen_bridge_child(self) -> bool:
+        """Stop the owned bridge child by handle (never pkill/pattern — the
+        flock is the real single-instance guard). True if one was stopped."""
+        proc = getattr(self, "_frozen_bridge_proc", None)
+        if proc is None or proc.poll() is not None:
+            return False
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        self._frozen_bridge_proc = None
+        return True
+
     def _toggle_bridge_frozen(self) -> None:
         # Frozen bundle only: the menubar owns the bridge as its OWN child
         # process (a re-exec of this binary with --run-bridge). No pkill / no
@@ -1198,14 +1229,7 @@ class BridgeMenuBar(NSObject):
         # source-run regexes, and the exclusive flock is the real
         # single-instance guard. M1 is launch-on-click with no auto-restart;
         # M2 finalizes the frozen lifecycle (see the runbook).
-        proc = getattr(self, "_frozen_bridge_proc", None)
-        if proc is not None and proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-            self._frozen_bridge_proc = None
+        if self._stop_frozen_bridge_child():
             return
         # Not running: spawn one child bridge. If another bridge (source-run or
         # bundled) already holds the flock, the child logs the refusal and exits
@@ -1325,6 +1349,89 @@ class BridgeMenuBar(NSObject):
             subprocess.Popen(
                 ["/bin/sh", "-c", f'sleep 1; hdiutil detach "{mount}" -quiet'],
                 start_new_session=True,
+            )
+        NSApplication.sharedApplication().terminate_(self)
+
+    def purgeBridge_(self, _sender):
+        if self._purge_in_progress:
+            return
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_("Purge RBSS Bridge from this Mac?")
+        alert.setInformativeText_(
+            "Removes: the app in ~/Applications, everything in "
+            "~/Library/Application Support/RBSS Bridge (installed configs, Govee "
+            "key, analysis cache, learned state), and the logs in "
+            "~/Library/Logs/rb_ss_bridge. The USB stick and its DMG are NOT "
+            "touched. Permission entries in System Settings stay (macOS keeps "
+            "those; they are inert)."
+        )
+        alert.addButtonWithTitle_("Purge")
+        alert.addButtonWithTitle_("Cancel")
+        if alert.runModal() != NSAlertFirstButtonReturn:
+            return
+        self._purge_in_progress = True
+        self.purge_item.setEnabled_(False)
+        self.purge_item.setTitle_("Purging…")
+        # Stop the owned bridge child FIRST, by handle + flock (M1 rule:
+        # never pkill/pattern), so nothing writes while files disappear.
+        self._stop_frozen_bridge_child()
+        threading.Thread(target=self._run_purge, daemon=True).start()
+
+    def _run_purge(self):
+        from rb_ss_bridge_v2.install_controller import bundle_root, perform_purge
+
+        try:
+            own = bundle_root(sys.executable)
+            result = perform_purge(own_app=own)
+            payload = {
+                "removed": result.removed,
+                "failures": list(result.failures),
+                "skipped": list(result.skipped),
+                "remains_note": result.remains_note,
+                "own_app": str(own or ""),
+            }
+        except Exception as exc:  # marshal to a visible dialog — never die silently
+            payload = {
+                "removed": 0,
+                "failures": [f"unexpected error ({type(exc).__name__})"],
+                "skipped": [],
+                "remains_note": "",
+                "own_app": "",
+            }
+        self.performSelectorOnMainThread_withObject_waitUntilDone_(
+            "finishPurge:", payload, False,
+        )
+
+    def finishPurge_(self, payload):
+        self._purge_in_progress = False
+        alert = NSAlert.alloc().init()
+        failures = payload.get("failures") or []
+        if failures:
+            alert.setMessageText_("Purge finished with leftovers")
+            detail = "; ".join(failures[:5])
+            alert.setInformativeText_(
+                f"Removed {payload.get('removed', 0)} item(s). Could not remove: "
+                f"{detail}. {payload.get('remains_note', '')}"
+            )
+        else:
+            alert.setMessageText_("Purged")
+            alert.setInformativeText_(
+                f"Removed {payload.get('removed', 0)} item(s). The app itself now "
+                f"moves to the Trash and the menubar quits. "
+                f"{payload.get('remains_note', '')}"
+            )
+        alert.addButtonWithTitle_("OK")
+        alert.runModal()
+        own_app = payload.get("own_app")
+        if own_app:
+            # Move the running bundle to Trash [assumed mechanism — macOS allows
+            # trashing a running app's bundle; the operator walkthrough verifies].
+            from Foundation import NSURL
+
+            from AppKit import NSWorkspace
+
+            NSWorkspace.sharedWorkspace().recycleURLs_completionHandler_(
+                [NSURL.fileURLWithPath_(own_app)], None
             )
         NSApplication.sharedApplication().terminate_(self)
 

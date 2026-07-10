@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import shutil
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePath
 
 APP_SUPPORT_DIR = Path.home() / "Library" / "Application Support" / "RBSS Bridge"
 APPS_DIR = Path.home() / "Applications"
@@ -149,4 +149,81 @@ def perform_install(
         )
 
     result.ok = True
+    return result
+
+
+def path_is_removable(path: str, *, apps_dir: Path = APPS_DIR, app_support: Path = APP_SUPPORT_DIR) -> bool:
+    """Same allowlist discipline as packaging/stick/purge.command: a manifest
+    entry is removable only under ~/Applications or the RBSS App Support dir,
+    and never with a '..' component."""
+    if ".." in PurePath(path).parts:
+        return False
+    text = str(path)
+    return text.startswith(f"{apps_dir}/") or text.startswith(f"{app_support}/")
+
+
+@dataclass
+class PurgeResult:
+    removed: int = 0
+    skipped: list[str] = field(default_factory=list)
+    failures: list[str] = field(default_factory=list)
+    remains_note: str = (
+        "Permission entries in System Settings stay (macOS keeps those; inert)."
+    )
+
+
+def perform_purge(
+    *,
+    apps_dir: Path = APPS_DIR,
+    app_support: Path = APP_SUPPORT_DIR,
+    logs_dir: Path = LOGS_DIR,
+    own_app: Path | None = None,
+) -> PurgeResult:
+    """Remove everything the bridge installed or created — three roots, in order.
+
+    1. Manifest paths (exactly, allowlist-checked, '..' rejected) — skipping
+       ``own_app``, which the menubar moves to Trash itself after this returns.
+    2. The whole App Support dir (configs/secrets/caches/state, incl. manifest).
+    3. ~/Library/Logs/rb_ss_bridge.
+
+    A failed item is recorded and the purge CONTINUES to the next removable
+    item — never a silent half-broken stop. Touches nothing outside the three
+    roots: not the stick, not the DMG, not other volumes.
+    """
+    result = PurgeResult()
+    manifest = app_support / MANIFEST_NAME
+    lines: list[str] = []
+    try:
+        lines = [
+            line.strip()
+            for line in manifest.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+    except OSError:
+        result.skipped.append(f"no readable manifest at {manifest}")
+
+    for line in lines:
+        if own_app is not None and line == str(own_app):
+            continue  # the running bundle goes to Trash after purge
+        if not path_is_removable(line, apps_dir=apps_dir, app_support=app_support):
+            result.skipped.append(line)
+            continue
+        target = Path(line)
+        try:
+            if target.is_dir() and not target.is_symlink():
+                shutil.rmtree(target)
+            else:
+                target.unlink(missing_ok=True)
+            result.removed += 1
+        except OSError as exc:
+            result.failures.append(f"{line} ({type(exc).__name__})")
+
+    for root in (app_support, logs_dir):
+        if not root.exists():
+            continue
+        try:
+            shutil.rmtree(root)
+            result.removed += 1
+        except OSError as exc:
+            result.failures.append(f"{root} ({type(exc).__name__})")
     return result
