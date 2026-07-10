@@ -84,6 +84,12 @@ status) are allowed during boot; mutations are not.
 - Nobody certifies their own work. Compressed chains are allowed under clock
   pressure but the gate evidence must be at YOUR desk (re-run tests yourself,
   read the diff yourself).
+- REVIEW-LOOP DEFAULT (operator-prompted correction, 2026-07-09 ~22:50): any
+  round touching RUNTIME BEHAVIOR gets a full independent adversarial review
+  regardless of clock. Compression is legal only for docs, loader-proven config,
+  and test-only changes. Context: 5 of 9 code rounds tonight ran compressed;
+  the suite caught what both full reviews missed (pad wiring) — the loop helps,
+  it does not sanctify; run BOTH.
 - Model/effort pins: launch flags for non-interactive CLIs; verify by eyeball.
   Top-tier model never below the manager seat.
 - Operator-attended lanes (he types into them directly) are HANDS OFF without
