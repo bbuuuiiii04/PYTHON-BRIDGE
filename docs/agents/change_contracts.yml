@@ -290,11 +290,13 @@ contracts:
     inspect:
       - docs/plans/active/usb_bridge_launcher_design.md
       - docs/plans/active/usb_bridge_launcher_m1_codex_spec.md
+      - docs/plans/active/usb_bridge_launcher_m2_codex_spec.md
       - docs/architecture/doc_index.md
     tests:
       - python3 -m unittest tests.test_launch_profile
       - python3 -m unittest tests.test_usb_launcher
       - python3 -m unittest tests.test_launch_agent_plist
+      - python3 -m unittest tests.test_make_stick
       - python3 -m unittest discover tests
       - python3 tools/check_docs_metadata.py
       - python3 tools/check_agent_contracts.py
