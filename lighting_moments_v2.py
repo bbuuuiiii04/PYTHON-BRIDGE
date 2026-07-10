@@ -41,6 +41,8 @@ The `reason` string on every decision is the D§12 observability contract.
 
 from __future__ import annotations
 
+import os
+
 from dataclasses import dataclass, field
 from typing import Any, Optional, Sequence
 
@@ -434,6 +436,33 @@ def _abort(v4: SpectralFeaturesV4, drop: int, beats: int) -> tuple[Optional[int]
         if present(bb) and present(bb + 1):
             return bb, bb - w_start
     return None, beats
+
+
+# AWR-199 interim guard (day-0, SOL2-confirmed hazard): the deep-sub-void rung's
+# round-up window is drop-anchored, but tolerant_scan lets the void END up to
+# 3 beats before the drop — those returned-music pickup beats were planned dark
+# with no release. The release boundary is operator-verdicted, not invented:
+# 1-beat pickups stay dark (Utopia b384 "1 bar blackout" counts its lone
+# transient), 2-beat pickups stay dark (TOXIC b159 / OMG b400 "perfect" verdicts
+# are gap-2 windows), so ONLY a >=3-beat returned-music run — the one reachable
+# shape no verdict covers, and exactly the SOL2 repro — releases, at the first
+# returned beat. The round-up padding BEFORE the void always stays dark (the
+# b192 2-bar label counts from the musical cut). Stage 2 (AWR-195) replaces
+# this with the approach-shape classifier; the growl min() gate is measured out
+# of scope here (a tail gate flips 52/93 library firings incl. an operator pin
+# — see the AWR-199 spec).
+PICKUP_ABORT_ENV = "RBSS_F2_VOID_PICKUP_ABORT"
+_PICKUP_ABORT_ON = os.environ.get(PICKUP_ABORT_ENV, "1") != "0"
+
+
+def _pickup_abort(sub: Sequence[float], e: int, drop: int) -> Optional[int]:
+    """Release beat for a deep-sub-void window whose void ended >= 3 beats
+    before the drop with the floor audibly back the whole way, else None.
+    AWR-199; boundary per the operator gap-0/1/2 verdicts."""
+    if drop - 1 - e >= 3 and all(
+            sub[b] >= FLOOR_PRESENT_DB for b in range(e + 1, drop)):
+        return e + 1
+    return None
 
 
 def darkness_ladder(v4: SpectralFeaturesV4, drop: int, family: str,
