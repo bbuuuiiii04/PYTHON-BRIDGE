@@ -31,6 +31,29 @@ Audit P3 (2026-07-03):
   StateManager push-loop caller; the runner thread now performs that teardown before another frame
   is sent.
 
+Firework redesign (AWR-187, 2026-07-09; implemented, software-tested, hardware-unvalidated):
+- Operator visual spec (verbatim acceptance): "the firework background explosion should strobe with
+  sparkling hues and then when the firework explosion background quickly dims, the embers continue
+  to aggressively spark." New frame effect `drop_firework_explosion_2` replaces the AWR-161 v1 read
+  ("white flash → relax → slow sparkle"): the explosion window (2×`surge_beats`, default 0.25) is a
+  multi-hue field strobed by `_hz_strobe_on` (hz/duty dialable; hues re-dealt per pixel each flash
+  from the injected palette tints — `color_a`/`color_b` arrive via the engine multi inject with
+  `color_source: engine`, `spark_a`/`spark_b` join the pool), then the background quick-dims to a
+  much lower `bg_hold` (default 0.25, floor 0.0; v1 held 0.7/floor 0.2) and the ember field sparks
+  aggressively over it (`_ember_env` fast-in/exp-out, `sparkle_life_s` 0.15, `sparkle_density` 0.5,
+  blend-replace keeps embers full-intensity; embers stay time-based per AWR-153). Registered as a
+  STROBE (`REALTIME_STROBE_EFFECTS` + hz/duty/color_b in the C5 allowlist), so the look needs
+  `allow_strobe: true` + `safety.allow_strobe: true`. Measured post-dim ember contrast at defaults:
+  195/255 against the AWR-161 ≥60 bar, same measurement. v1 `drop_firework_explosion` stays
+  registered (non-strobe) so the pre-apply live config keeps validating; the executive gate flips
+  the live `rt_drop_firework_explosion` look via `tools/apply_firework_redesign.py` (atomic write +
+  one-time `.pre_awr187.bak` backup, refuses without `safety.allow_strobe`, idempotent) — retire v1
+  and collapse the two-state live-config tripwire in `tests/test_led_color_engine_m2_patch_d.py`
+  after the gate. Files: `govee_frame_renderer.py`, `led_pad_controls.py` (pad defaults diverge
+  from v1 via `PARAM_DEFAULT_OVERRIDES`; `bg_hold` min 0.2→0), `config/led_look_director.example.json`,
+  `tools/apply_firework_redesign.py`. Tests: rewritten `DropFireworkExplosionTests`,
+  `tests/test_apply_firework_redesign.py`. SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
+
 LED round 3: Hz-gate migration + rainbow/firework promotions + center-burst fix (AWR-161, 2026-07-09; implemented, software-tested, hardware-unvalidated):
 - Migrated the last ten BPM-tied `int(beat*16.0)%2==0` / `int(cue_beat*16.0)%2==0` strobe gates onto
   the AWR-156 `_hz_strobe_on(local_t, params)` wall-clock gate (hz 6.0 / duty 0.3 defaults, same
