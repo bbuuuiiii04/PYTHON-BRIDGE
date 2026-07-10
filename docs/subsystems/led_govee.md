@@ -44,7 +44,7 @@ Firework redesign (AWR-187, 2026-07-09; implemented, software-tested, hardware-u
   blend-replace keeps embers full-intensity; embers stay time-based per AWR-153). Registered as a
   STROBE (`REALTIME_STROBE_EFFECTS` + hz/duty/color_b in the C5 allowlist), so the look needs
   `allow_strobe: true` + `safety.allow_strobe: true`. Measured post-dim ember contrast at defaults:
-  195/255 against the AWR-161 ≥60 bar, same measurement. v1 `drop_firework_explosion` stays
+  200/255 against the AWR-161 ≥60 bar, same measurement. v1 `drop_firework_explosion` stays
   registered (non-strobe) so the pre-apply live config keeps validating; the executive gate flips
   the live `rt_drop_firework_explosion` look via `tools/apply_firework_redesign.py` (atomic write +
   one-time `.pre_awr187.bak` backup, refuses without `safety.allow_strobe`, idempotent) — retire v1
