@@ -117,8 +117,11 @@ SoundSwitch pack-player boundary (T7c/T7e):
   toggle + info rows only, LED Engine v2, Laser Pad…, LED Pad…) → sep →
   AUTHORING + CHECKS block (Export, export status line, Record Session, Test
   the Lights…, Run Health Check) → sep → MAINTENANCE block (the AWR-186 M2
-  install/purge slot, then Quit — retitled "Quit Menu" → "Quit Menubar (bridge
-  keeps running)"). The LEDs glance row reads the `led_look_director` status
+  purge slot, then Quit — retitled "Quit Menu" → "Quit Menubar (bridge keeps
+  running)"). The M2 install offer is NOT in the maintenance block: per the M2
+  spec it stays the PRIMARY item on DMG-guest runs — inserted at the very top
+  of the menu (index 0 + separator) after the blueprint walk, M2's original
+  mechanism verbatim. The LEDs glance row reads the `led_look_director` status
   block via the pure `led_row_fields()` helper: On/Off/— state, achieved fps
   (only while realtime is active), active effect, current palette, and the
   adapter `degraded_reason` as an orange suffix; every field fails soft to
@@ -136,9 +139,10 @@ SoundSwitch pack-player boundary (T7c/T7e):
   bridge child by handle first, removes manifest paths (allowlist, `..`
   rejected) then the whole App Support dir then `~/Library/Logs/rb_ss_bridge`,
   then Trashes its own bundle and quits. Neither sends runtime commands.
-  AWR-192 moved WHERE they sit (both now in the MAINTENANCE block between the
-  last separator and Quit, install first) — position only; titles, selectors,
-  gating, and confirmation flows are M2's, verbatim.
+  AWR-192 moved only WHERE purge sits (now in the MAINTENANCE block between
+  the last separator and Quit); the install offer keeps M2's primary top-of-
+  menu position on DMG-guest runs. Titles, selectors, gating, and confirmation
+  flows are M2's, verbatim.
 
 Authoritative code:
 - `runtime_status.py`

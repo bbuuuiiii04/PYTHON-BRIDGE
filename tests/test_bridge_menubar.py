@@ -977,7 +977,10 @@ class BridgeMenubarTests(unittest.TestCase):
 
     def test_menu_blueprint_selector_inventory_exact(self) -> None:
         # The regroup adds/removes NO commands: the selector multiset is the
-        # pre-refactor 14 plus the two AWR-186 M2 selectors — each exactly once.
+        # pre-refactor 14 plus M2's purge — each exactly once. The install
+        # offer is deliberately NOT a blueprint entry: per the M2 spec it is
+        # primary-positioned (insertItem_atIndex_ 0 after the walk), and its
+        # source/gating is pinned by NativeInstallGateTests.
         bridge_menubar = self._import_module()
         flat = self._flatten_blueprint(bridge_menubar.MENU_BLUEPRINT)
         selectors = sorted(e[3] for e in flat if e[3])
@@ -989,9 +992,10 @@ class BridgeMenubarTests(unittest.TestCase):
                 "laserBlackout:", "laserClearBlackout:", "runValidation:",
                 "toggleRecordSession:", "testLights:", "mapLasers:",
                 "openLedPad:", "toggleLedEngineV2:", "quit:",
-                "installOnMac:", "purgeBridge:",
+                "purgeBridge:",
             ]),
         )
+        self.assertNotIn("installOnMac:", selectors)
 
     def test_menu_blueprint_blackout_promoted_to_top_level(self) -> None:
         bridge_menubar = self._import_module()
@@ -1010,16 +1014,15 @@ class BridgeMenubarTests(unittest.TestCase):
 
     def test_menu_blueprint_maintenance_block_order(self) -> None:
         # Purge sits after the last separator and before quit; quit is last.
+        # (Install is not a blueprint entry — see the selector-inventory test.)
         bridge_menubar = self._import_module()
         blueprint = bridge_menubar.MENU_BLUEPRINT
         self.assertEqual(blueprint[-1][1], "quit_item")
         attrs = [e[1] for e in blueprint]
         last_sep = max(i for i, e in enumerate(blueprint) if e[0] == "sep")
-        install_i = attrs.index("install_item")
         purge_i = attrs.index("purge_item")
         quit_i = attrs.index("quit_item")
-        self.assertLess(last_sep, install_i)
-        self.assertLess(install_i, purge_i)
+        self.assertLess(last_sep, purge_i)
         self.assertLess(purge_i, quit_i)
 
     def test_menu_blueprint_attrs_unique(self) -> None:
