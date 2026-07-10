@@ -4,18 +4,20 @@ truth_level: dispatch-brief
 last_verified_commit: 67ce0f9
 last_verified_date: 2026-07-09
 validation_scope: >
-  Dispatch brief for the AWR-186 M2 build orchestrator (Opus seat, tmux usbm2,
-  spawned ~22:45 2026-07-09 by the usb build manager on the operator's explicit
-  override: "no, i approve for it to be done NOW" — supersedes the Jul-11 banking;
+  Dispatch brief for the AWR-186 M2 build orchestrator (Fable/XHIGH per the standing
+  operator order "FABLE XHIGH FOR EVERYTHING"; tmux usbm2, FIRES 00:05 via the
+  executive's armed trigger — quota sequencing ruling, full window; authorized by
+  the operator's explicit override: "no, i approve for it to be done NOW";
   approvals recorded in the AWR-186 registry row). Executes
   docs/plans/active/usb_bridge_launcher_m2_codex_spec.md under the
   docs/agents/opus_seat_harness.md rails.
 ---
 
-# M2 build orchestrator brief (tmux usbm2, Opus/HIGH)
+# M2 build orchestrator brief (tmux usbm2, Fable/XHIGH, fires 00:05)
 
 You are the M2 BUILD ORCHESTRATOR. Read, in order, then execute:
-1. `docs/agents/opus_seat_harness.md` — your rails; every rule applies to you.
+1. `docs/agents/opus_seat_harness.md` — your rails; every rule applies to you
+   regardless of seat model (you are Fable/XHIGH by standing operator order).
 2. `docs/plans/active/usb_bridge_launcher_m2_codex_spec.md` — THE spec (AWR-186).
    Written for Codex; you execute it unchanged, task by task, Task 0 first.
 3. `docs/plans/active/usb_launcher_m2_operator_directive_2026_07_09.md` — the
