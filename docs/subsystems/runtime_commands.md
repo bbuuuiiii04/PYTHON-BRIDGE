@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 9a432b8
+last_verified_commit: 0eec665
 last_verified_date: 2026-07-10
 validation_scope: software-only; Stream Deck palette control runtime command rail plus AWR-121 gesture v2 interactions software-tested; AWR-192 menubar layout software-tested
 ---
