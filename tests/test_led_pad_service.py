@@ -81,6 +81,19 @@ class LedPadServiceTests(unittest.TestCase):
         path = self._copy_config(td)
         return LedPadService(path, dry_run=True, playback=playback), playback, path
 
+    def _lab_service(self, td: str) -> tuple[LedPadService, _FakePlayback]:
+        playback = _FakePlayback()
+        path = self._copy_config(td)
+        lab_dir = Path(td) / "led_lab"
+        lab_dir.mkdir(parents=True, exist_ok=True)
+        (lab_dir / "effects_lab.py").write_text(
+            "def pulse(beat_pos, local_t, frame_index, params, segments, seed):\n"
+            "    return [[params.get('level', 1.0), 0, 0, 0, 0, 1] for _ in range(segments)]\n"
+            "LAB_EFFECTS = {'pulse': ('slot', pulse)}\n",
+            encoding="utf-8",
+        )
+        return LedPadService(path, dry_run=True, playback=playback, lab_dir=lab_dir), playback
+
     @contextmanager
     def _running_server(self, service: LedPadService):
         server = ThreadingHTTPServer(("127.0.0.1", 0), build_handler(service))
@@ -310,6 +323,37 @@ class LedPadServiceTests(unittest.TestCase):
             self.assertTrue(payload["loopback_only"])
             self.assertIsNone(payload["lan_url"])
             self.assertEqual(payload["bound_host"], "127.0.0.1")
+
+    def test_lab_accept_snapshots_last_applied_pre_injection_params(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service, playback = self._lab_service(td)
+            service.lab_save({"name": "pulse", "kind": "slot", "fn": "pulse", "params": {"level": 0.3}, "cue_beats": 8})
+
+            service.lab_play({"name": "pulse", "params": {"level": 0.9}})
+            result = service.lab_accept({"name": "pulse"})
+            entry = service._lab.get("pulse")
+
+            self.assertTrue(result["ok"])
+            self.assertTrue(result["snapshotted"])
+            self.assertEqual(entry["status"], "accepted")
+            # Saved params == author params + live overlay, pre-injection.
+            self.assertEqual(entry["params"], {"level": 0.9})
+            self.assertNotIn("slot_colors", entry["params"])
+            # What actually played DID carry the injected palette colors.
+            self.assertIn("slot_colors", playback.play_calls[0]["spec"]["params"])
+
+    def test_lab_accept_without_play_reports_not_snapshotted(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service, _playback = self._lab_service(td)
+            service.lab_save({"name": "pulse", "kind": "slot", "fn": "pulse", "params": {"level": 0.3}, "cue_beats": 8})
+
+            result = service.lab_accept({"name": "pulse"})
+            entry = service._lab.get("pulse")
+
+            self.assertTrue(result["ok"])
+            self.assertFalse(result["snapshotted"])
+            self.assertEqual(entry["status"], "accepted")
+            self.assertEqual(entry["params"], {"level": 0.3})
 
     def test_http_lab_archive_route_and_unknown_name_400(self) -> None:
         with tempfile.TemporaryDirectory() as td:

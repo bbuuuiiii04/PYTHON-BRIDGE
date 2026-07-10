@@ -73,6 +73,17 @@
     renderParamControls();
     renderCue();
     renderLive();
+    setDirty();
+  }
+
+  // Dirty chip (pad-ui.js setDirty pattern): editor params vs saved entry params.
+  function setDirty() {
+    if (!state.current) { $("labDirtyChip").textContent = ""; return; }
+    let params;
+    try { params = JSON.parse($("paramsInput").value || "{}"); } catch { params = null; }
+    const dirty = params === null || JSON.stringify(params) !== JSON.stringify(state.current.params || {});
+    $("labDirtyChip").textContent = dirty ? "Unsaved tweaks" : "Saved";
+    $("labDirtyChip").className = dirty ? "warn-text" : "dim";
   }
 
   function renderCue() {
@@ -149,7 +160,7 @@
     applyTimer = setTimeout(async () => {
       if (!state.current || state.playingLook !== labScene(state.current.name)) return;
       let params;
-      try { params = JSON.parse($("paramsInput").value || "{}"); } catch { return; }
+      try { params = JSON.parse($("paramsInput").value || "{}"); } catch { showError("Params JSON invalid — live apply paused"); return; }
       try {
         const res = await api.labSave(currentPayload());
         state.current = res.entry;
@@ -190,6 +201,7 @@
       if (output) output.textContent = input.value;
     }
     $("paramsInput").value = JSON.stringify(params, null, 2);
+    setDirty();
     queueAutoApply();
   }
 
@@ -275,7 +287,7 @@
     await refresh();
   });
   $("paramsInput").onblur = () => { try { JSON.parse($("paramsInput").value || "{}"); clearError(); } catch (err) { showError(err); } };
-  $("paramsInput").oninput = () => queueAutoApply();
+  $("paramsInput").oninput = () => { setDirty(); queueAutoApply(); };
   $("bpmInput").onchange = ev => api.session({bpm:Number(ev.target.value)}).catch(showError);
   document.querySelectorAll("[data-step]").forEach(btn => btn.onclick = () => { $("bpmInput").value = Number($("bpmInput").value || 128) + Number(btn.dataset.step); $("bpmInput").dispatchEvent(new Event("change")); });
   $("paletteSelect").onchange = ev => api.session({test_palette:ev.target.value}).catch(showError);

@@ -220,6 +220,9 @@ class LedPadService:
             self._playback = playback_factory(result.config) if playback_factory else PadPlayback(result.config, dry_run=dry_run, renderer=self._lab_renderer)
         self._playing_name = ""
         self._last_play_editor: dict[str, Any] | None = None
+        # Accept-what-you-hear: last APPLIED pre-injection params per lab draft
+        # (author params + live UI overrides; palette-injected colors excluded).
+        self._last_lab_applied: dict[str, dict[str, Any]] = {}
 
     @property
     def draft_path(self) -> Path:
@@ -610,7 +613,17 @@ class LedPadService:
         return self._lab.save(payload)
 
     def lab_accept(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._lab.set_status(str(payload.get("name", "")).strip(), "accepted")
+        # Accept-what-you-hear: write the last-applied pre-injection params into
+        # the entry in the SAME save that flips status.
+        name = str(payload.get("name", "")).strip()
+        entry = self._lab.get(name)
+        snapshot = self._last_lab_applied.get(name)
+        if snapshot is not None:
+            entry["params"] = copy.deepcopy(snapshot)
+        entry["status"] = "accepted"
+        result = self._lab.save(entry)
+        result["snapshotted"] = snapshot is not None
+        return result
 
     def lab_reject(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._lab.set_status(str(payload.get("name", "")).strip(), "rejected")
@@ -637,6 +650,7 @@ class LedPadService:
         params = copy.deepcopy(entry.get("params") or {})
         if isinstance(payload.get("params"), dict):
             params.update(copy.deepcopy(payload["params"]))
+        self._last_lab_applied[name] = copy.deepcopy(params)
         look = {"scene_ref": LabRegistry.scene_ref(name), "color_source": "engine"}
         self._inject_engine_colors(config, LabRegistry.scene_ref(name), look, params, force_slot=(kind == "slot"))
         return {
