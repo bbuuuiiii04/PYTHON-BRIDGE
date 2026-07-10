@@ -42,6 +42,12 @@ python -m pytest tests
 | Frontend tools | syntax and smoke tests | does not prove live safety |
 | Docs/agent workflow | docs metadata, agent contract, drift, and staleness checkers | docs-only validation |
 
+AWR-197 adds `tests/test_speed_size_law.py`:
+`test_example_config_carries_the_speed_law`, `test_example_config_has_no_dead_pairs`,
+`test_apply_is_idempotent`, `test_apply_never_clobbers_existing`, and
+`test_apply_aborts_on_missing_look`. The patch_b `test_tracked_config_validates` also pins the
+approved explicit `loop_beats` literal. These are config/tool software checks only.
+
 ## Required documentation update
 
 When adding or changing tests, update:

@@ -31,6 +31,12 @@ Audit P3 (2026-07-03):
   StateManager push-loop caller; the runner thread now performs that teardown before another frame
   is sent.
 
+Speed/size law (AWR-197, 2026-07-10; staged, software-tested, hardware-unvalidated): realtime
+groove, breakdown, drop, and post-drop looks carry explicit beat-speed parameters by musical role,
+with big drop looks paired to smaller post-drop echoes. The law's terms live in
+`tools/apply_speed_size_law.py` `SPEED_PARAMS`; the tracked example config carries them, and the
+idempotent live-config apply sets only missing values so it never overwrites operator tuning.
+
 Firework redesign (AWR-187, 2026-07-09; implemented, software-tested, hardware-unvalidated):
 - Operator visual spec (verbatim acceptance): "the firework background explosion should strobe with
   sparkling hues and then when the firework explosion background quickly dims, the embers continue
