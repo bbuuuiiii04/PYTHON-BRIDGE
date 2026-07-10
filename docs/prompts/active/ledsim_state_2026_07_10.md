@@ -10,7 +10,16 @@ validation_scope: >
   row -> this file, then verifies every lane FRESH against reality.
 ---
 
-# ledsim manager state — AWR-196 (updated 2026-07-10 ~01:0x)
+# ledsim manager state — AWR-196 (updated 2026-07-10 ~01:2x — ROUND CLOSED AT MANAGER LEVEL)
+
+**FINAL: build landed (ledsimb, Fable/xhigh), manager adversarial review PASS
+(re-derived at my desk: 24 tests, fence, imports, parity, independent smoke,
+hard checks; two nits noted, no fix round). Report =
+/tmp/rbss_lane_signals/ledsim.SIM.report.md; .done signaled; superman5
+notified (superman4 retired mid-round). Registry cell carries the full review
+verdict. OPEN: executive gate, then operator calibration pass (the only
+accuracy source). Live-frame capture for true replay = banked decision.**
+Everything below is the mid-round trail, kept for provenance.
 
 ## Where we are
 - Charter read in full; org doctrine + opus harness loaded; codex-spec skill read.
