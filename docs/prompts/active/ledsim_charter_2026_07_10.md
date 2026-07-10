@@ -1,7 +1,7 @@
 # LEDSIM charter — accurate LED render & simulation (operator order ~23:50)
 
 doc_status: current
-truth_level: dispatch-charter (HOLD — awaiting operator room images, more coming)
+truth_level: dispatch-charter (ACTIVE)
 seat: dedicated Fable/xhigh manager lane `ledsim`, own build workflow, full review chain
 
 ## Operator order (verbatim intent)
@@ -17,8 +17,18 @@ Needs to be a near perfect real life representation."
 - **360 individual LEDs → 60 controllable segments × 6 LEDs per segment**
   (matches the bridge's 60-segment frame width)
 - Mount: **top-of-wall perimeter of a rectangular living room** ("[ ]" — full loop)
-- {{PENDING OPERATOR IMAGES: room photos/dimensions, strip start point + travel
-  direction, corner segment indices, controller location, gaps/doorways}}
+- Room: RECTANGULAR, strip on the full perimeter at top-of-wall. Operator ruling
+  2026-07-10 ~00:4x: NO room shots — geometry is SELF-CALIBRATED in the sim.
+  One dimension supplied: "2284" (unit unconfirmed; treat as mm ⇒ ~2.28m short
+  wall; with full-perimeter coverage 2(a+b)=15m ⇒ long wall ≈ 5.22m — DEFAULT
+  layout only, everything below overrides it).
+- SELF-CALIBRATION IS THE DESIGN (replaces photos): the four corner positions
+  (as segment indices), the start-segment/controller corner, and travel
+  direction are DRAGGABLE calibration knobs in the sim UI. Calibration flow:
+  operator plays a chase on the real strip, drags corners/start until the sim
+  matches what his eyes see, saves — persisted as the device profile. Strip
+  macro photos on file with the executive (per-segment IC, alternating emitter
+  packages, cut pads, powered head) inform the diffusion/bleed model.
 
 ## The five accuracy axes (what "near perfect" decomposes into)
 
@@ -54,7 +64,6 @@ Needs to be a near perfect real life representation."
 - Registry id assigned at dispatch by the executive. Signals + report files per
   fleet protocol (executive is outside tmux; mailbox + signal files).
 
-## HOLD
+## Registry
 
-Dispatch fires when the operator's remaining images land and the geometry
-section fills. Charter authored by superman4; images pending.
+AWR-196. Dispatched 2026-07-10 ~00:4x, lane `ledsim`, Fable/XHIGH.
