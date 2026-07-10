@@ -105,6 +105,17 @@ SoundSwitch pack-player boundary (T7c/T7e):
 - The menubar bridge toggle launches the canonical repo watcher at
   `scripts/ss_bridge_watcher.sh`. Menubar UI state is only a control surface; it
   does not prove watcher or bridge process health.
+- Frozen-bundle-only menu items (AWR-186 M2; both sit behind the same
+  `getattr(sys, "frozen", False)` gate, so a source-run menubar is
+  byte-identical and never imports `install_controller.py`): **"Install on this
+  Mac…"** appears only when running from a DMG/translocated location with no
+  install manifest (NSAlert confirm → app copy to `~/Applications` + payload to
+  App Support + interim-compatible manifest → relaunch + eject offer; never
+  starts the bridge); **"Purge RBSS Bridge…"** appears only on installed copies
+  (manifest present, not DMG-run) — explicit Purge confirm, stops the owned
+  bridge child by handle first, removes manifest paths (allowlist, `..`
+  rejected) then the whole App Support dir then `~/Library/Logs/rb_ss_bridge`,
+  then Trashes its own bundle and quits. Neither sends runtime commands.
 
 Authoritative code:
 - `runtime_status.py`
