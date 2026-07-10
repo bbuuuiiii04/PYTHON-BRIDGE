@@ -190,6 +190,50 @@ class LEDLookDirectorPriorityTests(unittest.TestCase):
         self.assertIsNotNone(decision)
         self.assertEqual(decision.look, "room_second")
 
+    def test_shuffle_bag_rebuilds_when_preference_subset_changes(self) -> None:
+        cfg = _director_config()
+        cfg["automation_enabled"] = True
+        subsets = ({f"drop_a_{i}" for i in range(4)}, {f"drop_b_{i}" for i in range(4)})
+        for name in set.union(*subsets):
+            cfg["looks"][name] = copy.deepcopy(cfg["looks"]["room_manual"])
+        cfg["banks"]["default"]["drop"] = sorted(set.union(*subsets))
+        result = load_led_look_director_config_from_dict(cfg)
+        self.assertTrue(result.available, msg=result.errors)
+
+        for seed in range(6):
+            with self.subTest(seed=seed):
+                director = LEDLookDirector(
+                    result.config, rng=random.Random(seed), shuffled_roles=("drop",),
+                )
+                for _ in range(seed % 3 + 1):
+                    self.assertIn(
+                        director.commit_role("drop", look_preference=lambda n: n in subsets[0]).look,
+                        subsets[0],
+                    )
+                self.assertIn(
+                    director.commit_role("drop", look_preference=lambda n: n in subsets[1]).look,
+                    subsets[1],
+                )
+
+    def test_shuffle_bag_cycle_intact_for_stable_subset(self) -> None:
+        cfg = _director_config()
+        cfg["automation_enabled"] = True
+        subset = {f"drop_a_{i}" for i in range(4)}
+        for name in subset:
+            cfg["looks"][name] = copy.deepcopy(cfg["looks"]["room_manual"])
+        cfg["banks"]["default"]["drop"] = sorted(subset)
+        result = load_led_look_director_config_from_dict(cfg)
+        self.assertTrue(result.available, msg=result.errors)
+        director = LEDLookDirector(
+            result.config, rng=random.Random(0), shuffled_roles=("drop",),
+        )
+
+        picks = [
+            director.commit_role("drop", look_preference=lambda n: n in subset).look
+            for _ in range(len(subset))
+        ]
+        self.assertEqual(set(picks), subset)
+
     def test_unknown_manual_override_returns_safe_default(self) -> None:
         director = self._build_director()
         self.assertFalse(director.set_manual_override("missing-look"))

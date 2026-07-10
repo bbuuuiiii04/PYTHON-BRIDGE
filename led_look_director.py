@@ -521,7 +521,7 @@ class LEDLookDirector:
             return subset[cursor % len(subset)]
         key = (role, backend)
         bag = self._role_shuffle_bags.get(key, ())
-        if cursor % len(subset) == 0 or not bag:
+        if cursor % len(subset) == 0 or not bag or set(bag) != set(subset):
             if peek:
                 # Preview the would-be shuffled bag while restoring RNG state so
                 # the next real selection builds the exact same bag.
