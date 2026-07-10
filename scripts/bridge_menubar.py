@@ -870,10 +870,11 @@ MENU_BLUEPRINT: tuple = (
     ("action", "test_lights_item", "Test the Lights…", "testLights:"),
     ("action", "validation_item", "Run Health Check", "runValidation:"),
     ("sep", None, None, None),  # MAINTENANCE block
-    # AWR-186 M2 SLOT: install/purge items — function owned by the usbm2 round;
-    # structure only. Both are frozen-gated at build time (m2_offer); when the
-    # gate is closed the attr stays None, exactly as M2 shipped it.
-    ("action", "install_item", "Install on this Mac…", "installOnMac:"),
+    # AWR-186 M2 SLOT: purge item — function owned by the usbm2 round;
+    # structure only. Frozen-gated at build time (m2_offer); when the gate is
+    # closed the attr stays None, exactly as M2 shipped it. The install offer
+    # is NOT here: per the M2 spec it is primary-positioned (inserted at menu
+    # index 0 + separator, after the blueprint walk) on DMG-guest runs.
     ("action", "purge_item", "Purge RBSS Bridge…", "purgeBridge:"),
     ("action", "quit_item", "Quit Menubar (bridge keeps running)", "quit:"),
 )
@@ -911,7 +912,8 @@ class BridgeMenuBar(NSObject):
         self.purge_item = None
         self._install_in_progress = False
         self._purge_in_progress = False
-        m2_offer = {"install_item": False, "purge_item": False}
+        offer_install = False
+        m2_offer = {"purge_item": False}
         if getattr(sys, "frozen", False):
             from rb_ss_bridge_v2.install_controller import (
                 APP_SUPPORT_DIR,
@@ -923,9 +925,7 @@ class BridgeMenuBar(NSObject):
 
             bundle = bundle_root(sys.executable)
             manifest_exists = (APP_SUPPORT_DIR / MANIFEST_NAME).exists()
-            m2_offer["install_item"] = bool(
-                should_offer_install(bundle, manifest_exists)
-            )
+            offer_install = bool(should_offer_install(bundle, manifest_exists))
             # PURGE (AWR-186 Task 4): installed copies only — manifest present
             # and not running from the DMG/translocation.
             m2_offer["purge_item"] = bool(
@@ -937,6 +937,16 @@ class BridgeMenuBar(NSObject):
         self.status_rows = []
         for entry in MENU_BLUEPRINT:
             self._build_menu_entry(self.menu, entry, m2_offer)
+        # Install offer stays the PRIMARY item on DMG-guest runs (M2 spec Task
+        # 2): inserted at the very top, above the status rows — M2's original
+        # mechanism verbatim, not a blueprint slot.
+        if offer_install:
+            self.install_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                "Install on this Mac…", "installOnMac:", ""
+            )
+            self.install_item.setTarget_(self)
+            self.menu.insertItem_atIndex_(self.install_item, 0)
+            self.menu.insertItem_atIndex_(NSMenuItem.separatorItem(), 1)
         self.status_item.setMenu_(self.menu)
         self._status = None
         self._snapshot = {}
