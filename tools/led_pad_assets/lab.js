@@ -176,13 +176,14 @@
   }
 
   function renderParamControls() {
-    const specs = (state.current && state.current.param_specs) || {};
+    const specs = (state.current && (state.current.effective_param_specs || state.current.param_specs)) || {};
+    const conflicts = (state.current && state.current.spec_conflicts) || [];
     const container = $("paramControls");
     const keys = Object.keys(specs);
     if (!keys.length) { container.innerHTML = ""; return; }
     let params;
     try { params = JSON.parse($("paramsInput").value || "{}"); } catch { params = {}; }
-    container.innerHTML = keys.map(key => {
+    container.innerHTML = (conflicts.length ? `<div class="dim">Slider ranges updated from the production controls table</div>` : "") + keys.map(key => {
       const spec = specs[key];
       if (spec.kind === "toggle") {
         const checked = params[key] === undefined ? false : Boolean(params[key]);

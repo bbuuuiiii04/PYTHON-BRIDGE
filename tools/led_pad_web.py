@@ -21,7 +21,7 @@ from urllib.parse import urlparse
 from ..govee_frame_renderer import REALTIME_EFFECT_NAMES, REALTIME_EFFECT_PARAM_KEYS, SLOT_EFFECTS
 from ..led_color_engine import LedColorEngine
 from ..led_config import LEDConfigResult, _resolve_path, load_led_look_director_config_from_dict
-from ..led_pad_controls import controls_for, render_catalog
+from ..led_pad_controls import controls_for, effective_lab_specs, render_catalog
 from ..runtime_status import STATUS_PATH
 from .led_pad_lab import LabRegistry, LabRenderer, load_lab_effects, render_preview_frames
 from .led_pad_playback import PadPlayback, stable_seed
@@ -597,7 +597,13 @@ class LedPadService:
         }, cue_beats
 
     def lab_list(self) -> dict[str, Any]:
-        return {"ok": True, "entries": self._lab.list(), "module_path": str(self._lab.module_path)}
+        entries = self._lab.list()
+        for entry in entries:
+            # Decoration only (never persisted): CONTROL_META wins shared keys.
+            specs, conflicts = effective_lab_specs(entry.get("param_specs") or {})
+            entry["effective_param_specs"] = specs
+            entry["spec_conflicts"] = conflicts
+        return {"ok": True, "entries": entries, "module_path": str(self._lab.module_path)}
 
     def lab_reload(self, _payload: dict[str, Any] | None = None) -> dict[str, Any]:
         result = load_lab_effects(self._lab.module_path)

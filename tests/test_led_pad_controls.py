@@ -18,6 +18,7 @@ from rb_ss_bridge_v2.led_pad_controls import (  # noqa: E402
     CONTROL_META,
     PARAM_DEFAULT_OVERRIDES,
     controls_for,
+    effective_lab_specs,
     render_catalog,
 )
 
@@ -49,6 +50,38 @@ class LedPadControlsTests(unittest.TestCase):
         flagged = {key for key, meta in CONTROL_META.items() if meta["color_sig"]}
 
         self.assertEqual(flagged, set(CONTROL_META) & set(_COLOR_SIG_KEYS))
+
+
+class EffectiveLabSpecsTests(unittest.TestCase):
+    def test_overrides_shared_key_bounds_and_reports_conflicts(self) -> None:
+        specs = {
+            "floor": {"kind": "slider", "label": "Old Floor", "min": 0.2, "max": 2.0, "step": 0.1},
+            "custom_level": {"kind": "slider", "label": "Level", "min": 0, "max": 1, "step": 0.05},
+        }
+
+        effective, conflicts = effective_lab_specs(specs)
+
+        self.assertEqual(conflicts, ["floor"])
+        for field in ("min", "max", "step", "label"):
+            self.assertEqual(effective["floor"][field], CONTROL_META["floor"][field], field)
+        self.assertEqual(effective["floor"]["kind"], "slider")  # kind stays from the spec
+        self.assertEqual(effective["custom_level"], specs["custom_level"])  # lab-only key passes through
+        # Pure function: input untouched.
+        self.assertEqual(specs["floor"]["min"], 0.2)
+
+    def test_matching_shared_key_reports_no_conflict(self) -> None:
+        meta = CONTROL_META["floor"]
+        specs = {"floor": {"kind": "slider", "label": "Anything", "min": meta["min"], "max": meta["max"], "step": meta["step"]}}
+
+        effective, conflicts = effective_lab_specs(specs)
+
+        self.assertEqual(conflicts, [])
+        self.assertEqual(effective["floor"]["label"], meta["label"])
+
+    def test_empty_and_lab_only_specs_pass_through(self) -> None:
+        self.assertEqual(effective_lab_specs({}), ({}, []))
+        specs = {"only_here": {"kind": "toggle", "label": "Flip"}}
+        self.assertEqual(effective_lab_specs(specs), (specs, []))
 
 
 class LedPadControlDefaultsTests(unittest.TestCase):

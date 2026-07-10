@@ -695,7 +695,10 @@ LIGHTING ENGINE v2 F1 identity surface (AWR-128, 2026-07-06):
 - `led_identity_v2.py` owns the pure identity helpers, deterministic content key/hash, zone
   assignment, dressing derivation, and the first-write-wins `IdentityStore`. The store path is
   `local/state/led_identity_v2.json` by default; malformed/corrupt store data degrades to
-  read-only behavior for that boot and must not stop v1 color output.
+  read-only behavior for that boot and must not stop v1 color output. In frozen-bundle runs only
+  (AWR-186 M2), `led_config.py` resolves that default through `launch_profile.resolve_state_path`
+  to `~/Library/Application Support/RBSS Bridge/state/` at parse time (a double-clicked app's cwd
+  is `/`, unwritable); source runs get the configured path back byte-identical.
 - `StateManager` derives `Ev.LED_TRACK_IDENTITY` off the existing ANLZ/spectral worker seam, guards
   identity events by deck `load_gen`, freezes measured records into the store, and forwards only
   serial event mutations to the engine. The 200 Hz push loop does not gain file, socket, MIDI,

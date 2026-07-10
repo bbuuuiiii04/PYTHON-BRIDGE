@@ -68,6 +68,14 @@ Use `docs/agents/task_playbooks/update_config_schema.md` before changing config 
 
 If the selected file is absent, the result is `available=false`, `reason=not_configured`. Any read, JSON, schema, or fixture-map error returns `reason=invalid_config`; the loader does not raise.
 
+Frozen-bundle note (AWR-186 M2): on an installed guest Mac, `usb_launcher
+--run-bridge` sets `RBSS_LASER_CONFIG` / `RBSS_LED_CONFIG` /
+`RBSS_SOUNDSWITCH_PACK_PLAYER_CONFIG` / `RBSS_LASER_COLOR_MAP_CONFIG` to the
+copies the native installer placed in `~/Library/Application Support/RBSS
+Bridge/` (only for files actually present; an explicitly exported env always
+wins). Source runs (the watcher) never set these and behave as documented
+above.
+
 The tracked example is inert: `enabled=false`, `dry_run=true`, and
 `output_backend=none`. Copy it to the ignored local filename only when preparing
 a reviewed local setup. Current local-file state was not inspected during RW-5 implementation.

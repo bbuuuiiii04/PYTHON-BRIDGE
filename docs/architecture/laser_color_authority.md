@@ -192,6 +192,11 @@ Implemented home: sampler/quantizer/producer in `laser_color_engine.py`, the
 merge seam in `soundswitch_laser_player.py`'s Autoloop success path, the
 white-moment flag in `led_dispatch_coordinator.py`, held-snapshot forwarding
 in `state_manager.py`, and the chart at `config/laser_color_map.json`.
+`load_laser_color_map()` resolves the chart path as env
+`RBSS_LASER_COLOR_MAP_CONFIG` → module-relative default (AWR-186 M2: the frozen
+bundle carries no chart, so the installer lands it in App Support and the
+launch profile points the env at it; every source run leaves the env unset and
+is byte-identical).
 `led_color_engine.py` exposes `color_state()` for the current anchor RGB
 without advancing RNG or mutating journey state.
 

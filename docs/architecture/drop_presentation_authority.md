@@ -46,7 +46,7 @@ zero randomness anywhere in this policy.**
 | drop window | Impact → end of the smart-phrasing drop role. A newer true-drop impact can re-enter the window with its own planned presentation and re-stamp the cap; a runway-less marker inside the same section leaves the existing presentation alone. `drop_window_cap_beats` is a 192-beat stuck-role backstop, not the expected release. The shared phrase authority — never an LED- or laser-private timer. |
 | pre-dark | Govees joining the lasers' existing pre-drop blackout for the final `led_predark_beats` (default 4) before a solo's impact: total darkness into the hit. |
 | session | One bridge process lifetime. Damper counters and the runway record reset with it; the learned store persists across sessions. |
-| learned store | The persistent per-track memory of the operator's manual solos (`local/state/laser_solo_learned.json`), keyed by `content_id` + the drop's **beat position** (±2-beat lookup tolerance — survives Rekordbox re-analysis reindexing; operator 2026-07-04). |
+| learned store | The persistent per-track memory of the operator's manual solos (`local/state/laser_solo_learned.json`), keyed by `content_id` + the drop's **beat position** (±2-beat lookup tolerance — survives Rekordbox re-analysis reindexing; operator 2026-07-04). In frozen-bundle runs only (AWR-186 M2), `launch_profile.resolve_state_path` relocates this file to `~/Library/Application Support/RBSS Bridge/state/`; source runs keep the cwd-relative path byte-identical. |
 
 ## The Ladder
 

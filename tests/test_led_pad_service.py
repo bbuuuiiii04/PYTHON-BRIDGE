@@ -372,6 +372,21 @@ class LedPadServiceTests(unittest.TestCase):
             # The overlay never persisted.
             self.assertEqual(service._lab.get("pulse")["params"], {"level": 0.0})
 
+    def test_lab_list_decorates_effective_specs_and_conflicts(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service, _playback = self._lab_service(td)
+            service.lab_save({
+                "name": "pulse", "kind": "slot", "fn": "pulse", "params": {},
+                "param_specs": {"floor": {"kind": "slider", "label": "Old", "min": 0.2, "max": 2.0, "step": 0.1}},
+            })
+
+            entry = service.lab_list()["entries"][0]
+
+            self.assertEqual(entry["spec_conflicts"], ["floor"])
+            self.assertEqual(entry["effective_param_specs"]["floor"]["max"], 1)
+            # Decoration only — stored spec unchanged.
+            self.assertEqual(entry["param_specs"]["floor"]["max"], 2.0)
+
     def test_http_lab_archive_route_and_unknown_name_400(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             service, _playback, _path = self._service(td)
