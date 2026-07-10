@@ -448,6 +448,7 @@ class GoveeRealtimeRunner:
         with self._lock:
             self._last_error = "" if sent_ok else "transport_send_failed"
             self._frame_index += 1
+            self._idle_since = None
         self._note_rt_send_health(sent_ok, was_failing)
         self._publish_engine_status(cleared=False)
         if log_throttled("rgb_rt_summary", 1.0, now):

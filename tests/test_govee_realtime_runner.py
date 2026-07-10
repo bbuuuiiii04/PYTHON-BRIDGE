@@ -147,6 +147,36 @@ class GoveeRealtimeRunnerTests(unittest.TestCase):
         self.assertIn("send_frame", transport.calls)
         self.assertEqual(transport.calls[-2:], ["blackout", "deactivate"])
 
+    def test_recovered_feed_clears_idle_grace(self) -> None:
+        transport = _FakeTransport()
+        runner = GoveeRealtimeRunner(
+            transport, GoveeFrameRenderer(), segments=2, fps=30, grace_s=0.25,
+        )
+        runner.set_desired(EffectSpec("solid", {"color": [9, 9, 9]}, 1, 100.0))
+
+        runner._tick_once(_anchor(), 100.0)
+        runner._tick_once(_anchor(permitted=False), 100.1)
+        runner._tick_once(_anchor(), 100.2)
+        runner._tick_once(_anchor(permitted=False), 100.36)
+
+        self.assertNotIn("blackout", transport.calls)
+        self.assertNotIn("deactivate", transport.calls)
+        self.assertTrue(runner.status()["active"])
+
+    def test_idle_grace_still_fires_when_feed_stays_bad(self) -> None:
+        transport = _FakeTransport()
+        runner = GoveeRealtimeRunner(
+            transport, GoveeFrameRenderer(), segments=2, fps=30, grace_s=0.25,
+        )
+        runner.set_desired(EffectSpec("solid", {"color": [9, 9, 9]}, 1, 100.0))
+
+        runner._tick_once(_anchor(), 100.0)
+        runner._tick_once(_anchor(permitted=False), 100.1)
+        runner._tick_once(_anchor(permitted=False), 100.4)
+
+        self.assertEqual(transport.calls[-2:], ["blackout", "deactivate"])
+        self.assertFalse(runner.status()["active"])
+
     def test_zero_bpm_anchor_stays_idle(self) -> None:
         transport = _FakeTransport()
         runner = GoveeRealtimeRunner(transport, GoveeFrameRenderer(), segments=4, fps=30)
