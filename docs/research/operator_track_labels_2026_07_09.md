@@ -115,6 +115,16 @@ T2 blackout, b480 HOUSE T2 blackout, remaining six drops T1 snap.
 - **notes:** This entry is the session's seam smoke test: values reproduce the
   executive's desk measurements from the AWR-176 spec (growl mean ~27.0, 8 drops,
   bass/sub sustain flat). Becomes a named P1 acceptance case after the backfill.
+- **P1 acceptance (post-backfill, same night — full numbers in
+  /tmp/rbss_lane_signals/labels.P1ACC.report.md):** PASS by ranking — b480 is rank-1
+  of 8 drops on centroid movement (inside-window max 0.90 / mean 0.80 oct; next
+  sibling 0.82/0.72; the taper visible as 0.70→0.64 decline) while amplitude stays
+  flat 27 dB everywhere — the new axis does what amplitude could not. Caveats for
+  the Part E gate calibration: provisional gates saturate (97% of beats flag),
+  sibling margin is +10–11% (per-track-relative gate separates, absolute floor does
+  not), and near-silent windows read noisy spans (the −70 dB level guard is far
+  below real quiet-section levels). Amplitude pins (Anti Up / FETISH / Drake)
+  reproduced byte-exact through the backfill re-extraction — determinism held.
 
 ---
 
