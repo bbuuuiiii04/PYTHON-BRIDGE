@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LED Room Simulator</title>
+<link rel="stylesheet" href="sim.css">
+</head>
+<body>
+<header>
+  <h1>LED Room Simulator</h1>
+  <span class="tag">offline · never touches the device</span>
+  <span id="profile-dirty" class="dirty" hidden>profile edited — not saved</span>
+</header>
+<div id="error-banner" class="banner" hidden></div>
+<div id="warnings" class="warnings" hidden></div>
+
+<main>
+  <section class="stage">
+    <canvas id="room-canvas" width="960" height="600"></canvas>
+    <div class="transport">
+      <button id="play-pause">Play</button>
+      <label class="check"><input type="checkbox" id="loop" checked> loop</label>
+      <input type="range" id="scrub" min="0" max="0" value="0">
+      <span id="frame-label" class="mono">0/0</span>
+    </div>
+  </section>
+
+  <aside class="controls">
+    <details open>
+      <summary>Source</summary>
+      <label>Type
+        <select id="source-kind">
+          <option value="effect">Production effect</option>
+          <option value="look">Production look</option>
+          <option value="lab">Lab draft</option>
+          <option value="replay">Replay file</option>
+        </select>
+      </label>
+      <label>Name <select id="source-name"></select></label>
+      <div id="replay-row" hidden>
+        <label>frames-JSONL path <input type="text" id="replay-path" placeholder="repo-relative or /tmp/…"></label>
+        <button id="replay-load">Load</button>
+      </div>
+      <label>Params (JSON) <textarea id="params" rows="4">{}</textarea></label>
+      <div class="row3">
+        <label>BPM <input type="number" id="bpm" value="128" min="20" max="300"></label>
+        <label>Seed <input type="number" id="seed" value="0"></label>
+        <label>Duration s <input type="number" id="duration" value="8" min="1" max="30"></label>
+      </div>
+      <button id="render" class="primary">Render</button>
+    </details>
+
+    <details open>
+      <summary>Device knobs (local until saved)</summary>
+      <label>gamma <input type="range" id="knob-gamma" min="0.2" max="5" step="0.01"><span id="knob-gamma-val" class="mono"></span></label>
+      <label>white R <input type="range" id="knob-white-0" min="0" max="2" step="0.01"><span id="knob-white-0-val" class="mono"></span></label>
+      <label>white G <input type="range" id="knob-white-1" min="0" max="2" step="0.01"><span id="knob-white-1-val" class="mono"></span></label>
+      <label>white B <input type="range" id="knob-white-2" min="0" max="2" step="0.01"><span id="knob-white-2-val" class="mono"></span></label>
+      <label>brightness <input type="range" id="knob-brightness" min="0" max="2" step="0.01"><span id="knob-brightness-val" class="mono"></span></label>
+      <label>diffusion (seg) <input type="range" id="knob-diffusion" min="0.1" max="6" step="0.1"><span id="knob-diffusion-val" class="mono"></span></label>
+      <label>bleed <input type="range" id="knob-bleed" min="0" max="1" step="0.01"><span id="knob-bleed-val" class="mono"></span></label>
+      <label>wash reach mm <input type="range" id="knob-wash-reach" min="0" max="3000" step="10"><span id="knob-wash-reach-val" class="mono"></span></label>
+      <label>wash gain <input type="range" id="knob-wash-gain" min="0" max="4" step="0.05"><span id="knob-wash-gain-val" class="mono"></span></label>
+      <label>fps <input type="range" id="knob-fps" min="1" max="120" step="1"><span id="knob-fps-val" class="mono"></span></label>
+      <label>latency ms <input type="range" id="knob-latency" min="-500" max="500" step="5"><span id="knob-latency-val" class="mono"></span></label>
+      <label>hold mode
+        <select id="knob-hold"><option value="zoh">zoh (hard switch)</option><option value="slew">slew (lerp)</option></select>
+      </label>
+      <label>slew ms <input type="range" id="knob-slew" min="0" max="1000" step="5"><span id="knob-slew-val" class="mono"></span></label>
+      <div class="row">
+        <button id="profile-save" class="primary">Save profile</button>
+        <button id="profile-revert">Revert</button>
+      </div>
+    </details>
+
+    <details open>
+      <summary>Calibrate</summary>
+      <button id="calibrate-toggle">Calibrate…</button>
+      <div id="calibrate-panel" hidden>
+        <p><strong>Geometry:</strong> play the same effect on the real strip from the
+        Pad, then drag the corner handles, slide the seg-0 handle, or click the
+        direction arrow until the sim moves like your room.</p>
+        <button id="preset-slow-chase">Slow beat_chase preset</button>
+        <p><strong>Photometrics:</strong> put a test card on the real strip, hold your
+        phone photo next to this canvas, and match with the knobs.</p>
+        <div class="cards">
+          <button data-card="white">white</button>
+          <button data-card="red">red</button>
+          <button data-card="green">green</button>
+          <button data-card="blue">blue</button>
+          <button data-card="gray50">gray50</button>
+          <button data-card="single_segment">single seg</button>
+        </div>
+        <p>Then <em>Save profile</em> to persist.</p>
+      </div>
+    </details>
+  </aside>
+</main>
+<script type="module" src="sim-app.js"></script>
+</body>
+</html>

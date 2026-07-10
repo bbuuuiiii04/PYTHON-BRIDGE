@@ -1,0 +1,101 @@
+/* sim.css — LED room simulator (AWR-196). Dark by design: it simulates light. */
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: #0b0c10;
+  color: #d7dae2;
+  font: 14px/1.45 system-ui, -apple-system, sans-serif;
+}
+header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid #23262f;
+}
+header h1 { font-size: 16px; margin: 0; }
+.tag { color: #7c8496; font-size: 12px; }
+.dirty { color: #ffd166; font-size: 12px; }
+.banner {
+  background: #4a1420;
+  color: #ffb3c0;
+  padding: 8px 16px;
+  border-bottom: 1px solid #7c2438;
+  white-space: pre-wrap;
+}
+.warnings {
+  background: #3a3114;
+  color: #ffe08a;
+  padding: 6px 16px;
+  font-size: 12px;
+  border-bottom: 1px solid #665a24;
+}
+main {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 14px;
+  padding: 14px 16px;
+}
+.stage canvas {
+  width: 100%;
+  height: auto;
+  background: #08090c;
+  border: 1px solid #23262f;
+  border-radius: 6px;
+  touch-action: none;
+}
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+.transport input[type="range"] { flex: 1; }
+.controls details {
+  border: 1px solid #23262f;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  background: #101218;
+}
+.controls summary { cursor: pointer; font-weight: 600; margin-bottom: 4px; }
+.controls label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+  font-size: 13px;
+}
+.controls label > input[type="range"] { flex: 1; }
+.controls label > select, .controls label > input[type="text"], .controls label > input[type="number"] {
+  flex: 1;
+  min-width: 0;
+}
+.controls textarea, .controls select, .controls input {
+  background: #0b0d13;
+  color: #d7dae2;
+  border: 1px solid #2a2e3a;
+  border-radius: 4px;
+  padding: 4px 6px;
+  font: inherit;
+}
+.controls textarea { width: 100%; font-family: ui-monospace, monospace; font-size: 12px; }
+.mono { font-family: ui-monospace, monospace; font-size: 12px; color: #9aa3b5; min-width: 42px; text-align: right; }
+button {
+  background: #1c2030;
+  color: #d7dae2;
+  border: 1px solid #323848;
+  border-radius: 5px;
+  padding: 5px 12px;
+  cursor: pointer;
+  font: inherit;
+}
+button:hover { background: #262c40; }
+button.primary { background: #1f3a5f; border-color: #2f5a8f; }
+button.primary:hover { background: #27497a; }
+.row, .cards { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+.row3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.check { flex-direction: row; }
+@media (max-width: 900px) {
+  main { grid-template-columns: 1fr; }
+}
