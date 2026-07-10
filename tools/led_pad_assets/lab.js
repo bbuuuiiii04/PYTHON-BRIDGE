@@ -286,7 +286,7 @@
     stopPreview();
     // No implicit save: preview posts the current editor params directly.
     const params = JSON.parse($("paramsInput").value || "{}");
-    const res = await api.labPreview({name: state.current.name, params, cue_beats: cue()});
+    const res = await api.labPreview({name: state.current.name, params});
     if (!res.ok) {
       $("traceText").textContent = res.traceback || res.error || "preview failed";
       if (DEV) $("tracePanel").open = true;

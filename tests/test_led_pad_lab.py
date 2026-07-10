@@ -278,6 +278,29 @@ class LedPadLabTests(unittest.TestCase):
             broken.reload()
             self.assertEqual(broken.render("lab_zzz", **kw), [(0, 0, 0)] * 3)
 
+    def test_renderer_memoizes_fn_resolution_until_reload(self) -> None:
+        # The resolver may read the registry file; render() runs on the playback
+        # tick thread, so it must resolve at most once per name per reload.
+        with tempfile.TemporaryDirectory() as td:
+            module = Path(td) / "effects_lab.py"
+            _write_two_effect_module(module)
+            calls: list[str] = []
+
+            def resolver(key: str) -> str:
+                calls.append(key)
+                return "b"
+
+            renderer = LabRenderer(module, fn_for=resolver)
+            renderer.reload()
+            kw = dict(beat_pos=0, local_t=0, frame_index=0, params={}, segments=3, seed=1)
+            renderer.render("lab_zzz", **kw)
+            renderer.render("lab_zzz", **kw)
+            renderer.render("lab_zzz", **kw)
+            self.assertEqual(calls, ["zzz"])  # memoized after the first miss
+            renderer.reload()
+            renderer.render("lab_zzz", **kw)
+            self.assertEqual(calls, ["zzz", "zzz"])  # reload clears the cache
+
     def test_lab_play_and_preview_resolve_renamed_draft_via_registry_fn(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
