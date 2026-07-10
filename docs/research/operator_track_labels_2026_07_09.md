@@ -387,6 +387,36 @@ track" complaint + B3-4 "big bright sparkles" want).
 ### B3-5 · White Wine & Adderall (YUSSI Remix) — Chainsmokers · NEUTRAL T3 @1:08
 - **his words:** "yes t3 neutral i think" — CONFIRMED (soft).
 
+### B3-6 · Show Me Love x Perfect (Exceeder) (DANČI) · COMET T3 @2:06 · LIVE BEHAVIOR OBSERVATION
+- **his words:** "big problem, the track plays differently whenever i re run the same
+  drop. i dont see a comet at 2:06. well i did, but then i didnt."
+- **mechanism (code-read, `led_dispatch_policy.py:2045-2054`):** the F2 family×tier
+  set only NARROWS a preference and the director applies it FAIL-OPEN (empty subset ⇒
+  full bank), with the look director rotating for variety — so different looks across
+  re-runs of the same drop are design, not corruption. The sharper finding: the
+  COMET-family T2/T3 pools contain NO comet-class look at all (same 11 strobe/burst
+  looks as every family) — a comet can only arrive via fail-open to the full bank,
+  which is exactly an intermittent comet. Config semantics, not scorer: family name ≠
+  look content in the live routing. Relayed to executive; pairs with the per-family
+  visual-language desk item.
+- **classification:** OBSERVATION (behavior), not a perception grade.
+
+### B3-7 · What Did I Miss (Hills Remix) — Drake · WALL T3 @1:28
+- **his words:** "not exactly, maybe t2. this track also has a 4 beat growl the
+  bridge should recognize."
+- **measured:** @1:28 growl_band 3.7 → 16.1 → 28.5/30.5/31.4/31.5 (rises into drop
+  b192, hot ~4 beats = his count) — GROWL PIN #3. Zone DEEP_POOL, aggression 0.33:
+  another calm-zone soft over-rate (T3→T2), hypothesis-consistent.
+- **classification:** soft tier over-rate; growl amplitude AGREES (timbre pending P1).
+- **systems:** f2, led, p1
+
+### B3-8 · BLACKPINK - JUMP (JAY ESKAR) · NEUTRAL T3 @2:45 · SCRIPTED
+- **his words:** "this is a scripted track"
+- **classification:** N/A-SCRIPTED — the room runs its SoundSwitch scripted timeline
+  there (F2 stands down), so F2 tier has no live consequence on this track. Corpus
+  rule derived: scripted tracks are EXCLUDED from tier-calibration acceptance sets.
+- **systems:** f2 (calibration-set rule)
+
 ### Hypothesis update after B3 (honest revision)
 B3 weakens the simple contrast story: 3 of 5 void-approached T3s CONFIRMED (Anti Up
 ION, FETISH VOLT, Chainsmokers), 1 soft over-rate, 1 excluded. Over-rates so far
