@@ -90,6 +90,33 @@ def _open_port(port: str, *, timeout: float = 1.0, write_timeout: float = 2.0):
 
 
 # ---------------------------------------------------------------------------
+# Port auto-detection — never guess the wrong device
+# ---------------------------------------------------------------------------
+
+def find_enttec_port() -> Optional[str]:
+    """Auto-detect the Enttec DMX USB Pro serial port (FTDI, VID 0x0403).
+
+    Returns a device path ONLY when EXACTLY ONE candidate exists — 0 or >1
+    returns None so we never drive the wrong device.
+    """
+    try:
+        from serial.tools import list_ports
+    except ImportError:
+        return None
+    cands = sorted({p.device for p in list_ports.comports()
+                    if getattr(p, "vid", None) == 0x0403 or "usbserial" in (p.device or "")})
+    return cands[0] if len(cands) == 1 else None
+
+
+def resolve_enttec_port(configured: str) -> str:
+    """Configured port if it exists on disk; else a lone auto-detected Enttec;
+    else the configured value unchanged (fail-closed to existing behavior)."""
+    if configured and Path(configured).exists():
+        return configured
+    return find_enttec_port() or configured
+
+
+# ---------------------------------------------------------------------------
 # Mailbox worker — one thread owns the serial port
 # ---------------------------------------------------------------------------
 
@@ -259,4 +286,6 @@ __all__ = [
     "build_dmx_packet",
     "_ZERO_PACKET",
     "SoundSwitchDmxWorker",
+    "find_enttec_port",
+    "resolve_enttec_port",
 ]

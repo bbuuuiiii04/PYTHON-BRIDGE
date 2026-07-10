@@ -79,6 +79,7 @@ def perform_install(
       1. app bundle -> <apps_dir>/RBSS Bridge.app
       2. payload spectral_cache/** -> <app_support>/spectral_cache/** (file-level)
       3. payload home/*            -> <app_support>/* (govee.env + live configs)
+      4. payload soundswitch_pack/** -> <app_support>/soundswitch_pack/** (file-level)
 
     No subprocesses, no dialogs — the menubar owns the UI around this. A failed
     step reports WHICH step and stops; nothing is rolled back (the DMG-run app
@@ -147,6 +148,21 @@ def perform_install(
         result.notes.append(
             "no home-parity payload — bridge runs on example configs, no Govee cloud"
         )
+
+    pack_src = payload / "soundswitch_pack"
+    if pack_src.is_dir():
+        for src in _iter_files(pack_src):
+            rel = src.relative_to(pack_src)
+            dest = app_support / "soundswitch_pack" / rel
+            try:
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(src, dest)
+            except OSError as exc:
+                result.failed_step = f"install pack file {rel} ({type(exc).__name__})"
+                return result
+            with manifest.open("a", encoding="utf-8") as fp:
+                fp.write(f"{dest}\n")
+            result.installed_files += 1
 
     result.ok = True
     return result

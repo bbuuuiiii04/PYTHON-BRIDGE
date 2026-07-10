@@ -11,6 +11,7 @@
 #   2. Payload staging (never inside the repo tree — mktemp -d only):
 #        App Support spectral_cache        -> RBSS_payload/spectral_cache
 #        live configs + govee.env (below)  -> RBSS_payload/home/
+#        soundswitch_pack (config pack_path; the exported show) -> RBSS_payload/soundswitch_pack
 #      Secrets-on-stick is operator-APPROVED (2026-07-09 ~22:40, AWR-186 row).
 #      Each copy is gated on the file existing; an EXISTING-but-unreadable
 #      source aborts the run (fail closed) so a half-payload never ships.
@@ -110,6 +111,20 @@ for src in "${HOME_PARITY_FILES[@]}"; do
         echo "make_stick: NOTE — '$src' absent; skipped (that subsystem falls back to its example/defaults on the guest Mac)."
     fi
 done
+
+# The exported SoundSwitch pack itself (the show): read pack_path from the live
+# config and copy the whole dir into the payload, so the guest Mac's native pack
+# DMG renderer has something to load (its config pack_path is a build-machine
+# absolute path). RBSS_SS_PACK_PATH on the guest points the renderer here.
+PACK_CFG="$CONFIG_DIR/soundswitch_pack_player.json"
+if [ -e "$PACK_CFG" ]; then
+    PACK_SRC="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("pack_path",""))' "$PACK_CFG" 2>/dev/null || true)"
+    if [ -n "$PACK_SRC" ] && [ -d "$PACK_SRC" ]; then
+        cp -R "$PACK_SRC" "$STAGING/RBSS_payload/soundswitch_pack" || fail "step 'pack copy' failed — pack dir unreadable ($PACK_SRC)."
+    elif [ -n "$PACK_SRC" ]; then
+        echo "make_stick: NOTE — pack_path '$PACK_SRC' absent; native pack DMX output idle on the guest until a pack is installed."
+    fi
+fi
 
 PAYLOAD_COUNT="$(find "$STAGING/RBSS_payload" -type f 2>/dev/null | wc -l | tr -d ' ')"
 

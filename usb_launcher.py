@@ -100,6 +100,12 @@ def _run_bridge() -> int:
         ).items()
         if not os.environ.get(env)
     }
+    # Point the native pack DMX renderer at the installed pack dir so it works on
+    # a guest Mac (the config's pack_path is a build-machine absolute path). The
+    # operator env wins; only set it when the installed pack actually exists.
+    pack_dir = support_dir / "soundswitch_pack"
+    if pack_dir.is_dir() and not os.environ.get("RBSS_SS_PACK_PATH"):
+        os.environ["RBSS_SS_PACK_PATH"] = str(pack_dir)
     # Force the 19 launch flags (parity with the watcher, which hardcodes them),
     # honoring an operator RBSS_LASER_CONFIG override for the config path.
     laser_cfg = (

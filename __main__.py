@@ -73,6 +73,7 @@ from .laser_output_backend import (
 from .laser_models import LaserPersonality
 from .midi_output import MidiOutput
 from .artnet_truth import ArtNetTruthSink, load_truth_check_env
+from .enttec_dmx_pro import resolve_enttec_port
 from .soundswitch_frame_sender import SoundSwitchFrameSender
 from .soundswitch_laser_player import LaserPackPlayer
 from .laser_color_engine import load_laser_color_map
@@ -344,7 +345,11 @@ def _build_soundswitch_pack_startup(
         return SoundSwitchPackStartupBundle(
             None, pack, player, None, None, "legacy_midi_configured",
         )
-    if not cfg.enttec_port:
+    # Prefer the configured port when it exists; otherwise fall back to a lone
+    # auto-detected Enttec so the path is not hardcoded per device.  Resolve
+    # BEFORE the missing-port gate so an auto-detected port can satisfy it.
+    enttec_port = resolve_enttec_port(cfg.enttec_port)
+    if not enttec_port:
         log.warning("[MAIN] soundswitch-pack disabled  reason=missing_enttec_port")
         return SoundSwitchPackStartupBundle(
             None, pack, player, None, None, "pack_start_failed",
@@ -364,7 +369,7 @@ def _build_soundswitch_pack_startup(
             **midi_kwargs,
         )
         frame_sender = frame_sender_factory(
-            cfg.enttec_port,
+            enttec_port,
             fixture_map=cfg.fixture_map,
             idle_blackout_s=cfg.frame_stale_timeout_ms / 1000.0,
         )

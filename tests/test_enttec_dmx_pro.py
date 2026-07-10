@@ -13,13 +13,16 @@ import signal
 import sys
 import threading
 import time
+import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 # Ensure the package parent is importable regardless of how tests are discovered.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from rb_ss_bridge_v2 import bridge_fmt
+from rb_ss_bridge_v2 import enttec_dmx_pro as edp
 from rb_ss_bridge_v2.enttec_dmx_pro import (
     MSG_START,
     MSG_END,
@@ -28,6 +31,8 @@ from rb_ss_bridge_v2.enttec_dmx_pro import (
     build_dmx_packet,
     _ZERO_PACKET,
     SoundSwitchDmxWorker,
+    find_enttec_port,
+    resolve_enttec_port,
 )
 
 
@@ -399,6 +404,112 @@ class TestSoundSwitchDmxWorkerHealthTransitions(unittest.TestCase):
 
         self.assertTrue(any("SoundSwitchDmxWorker started" in r.getMessage() for r in records))
         self.assertTrue(any("SoundSwitchDmxWorker exited" in r.getMessage() for r in records))
+
+
+# ---------------------------------------------------------------------------
+# Port auto-detection — no serial/Enttec/hardware port opened
+# ---------------------------------------------------------------------------
+
+def _fake_port(device: str, vid=None):
+    """A stand-in for a pyserial ListPortInfo (only .device / .vid are read)."""
+    return types.SimpleNamespace(device=device, vid=vid)
+
+
+def _fake_serial_tools(ports):
+    """Return a sys.modules patch that makes ``from serial.tools import
+    list_ports`` resolve to a fake whose ``comports()`` yields *ports*.
+
+    Works whether or not pyserial is actually installed — the fake fully
+    overrides the ``serial`` import chain for the duration of the patch.
+    """
+    fake_list_ports = types.ModuleType("serial.tools.list_ports")
+    fake_list_ports.comports = lambda: list(ports)
+    fake_tools = types.ModuleType("serial.tools")
+    fake_tools.list_ports = fake_list_ports
+    fake_serial = types.ModuleType("serial")
+    fake_serial.tools = fake_tools
+    return mock.patch.dict(sys.modules, {
+        "serial": fake_serial,
+        "serial.tools": fake_tools,
+        "serial.tools.list_ports": fake_list_ports,
+    })
+
+
+class TestFindEnttecPort(unittest.TestCase):
+    """find_enttec_port returns a device ONLY when exactly one candidate exists.
+
+    CONFIRMATION: No serial/Enttec/hardware port opened in any test in this class.
+    """
+
+    def test_zero_ftdi_candidates_returns_none(self):
+        """No FTDI VID and no usbserial device -> None."""
+        ports = [_fake_port("/dev/cu.Bluetooth-Incoming-Port", vid=None)]
+        with _fake_serial_tools(ports):
+            self.assertIsNone(find_enttec_port())
+
+    def test_exactly_one_candidate_returns_that_device(self):
+        """A single FTDI (VID 0x0403) candidate -> its device path."""
+        ports = [
+            _fake_port("/dev/cu.Bluetooth-Incoming-Port", vid=None),
+            _fake_port("/dev/cu.usbserial-EN123456", vid=0x0403),
+        ]
+        with _fake_serial_tools(ports):
+            self.assertEqual(find_enttec_port(), "/dev/cu.usbserial-EN123456")
+
+    def test_two_candidates_returns_none(self):
+        """Two FTDI candidates are ambiguous -> None (never guess a device)."""
+        ports = [
+            _fake_port("/dev/cu.usbserial-EN111111", vid=0x0403),
+            _fake_port("/dev/cu.usbserial-EN222222", vid=0x0403),
+        ]
+        with _fake_serial_tools(ports):
+            self.assertIsNone(find_enttec_port())
+
+    def test_missing_pyserial_returns_none(self):
+        """If pyserial is not importable, find_enttec_port fails closed to None."""
+        with mock.patch.dict(sys.modules, {
+            "serial": None,
+            "serial.tools": None,
+            "serial.tools.list_ports": None,
+        }):
+            self.assertIsNone(find_enttec_port())
+
+
+class TestResolveEnttecPort(unittest.TestCase):
+    """resolve_enttec_port prefers an existing configured port, else a lone
+    auto-detected Enttec, else the configured value unchanged (fail-closed).
+
+    CONFIRMATION: No serial/Enttec/hardware port opened in any test in this class.
+    """
+
+    def test_prefers_existing_configured_path(self):
+        """An on-disk configured port wins and auto-detect is never consulted."""
+        ports = [_fake_port("/dev/cu.usbserial-OTHER", vid=0x0403)]
+        with mock.patch.object(edp.Path, "exists", return_value=True), \
+                _fake_serial_tools(ports):
+            self.assertEqual(
+                resolve_enttec_port("/dev/cu.usbserial-CONFIGURED"),
+                "/dev/cu.usbserial-CONFIGURED",
+            )
+
+    def test_falls_back_to_autodetect_when_configured_missing(self):
+        """A configured path that is not on disk falls back to the lone Enttec."""
+        ports = [_fake_port("/dev/cu.usbserial-EN999999", vid=0x0403)]
+        with mock.patch.object(edp.Path, "exists", return_value=False), \
+                _fake_serial_tools(ports):
+            self.assertEqual(
+                resolve_enttec_port("/dev/cu.usbserial-GONE"),
+                "/dev/cu.usbserial-EN999999",
+            )
+
+    def test_fails_closed_to_configured_when_nothing_found(self):
+        """No on-disk port and no lone auto-detect -> configured value unchanged."""
+        with mock.patch.object(edp.Path, "exists", return_value=False), \
+                _fake_serial_tools([]):
+            self.assertEqual(
+                resolve_enttec_port("/dev/cu.usbserial-GONE"),
+                "/dev/cu.usbserial-GONE",
+            )
 
 
 if __name__ == "__main__":

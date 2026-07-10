@@ -77,6 +77,40 @@ class MakeStickTests(unittest.TestCase):
         # 1 cache file + 5 home-parity files
         self.assertIn("6 payload file(s)", result.stdout)
 
+    def test_pack_dir_copied_into_payload(self):
+        # AWR-186 Track A: pack_path from the live config is copied into the
+        # payload so the guest Mac's native pack DMX renderer has the show.
+        import json
+
+        pack = Path(self.tmp.name) / "the_pack"
+        (pack / "sub").mkdir(parents=True)
+        (pack / "pack_manifest.json").write_text("{}")
+        (pack / "sub" / "cue.bin").write_text("x")
+        (self.config / "soundswitch_pack_player.json").write_text(
+            json.dumps({"pack_path": str(pack)})
+        )
+        result = self._run()
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        dest = self.staging / "RBSS_payload" / "soundswitch_pack"
+        self.assertTrue((dest / "pack_manifest.json").is_file())
+        self.assertTrue((dest / "sub" / "cue.bin").is_file())
+        # 1 cache + 5 home-parity + 2 pack files
+        self.assertIn("8 payload file(s)", result.stdout)
+
+    def test_absent_pack_path_notes_and_succeeds(self):
+        import json
+
+        gone = Path(self.tmp.name) / "not_there_pack"
+        (self.config / "soundswitch_pack_player.json").write_text(
+            json.dumps({"pack_path": str(gone)})
+        )
+        result = self._run()
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertFalse(
+            (self.staging / "RBSS_payload" / "soundswitch_pack").exists()
+        )
+        self.assertIn("native pack DMX output idle", result.stdout)
+
     def test_absent_files_skip_but_run_succeeds(self):
         (self.support / "govee.env").unlink()
         (self.config / "laser_director.json").unlink()

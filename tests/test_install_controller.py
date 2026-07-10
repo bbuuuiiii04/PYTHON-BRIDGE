@@ -97,6 +97,32 @@ class PerformInstallTests(unittest.TestCase):
         self.assertEqual(len(lines), 1 + result.installed_files)
         self.assertEqual(result.installed_files, 3)
 
+    def test_pack_payload_installs_and_is_manifest_recorded(self) -> None:
+        # AWR-186 Track A: the exported SoundSwitch pack rides in the payload and
+        # lands in App Support (file-level, manifest-recorded) like spectral_cache.
+        payload = ic.payload_dir(self.bundle)
+        (payload / "soundswitch_pack" / "sub").mkdir(parents=True)
+        (payload / "soundswitch_pack" / "pack_manifest.json").write_text("{}")
+        (payload / "soundswitch_pack" / "sub" / "cue.bin").write_text("x")
+        result = self._install()
+        self.assertTrue(result.ok, result.failed_step)
+        self.assertTrue(
+            (self.support / "soundswitch_pack" / "pack_manifest.json").is_file()
+        )
+        self.assertTrue(
+            (self.support / "soundswitch_pack" / "sub" / "cue.bin").is_file()
+        )
+        lines = (self.support / "install_manifest.txt").read_text().splitlines()
+        self.assertIn(
+            str(self.support / "soundswitch_pack" / "pack_manifest.json"), lines
+        )
+        self.assertIn(
+            str(self.support / "soundswitch_pack" / "sub" / "cue.bin"), lines
+        )
+        # 1 spectral_cache + 2 home + 2 pack files, all manifest-recorded.
+        self.assertEqual(result.installed_files, 5)
+        self.assertEqual(len(lines), 1 + result.installed_files)
+
     def test_missing_payload_still_installs_app(self) -> None:
         bare = Path(self.tmp.name) / "bare" / "RBSS Bridge.app"
         (bare / "Contents").mkdir(parents=True)

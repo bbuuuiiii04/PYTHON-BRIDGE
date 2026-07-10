@@ -128,6 +128,49 @@ class RunBridgeEnvTests(unittest.TestCase):
                     os.environ["RBSS_LED_CONFIG"], str(support / "led_look_director.json")
                 )
 
+    def test_run_bridge_points_pack_env_at_installed_pack_dir(self) -> None:
+        # AWR-186 Track A: an installed App Support soundswitch_pack/ dir sets
+        # RBSS_SS_PACK_PATH so the native pack DMX renderer works on a guest Mac.
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            support = Path(tmp)
+            (support / "soundswitch_pack").mkdir()
+            with mock.patch.dict(os.environ, {}, clear=False), \
+                 mock.patch.object(usb_launcher, "GOVEE_ENV_PATH", support / "govee.env"), \
+                 mock.patch("rb_ss_bridge_v2.__main__.main"):
+                os.environ.pop("RBSS_SS_PACK_PATH", None)
+                usb_launcher._run_bridge()
+                self.assertEqual(
+                    os.environ["RBSS_SS_PACK_PATH"], str(support / "soundswitch_pack")
+                )
+
+    def test_run_bridge_pack_env_respects_operator_override(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            support = Path(tmp)
+            (support / "soundswitch_pack").mkdir()
+            with mock.patch.dict(
+                os.environ, {"RBSS_SS_PACK_PATH": "/operator/pack"}, clear=False
+            ), \
+                 mock.patch.object(usb_launcher, "GOVEE_ENV_PATH", support / "govee.env"), \
+                 mock.patch("rb_ss_bridge_v2.__main__.main"):
+                usb_launcher._run_bridge()
+                self.assertEqual(os.environ["RBSS_SS_PACK_PATH"], "/operator/pack")
+
+    def test_run_bridge_no_pack_env_when_dir_absent(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            support = Path(tmp)  # no soundswitch_pack dir created
+            with mock.patch.dict(os.environ, {}, clear=False), \
+                 mock.patch.object(usb_launcher, "GOVEE_ENV_PATH", support / "govee.env"), \
+                 mock.patch("rb_ss_bridge_v2.__main__.main"):
+                os.environ.pop("RBSS_SS_PACK_PATH", None)
+                usb_launcher._run_bridge()
+                self.assertIsNone(os.environ.get("RBSS_SS_PACK_PATH"))
+
     def test_run_bridge_explicit_env_beats_app_support_copy(self) -> None:
         import tempfile
 

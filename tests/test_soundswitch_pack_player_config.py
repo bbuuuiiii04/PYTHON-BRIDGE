@@ -157,6 +157,32 @@ class SoundSwitchPackPlayerConfigTests(unittest.TestCase):
         assert result.config is not None
         self.assertEqual(result.config.output_backend, "pack")
 
+    def test_pack_path_env_override_wins_and_expands_user(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "player.json"
+            _write_json(config_path, _valid(pack_path="/build-machine/absolute/pack"))
+            override = "~/guest/soundswitch_pack"
+            with mock.patch.dict(
+                os.environ, {"RBSS_SS_PACK_PATH": override},
+            ):
+                result = load_soundswitch_pack_player_config(str(config_path))
+        self.assertTrue(result.available, result.errors)
+        assert result.config is not None
+        self.assertEqual(
+            result.config.pack_path, str(Path(override).expanduser())
+        )
+
+    def test_pack_path_uses_config_value_without_env(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "player.json"
+            _write_json(config_path, _valid(pack_path="/build-machine/absolute/pack"))
+            with mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("RBSS_SS_PACK_PATH", None)
+                result = load_soundswitch_pack_player_config(str(config_path))
+        self.assertTrue(result.available, result.errors)
+        assert result.config is not None
+        self.assertEqual(result.config.pack_path, "/build-machine/absolute/pack")
+
     def test_relative_fixture_map_path_is_relative_to_config_and_overrides_inline(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
