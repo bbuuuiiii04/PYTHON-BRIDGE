@@ -109,7 +109,7 @@ status) are allowed during boot; mutations are not.
   one-line confirm still open.
 - `rebuild_stick.sh` wrapper offer (usb lane): yes/no still open.
 - D1-F1 phantom-load fix: OPERATOR-DEFERRED (his word stands; offered twice).
-- Pre-drop tease: no verdict ever given.
+- ~~Pre-drop tease~~ RULED DEAD ~21:5x: "i will never use pre_drop" — look-role dead forever, pre-drop darkness UNAFFECTED. Also on record same exchange: baked-color inventory delivered (7 drop strobes + t1 chase quartet are fixed-color; palette-conversion round offered, no verdict yet).
 - Full veto list + parked items: resume doc "Undecided operator items" row.
 
 ## FINAL-STATE (patched ~21:05, the last superman4 write — git log wins on divergence)
