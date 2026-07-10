@@ -3,7 +3,7 @@ doc_status: current
 truth_level: code-verified
 last_verified_commit: 7d9ecdc
 last_verified_date: 2026-07-10
-validation_scope: software-only; AWR reader-safety emit-boundary tempo clamp (clamp_emit_bpm) software-tested 2026-07-10
+validation_scope: software-only; AWR reader-safety emit-boundary tempo clamp (clamp_emit_bpm) software-tested 2026-07-10; AWR-186 USB gate-fix (Enttec positive-identity port detection in enttec_dmx_pro.find_enttec_port + make_stick pack-config fail-closed) software-tested 2026-07-10 — no behavior change in this doc's scope, no hardware action
 ---
 
 # SoundSwitch Output

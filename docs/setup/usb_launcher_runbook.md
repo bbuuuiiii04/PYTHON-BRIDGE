@@ -51,8 +51,12 @@ helpers into the stick's **`RBSS BRIDGE USB/` folder** (the operator's layout,
 helpers and the native installer never drift apart (M2 review fix). It refuses
 any target volume without `PIONEER/` (wrong stick), stages only under
 `mktemp -d` (never the repo tree), skips absent payload files with a note, and
-aborts naming the step if a source exists but is unreadable. Summary line
-reports DMG size, payload file count, stick free space.
+aborts naming the step if a source exists but is unreadable — including a
+malformed/unreadable `soundswitch_pack_player.json` or a declared non-empty
+`pack_path` that is not a readable directory (fail closed, so a stick never
+ships claiming success with no show; an absent config or empty `pack_path`
+stays backward-compatible no-pack). Summary line reports DMG size, payload file
+count, stick free space.
 
 ### Manual reference (what make_stick.sh runs, M1 commands)
 
@@ -189,7 +193,8 @@ primary flow; these remain for a Mac where the app won't launch:
   native PURGE: App Support extras and run logs remain.
 - Tests: `tests/test_stick_commands.py` (purge deletion scoping);
   `tests/test_make_stick.py` (builder staging layout, existence-gating,
-  fail-closed unreadable, PIONEER refusal); `tests/test_install_controller.py`
+  fail-closed unreadable — incl. malformed pack config + non-readable non-empty
+  `pack_path` — PIONEER refusal); `tests/test_install_controller.py`
   (native install/purge pure seams: detection, manifest exactness, allowlist +
   `..` + three-root order, frozen state-dir resolution).
 

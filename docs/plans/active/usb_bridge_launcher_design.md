@@ -219,7 +219,12 @@ file-level manifest, relaunch + eject offer, never auto-starts the bridge), conf
 wiring via `launch_profile.app_support_config_env`, frozen-only `local/state` →
 App Support `state/` (`launch_profile.resolve_state_path`), and the menubar PURGE (§R6:
 confirm-gated, stop-child-first, three-root allowlist, Trash own bundle, honest TCC residue note).
-`packaging/make_stick.sh` is the one-command operator-side builder. No LaunchAgent/auto-start (M3)
+`packaging/make_stick.sh` is the one-command operator-side builder (AWR-186 executive-gate
+hardening 2026-07-10: it fails closed on a malformed/unreadable `soundswitch_pack_player.json` or a
+non-empty `pack_path` that is not a readable directory, so a stick never ships claiming success with
+no show; and the Enttec DMX port auto-detect — `enttec_dmx_pro.find_enttec_port` — now returns a
+device ONLY on positive ENTTEC identity, never a bare FTDI VID or `usbserial` name, falling back to
+the configured port). No LaunchAgent/auto-start (M3)
 and no temporary/stage-to-scratch mode was built.*
 
 **3.4 Menubar UI** — extend the existing PyObjC app `scripts/bridge_menubar.py` (`confirmed`

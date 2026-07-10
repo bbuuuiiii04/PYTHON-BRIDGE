@@ -2,8 +2,8 @@
 doc_status: current
 truth_level: code-verified
 last_verified_commit: b16792a
-last_verified_date: 2026-07-07
-validation_scope: software-only; laser color held-snapshot CH8/CH9 forwarding and the 2026-07-07 menu/follow-LED/brightness-floor/CH9=90 layer verified in tests, hardware-unvalidated (chase CH8 values await live eyeball; CH3/CH4 untouched)
+last_verified_date: 2026-07-10
+validation_scope: software-only; laser color held-snapshot CH8/CH9 forwarding and the 2026-07-07 menu/follow-LED/brightness-floor/CH9=90 layer verified in tests, hardware-unvalidated (chase CH8 values await live eyeball; CH3/CH4 untouched); AWR-186 USB gate-fix (Enttec positive-identity port detection in enttec_dmx_pro.find_enttec_port + make_stick pack-config fail-closed) software-tested 2026-07-10 — no behavior change in this doc's scope, no hardware action
 ---
 
 # Laser Subsystem

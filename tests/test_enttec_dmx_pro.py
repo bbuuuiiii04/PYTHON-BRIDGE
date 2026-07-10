@@ -410,9 +410,28 @@ class TestSoundSwitchDmxWorkerHealthTransitions(unittest.TestCase):
 # Port auto-detection — no serial/Enttec/hardware port opened
 # ---------------------------------------------------------------------------
 
-def _fake_port(device: str, vid=None):
-    """A stand-in for a pyserial ListPortInfo (only .device / .vid are read)."""
-    return types.SimpleNamespace(device=device, vid=vid)
+def _fake_port(device: str, vid=None, manufacturer=None, product=None,
+               description=None, hwid=None, serial_number=None):
+    """A stand-in for a pyserial ListPortInfo.
+
+    Only the attributes find_enttec_port reads are populated; unset identity
+    fields default to None, exactly as pyserial reports them when the OS can't
+    supply a descriptor string.  (vid / serial_number are kept for realistic
+    fakes; positive identity is decided by the manufacturer/product/description/
+    hwid strings, never by the generic FTDI VID or the device name.)
+    """
+    return types.SimpleNamespace(
+        device=device, vid=vid, manufacturer=manufacturer, product=product,
+        description=description, hwid=hwid, serial_number=serial_number,
+    )
+
+
+# A realistic positively-identified Enttec DMX USB Pro (macOS descriptor strings).
+def _enttec_port(device: str, **overrides):
+    kw = dict(vid=0x0403, manufacturer="ENTTEC", product="DMX USB PRO",
+              serial_number="EN123456")
+    kw.update(overrides)
+    return _fake_port(device, **kw)
 
 
 def _fake_serial_tools(ports):
@@ -436,31 +455,89 @@ def _fake_serial_tools(ports):
 
 
 class TestFindEnttecPort(unittest.TestCase):
-    """find_enttec_port returns a device ONLY when exactly one candidate exists.
+    """find_enttec_port returns a device ONLY on positive ENTTEC identity, and
+    only when exactly one such device is present.
 
     CONFIRMATION: No serial/Enttec/hardware port opened in any test in this class.
     """
 
-    def test_zero_ftdi_candidates_returns_none(self):
-        """No FTDI VID and no usbserial device -> None."""
-        ports = [_fake_port("/dev/cu.Bluetooth-Incoming-Port", vid=None)]
+    def test_no_ports_returns_none(self):
+        """No ports at all -> None."""
+        with _fake_serial_tools([]):
+            self.assertIsNone(find_enttec_port())
+
+    def test_lone_generic_ftdi_is_rejected(self):
+        """A single generic FTDI adapter (VID 0x0403, generic descriptor) is NOT
+        positive ENTTEC identity -> None (fail closed, require configured port).
+
+        This is the core wrong-device guard: FTDI is a generic vendor, so a bare
+        0x0403 VID must never be opened as the DMX output.
+        """
+        ports = [_fake_port(
+            "/dev/cu.usbserial-A50285BI", vid=0x0403,
+            manufacturer="FTDI", product="FT232R USB UART",
+            description="FT232R USB UART",
+            hwid="USB VID:PID=0403:6001 SER=A50285BI LOCATION=20-1",
+        )]
         with _fake_serial_tools(ports):
             self.assertIsNone(find_enttec_port())
 
-    def test_exactly_one_candidate_returns_that_device(self):
-        """A single FTDI (VID 0x0403) candidate -> its device path."""
+    def test_lone_generic_usbserial_name_is_rejected(self):
+        """A single device whose node is named 'usbserial' but carries NO ENTTEC
+        identity string is rejected -> None. The device name is not identity."""
+        ports = [_fake_port(
+            "/dev/cu.usbserial-1420", vid=None,
+            manufacturer="Silicon Labs", product="CP2102 USB to UART Bridge",
+            description="CP2102 USB to UART Bridge Controller",
+        )]
+        with _fake_serial_tools(ports):
+            self.assertIsNone(find_enttec_port())
+
+    def test_lone_positive_enttec_returns_device(self):
+        """A single positively-identified Enttec (ENTTEC manufacturer + DMX USB
+        PRO product) -> its device path."""
         ports = [
             _fake_port("/dev/cu.Bluetooth-Incoming-Port", vid=None),
-            _fake_port("/dev/cu.usbserial-EN123456", vid=0x0403),
+            _enttec_port("/dev/cu.usbserial-EN123456"),
         ]
         with _fake_serial_tools(ports):
             self.assertEqual(find_enttec_port(), "/dev/cu.usbserial-EN123456")
 
-    def test_two_candidates_returns_none(self):
-        """Two FTDI candidates are ambiguous -> None (never guess a device)."""
+    def test_positive_by_product_string_only(self):
+        """Product 'DMX USB PRO' alone is positive identity even if manufacturer
+        is missing (OS-dependent descriptor availability)."""
+        ports = [_fake_port(
+            "/dev/cu.usbserial-EN777777", vid=0x0403,
+            product="DMX USB PRO", description="DMX USB PRO",
+        )]
+        with _fake_serial_tools(ports):
+            self.assertEqual(find_enttec_port(), "/dev/cu.usbserial-EN777777")
+
+    def test_positive_by_manufacturer_string_only(self):
+        """Manufacturer 'ENTTEC' alone is positive identity."""
+        ports = [_fake_port(
+            "/dev/cu.usbmodemEN888888", vid=0x0403, manufacturer="Enttec",
+        )]
+        with _fake_serial_tools(ports):
+            self.assertEqual(find_enttec_port(), "/dev/cu.usbmodemEN888888")
+
+    def test_positive_enttec_wins_over_generic_ftdi_sibling(self):
+        """One positively-identified Enttec alongside a generic FTDI adapter is
+        unambiguous -> the Enttec. The generic FTDI is not a candidate at all."""
         ports = [
-            _fake_port("/dev/cu.usbserial-EN111111", vid=0x0403),
-            _fake_port("/dev/cu.usbserial-EN222222", vid=0x0403),
+            _fake_port("/dev/cu.usbserial-A50285BI", vid=0x0403,
+                       manufacturer="FTDI", product="FT232R USB UART"),
+            _enttec_port("/dev/cu.usbserial-EN123456"),
+        ]
+        with _fake_serial_tools(ports):
+            self.assertEqual(find_enttec_port(), "/dev/cu.usbserial-EN123456")
+
+    def test_two_positive_enttec_are_ambiguous_returns_none(self):
+        """Two positively-identified Enttec devices are genuinely ambiguous ->
+        None (never guess which is the real output)."""
+        ports = [
+            _enttec_port("/dev/cu.usbserial-EN111111"),
+            _enttec_port("/dev/cu.usbserial-EN222222"),
         ]
         with _fake_serial_tools(ports):
             self.assertIsNone(find_enttec_port())
@@ -493,13 +570,27 @@ class TestResolveEnttecPort(unittest.TestCase):
             )
 
     def test_falls_back_to_autodetect_when_configured_missing(self):
-        """A configured path that is not on disk falls back to the lone Enttec."""
-        ports = [_fake_port("/dev/cu.usbserial-EN999999", vid=0x0403)]
+        """A configured path that is not on disk falls back to the lone,
+        positively-identified Enttec."""
+        ports = [_enttec_port("/dev/cu.usbserial-EN999999")]
         with mock.patch.object(edp.Path, "exists", return_value=False), \
                 _fake_serial_tools(ports):
             self.assertEqual(
                 resolve_enttec_port("/dev/cu.usbserial-GONE"),
                 "/dev/cu.usbserial-EN999999",
+            )
+
+    def test_generic_ftdi_does_not_satisfy_autodetect_fallback(self):
+        """When the configured port is gone and the only device present is a
+        generic FTDI (no ENTTEC identity), resolve fails closed to the configured
+        value unchanged — it never adopts a stranger's adapter."""
+        ports = [_fake_port("/dev/cu.usbserial-A50285BI", vid=0x0403,
+                             manufacturer="FTDI", product="FT232R USB UART")]
+        with mock.patch.object(edp.Path, "exists", return_value=False), \
+                _fake_serial_tools(ports):
+            self.assertEqual(
+                resolve_enttec_port("/dev/cu.usbserial-GONE"),
+                "/dev/cu.usbserial-GONE",
             )
 
     def test_fails_closed_to_configured_when_nothing_found(self):

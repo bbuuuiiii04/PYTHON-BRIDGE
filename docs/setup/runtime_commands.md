@@ -2,8 +2,8 @@
 doc_status: current
 truth_level: code-verified
 last_verified_commit: 23d5c4a
-last_verified_date: 2026-07-08
-validation_scope: software-validated only; hardware-unvalidated in repo evidence
+last_verified_date: 2026-07-10
+validation_scope: software-validated only; AWR-186 USB gate-fix (Enttec positive-identity port detection in enttec_dmx_pro.find_enttec_port + make_stick pack-config fail-closed) software-tested 2026-07-10 — no behavior change in this doc's scope, no hardware action; hardware-unvalidated in repo evidence
 ---
 
 # Runtime Commands

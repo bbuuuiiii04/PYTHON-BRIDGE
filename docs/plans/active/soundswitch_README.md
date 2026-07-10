@@ -2,8 +2,8 @@
 doc_status: active-plan-index
 truth_level: code-and-test-grounded-routing
 last_verified_commit: 7d9ecdc
-last_verified_date: 2026-07-02
-validation_scope: SoundSwitch exporter and bridge-native player planning routes; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
+last_verified_date: 2026-07-10
+validation_scope: SoundSwitch exporter and bridge-native player planning routes; AWR-186 USB gate-fix (Enttec positive-identity port detection in enttec_dmx_pro.find_enttec_port + make_stick pack-config fail-closed) software-tested 2026-07-10 — no behavior change in this doc's scope, no hardware action; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # SoundSwitch exporter / bridge-native DMX - active project index

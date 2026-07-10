@@ -118,11 +118,18 @@ done
 # absolute path). RBSS_SS_PACK_PATH on the guest points the renderer here.
 PACK_CFG="$CONFIG_DIR/soundswitch_pack_player.json"
 if [ -e "$PACK_CFG" ]; then
-    PACK_SRC="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("pack_path",""))' "$PACK_CFG" 2>/dev/null || true)"
-    if [ -n "$PACK_SRC" ] && [ -d "$PACK_SRC" ]; then
-        cp -R "$PACK_SRC" "$STAGING/RBSS_payload/soundswitch_pack" || fail "step 'pack copy' failed — pack dir unreadable ($PACK_SRC)."
-    elif [ -n "$PACK_SRC" ]; then
-        echo "make_stick: NOTE — pack_path '$PACK_SRC' absent; native pack DMX output idle on the guest until a pack is installed."
+    # A config that EXISTS but can't be parsed/read is a hard error: never ship a
+    # stick that silently carries no show. (The old `2>/dev/null || true` swallowed
+    # a malformed config into an empty pack_path and then "succeeded" with no pack.)
+    # Absent config or an empty pack_path stays backward-compatible no-pack.
+    PACK_SRC="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("pack_path","") or "")' "$PACK_CFG")" \
+        || fail "step 'pack config read' failed — '$PACK_CFG' exists but is unreadable or not valid JSON."
+    if [ -n "$PACK_SRC" ]; then
+        # A declared non-empty pack_path MUST resolve to a readable directory — a
+        # non-empty path pointing nowhere is a broken config, not "no pack".
+        [ -d "$PACK_SRC" ] || fail "step 'pack copy' failed — pack_path '$PACK_SRC' is not a readable directory."
+        cp -R "$PACK_SRC" "$STAGING/RBSS_payload/soundswitch_pack" \
+            || fail "step 'pack copy' failed — pack dir unreadable ($PACK_SRC)."
     fi
 fi
 

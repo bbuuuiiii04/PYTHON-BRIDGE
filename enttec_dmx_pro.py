@@ -90,21 +90,57 @@ def _open_port(port: str, *, timeout: float = 1.0, write_timeout: float = 2.0):
 
 
 # ---------------------------------------------------------------------------
-# Port auto-detection — never guess the wrong device
+# Port auto-detection — positive ENTTEC identity only, never guess a device
 # ---------------------------------------------------------------------------
+#
+# The Enttec DMX USB Pro is built on a generic FTDI chip (VID 0x0403), and its
+# device node is a generic "usbserial" name.  Neither is proof of identity: any
+# unrelated FTDI/USB-serial adapter shares them, so selecting on VID or on the
+# "usbserial" name alone can hand a stranger's device to the DMX output.  The
+# ONLY positive evidence is the descriptor strings ENTTEC burns into the FTDI
+# EEPROM (manufacturer "ENTTEC", product "DMX USB PRO"), which pyserial exposes
+# via manufacturer/product/description/hwid.  Those strings vary by OS and may
+# be absent; when they are, we fail closed (return None) and require the
+# operator's configured port rather than guess.  Metadata only — detection
+# never opens or probes a candidate.
+
+_ENTTEC_IDENTITY_MARKERS = ("enttec", "dmx usb pro")
+
+
+def _is_enttec(port) -> bool:
+    """True only on positive ENTTEC identity evidence.
+
+    A bare FTDI VID (0x0403) or a "usbserial" device name is deliberately NOT
+    accepted here — those are generic.  Reads descriptor metadata only; never
+    opens or probes the port.
+    """
+    fields = (
+        getattr(port, "manufacturer", None),
+        getattr(port, "product", None),
+        getattr(port, "description", None),
+        getattr(port, "hwid", None),
+    )
+    blob = " ".join(f for f in fields if f).lower()
+    return any(marker in blob for marker in _ENTTEC_IDENTITY_MARKERS)
+
 
 def find_enttec_port() -> Optional[str]:
-    """Auto-detect the Enttec DMX USB Pro serial port (FTDI, VID 0x0403).
+    """Auto-detect the Enttec DMX USB Pro serial port by POSITIVE identity only.
 
-    Returns a device path ONLY when EXACTLY ONE candidate exists — 0 or >1
-    returns None so we never drive the wrong device.
+    Returns a device path ONLY when exactly one enumerated port carries positive
+    ENTTEC identity evidence (see ``_is_enttec``).  Zero identified -> None (fail
+    closed: the operator's configured port is required).  More than one
+    identified -> None (ambiguous; never guess which is the real one).  A generic
+    FTDI VID or a "usbserial" device name is never sufficient.  Enumeration only:
+    no port is opened or probed here.  This is NOT universal auto-detection — a
+    device that does not advertise ENTTEC strings must be named in config.
     """
     try:
         from serial.tools import list_ports
     except ImportError:
         return None
     cands = sorted({p.device for p in list_ports.comports()
-                    if getattr(p, "vid", None) == 0x0403 or "usbserial" in (p.device or "")})
+                    if p.device and _is_enttec(p)})
     return cands[0] if len(cands) == 1 else None
 
 

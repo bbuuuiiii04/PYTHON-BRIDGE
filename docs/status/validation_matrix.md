@@ -2,8 +2,8 @@
 doc_status: current
 truth_level: code-and-config-grounded
 last_verified_commit: fc17cc1
-last_verified_date: 2026-07-09
-validation_scope: software-validated only plus Rekordbox 7.2.11 passive mixer RE evidence routing; AWR-157 blank-role hold + reader freshness software-tested; AWR-160 phantom track-load stability gate software-tested; AWR-161 LED round 3 software-tested; hardware-unvalidated in repo evidence
+last_verified_date: 2026-07-10
+validation_scope: software-validated only plus Rekordbox 7.2.11 passive mixer RE evidence routing; AWR-157 blank-role hold + reader freshness software-tested; AWR-160 phantom track-load stability gate software-tested; AWR-161 LED round 3 software-tested; AWR-186 USB gate-fix (Enttec positive-identity port detection + make_stick pack-config fail-closed) software-tested 2026-07-10, no hardware action; hardware-unvalidated in repo evidence
 ---
 
 # Validation Matrix

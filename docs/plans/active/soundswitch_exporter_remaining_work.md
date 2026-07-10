@@ -2,8 +2,8 @@
 doc_status: active-plan
 truth_level: code-and-test-grounded
 last_verified_commit: 7d9ecdc
-last_verified_date: 2026-07-02
-validation_scope: SoundSwitch 2.10.3 canonical-project/RAVE-profile implementation status; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
+last_verified_date: 2026-07-10
+validation_scope: SoundSwitch 2.10.3 canonical-project/RAVE-profile implementation status; AWR-186 USB gate-fix (Enttec positive-identity port detection in enttec_dmx_pro.find_enttec_port + make_stick pack-config fail-closed) software-tested 2026-07-10 — no behavior change in this doc's scope, no hardware action; SOFTWARE/WIRE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # SoundSwitch Exporter and Bridge-Native DMX - Current Status and Remaining Work

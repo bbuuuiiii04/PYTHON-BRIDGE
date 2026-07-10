@@ -97,7 +97,10 @@ class MakeStickTests(unittest.TestCase):
         # 1 cache + 5 home-parity + 2 pack files
         self.assertIn("8 payload file(s)", result.stdout)
 
-    def test_absent_pack_path_notes_and_succeeds(self):
+    def test_nonexistent_pack_path_fails_closed(self):
+        # A non-empty pack_path that points nowhere is a broken config, NOT
+        # "no pack": the builder must abort so a stick claiming success can never
+        # ship without its show.
         import json
 
         gone = Path(self.tmp.name) / "not_there_pack"
@@ -105,11 +108,35 @@ class MakeStickTests(unittest.TestCase):
             json.dumps({"pack_path": str(gone)})
         )
         result = self._run()
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("not a readable directory", result.stderr)
+        self.assertFalse(
+            (self.staging / "RBSS_payload" / "soundswitch_pack").exists()
+        )
+
+    def test_malformed_pack_config_fails_closed(self):
+        # A config that exists but can't be parsed must abort — the old
+        # `2>/dev/null || true` swallowed this into a silent no-pack success.
+        (self.config / "soundswitch_pack_player.json").write_text(
+            "{ this is not valid json"
+        )
+        result = self._run()
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("pack config read", result.stderr)
+
+    def test_empty_pack_path_succeeds_no_pack(self):
+        # An intentionally empty pack_path stays backward-compatible: no pack,
+        # clean success (proves the fail-closed change didn't over-tighten).
+        import json
+
+        (self.config / "soundswitch_pack_player.json").write_text(
+            json.dumps({"pack_path": ""})
+        )
+        result = self._run()
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         self.assertFalse(
             (self.staging / "RBSS_payload" / "soundswitch_pack").exists()
         )
-        self.assertIn("native pack DMX output idle", result.stdout)
 
     def test_absent_files_skip_but_run_succeeds(self):
         (self.support / "govee.env").unlink()
