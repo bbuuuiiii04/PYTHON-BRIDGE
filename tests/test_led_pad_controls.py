@@ -179,6 +179,12 @@ class LedPadControlDefaultsTests(unittest.TestCase):
             # beat_strobe's (0.5, the global CONTROL_META default).
             "drop_white_aggressive": {"duty": 0.3},
             "drop_strobe_colorway": {"duty": 0.3},
+            # AWR-187: the redesigned firework's fallbacks diverge from v1's
+            # (which set the CONTROL_META globals).
+            "drop_firework_explosion_2": {
+                "surge_beats": 0.25, "bg_hold": 0.25, "sparkle_density": 0.5,
+                "sparkle_life_s": 0.15, "duty": 0.3,
+            },
         }
         self.assertEqual(PARAM_DEFAULT_OVERRIDES, expected)
         for scene_ref, overrides in expected.items():

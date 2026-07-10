@@ -113,10 +113,10 @@ for _key, _entry in CONTROL_META.items():
 
 # Per-scene_ref default overrides for keys whose renderer fallback genuinely
 # differs by scene_ref (confirmed by reading govee_frame_renderer.py; see
-# docs/guides/led_pad.md for the audit table with exact source lines). Only
-# `travel_beats` and `width` diverge today; every other key in CONTROL_META is
-# either uniform across every scene_ref that actually reads it from `params`,
-# or is never read from `params` at all (default None / "auto").
+# docs/guides/led_pad.md for the audit table with exact source lines). Every
+# key in CONTROL_META that has no row here is either uniform across every
+# scene_ref that actually reads it from `params`, or is never read from
+# `params` at all (default None / "auto").
 PARAM_DEFAULT_OVERRIDES: dict[str, dict[str, Any]] = {
     "groove_center_chase": {"travel_beats": 1.0},
     "post_drop_firework_chase": {"travel_beats": 1.0},
