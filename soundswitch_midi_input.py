@@ -537,6 +537,8 @@ class SoundSwitchMidiInputAdapter:
                             ever_ready = True
                             self._ready_event.set()
                             log.info("[SS-MIDI] worker started")
+                            if bf.log_changed(gone_key, False):
+                                log.info("[SS-MIDI] input port connected")
                         if self._stop_event.is_set():
                             break
                         if msg is None:
@@ -559,7 +561,10 @@ class SoundSwitchMidiInputAdapter:
                     if ready or not ever_ready:
                         self._mark_port_gone()
                         self._ready_event.set()
+                    if bf.log_changed(gone_key, True):
                         log.warning("[SS-MIDI] input port gone; retrying exact port")
+                    else:
+                        log.debug("[SS-MIDI] input port gone; retrying exact port")
                     # A device that has never once appeared retries by opening and
                     # tearing down its own MIDI client every interval, forever.
                     # Proved live (2026-06-30) that doing this at 0.25s churns the
