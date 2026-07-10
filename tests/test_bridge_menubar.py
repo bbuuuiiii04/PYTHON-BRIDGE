@@ -984,8 +984,9 @@ class BridgeMenubarTests(unittest.TestCase):
 
     def test_menu_blueprint_selector_inventory_exact(self) -> None:
         # The regroup adds/removes NO commands: the selector multiset is the
-        # pre-refactor 14 plus M2's purge — each exactly once. The install
-        # offer is deliberately NOT a blueprint entry: per the M2 spec it is
+        # pre-refactor 14 plus M2's purge plus the get-task-allow "Enable
+        # Rekordbox Reads" action — each exactly once. The install offer is
+        # deliberately NOT a blueprint entry: per the M2 spec it is
         # primary-positioned (insertItem_atIndex_ 0 after the walk), and its
         # source/gating is pinned by NativeInstallGateTests.
         bridge_menubar = self._import_module()
@@ -999,7 +1000,7 @@ class BridgeMenubarTests(unittest.TestCase):
                 "laserBlackout:", "laserClearBlackout:", "runValidation:",
                 "toggleRecordSession:", "testLights:", "mapLasers:",
                 "openLedPad:", "toggleLedEngineV2:", "quit:",
-                "purgeBridge:",
+                "purgeBridge:", "enableRekordboxReads:",
             ]),
         )
         self.assertNotIn("installOnMac:", selectors)

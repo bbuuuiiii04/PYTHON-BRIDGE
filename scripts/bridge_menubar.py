@@ -869,6 +869,7 @@ MENU_BLUEPRINT: tuple = (
     ("action", "record_session_item", "Record Session: Off", "toggleRecordSession:"),
     ("action", "test_lights_item", "Test the Lights…", "testLights:"),
     ("action", "validation_item", "Run Health Check", "runValidation:"),
+    ("action", "enable_rb_reads_item", "Enable Rekordbox Reads…", "enableRekordboxReads:"),
     ("sep", None, None, None),  # MAINTENANCE block
     # AWR-186 M2 SLOT: purge item — function owned by the usbm2 round;
     # structure only. Frozen-gated at build time (m2_offer); when the gate is
@@ -1553,6 +1554,17 @@ class BridgeMenuBar(NSObject):
             argv = [sys.executable, str(REPO_ROOT / "usb_launcher.py"), "--replay-session", path]
         subprocess.Popen(argv, start_new_session=True)
         _notify(f"Test the Lights: replaying {Path(path).name} — watch the rig.")
+
+    def enableRekordboxReads_(self, _sender):
+        # Re-sign Rekordbox (with your consent + admin password) so the bridge can
+        # read its playback state — the get-task-allow patch. Dispatched to the
+        # launcher so the menubar thread never blocks on the admin prompt/codesign;
+        # all UI is macOS dialogs owned by that process.
+        if getattr(sys, "frozen", False):
+            argv = [sys.executable, "--patch-rekordbox"]
+        else:
+            argv = [sys.executable, str(REPO_ROOT / "usb_launcher.py"), "--patch-rekordbox"]
+        subprocess.Popen(argv, start_new_session=True)
 
     def mapLasers_(self, _sender):
         open_browser_url(LASER_PAD_URL)

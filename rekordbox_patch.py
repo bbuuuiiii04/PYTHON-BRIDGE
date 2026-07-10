@@ -31,7 +31,10 @@ CLI:
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import plistlib
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -154,7 +157,48 @@ class PatchResult:
     command: list[str] | None = None
 
 
-def apply_patch(app: Path, *, dry_run: bool = True) -> PatchResult:
+# A "runner" runs the codesign re-sign command and returns (returncode, stderr).
+# The re-sign is the ONLY step needing write access to /Applications; verify +
+# re-read are read-only and always run in-process.
+
+def _default_runner(argv: list[str]) -> tuple[int, str]:
+    try:
+        p = subprocess.run(argv, capture_output=True, text=True, timeout=300)
+        return p.returncode, p.stderr or ""
+    except (OSError, subprocess.SubprocessError) as exc:
+        return 1, f"codesign did not run: {exc}"
+
+
+def run_via_admin(argv: list[str]) -> tuple[int, str]:
+    """Run argv as root behind a macOS admin-password prompt (osascript).
+
+    The command is written to a temp shell script (each arg shell-quoted) and
+    osascript only references that fixed, shell-quoted temp path — nothing from
+    argv is interpolated into the AppleScript string, so an app/plist path can't
+    inject. Used by the menubar and CLI --admin when /Applications isn't writable.
+    """
+    script = "#!/bin/sh\nexec " + " ".join(shlex.quote(a) for a in argv) + "\n"
+    with tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False) as fh:
+        fh.write(script)
+        sh_path = fh.name
+    try:
+        os.chmod(sh_path, 0o755)
+        osa = subprocess.run(
+            ["osascript", "-e",
+             f'do shell script "/bin/sh {shlex.quote(sh_path)}" with administrator privileges'],
+            capture_output=True, text=True, timeout=600,
+        )
+        return osa.returncode, osa.stderr or ""
+    except (OSError, subprocess.SubprocessError) as exc:
+        return 1, f"admin escalation failed: {exc}"
+    finally:
+        try:
+            os.unlink(sh_path)
+        except OSError:
+            pass
+
+
+def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
     """Re-sign ``app`` ad-hoc with get-task-allow, fail-closed and verified.
 
     dry_run=True (default) does NO modification — it returns the exact codesign
@@ -185,16 +229,12 @@ def apply_patch(app: Path, *, dry_run: bool = True) -> PatchResult:
                            "Dry run — Rekordbox NOT modified. This command would add get-task-allow.",
                            command=argv)
 
-    try:
-        proc = subprocess.run(argv, capture_output=True, text=True, timeout=300)
-    except (OSError, subprocess.SubprocessError) as exc:
-        return PatchResult(False, "failed", f"codesign did not run: {exc}", command=argv)
-    if proc.returncode != 0:
+    rc, err = (runner or _default_runner)(argv)
+    if rc != 0:
         hint = ""
-        if "not permitted" in (proc.stderr or "").lower() or "permission denied" in (proc.stderr or "").lower():
-            hint = " (needs admin — run with sudo, or use the menubar which prompts for your password)"
-        return PatchResult(False, "failed",
-                           f"codesign failed{hint}: {proc.stderr.strip()}", command=argv)
+        if "not permitted" in err.lower() or "permission denied" in err.lower():
+            hint = " (needs admin — run with sudo, or use --admin / the menubar which prompt for your password)"
+        return PatchResult(False, "failed", f"codesign failed{hint}: {err.strip()}", command=argv)
 
     # Verify the re-sign is valid AND the entitlement actually took.
     verify = subprocess.run(["codesign", "--verify", "--strict", str(app)],
@@ -213,6 +253,52 @@ def apply_patch(app: Path, *, dry_run: bool = True) -> PatchResult:
                        command=argv)
 
 
+# ── macOS GUI flow (menubar / frozen-app dispatch) ───────────────────────────
+
+def _osascript(script: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=600)
+
+
+def _gui_notify(message: str) -> None:
+    # Modal OK dialog — a one-shot result the operator should actually see.
+    _osascript(f'display dialog {json.dumps(message)} buttons {{"OK"}} '
+               f'default button "OK" with title "RBSS Bridge"')
+
+
+def _gui_confirm(message: str) -> bool:
+    try:
+        p = _osascript(f'display dialog {json.dumps(message)} buttons {{"Cancel", "Enable Reads"}} '
+                       f'default button "Cancel" with title "RBSS Bridge"')
+    except subprocess.SubprocessError:
+        return False
+    return p.returncode == 0 and "Enable Reads" in (p.stdout or "")
+
+
+def run_interactive_gui() -> int:
+    """Menubar/frozen-app entry: check → consent dialog → admin patch → result.
+    Every message goes through a macOS dialog; no terminal needed."""
+    app = find_rekordbox()
+    if app is None:
+        _gui_notify("Rekordbox not found in /Applications — install it first.")
+        return 2
+    if has_get_task_allow(app):
+        _gui_notify("Rekordbox reads are already enabled on this Mac.")
+        return 0
+    if is_rekordbox_running():
+        _gui_notify("Quit Rekordbox first, then choose Enable Rekordbox Reads again.")
+        return 1
+    if not _gui_confirm(
+        "Enable the bridge to read Rekordbox on this Mac?\n\n"
+        "This re-signs Rekordbox so the bridge can read its playback state. A "
+        "Rekordbox update will undo it — just run this again. You'll be asked for "
+        "your admin password."
+    ):
+        return 1
+    result = apply_patch(app, dry_run=False, runner=run_via_admin)
+    _gui_notify(result.message)
+    return 0 if result.ok else 1
+
+
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
 def main(argv: list[str] | None = None) -> int:
@@ -222,6 +308,8 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--dry-run", action="store_true", help="show the exact command without modifying anything")
     g.add_argument("--apply", action="store_true", help="apply the patch (Rekordbox must be quit)")
     ap.add_argument("--yes", action="store_true", help="skip the confirmation prompt (for menubar/admin use)")
+    ap.add_argument("--admin", action="store_true",
+                    help="prompt for your admin password (osascript) instead of requiring sudo")
     args = ap.parse_args(argv)
 
     app = find_rekordbox()
@@ -237,7 +325,7 @@ def main(argv: list[str] | None = None) -> int:
             if input("Type YES to proceed: ").strip() != "YES":
                 print("Aborted.")
                 return 1
-        result = apply_patch(app, dry_run=False)
+        result = apply_patch(app, dry_run=False, runner=(run_via_admin if args.admin else None))
     elif args.dry_run:
         result = apply_patch(app, dry_run=True)
     else:  # --check (default)

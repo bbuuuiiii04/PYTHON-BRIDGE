@@ -144,6 +144,17 @@ def _run_replay_session(path: str) -> int:
     return _run_bridge()
 
 
+def _run_patch_rekordbox() -> int:
+    """Consent-gated Rekordbox get-task-allow patch (menubar/frozen entry).
+
+    All UI is macOS dialogs (no terminal); the admin password prompt + codesign
+    happen inside run_interactive_gui, so the menubar just fires-and-forgets this.
+    """
+    from rb_ss_bridge_v2 import rekordbox_patch
+
+    return rekordbox_patch.run_interactive_gui()
+
+
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if not args:
@@ -152,6 +163,8 @@ def main(argv: list[str] | None = None) -> int:
     mode = args[0]
     if mode == "--run-frame-engine":
         return _run_frame_engine(args[1:])
+    if mode == "--patch-rekordbox":
+        return _run_patch_rekordbox()
     if mode == "--run-bridge":
         return _run_bridge()
     if mode == "--run-streamdeck":

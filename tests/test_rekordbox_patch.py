@@ -132,5 +132,85 @@ class ApplyPatchRunTests(unittest.TestCase):
         self.assertEqual(r.action, "failed")
 
 
+class RunnerSeamTests(unittest.TestCase):
+    def test_apply_patch_uses_custom_runner_for_codesign(self) -> None:
+        calls = []
+
+        def fake_runner(argv):
+            calls.append(argv)
+            return (0, "")
+
+        with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
+             mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
+             mock.patch.object(rp, "read_entitlements", return_value={}), \
+             mock.patch.object(rp, "has_get_task_allow", return_value=True), \
+             mock.patch.object(rp.subprocess, "run", return_value=_proc(0)):  # verify only
+            r = apply_patch(APP, dry_run=False, runner=fake_runner)
+        self.assertTrue(r.ok)
+        self.assertEqual(r.action, "patched")
+        self.assertEqual(len(calls), 1)          # runner used for the codesign step
+        self.assertIn("codesign", calls[0])
+
+    def test_run_via_admin_builds_safe_osascript(self) -> None:
+        with mock.patch.object(rp.subprocess, "run", return_value=_proc(0)) as run:
+            rc, _ = rp.run_via_admin(["codesign", "--force", "-",
+                                      "/Applications/rekordbox 7/rekordbox.app"])
+        self.assertEqual(rc, 0)
+        argv = run.call_args[0][0]
+        self.assertEqual(argv[0], "osascript")
+        script_arg = argv[-1]
+        self.assertIn("do shell script", script_arg)
+        self.assertIn("administrator privileges", script_arg)
+        # osascript only references a /bin/sh <tempfile>, never the raw codesign args
+        self.assertIn("/bin/sh", script_arg)
+        self.assertNotIn("rekordbox.app", script_arg)
+
+
+class InteractiveGuiTests(unittest.TestCase):
+    def test_not_found(self) -> None:
+        with mock.patch.object(rp, "find_rekordbox", return_value=None), \
+             mock.patch.object(rp, "_gui_notify") as notify:
+            self.assertEqual(rp.run_interactive_gui(), 2)
+        self.assertIn("not found", notify.call_args[0][0].lower())
+
+    def test_already_patched(self) -> None:
+        with mock.patch.object(rp, "find_rekordbox", return_value=APP), \
+             mock.patch.object(rp, "has_get_task_allow", return_value=True), \
+             mock.patch.object(rp, "_gui_notify") as notify:
+            self.assertEqual(rp.run_interactive_gui(), 0)
+        self.assertIn("already", notify.call_args[0][0].lower())
+
+    def test_running_refused(self) -> None:
+        with mock.patch.object(rp, "find_rekordbox", return_value=APP), \
+             mock.patch.object(rp, "has_get_task_allow", return_value=False), \
+             mock.patch.object(rp, "is_rekordbox_running", return_value=True), \
+             mock.patch.object(rp, "_gui_notify") as notify:
+            self.assertEqual(rp.run_interactive_gui(), 1)
+        self.assertIn("quit", notify.call_args[0][0].lower())
+
+    def test_cancelled_never_patches(self) -> None:
+        with mock.patch.object(rp, "find_rekordbox", return_value=APP), \
+             mock.patch.object(rp, "has_get_task_allow", return_value=False), \
+             mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
+             mock.patch.object(rp, "_gui_confirm", return_value=False), \
+             mock.patch.object(rp, "apply_patch") as ap, \
+             mock.patch.object(rp, "_gui_notify"):
+            self.assertEqual(rp.run_interactive_gui(), 1)
+        ap.assert_not_called()  # no consent -> no modification
+
+    def test_confirmed_applies_via_admin(self) -> None:
+        with mock.patch.object(rp, "find_rekordbox", return_value=APP), \
+             mock.patch.object(rp, "has_get_task_allow", return_value=False), \
+             mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
+             mock.patch.object(rp, "_gui_confirm", return_value=True), \
+             mock.patch.object(rp, "apply_patch",
+                               return_value=rp.PatchResult(True, "patched", "done")) as ap, \
+             mock.patch.object(rp, "_gui_notify"):
+            self.assertEqual(rp.run_interactive_gui(), 0)
+        ap.assert_called_once()
+        self.assertFalse(ap.call_args.kwargs["dry_run"])          # real apply, not dry-run
+        self.assertIs(ap.call_args.kwargs["runner"], rp.run_via_admin)  # admin-escalated
+
+
 if __name__ == "__main__":
     unittest.main()
