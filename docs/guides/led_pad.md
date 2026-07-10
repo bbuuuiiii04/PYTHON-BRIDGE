@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: software-tested
-last_verified_commit: 2040c1f
-last_verified_date: 2026-07-04
-validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (live-apply + variant switch + preview), Round 2 (param_specs sliders/toggles, slot swatches, JSON demoted to Advanced), and Round 3 (rejected-drafts filter, draft delete), QR same-network access, the iOS/iPad touch pass, and the editor unset-param-defaults fix; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
+last_verified_commit: 60485f7
+last_verified_date: 2026-07-10
+validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (live-apply + variant switch + preview), Round 2 (param_specs sliders/toggles, slot swatches, JSON demoted to Advanced), Round 3 (rejected-drafts filter, draft delete), QR same-network access, the iOS/iPad touch pass, the editor unset-param-defaults fix, and the AWR-193 pad/lab overhaul (accept snapshot, decoupled preview, archive flow, fn fallback, effective bounds, color pickers + regime badges, reconnect, freshness watchdog + live fingerprint + no-cache); SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # LED Pad
@@ -66,11 +66,24 @@ This is plain HTTP, not HTTPS — the QR/URL is a convenience for typing a LAN a
 a phone, not a security boundary. Firewalls or Wi-Fi client (AP) isolation can still
 block another device from reaching the LAN URL even when one is detected.
 
-## Picking up code changes
+## Picking up code changes (freshness contract, AWR-193)
 
-The LaunchAgent only restarts on crash (`KeepAlive.SuccessfulExit=false`). After editing
-`scripts/led_pad.py`, `tools/led_pad_*.py`, `tools/led_pad_assets/**`, or pad control helpers,
-force the agent to reload:
+The pad now restarts itself for code freshness. A watchdog thread in `run_server`
+(`tools/led_pad_web.py`) samples the mtimes of an explicit watched-module list every 5 s:
+`govee_frame_renderer.py`, `led_pad_controls.py`, `govee_realtime_runner.py`,
+`led_color_engine.py`, `led_config.py`, `tools/led_pad_web.py`, `tools/led_pad_lab.py`,
+`tools/led_pad_playback.py`, `tools/pad_access.py`. When any watched file changes (or goes
+missing) and the change has been stable for >= 3 s, the pad logs
+"source changed on disk — restarting for freshness" and exits with code 3; launchd
+(`KeepAlive.SuccessfulExit=false`) relaunches it. The restart decision is the pure function
+`freshness_restart_due` and it refuses while playback is running or while the pad owns the
+LEDs — a pad-owned restart would drop the room dark, so that path is impossible by
+construction. Open pages heal through the shared reconnect helper (below). All HTTP
+responses (JSON and static assets) carry `Cache-Control: no-cache`, so browsers re-fetch
+assets after a restart.
+
+Manual force-reload still works when the pad is mid-playback or pad-owned (the watchdog
+refuses then):
 
 ```bash
 launchctl kickstart -k gui/$UID/com.bbui.led-pad
@@ -100,6 +113,20 @@ Logs are written to `/tmp/led_pad.log` and `/tmp/led_pad.err`.
 - Derive renderer controls from `REALTIME_EFFECT_PARAM_KEYS` and validate the full draft before
   writing live config.
 - Apply the draft to `config/led_look_director.json` with a `.bak-*` backup.
+- Detect live config moving underneath the draft (AWR-193): a gitignored fingerprint sidecar
+  `config/led_look_director.draft.base` records the sha256 of the live config the draft is based
+  on (written when the draft is first created from live, on Apply/Discard/history restore, and
+  refreshed while the draft is clean). `/api/config` gains `"live_changed"`; when true the pad
+  shows "Live config changed underneath this draft (bridge or agent edit). Review before Apply —
+  Discard reloads live." and repeats that line in the Apply confirm. No auto-merge, ever.
+- Render rgb-kind controls as native color pickers with a live swatch (AWR-193; previously
+  skipped). On engine-colored looks, rgb-kind and color-signature rows carry the badge
+  "palette overrides this in the room" — the controls still edit stored params, the badge states
+  the audition truth.
+- Survive pad-server restarts (AWR-193): both pages route their 2 s runtime polls through the
+  shared `PadHealth` helper (`pad-core.js`) — two consecutive poll failures show a persistent
+  "Pad server unreachable — reconnecting…" banner with backoff (2 s → 5 s cap); the first success
+  after downtime runs a full page refresh and clears the banner.
 
 ## Editor unset-param defaults (2026-07-03)
 
@@ -134,9 +161,17 @@ Template Lab is a second route in the same LED Pad server. It loads draft render
 pad process from `config/led_lab/effects_lab.py` and tracks draft metadata in
 `config/led_lab/drafts.json`. The bridge never imports lab code.
 
-Lab names must be lowercase identifiers and cannot collide with production realtime render names.
-They play as `lab_<name>` through the same standalone playback slot as LED Pad looks, so starting
-a lab draft preempts pad playback and starting a pad look preempts lab playback.
+Lab names must be lowercase identifiers; a NEW draft cannot take a production realtime render
+name, but an existing entry whose name later became a production effect stays fully saveable
+(AWR-193 Task 1 — the collision check fires on create only, so promotion no longer bricks the
+source draft's Save/Accept/Reject). Such entries are flagged `production_collision` in
+`/api/lab/list`, get an "in production" chip and an archive banner in the UI, and can be filed
+away with one confirm-gated Archive tap (`POST /api/lab/archive` → status `promoted`; the
+Rejected list toggle is now "Archived (n)" covering rejected + promoted). Drafts play as
+`lab_<name>` through the same standalone playback slot as LED Pad looks, so starting a lab draft
+preempts pad playback and starting a pad look preempts lab playback. Play and preview resolve the
+effect name-first with the entry's `fn` as fallback (AWR-193 Task 2), so a renamed draft keeps
+rendering while `effects_lab.py` still registers the original fn.
 
 The Lab page supports draft brief/notes, param controls (see below), cue length, Play/Stop, Reload
 code, Accept/Reject/Archive status, and a plain-language error banner (the raw traceback panel is
@@ -161,6 +196,33 @@ agent-facing content). To promote an accepted draft:
 7. Renamed drafts note (AWR-193 Task 2): play/preview resolve a draft's effect name-first,
    then by its stored `fn` — a draft renamed after authoring keeps rendering as long as
    `effects_lab.py` still registers the original fn name.
+
+### AWR-193 overhaul flows (2026-07-10)
+
+- **Accept-what-you-hear.** `_lab_play_spec` records the last APPLIED pre-injection params per
+  draft (author params + live UI overrides, snapshotted immediately before engine color
+  injection — palette-injected colors are never saved). Accept writes that snapshot into the
+  entry in the same save that flips status; the response carries `"snapshotted"` (false when the
+  draft was never played this server session, in which case params stay untouched). A dirty chip
+  next to Save reads "Unsaved tweaks" / "Saved" from comparing the editor params against the
+  saved entry.
+- **Decoupled preview.** ◉ Preview no longer saves first — it posts the current editor params
+  straight to `/api/lab/preview`. Play keeps save-first, and a save failure shows
+  "Save failed: …" in the banner and visibly aborts the play attempt. Auto-apply JSON parse
+  failures surface "Params JSON invalid — live apply paused" instead of silently returning.
+- **Single-source bounds.** `led_pad_controls.effective_lab_specs()` decorates every
+  `/api/lab/list` entry with `effective_param_specs` + `spec_conflicts`: for any spec key that
+  also exists in `CONTROL_META`, CONTROL_META's min/max/step/label WIN (kind stays from the
+  spec); conflicting stored bounds are reported, and the UI notes "Slider ranges updated from the
+  production controls table". Nothing is persisted back into the draft.
+- **Color pickers.** Complete `<base>_r/_g/_b` slider triplets collapse into one native color
+  picker row with a live swatch; the picker writes all three channel params through the same
+  auto-apply path. Incomplete triplets stay sliders. On slot-kind drafts, color rows carry the
+  "palette overrides this in the room" badge (slot-kind auditions are palette-fed).
+- **Operator-clean surface.** The promotion checklist lives in this doc (above), not the UI. The
+  raw traceback panel renders only with `?dev=1`; failures otherwise show a plain-language
+  banner. The cue row is labeled "Cue length (beats)" on both pages, and Delete sits in a
+  separated danger zone below the panel instead of next to Accept.
 
 ### Param controls and slot swatches (Round 2)
 
@@ -223,9 +285,10 @@ detail panel is unaffected.
 `POST /api/lab/delete {"name"}` removes a draft's `drafts.json` entry only — it never touches the
 function inside `effects_lab.py` (that cleanup stays a separate manual/agent step) and it refuses
 while that exact draft is the one currently playing (`{"ok": false, "error": "stop_playback_first"}`)
-instead of stopping playback on the operator's behalf. The Lab page's **Delete** button sits at the
-end of the action row, away from **▶ Play**, confirms through the shared `PadModal`, shows "Stop
-playback first." on refusal, and otherwise clears the selection and refreshes the list.
+instead of stopping playback on the operator's behalf. The Lab page's **Delete draft** button lives
+in a separated danger zone at the bottom of the detail panel (AWR-193 Task 7 — no longer in the
+Accept/Reject action row), confirms through the shared `PadModal`, shows "Stop playback first." on
+refusal, and otherwise clears the selection and refreshes the list.
 
 ## Ownership And Recovery
 
@@ -299,8 +362,12 @@ runtime/API behavior change):
 
 Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (`/api/lab/update`, `/api/lab/switch`,
 `/api/lab/preview`, auto-apply, preview strip), Template Lab Round 2 (`param_specs`
-slider/toggle controls, slot swatches, JSON demoted under Advanced), and Template Lab Round 3
-(rejected-drafts filter, `/api/lab/delete`) are implemented/software-tested.
+slider/toggle controls, slot swatches, JSON demoted under Advanced), Template Lab Round 3
+(rejected-drafts filter, `/api/lab/delete`), and the AWR-193 overhaul (collision unbrick +
+archive, fn fallback, accept snapshot + dirty chip, decoupled preview, effective bounds, color
+pickers + regime badges, operator-clean surface, reconnect helper, freshness watchdog +
+live-changed fingerprint + no-cache) are implemented/software-tested. AWR-193's JS/UI behavior
+has no automated harness — it is code-review + manual-smoke covered only.
 Locked Palette and renderer param unlock behavior is covered by software tests only. All LED Pad
 and Template Lab playback/UI claims are SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED. The
 iOS/iPad touch pass is implemented/software-tested only; on-device verification is pending.
