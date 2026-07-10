@@ -18,9 +18,23 @@ validation_scope: >
 
 === BEGIN PROMPT ===
 
-**Model:** Claude Opus 4.8 · **Effort:** xhigh · **ultracode ON** (author and run Workflows for the substantive phases) · Set a large max-output budget (~64k).
+**Driver model:** Brandon's pick at launch — a strong reasoning model for the orchestration seat. **Per-subtask model, effort, and context window are YOUR judgment under the cost budget in §0** — do not default everything to the biggest model. **Agentic multi-agent orchestration ON** (Workflows if this environment provides them; otherwise parallel subagents — see §3.1). Raise the max-output budget only where a task needs it.
 
 This is read-only interoperability RE of Brandon's own, legally-installed Rekordbox and TimecodeLink on his own Mac, so his own DJ lighting bridge keeps working when Rekordbox updates. The bridge already reads Rekordbox playback state through the macOS `task_for_pid` access it uses today; you add nothing to that access.
+
+## 0. Model, effort & context budget — COST-CONSTRAINED (read first)
+
+Brandon is on the **$20/month Cursor plan**; every premium-model call draws from a shared **~$20 monthly API credit pool**. Spend it like it's your own money. **You** choose the model, effort, and context window for **every** sub-task and sub-agent from this roster — match the tool to the job:
+
+- **Premium / expensive — reserve for the few hardest steps** (Opus 4.8, Fable 5, GPT 5.6 SOL): the RE reasoning that decides the version-extension mechanism, adjudicating each **safety claim**, and the final adversarial pass over the strobe-clamp correctness. High/xhigh effort **only where it changes the answer** (max rarely — it overthinks with diminishing returns).
+- **Mid — the workhorse tier** (GPT 5.6 TERRA, Cursor Grok 4.5): per-version verification, reading decompiler output, writing tests, routine review rounds. Medium effort default.
+- **Cheap / fast — bulk mechanical work** (Composer 2.5): running `otool`/`strings`/`nm`, collecting symbols, diffing tables, boilerplate tests, doc edits. Low effort.
+
+Rules:
+- **Cheapest model + lowest effort that does the sub-task correctly wins.** Escalate a tier only when the cheaper one demonstrably cannot.
+- **Context window: large only when the task needs it** (whole-binary cross-refs, a multi-file safety trace). Give scoped sub-tasks a normal window — a big context on a small task is wasted spend.
+- **HARD EXCEPTION — never cheap out on safety.** Any step that decides whether a clamp bounds every tempo path, whether the reader fails closed, or whether a strobe surface is covered runs on a **premium model at high effort**, cost notwithstanding. Cost discipline never overrides the §7 floor (matches Brandon's standing rule: safety-critical reasoning stays on a high tier).
+- If the credit pool is a hard limit, **do the cheap, high-information phases first** (§6.1 premise, §7 strobe floor) and tell Brandon where the spend went before committing premium budget to the deep rekordbox-binary RE.
 
 ## 1. Mission (one line)
 
@@ -104,7 +118,7 @@ The one hard floor: **a bad reading must never drive a dangerous strobe.** Defen
 
 ## 8. Orchestration + review doctrine (ultracode — apply recursively; bounded so it terminates)
 
-- **Fan out** (Workflow, or §3.1 subagent fallback): per-function decompilation; per-version verification; the review passes. Default `pipeline`; barrier only when a stage needs all prior results.
+- **Fan out** (Workflow, or §3.1 subagent fallback): per-function decompilation; per-version verification; the review passes. Default `pipeline`; barrier only when a stage needs all prior results. **Pick each fan-out agent's model/effort/context per §0** — cheap models (Composer 2.5) for mechanical decompile-reading and per-version bulk checks; a premium model at high effort for the safety-claim adjudication and the final clamp review. Never route a safety adjudication to a cheap tier.
 - **Strict review:** every reverse-engineered offset/field and every code change gets an independent verifier that re-derives it **from the binary/code**, not from your notes.
 - **Adversarial review:** for each safety claim and each derived offset, spawn ≥3 independent skeptics **prompted to REFUTE**, defaulting to "refuted" under uncertainty; a claim survives only on majority non-refute. Use perspective-diverse verifiers (correctness / does-it-fail-closed / does-it-reproduce-on-the-binary).
 - **Scope the review to what is verifiable this session.** Only 7.2.11's binary is on disk. The "re-derive-from-binary" strict review and the refute-default adversarial review apply to versions whose binary is obtainable this session (7.2.11, plus any build you can legitimately obtain/import). **For absent-binary versions the claim under review is the fail-closed-safety claim** (inert-on-failure + version-independent §7 floor), **NOT offset correctness** — offset correctness for those is explicitly "proven-by-construction / unverified, degrade-safe" (matches DONE #2). Do not let skeptics refute an absent-binary correctness claim forever; review the safety claim instead.
@@ -119,7 +133,7 @@ The one hard floor: **a bad reading must never drive a dangerous strobe.** Defen
 
 ## 10. Claim discipline + final report
 
-Label every load-bearing claim `confirmed` / `assumed` / `unknown`, each tied to a decompilation, a command, or a file:line. No hidden chain-of-thought — evidence-tied rationale, labels, and verdicts only. End with: (1) a plain-English safety statement for Brandon — what is safe, on which versions, and by which evidence class (binary-verified / live-confirmed / proven-by-construction), **explicitly scoped** to SS-app-mode + LED/laser emit and noting the pack-player surface is not covered; (2) the residual-unknowns list; (3) what you changed and where; (4) the exact operator next-actions — the staged live-confirm procedure for his 7.2.11 session, and the flash-Hz ceiling to tune.
+Label every load-bearing claim `confirmed` / `assumed` / `unknown`, each tied to a decompilation, a command, or a file:line. No hidden chain-of-thought — evidence-tied rationale, labels, and verdicts only. End with: (1) a plain-English safety statement for Brandon — what is safe, on which versions, and by which evidence class (binary-verified / live-confirmed / proven-by-construction), **explicitly scoped** to SS-app-mode + LED/laser emit and noting the pack-player surface is not covered; (2) the residual-unknowns list; (3) what you changed and where; (4) the exact operator next-actions — the staged live-confirm procedure for his 7.2.11 session, and the flash-Hz ceiling to tune; (5) which models/effort/context you used per phase and roughly how much of the credit pool that spent (§0), so Brandon can see where the budget went.
 
 Lead with the outcome. When you can recommend, recommend — don't survey options you won't pursue.
 
@@ -128,4 +142,6 @@ Lead with the outcome. When you can recommend, recommend — don't survey option
 ---
 
 ### Brandon-facing note (not part of the prompt)
+**Cost note:** the prompt now leads with a §0 budget section — you're on the $20 Cursor plan, so it tells the agent to pick models/effort/context by its own judgment from your roster (Fable 5, GPT 5.6 SOL, GPT 5.6 TERRA, Composer 2.5, Cursor Grok 4.5, Opus 4.8), cheap models for bulk work and premium only for the hard reasoning — with a hard carve-out that the *safety* adjudication always uses a premium model at high effort, cost notwithstanding. It also reports where the credit pool went. One assumption to correct if wrong: the roster is Cursor's, so I wrote the orchestration to work whether you run this in Cursor or Claude Code — if it's specifically Cursor, its background-agent flow stands in for the "Workflow" mentions.
+
 This is the finalized version — I ran a 4-lens adversarial review over my first draft and folded in every fix I could verify against the code. The biggest catch: the clamp site the old plan named (`d.meta.bpm`) would **not** have caught the live-BPM-follow path that sends a memory-scanned tempo straight to SoundSwitch, so the prompt now clamps at the emit boundary and explicitly covers the scanner threads. It also stops the review loop from running forever on the four Rekordbox versions whose binaries aren't on your disk, drops the stale line numbers, and fixes the roles default to "spec for Codex unless you say implement directly." The one question it asks you at the very start is that roles choice. Say the word if you want scope changed (e.g. include the x86_64 table) before you run it.
