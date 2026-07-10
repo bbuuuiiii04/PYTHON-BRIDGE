@@ -62,6 +62,16 @@ from . import bridge_log
 
 log = logging.getLogger("rb_state")
 
+# Live-BPM read sanity ceiling (RBSS_RB_BPM_READ_MAX, default 300). A direct
+# memory read above this is nonsense — a real deck tempo, even heavily pitched,
+# stays under it — and would otherwise flow unbounded into d.meta.bpm and drive
+# beat-locked LED / laser flash timing from a garbage read. Reject-and-keep-prior,
+# never synthesise.
+try:
+    _RB_BPM_READ_MAX = float(os.environ.get("RBSS_RB_BPM_READ_MAX", "300"))
+except ValueError:
+    _RB_BPM_READ_MAX = 300.0
+
 _RB_STATE_DISABLE_ENV = "RBSS_RB_STATE_DISABLE"
 RB_MASTER_DIRECT_SOURCE = "offset_table"
 RB_MASTER_UNAVAILABLE_SOURCE = "unavailable"
@@ -821,8 +831,10 @@ class RBStateReader(threading.Thread):
         except OSError:
             return None
         v = struct.unpack_from("<f", data)[0]
-        # Filter out NaN / inf / nonsense; suppress rather than synthesise.
-        if not (0.0 < v < 1000.0):
+        # Filter out NaN / inf / nonsense; suppress rather than synthesise. The
+        # upper bound is a live-safety cap: a nonsense high BPM must not reach
+        # d.meta.bpm and drive beat-locked LED/laser flash timing (_RB_BPM_READ_MAX).
+        if not (0.0 < v < _RB_BPM_READ_MAX):
             return None
         return v
 

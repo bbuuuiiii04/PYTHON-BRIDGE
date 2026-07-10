@@ -23,6 +23,7 @@ from rb_ss_bridge_v2.osl_output import (  # noqa: E402
 )
 from rb_ss_bridge_v2.sound_switch_engine import SoundSwitchEngine  # noqa: E402
 from rb_ss_bridge_v2.rb_offsets import all_offsets, load_offsets_for_version  # noqa: E402
+from rb_ss_bridge_v2.rb_state_reader import _RB_BPM_READ_MAX  # noqa: E402
 from rb_ss_bridge_v2.live_bpm import _normalize_rb_version  # noqa: E402
 from rb_ss_bridge_v2.tools.rekordbox_derive_offsets import (  # noqa: E402
     parse_nm, derive_anchors, SINGLETON_ANCHORS, INSTANCE_OFF, DEFAULT_IMAGE_BASE,
@@ -115,6 +116,15 @@ class UnknownVersionFailClosedTests(unittest.TestCase):
         conn = _RecordConn()
         SoundSwitchEngine(OS2LOutput(conn)).send_live_bpm_follow(1, 800.0)
         self.assertTrue(all(v == BPM_EMIT_MAX for v in _emitted_bpms(conn.sent)))
+
+
+class DirectReadBpmCeilingTests(unittest.TestCase):
+    def test_read_ceiling_is_a_real_tempo_bound(self) -> None:
+        # A garbage direct-read BPM must be rejected before it can reach
+        # d.meta.bpm -> beat-locked LED/laser flash timing. The ceiling must stay
+        # a real-tempo bound, never the old permissive 1000.
+        self.assertLessEqual(_RB_BPM_READ_MAX, 300.0)
+        self.assertGreaterEqual(_RB_BPM_READ_MAX, 250.0)
 
 
 class VersionStringNormalizationTests(unittest.TestCase):
