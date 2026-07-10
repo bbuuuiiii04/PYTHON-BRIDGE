@@ -30,7 +30,8 @@ import logging
 import threading
 import time
 from collections import deque
-from typing import Callable
+from pathlib import Path
+from typing import Callable, Optional
 
 from . import bridge_fmt as bf
 from . import bridge_log

@@ -21,6 +21,7 @@ log = logging.getLogger("soundswitch_pack_player_config")
 _REPO_ROOT = Path(__file__).resolve().parent
 _DEFAULT_CONFIG_PATH = _REPO_ROOT / "config" / "soundswitch_pack_player.json"
 _CONFIG_ENV = "RBSS_SOUNDSWITCH_PACK_PLAYER_CONFIG"
+_PACK_PATH_ENV = "RBSS_SS_PACK_PATH"
 _VALID_OUTPUT_BACKENDS = frozenset({"none", "midi", "pack"})
 _FIXTURE_CHANNELS = frozenset(range(1, 20))
 _ALLOWED_KEYS = frozenset({
@@ -112,6 +113,9 @@ def load_soundswitch_pack_player_config_from_dict(
             errors.append("output_backend must be one of: midi, none, pack")
 
         pack_path = _string_field(data, "pack_path", "", errors)
+        _pack_override = os.environ.get(_PACK_PATH_ENV)
+        if _pack_override:
+            pack_path = str(Path(_pack_override).expanduser())
         fixture_map_path = _string_field(data, "fixture_map_path", "", errors)
         enttec_port = _string_field(data, "enttec_port", "", errors)
         frame_stale_timeout_ms = _positive_int_field(
