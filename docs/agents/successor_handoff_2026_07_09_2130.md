@@ -254,9 +254,24 @@ SINCE-KICKSTART DELTAS (kickstart went ~21:05; you may have read docs older than
    post-grid-fix = still WALL-T1 (viol 0.53-0.61) vs his "wall tier 3, rips heads
    off" — grid fix did NOT recover it. Clue: identity distortion MAXED 1.00 but
    aggression = 0.39; the aggression formula takes ZERO distortion input
-   (led_identity_v2.py:98-103). Scary Monsters (Levex) = the over-rate pin (T3
-   planned, ~T1 to his ear). B2 labels batch (5 cases incl OCHO blackout-density,
-   fires 5x) was going to his ear at handoff — check the corpus for verdicts.
+   (led_identity_v2.py:98-103). Scary Monsters (Levex) = over-rate pin #1 (T3
+   planned, ~T1 to his ear). B2 PARTIAL VERDICTS (~20:45, committed to corpus):
+   TOXIC EVIL + OMG = over-rate pins #2/#3 ("super inflated"; TOXIC also a FAMILY
+   misread — WALL planned on dark tech house; OMG carries a per-track LASER
+   EXCLUSION verdict: ZERO lasers on that track — new verdict TYPE for the
+   multi-factor laser gate). OCHO (hard techno): darkness DENSITY right; 1:59.6
+   bo16 TOO LONG → should be 1 bar; WANTED 5-bar blackout at 3:24 where the plan
+   has NOTHING (false-negative void class); 3 pre-chorus bo4s CONFIRMED GOOD
+   (note: that's LED-side pre-chorus darkness working — his 4-BAR expectation is
+   the LASER mask, item 8). TENSION TO PRESERVE: OCHO bo16→shorter vs Matroda
+   bo16→"could warrant 32" — blackout length is CONTEXT-SHAPED (hard-techno tight
+   vs breakdown-tail long), NOT a global cap change; do not fix one against the
+   other. RECORDED HYPOTHESIS for the tier round (selection-bias caveat noted):
+   over-rates are void-approached drops, the under-rate is wall-of-sound —
+   violence terms are contrast-shaped. Operator fixed a SECOND live marker defect
+   mid-review (OCHO phrase labels 1 beat off) — marker cleanup is a running side
+   effect of the labels protocol. B2-4/5 pending at handoff; operator: "STANDBY
+   FOR MORE INFO" — check the corpus for the final entries.
 10. Final HEAD at handoff: [FILL]; sweeps: P1 running PID 78394; stick sweep
    awaits rename → re-fire → THEN payload export (order mandatory).
 
