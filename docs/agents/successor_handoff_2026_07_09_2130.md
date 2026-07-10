@@ -352,3 +352,8 @@ Item 10 final HEAD = the commit that carries THIS addendum (git log -1). superma
     pre-Saturday: different USB port test + a backup stick — the clone MUST also
     be volume-named MINK (pre-warm keys are mount-name-bound) and the two sticks
     never plugged in simultaneously.
+    FINAL LAYOUT (operator moved the package ~22:30): everything lives under
+    `/Volumes/MINK/RBSS BRIDGE USB/` (DMG + both .command + RBSS_payload, 3588
+    JSONs); install.command resolves siblings — no code change; usb verified
+    count-guarded. Stick declared Saturday-final; pre-warm 567/567 clean.
+

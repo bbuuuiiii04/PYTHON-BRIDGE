@@ -16,7 +16,7 @@ validation_scope: >
 - [ ] Friend confirmed: **Rekordbox 7.2.11** (Rekordbox → About) — wrong version =
       lights stay idle; there is no workaround on site.
 - [ ] Friend's laptop is **Apple Silicon** (M-series). Intel = app won't launch.
-- [ ] MINK carries: `RBSS Bridge.dmg`, `install.command`, `purge.command`,
+- [ ] MINK carries a `RBSS BRIDGE USB` folder holding: `RBSS Bridge.dmg`, `install.command`, `purge.command`,
       `RBSS_payload/` (the pre-warm — if missing, everything still works, tracks
       just analyze ~15s on first play).
 - [ ] Note his exact XDJ model (decides whether stick-in-deck can ever work later).
