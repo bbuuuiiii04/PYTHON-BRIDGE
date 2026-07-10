@@ -196,34 +196,38 @@ class PatchDTests(unittest.TestCase):
         # + rt_drop_firework_explosion). Every value below is transcribed once
         # from the approved mirror content and hardcoded as an explicit literal
         # so these stay drift tripwires: an unapproved live change turns red.
-        # Tuple = (scene_ref, color_source, params, role). safety_class == drop
-        # for every row.
+        # Tuple = (scene_ref, color_source, params, role, safety_class).
+        # role None = the look is APPROVED out of the drop bank (still pinned:
+        # an unapproved re-add turns red).
+        # AWR-191 re-pin (2026-07-09 executive gate, final-board dispatch):
+        # the firework two-state pin collapsed to the post-apply literal —
+        # tools/apply_firework_redesign.py (353dfa7) ran at the gate (backup
+        # config/led_look_director.json.pre_awr187.bak on disk); the rainbow
+        # pull (rt_rainbow_drop out of the drop bank) and the AWR-188 Part G
+        # palette-comet banking (docs b6a2103) are the other two approved live
+        # changes. Everything below is still an exact-literal tripwire.
         expected_by_rel = {
             "config/led_look_director.example.json": {
-                "rt_post_drop_remnant_chase": ("rt_drop_chase", "engine", {"width": 4}, "post_drop"),
-                "rt_drop_center_burst": ("rt_drop_center_burst", "engine", {}, "drop"),
+                "rt_post_drop_remnant_chase": ("rt_drop_chase", "engine", {"width": 4}, "post_drop", "drop"),
+                "rt_drop_center_burst": ("rt_drop_center_burst", "engine", {}, "drop", "drop"),
             },
             "config/led_look_director.json": {
-                "rt_drop_chase_freestyle_nebula": ("drop_chase_freestyle_nebula", "engine", {}, "drop"),
-                "rt_drop_center_burst": ("rt_drop_center_burst", "engine", {}, "drop"),
-                "rt_drop_strobe_blue": ("drop_strobe_colorway", "baked", {"color_a": [0, 0, 255], "hz": 6.0, "duty": 0.3}, "drop"),
-                "rt_drop_strobe_cyan": ("drop_strobe_colorway", "baked", {"color_a": [0, 255, 255], "hz": 6.0, "duty": 0.3}, "drop"),
-                "rt_drop_strobe_green": ("drop_strobe_colorway", "baked", {"color_a": [0, 255, 0], "hz": 6.0, "duty": 0.3}, "drop"),
-                "rt_drop_strobe_red": ("drop_strobe_colorway", "baked", {"color_a": [255, 0, 0], "hz": 6.0, "duty": 0.3}, "drop"),
-                "rt_drop_strobe_red_white": ("drop_strobe_colorway", "baked", {"color_a": [255, 0, 0], "color_b": [255, 255, 255], "hz": 5.5, "duty": 0.25}, "drop"),
-                "rt_drop_strobe_blue_cyan": ("drop_strobe_colorway", "baked", {"color_a": [0, 0, 255], "color_b": [0, 135, 255], "hz": 5.0, "duty": 0.25}, "drop"),
-                "rt_drop_strobe_cyan_white": ("drop_strobe_colorway", "baked", {"color_a": [0, 255, 255], "color_b": [100, 105, 255], "hz": 5.0, "duty": 0.25}, "drop"),
-                "rt_rainbow_drop": ("rainbow_ordered", "baked", {"width": 6, "cycle_beats": 1, "travel_per_beat": 30}, "drop"),
-                # AWR-187: TWO approved states for the firework look — the
-                # pre-apply v1 (until the executive gate runs
-                # tools/apply_firework_redesign.py against the live config) and
-                # the post-apply redesign. Any THIRD state still turns red.
-                # Collapse to the post-apply literal at the next drift pass
-                # after the gate.
-                "rt_drop_firework_explosion": (
-                    ("drop_firework_explosion", "baked", {"color_a": [255, 240, 220], "spark_a": [255, 170, 60], "spark_b": [255, 240, 220], "surge_beats": 0.5, "bg_hold": 0.7, "sparkle_density": 0.35, "sparkle_size": 1.0, "sparkle_life_s": 0.35}, "drop"),
-                    ("drop_firework_explosion_2", "engine", {"color_a": [255, 240, 220], "color_b": [255, 170, 60], "spark_a": [255, 170, 60], "spark_b": [255, 240, 220], "surge_beats": 0.25, "bg_hold": 0.25, "sparkle_density": 0.5, "sparkle_size": 1.0, "sparkle_life_s": 0.15, "hz": 6.0, "duty": 0.3}, "drop"),
-                ),
+                "rt_drop_chase_freestyle_nebula": ("drop_chase_freestyle_nebula", "engine", {}, "drop", "drop"),
+                "rt_drop_center_burst": ("rt_drop_center_burst", "engine", {}, "drop", "drop"),
+                "rt_drop_strobe_blue": ("drop_strobe_colorway", "baked", {"color_a": [0, 0, 255], "hz": 6.0, "duty": 0.3}, "drop", "drop"),
+                "rt_drop_strobe_cyan": ("drop_strobe_colorway", "baked", {"color_a": [0, 255, 255], "hz": 6.0, "duty": 0.3}, "drop", "drop"),
+                "rt_drop_strobe_green": ("drop_strobe_colorway", "baked", {"color_a": [0, 255, 0], "hz": 6.0, "duty": 0.3}, "drop", "drop"),
+                "rt_drop_strobe_red": ("drop_strobe_colorway", "baked", {"color_a": [255, 0, 0], "hz": 6.0, "duty": 0.3}, "drop", "drop"),
+                "rt_drop_strobe_red_white": ("drop_strobe_colorway", "baked", {"color_a": [255, 0, 0], "color_b": [255, 255, 255], "hz": 5.5, "duty": 0.25}, "drop", "drop"),
+                "rt_drop_strobe_blue_cyan": ("drop_strobe_colorway", "baked", {"color_a": [0, 0, 255], "color_b": [0, 135, 255], "hz": 5.0, "duty": 0.25}, "drop", "drop"),
+                "rt_drop_strobe_cyan_white": ("drop_strobe_colorway", "baked", {"color_a": [0, 255, 255], "color_b": [100, 105, 255], "hz": 5.0, "duty": 0.25}, "drop", "drop"),
+                # Approved rainbow pull: the look def stands, the bank row is gone.
+                "rt_rainbow_drop": ("rainbow_ordered", "baked", {"width": 6, "cycle_beats": 1, "travel_per_beat": 30}, None, "drop"),
+                # AWR-188 Part G palette-comet banking (drop + post_drop).
+                "rt_drop_palette_comet": ("palette_comet", "engine", {"width": 6, "cycle_beats": 1, "travel_per_beat": 30}, "drop", "drop"),
+                "rt_post_drop_palette_comet": ("palette_comet", "engine", {"width": 2, "cycle_beats": 8}, "post_drop", "post_drop"),
+                # AWR-187 post-apply firework redesign (single approved state).
+                "rt_drop_firework_explosion": ("drop_firework_explosion_2", "engine", {"color_a": [255, 240, 220], "color_b": [255, 170, 60], "spark_a": [255, 170, 60], "spark_b": [255, 240, 220], "surge_beats": 0.25, "bg_hold": 0.25, "sparkle_density": 0.5, "sparkle_size": 1.0, "sparkle_life_s": 0.15, "hz": 6.0, "duty": 0.3}, "drop", "drop"),
             },
         }
         for rel in ("config/led_look_director.example.json", "config/led_look_director.json"):
@@ -234,19 +238,17 @@ class PatchDTests(unittest.TestCase):
                 continue
             result = load_led_look_director_config(str(cfg_path))
             self.assertEqual(tuple(result.errors), (), f"{rel}: {result.errors}")
-            for name, entry in expected_by_rel[rel].items():
-                alternatives = entry if isinstance(entry[0], tuple) else (entry,)
+            for name, (scene_ref, color_source, params, role, safety_class) in expected_by_rel[rel].items():
                 self.assertIn(name, result.config.looks)
                 look = result.config.looks[name]
-                actual = (look.scene_ref, look.color_source, look.params)
-                self.assertIn(
-                    actual,
-                    [(s, c, p) for s, c, p, _ in alternatives],
-                    msg=f"{rel}:{name}: {actual}",
-                )
-                role = alternatives[0][3]
-                self.assertEqual(look.safety_class, "drop")
-                self.assertIn(name, getattr(result.config.banks["default"], role), msg=f"{rel}:{name}")
+                self.assertEqual(look.scene_ref, scene_ref, msg=f"{rel}:{name}")
+                self.assertEqual(look.color_source, color_source, msg=f"{rel}:{name}")
+                self.assertEqual(look.params, params, msg=f"{rel}:{name}")
+                self.assertEqual(look.safety_class, safety_class, msg=f"{rel}:{name}")
+                if role is None:
+                    self.assertNotIn(name, result.config.banks["default"].drop, msg=f"{rel}:{name}")
+                else:
+                    self.assertIn(name, getattr(result.config.banks["default"], role), msg=f"{rel}:{name}")
 
     def test_drop_slot_color_smoke_and_snap(self) -> None:
         root = Path(__file__).resolve().parents[1]
