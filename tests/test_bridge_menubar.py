@@ -872,5 +872,46 @@ class BridgeMenubarTests(unittest.TestCase):
         self.assertTrue(result["ok"])
 
 
+class NativeInstallGateTests(BridgeMenubarTests):
+    """AWR-186 M2: the install offer must be frozen-gated so source-run menubars
+    never import install_controller (source behavior byte-identical)."""
+
+    def test_install_offer_is_frozen_gated_in_init(self) -> None:
+        scripts_dir = Path(__file__).resolve().parents[1] / "scripts"
+        source = (scripts_dir / "bridge_menubar.py").read_text(encoding="utf-8")
+        # The install block sits behind the same frozen gate the bridge toggle
+        # uses, and install_controller is imported nowhere at module level.
+        self.assertIn("Install on this Mac…", source)
+        self.assertIn('if getattr(sys, "frozen", False):', source)
+        for line in source.splitlines():
+            stripped = line.lstrip()
+            if stripped.startswith(("from ", "import ")) and "install_controller" in line:
+                self.assertNotEqual(
+                    line, stripped,
+                    f"install_controller import must never be module-level: {line!r}",
+                )
+
+    def test_install_worker_marshals_failure_to_dialog(self) -> None:
+        bridge_menubar = self._import_module()
+        worker = Mock()
+        with patch.object(
+            bridge_menubar.BridgeMenuBar, "_run_install",
+            bridge_menubar.BridgeMenuBar._run_install,
+        ):
+            handler = bridge_menubar.BridgeMenuBar._run_install
+            with patch(
+                "rb_ss_bridge_v2.install_controller.perform_install",
+                side_effect=OSError("disk gone"),
+            ), patch(
+                "rb_ss_bridge_v2.install_controller.bundle_root",
+                return_value=Path("/Volumes/RBSS Bridge/RBSS Bridge.app"),
+            ):
+                handler(worker)
+        args = worker.performSelectorOnMainThread_withObject_waitUntilDone_.call_args.args
+        self.assertEqual(args[0], "finishInstall:")
+        self.assertFalse(args[1]["ok"])
+        self.assertIn("OSError", args[1]["failed_step"])
+
+
 if __name__ == "__main__":
     unittest.main()
