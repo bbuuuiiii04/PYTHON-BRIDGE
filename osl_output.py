@@ -28,6 +28,43 @@ from . import bridge_log
 
 log = logging.getLogger("osl_output")
 
+# ── Live-safety: emit-boundary tempo clamp ───────────────────────────────────
+# A garbage/out-of-range memory read — from the direct reader OR the live-BPM
+# memory scanner — must never feed SoundSwitch an absurd tempo, which SS would
+# turn into a dangerously fast flash. Every BPM the bridge emits to SS funnels
+# through send_bpm / send_beat / send_deck_load below (the scanner-follow path
+# send_live_bpm_follow -> send_bpm included, which bypasses d.meta.bpm), so one
+# clamp at those emits bounds all of them. Operator-tunable; the UPPER bound is
+# the load-bearing safety limit (a real high reading is capped, not eaten).
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ[name])
+    except (KeyError, ValueError):
+        return default
+
+
+BPM_EMIT_MIN = _env_float("RBSS_BPM_EMIT_MIN", 20.0)
+BPM_EMIT_MAX = _env_float("RBSS_BPM_EMIT_MAX", 300.0)
+
+
+def clamp_emit_bpm(bpm: float) -> float:
+    """Bound an outgoing tempo before it reaches SoundSwitch.
+
+    Non-finite or <=0 -> 0.0 (SS treats 0 as "no tempo"); otherwise clamp into
+    [BPM_EMIT_MIN, BPM_EMIT_MAX]. One choke at the emit boundary, not a guard at
+    every caller, so it covers the scanner-follow path and any future caller.
+    """
+    if not math.isfinite(bpm) or bpm <= 0.0:
+        return 0.0
+    if bpm < BPM_EMIT_MIN:
+        return BPM_EMIT_MIN
+    if bpm > BPM_EMIT_MAX:
+        return BPM_EMIT_MAX
+    return bpm
+
+
 # ── Handshake sent on every new connection ───────────────────────────────────
 
 _HANDSHAKE = {
@@ -261,6 +298,7 @@ class OS2LOutput:
 
     def send_beat(self, deck: int, bpm: float, beat_index: int, change: bool = False) -> None:
         """Fire a beat event to SS for the given deck."""
+        bpm = clamp_emit_bpm(bpm)
         self._conn.send({
             "evt":   "beat",
             "deck":  deck,
@@ -326,7 +364,7 @@ class OS2LOutput:
             },
         )
         if bpm_out:
-            self._sub(f"{dn} get_bpm", round(bpm_out, 2), verbose=True)
+            self._sub(f"{dn} get_bpm", round(clamp_emit_bpm(bpm_out), 2), verbose=True)
 
         title = os.path.basename(meta.filepath).rsplit(".", 1)[0] if meta.filepath else ""
         self._sub(f"{dn} song_title", title, verbose=True)
@@ -352,7 +390,7 @@ class OS2LOutput:
         self._sub(f"{dn} get_beatpos", round(beatpos, 4))
 
     def send_bpm(self, deck: int, bpm: float) -> None:
-        self._sub(f"deck {deck} get_bpm", round(bpm, 2), verbose=True)
+        self._sub(f"deck {deck} get_bpm", round(clamp_emit_bpm(bpm), 2), verbose=True)
 
     def send_loop_on(self, deck: int, beats: int = AUTOLOOP_BEATS) -> None:
         self._sub(f"deck {deck} loop", "on", verbose=True)
