@@ -147,6 +147,11 @@ main { padding: var(--pad); }
 .param-row.param-toggle input[type="checkbox"] { width: 24px; height: 24px; }
 .param-row output { min-width: 48px; text-align: right; font-family: var(--font-data); color: var(--text-dim); }
 .slot-swatches { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+.swatch-chip.small { width: 24px; height: 24px; border-radius: var(--radius-sm); border: 1px solid var(--border); display: inline-block; vertical-align: middle; }
+.color-cell { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.param-row input[type="color"], .control-row input[type="color"] { min-height: 40px; width: 56px; padding: 2px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
+.regime-badge { border: 1px dashed var(--lab); color: var(--lab); border-radius: 999px; padding: 1px 7px; font-size: 10px; margin-left: 6px; white-space: nowrap; }
+.param-row.palette-fed input, .control-row.palette-fed input { opacity: .7; }
 .slot-swatches .swatch-chip { width: 40px; height: 40px; border-radius: var(--radius-sm); border: 1px solid var(--border); display: flex; align-items: flex-end; justify-content: center; font-size: 9px; color: rgb(255 255 255 / .85); text-shadow: 0 1px 2px rgb(0 0 0 / .6); }
 .advanced-panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--pad); }
 .advanced-panel summary { cursor: pointer; color: var(--text-dim); font-size: 12px; }
