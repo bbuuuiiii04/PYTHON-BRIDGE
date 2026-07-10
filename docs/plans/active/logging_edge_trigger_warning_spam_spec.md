@@ -67,6 +67,12 @@ re-armed on connect at line 176). Reuse it; do not invent a parallel mechanism.
 - The bridge may be live while you work; never launch or signal any bridge process.
 
 ### Task 1 - `soundswitch_midi_input.py`: edge-trigger the port-gone warning
+
+> **LANDED 2026-07-09 as AWR-190** (haze lane, superman4 dispatch; registry row has the
+> evidence). Delta from the text below, both operator/executive-directed: the key is
+> per-port (`ss_midi_port_gone:<port_name>`, primed False at worker start so first boot
+> logs no spurious "connected"), and retries between edges emit at DEBUG. Tasks 2–6
+> remain open.
 At line ~537-540, gate the warning with `bf.log_changed("ss_midi_port_gone", True)` (import
 `bridge_fmt as bf` following the module's existing import style; check for an existing import
 first). On successful (re)open of the port (the code path that sets `ready = True` /
