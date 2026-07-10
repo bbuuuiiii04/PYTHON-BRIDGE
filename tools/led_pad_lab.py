@@ -243,6 +243,9 @@ class LabRenderer:
         self.module_path = Path(module_path)
         self.delegate = delegate or GoveeFrameRenderer()
         self.fn_for = fn_for
+        # Resolver results memoized per name so render() never does registry
+        # I/O per frame; reload() (run on every play/preview spec) clears it.
+        self._fn_cache: dict[str, str] = {}
         self.effects: dict[str, tuple[str, Callable[..., Any]]] = {}
         self.last_error = ""
         self.last_traceback = ""
@@ -252,6 +255,7 @@ class LabRenderer:
         self.effects = result["effects"] if result["ok"] else {}
         self.last_error = result["error"]
         self.last_traceback = result["traceback"]
+        self._fn_cache.clear()
         return result
 
     def blank(self, segments: int) -> Frame:
@@ -267,10 +271,14 @@ class LabRenderer:
             # Name first, entry-fn fallback: renamed drafts whose module still
             # registers the original fn keep rendering. A resolver failure must
             # not raise out of render — it just means name-only (blank) behavior.
-            try:
-                found = self.effects.get(str(self.fn_for(key)))
-            except Exception:
-                found = None
+            fn_name = self._fn_cache.get(key)
+            if fn_name is None:
+                try:
+                    fn_name = str(self.fn_for(key))
+                except Exception:
+                    fn_name = key
+                self._fn_cache[key] = fn_name
+            found = self.effects.get(fn_name)
         if found is None:
             return self.delegate.blank(segments)
         kind, fn = found
