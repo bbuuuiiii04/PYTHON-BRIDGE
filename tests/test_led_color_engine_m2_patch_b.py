@@ -101,7 +101,7 @@ class PatchBTests(unittest.TestCase):
         self.assertEqual(look.scene_ref, "rt_groove_chase")
         self.assertEqual(look.color_source, "engine")
         # AWR-156 knob #9: role-scoped width (was {}).
-        self.assertEqual(look.params, {"width": 2.5})
+        self.assertEqual(look.params, {"width": 2.5, "loop_beats": 4.0})
 
 if __name__ == "__main__":
     unittest.main()
