@@ -118,8 +118,10 @@ drawer now shows that real default instead of the control's minimum:
   list) now shows the scene ref with a cloud icon instead of rendering blank.
 
 Defaults were hand-extracted from `govee_frame_renderer.py`'s literal `params.get(key, DEFAULT)`
-fallbacks into `led_pad_controls.py::CONTROL_META` (`travel_beats`/`width` differ by scene_ref via
-`PARAM_DEFAULT_OVERRIDES`); `tests/test_led_pad_controls.py::LedPadControlDefaultsTests` pins every
+fallbacks into `led_pad_controls.py::CONTROL_META` (keys whose fallback differs by scene_ref —
+`travel_beats`/`width`, the AWR-156 strobe `duty`, and AWR-187's `drop_firework_explosion_2`
+surge/hold/ember keys — carry per-scene rows in `PARAM_DEFAULT_OVERRIDES`);
+`tests/test_led_pad_controls.py::LedPadControlDefaultsTests` pins every
 hand-extracted value against the exact renderer source text, so an unrelated future change to a
 renderer fallback fails that test instead of silently drifting from the pad UI. Several
 sync-timing keys (`sync_mode`, `heads`, `max_pulses`, `spawn_on_wrap`, `reverse`) are allowlisted
