@@ -450,6 +450,45 @@ track" complaint + B3-4 "big bright sparkles" want).
   GUARANTEE the look CLASS, not merely prefer it.
 - **systems:** f2, led, laser
 
+### B4-3 · Cocaine Inside My Blunts — Disco Lines · WALL T3 @1:28 · over-rate + FALSE NEGATIVE #2
+- **his words:** "absolutely not. played the track and it didn't do a wall t3, but it
+  doesn't deserve one anyways at 1:28 or anywhere in the track. also should've been a
+  1 bar blackout before 1:28"
+- **measured:** approach to drop b192: sub sags −9/−11/−12 (hovering AT the −10
+  threshold) then −28, growl holds 11–25 dB — the growl-dark gate blocks again, and
+  the void-depth margin is borderline. AWR-184 FALSE NEGATIVE #2, same mechanism as
+  SIGNAL plus a threshold-margin note. Tier: hard over-rate (calm-character pattern).
+  Look non-fire observation #3.
+- **systems:** f2, led
+
+### B4-4 · Never Be Like You (it's murph Remix) · HOUSE T3 @1:41 · DESIGN WANT (no-void blackout)
+- **his words:** "should've done a 1 bar blackout before the drop at 1:41. track is
+  also colorful track. also at this track has synth sustains throughout the drop
+  except for the first drop section"
+- **measured:** NO void before b224 — sub climbs back to +27 dB before the drop.
+  This blackout want is NOT a rule miss: it's a design want (pre-drop darkness where
+  the music does not cut) — distinct bucket from SIGNAL/Cocaine. Palette note
+  ("colorful track") + structure label: synth sustains through all drop sections
+  except the first (euphoric-sustain / F4 material).
+- **classification:** no tier verdict given; blackout = DESIGN WANT; structure PARTIAL.
+- **systems:** f2, led, p1
+
+### B4-5 · Latch — Disclosure/Sam Smith · HOUSE T3 @1:35 · over-rate (→T1) + input defect #5
+- **his words:** "phrase analysis swapped a drop section with an up, fixed.
+  absolutely not t3 btw this is t1."
+- **classification:** hard over-rate T3→T1 (melodic house, calm-character pattern);
+  FIFTH live input-defect fix (phrase drop↔buildup swap) — re-measure post-re-analysis.
+- **systems:** f2
+
+### B4-6 · Rude Boy (AANSE Remix) — Rihanna · HOUSE T3 @1:01
+- **his words:** "no definitely not." — hard over-rate.
+
+### B4 threshold tally (violence 0.698–0.700 = the current T3 line)
+Of 6 judged: 4 hard over-rates (Age Of Love, Cocaine, Latch→T1, Rude Boy) + 1 no-tier
+answer + SIGNAL confirmed-and-then-some (whole track under-rated). The 0.70 T3
+threshold is TOO LOW as a pure violence cut; true T3 either sits higher or needs the
+character/zone context term. Placement data for the successor tier round.
+
 ### Hypothesis update after B3 (honest revision)
 B3 weakens the simple contrast story: 3 of 5 void-approached T3s CONFIRMED (Anti Up
 ION, FETISH VOLT, Chainsmokers), 1 soft over-rate, 1 excluded. Over-rates so far
