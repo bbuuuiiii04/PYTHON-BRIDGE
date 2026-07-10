@@ -295,6 +295,22 @@ SINCE-KICKSTART DELTAS (kickstart went ~21:05; you may have read docs older than
 10. Final HEAD at handoff: [FILL]; sweeps: P1 running PID 78394; stick sweep
    awaits rename → re-fire → THEN payload export (order mandatory).
 
+12. LASER LAG ON ATTRIBUTE-CUE BURSTS (operator report ~21:00, his words: lasers
+    "can sometimes lag when an autoloop/scripted track plays with a lot of
+    attribute cues at once. this should not be an issue since i have the enttech
+    usb pro and it rendered fine with soundswitch"). THE BAR IS DEFINED BY THAT
+    SENTENCE: parity with the SS-app on identical hardware — the wire is not the
+    bottleneck, the bridge path is the suspect. Executive triage on tonight's log:
+    laser path has NO timing instrumentation (nothing to grep — that is finding
+    #1); event-late max 96ms tonight lean vs 374ms this afternoon under full
+    agent-fleet load (machine load amplifies; the fleet purge helps but does not
+    close the report — he says "sometimes", not "tonight"). ROUND SHAPE: (1)
+    instrument cue-received→DMX-written latency at DEBUG (log-style rule), (2)
+    reproduce with an attribute-heavy scripted track, (3) suspects in order:
+    frame-sender pacing interaction, SoundSwitchDmxWorker serial batching,
+    event-queue contention (the event-late class), layered persistent-buffer
+    recompute cost on attribute bursts (soundswitch_laser_player render path).
+
 Item 10 final HEAD = the commit that carries THIS addendum (git log -1). superman4 purged all Claude tmux sessions immediately after appending this; hold at the approval gate.
 
 11. RT DROP FIREWORK EXPLOSION (operator report 21:28, verbatim: "rt drop firework
