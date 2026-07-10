@@ -545,29 +545,93 @@ answer + SIGNAL confirmed-and-then-some (whole track under-rated). The 0.70 T3
 threshold is TOO LOW as a pure violence cut; true T3 either sits higher or needs the
 character/zone context term. Placement data for the successor tier round.
 
-### Hypothesis update after B3 (honest revision)
-B3 weakens the simple contrast story: 3 of 5 void-approached T3s CONFIRMED (Anti Up
-ION, FETISH VOLT, Chainsmokers), 1 soft over-rate, 1 excluded. Over-rates so far
-cluster on tracks whose CHARACTER is chill/dark-groovy (Scary Monsters GLACIER,
-OMG chill piano, Radiohead dark techno, TOXIC dark tech house) while energetic-zone
-T3s hold. Refined candidate: tier needs zone/character context (calm-zone tracks
-reaching T3 = suspect), NOT a blanket void-contrast damp. Counter-note: REWIND is
-GLACIER *because* the same aggression under-read drags its zone — zone is
-downstream of the defect, not independent. Successor tests both.
+## Cross-batch analysis (tier hypothesis evolution — kept in discovery order)
 
-All three tier over-rates tonight (Scary Monsters, TOXIC EVIL, OMG) are drops
-approached through a deep sub void; the under-rate (REWIND) is a continuous
-wall-of-sound track. Violence terms (punch/attack) are contrast-shaped, so a
-silent approach may inflate them while sustained loudness suppresses them.
-Testable: do void-preceded drops systematically score higher violence than
-same-track non-void drops? (Selection-bias caveat: B-cases were drawn from the
-void-firing list.)
+**First pass (after B2, superseded):** all tier over-rates at that point (Scary
+Monsters, TOXIC EVIL, OMG) were drops approached through a deep sub void; the
+under-rate (REWIND) is a continuous wall-of-sound track. Violence terms
+(punch/attack) are contrast-shaped, so a silent approach may inflate them while
+sustained loudness suppresses them. (Selection-bias caveat: all B-cases were drawn
+from the void-firing list.)
 
-14 primary entries across 3 fully-labeled tracks + 5 machine-picked review verdicts:
-AGREES 5 · PARTIAL 5 · BLIND 1 · MISREAD 2 · BEHAVIOR VERDICT 1. Shipped from
-labels tonight: AWR-184 (deep-sub-void blackout rung; both Utopia pins verified
-through live seams) + blast-radius sweep clearing all three suspect classes (NO
-AWR-186 needed). Successor batch (executive-pinned in handoff FINAL-STATE):
-Scary Monsters tier misread · REWIND post-grid-fix re-measure · 32-beat cap-raise
-datum · ANLZ intro-marker quality note. Protocol (sweep → operator verdicts →
-bounded round) is the standing shape for label batches under the successor.
+**Revision (after B3, current):** B3 weakened the blanket contrast story: 3 of 5
+void-approached T3s CONFIRMED (Anti Up ION, FETISH VOLT, Chainsmokers), 1 soft
+over-rate, 1 excluded. Over-rates cluster on tracks whose CHARACTER is
+chill/dark-groovy (Scary Monsters GLACIER, OMG chill piano, Radiohead dark techno,
+TOXIC dark tech house) while energetic-zone T3s hold. Refined candidate: tier needs
+zone/character context (calm-zone tracks reaching T3 = suspect), NOT a blanket
+void-contrast damp. Counter-note: REWIND is GLACIER *because* the same aggression
+under-read drags its zone — zone is downstream of the defect, not independent. B4
+added the threshold datum (0.70 line too low) and the under-rate signature: both
+confirmed under-rated tracks show **identity distortion 1.00 with low aggression**
+(the aggression formula takes no distortion input, `led_identity_v2.py:98-103`).
+The B5 pre-measures found two more tracks wearing exactly that signature (Aurora
+Starvation, SPIRAL — both DEEP_POOL, distortion 1.00) before any ear verdict.
+Successor tests all three legs: character-context damping, threshold placement,
+distortion→aggression coupling.
+
+---
+
+## B5 queued — pre-measured case cards (READY, awaiting operator verdicts)
+
+Prepared during the efficiency window (executive dispatch): next 10 unused tracks
+from the 80-track blast-radius list, dossiers + firing windows measured offline at
+`6e40d38` (post-AWR-185 — its precedence guard is visible in the plans: Sky Full of
+Stars' 2:20 blackout now attributes to the "true stop" rung, not deep-sub-void).
+Full raw dossiers in the session scratchpad (`b5_premeasure.txt`) and mirrored in
+the B5PREP report; cards below are question-ready. In every case the room returns
+ON the drop hit; the question is the darkness leading in, plus tier where asked.
+
+- **B5-1 · Give It To Me Good — SIDEPIECE/Disco Lines** (DEEP_POOL, aggr 0.31):
+  HOUSE T3 twice (v0.73 @1:20, v0.76 @2:47), 1-bar black into each. Ask: calm-groove
+  over-rate test ×2. NOTE: the library carries a duplicate copy ("(Extended)") —
+  flag which he plays.
+- **B5-2 · Lights On — MPH, AC Slater** (VOLT): HOUSE T3 twice (v0.76 @1:39.6,
+  v0.74 @3:33.4), 1-bar black into each. Ask: energetic-zone hold test.
+- **B5-3 · Rave Tool — Henry Fong** (EMBERCORE, distortion 1.00): WALL T3 (v0.72),
+  2-bar black into 1:39.2. Ask: tier + family on a hard rave tool.
+- **B5-4 · EYES CUT DEEPER (VIRX REMIX)** (GLACIER — suspect class): NEUTRAL T3
+  (v0.74), 4-BAR black into 2:29. Ask: tier + is 4 bars right.
+- **B5-5 · POP LOCK AND DROP IT — SIDEQUEST** (ION): WALL T3 (v0.70) 2-bar black
+  into 0:40 AND COMET T1 2-bar black into 1:18 — within-track spread. Ask: both
+  drops.
+- **B5-6 · i don't trust a soul — Ship Wrek** (TWILIGHT): WALL T2 4-bar black into
+  1:27.3 riding the LONGEST void in the library (63 beats) + NEUTRAL T1 1-bar into
+  1:41.8. Ask: the 4-bar verdict (cap-raise datum #2) + the quick double.
+- **B5-7 · Starvation (Moraitov Edit) — Aurora** (DEEP_POOL, distortion 1.00, aggr
+  0.31 — REWIND-signature): NEUTRAL T1 (v0.73 damped to T1) 4-bar black at 0:12
+  (intro, 30-beat void). Ask: intro-bo16 verdict + does this track deserve more
+  than T1 (under-rate probe #1).
+- **B5-8 · SPIRAL (BELPHË SCHRANZ REWORK) — ISOxo/Brutalismus 3000** (DEEP_POOL,
+  distortion 1.00 — REWIND-signature): COMET T2, 4-bar black into 1:00. Ask:
+  schranz monster reading as calm deep-pool COMET T2 — tier + family (under-rate
+  probe #2).
+- **B5-9 · A Sky Full of Stars (Hardwell remix) — Coldplay** (GLACIER, aggr 0.17):
+  WALL T1 (v0.53), 1-bar "true stop" black into 2:20.2. Ask: big-room euphoric at
+  T1 — under-rate probe #3 (+ euphoric-sustain structure material).
+- **B5-10 · Make It Happen (Dom Dolla Remix) — RÜFÜS DU SOL** (TWILIGHT): WALL T2,
+  4-bar black into 1:49.1 (13-beat void). Ask: 4 bars of dark on melodic groove
+  house — right?
+
+Open verdicts carried from B4: **B4-7** Pump It (GWELD Schranz Remix) WALL T3 @1:14
+· **B4-8** IDFWU (RAY VOLPE REMIX) WALL T3 @0:43.
+
+---
+
+## Session close (final — supersedes the 19:45 interim close)
+
+Session 1 closed 19:45 with 14 entries; the operator ordered continuation ("changes
+need to be moving now" → "we have an hour to POUND tracks") through B2–B4, ending
+at **33 primary entries**: AGREES 8 · PARTIAL 6 · BLIND 1 · MISREAD 12 · BEHAVIOR
+VERDICT 1 (+1 laser exclusion in B2-2) · DESIGN WANT 1 · EXCLUDED 2 · OBSERVATION 1
+· N/A-SCRIPTED 1. Shipped from labels the same evening: AWR-184 (deep-sub-void
+blackout rung; both Utopia pins seam-verified; first false positive B2-4 + false
+negatives B4-2/B4-3 recorded with confirmed mechanism = bounded-fix brief).
+Successor work queue: tier round (both-direction pins + threshold datum +
+distortion-coupling clue) · AWR-184 boundary fix (three pins) · look-delivery
+reliability (guarantee-the-class expectation, 3 observations) · per-family visual
+languages desk item · post-re-analysis re-measures (REWIND full-energy bar, OCHO
+incl. wanted 3:24 blackout, Latch) · B5 cards above · P1 acceptance set after the
+overnight backfill. The sweep→verdict→bounded-round protocol is standing. All
+entries mirrored in the gitignored JSONL machine layer (41 objects incl.
+amendments/meta).
