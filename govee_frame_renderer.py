@@ -2061,6 +2061,52 @@ def _slot_rt_post_drop_firework_remnants(beat: float, local_t: float, frame_inde
     return field
 
 
+def _slot_palette_comet(beat: float, local_t: float, frame_index: int,
+                        params: Mapping[str, Any], segments: int, seed: int) -> MotionField:
+    """AWR-187 Part G: palette-cycling comet — _rainbow_ordered generalized
+    from baked hue to the track's injected palette slots (a palette, not a
+    renderer branch: on rainbow-classified tracks the PALETTE is rainbow, so
+    the same effect goes rainbow there). Same dual-head movement as the
+    accepted rainbow pair (travel_per_beat beat-locks the heads; absent falls
+    back to the legacy loop_beats pace) and the same position-plus-time color
+    phase, quantized onto the palette slots instead of the HSV wheel. Cycles
+    only the palette slots (0-4 at most); slot 5 stays reserved for the white
+    accent per current white rules. Palette length comes from the runtime-
+    injected slot_colors (any length works: 6-slot v2 dressing cycles slots
+    0-4; a 3-slot palette cycles 0-2; no injection fails bright-white on
+    slot 0 like every slot effect). The seeded start offset walks different
+    tracks/sections into the palette at different colors, deterministically:
+    same seed + beat + local_t => same frame. Not a strobe (no gate; heads
+    only travel)."""
+    seg = max(0, int(segments))
+    field = _empty_motion_field(seg)
+    if seg == 0:
+        return field
+    width = max(0.3, min(6.0, float(params.get("width", 2.0))))
+    loop_beats = max(0.001, float(params.get("loop_beats", 4.0)))
+    span = max(0.1, min(2.0, float(params.get("palette_span", 1.0))))
+    cycle_beats = max(1.0, float(params.get("cycle_beats", 8.0)))
+    slots = _slots(params.get("slot_colors")) or _DEFAULT_SLOT_COLORS
+    n_slots = min(len(slots), 5)  # slot 5 = white accent, never cycled
+
+    tpb = params.get("travel_per_beat")
+    if tpb is not None:
+        travel = max(2.0, min(120.0, float(tpb)))
+        pos1 = (beat * travel) % seg
+        pos2 = (beat * travel + seg / 2.0) % seg
+    else:
+        pos1 = ((beat / loop_beats) % 1.0) * seg
+        pos2 = (((beat + loop_beats / 2.0) / loop_beats) % 1.0) * seg
+
+    start = _rng(seed, "palette_comet").randrange(n_slots)
+    for pos in (pos1, pos2):
+        for idx, w in _head_weights(pos, width, seg).items():
+            phase = ((idx / seg) * span + beat / cycle_beats) % 1.0
+            slot = (start + int(phase * n_slots)) % n_slots
+            field[idx][slot] = min(1.0, field[idx][slot] + w)
+    return field
+
+
 # Slot effects return a MotionField (per-pixel slot intensities) instead of a
 # Frame.  render() routes these through universal_colorizer with the injected
 # slot_colors palette.  M2.5 adds generic slotized realtime cues alongside the
@@ -2122,6 +2168,12 @@ _EFFECTS["rainbow_ordered"] = _rainbow_ordered
 # injected palette). Not a strobe -- the surge is a smooth resolve, not a gate.
 _EFFECTS["drop_firework_explosion"] = _drop_firework_explosion
 
+# AWR-187 Part G: palette-cycling comet — the rainbow generalization. A SLOT
+# effect (the point: the dispatch layer injects the track palette as
+# slot_colors), so it registers in SLOT_EFFECTS, additively per the Phase-2a
+# rule. Not a strobe.
+SLOT_EFFECTS["palette_comet"] = _slot_palette_comet
+
 # Phase-2b config validation must accept slot cues + the baked sand name.
 REALTIME_EFFECT_NAMES = frozenset(_EFFECTS.keys() | SLOT_EFFECTS.keys())
 
@@ -2175,6 +2227,12 @@ _M2_PHASE2A_PARAM_KEYS: dict[str, frozenset[str]] = {
     ),
     "rainbow_ordered": (
         frozenset({"width", "cycle_beats", "rainbow_span", "travel_per_beat",
+                   "loop_beats", "duration_beats"}) | _SYNC_PARAM_KEYS
+    ),
+    # AWR-187 Part G: same knobs as rainbow_ordered with palette_span in place
+    # of rainbow_span. slot_colors stays runtime-injected, NOT allowlisted.
+    "palette_comet": (
+        frozenset({"width", "cycle_beats", "palette_span", "travel_per_beat",
                    "loop_beats", "duration_beats"}) | _SYNC_PARAM_KEYS
     ),
     "drop_firework_explosion": (
