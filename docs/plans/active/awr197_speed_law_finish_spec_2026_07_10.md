@@ -94,8 +94,9 @@ approved speed-law literal` + explicit path.
   `tools/apply_speed_size_law.py` SPEED_PARAMS; example config carries it; the
   live config is applied via the script, set-if-missing, idempotent).
 - `docs/status/active_work_registry.md`: RE-READ fresh immediately before
-  editing (parallel lanes append). Add the AWR-197 row (the id is already
-  claimed by this round - do NOT take a new id): codified in example config +
+  editing (parallel lanes append). UPDATE the existing AWR-197 row IN PLACE
+  (the executive already inserted a CLAIMED row - do NOT add a second row or
+  take a new id): codified in example config +
   apply script; tests by name; and the honest live-state note from Part A
   (live apply taken, then wiped by the 14:29 pad incident; re-apply awaits the
   operator's ruling; STAGED ONLY; SOFTWARE-VALIDATED ONLY /

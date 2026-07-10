@@ -157,6 +157,10 @@ def _default_pad_meta(config: dict[str, Any]) -> dict[str, Any]:
         "drafts": [],
         "looks": {},
         "ui": {"bpm": 128, "test_palette": palettes[0] if palettes else "", "loop": True},
+        # Which looks THIS pad session edited/created vs deleted. Persisted with
+        # the draft (survives a pad-server restart) so commit can merge only the
+        # operator's real edits over live and never re-apply stale draft content.
+        "pad_session": {"touched": [], "deleted": []},
     }
 
 
@@ -175,6 +179,31 @@ def _ensure_pad_meta(config: dict[str, Any]) -> None:
         ui.setdefault(key, value)
     meta.setdefault("drafts", [])
     meta.setdefault("looks", {})
+    session = meta.setdefault("pad_session", {})
+    if not isinstance(session, dict):
+        meta["pad_session"] = session = {}
+    for key in ("touched", "deleted"):
+        if not isinstance(session.get(key), list):
+            session[key] = []
+
+
+def _pad_session(config: dict[str, Any]) -> dict[str, list[str]]:
+    _ensure_pad_meta(config)
+    return config["_pad_meta"]["pad_session"]
+
+
+def _mark_touched(config: dict[str, Any], name: str) -> None:
+    session = _pad_session(config)
+    session["deleted"] = [item for item in session["deleted"] if item != name]
+    if name not in session["touched"]:
+        session["touched"].append(name)
+
+
+def _mark_deleted(config: dict[str, Any], name: str) -> None:
+    session = _pad_session(config)
+    session["touched"] = [item for item in session["touched"] if item != name]
+    if name not in session["deleted"]:
+        session["deleted"].append(name)
 
 
 def _default_bank(config: dict[str, Any]) -> dict[str, Any]:
@@ -482,6 +511,7 @@ class LedPadService:
         meta.setdefault(name, {})
         if "cue_beats" in payload:
             meta[name]["cue_beats"] = float(payload.get("cue_beats") or 0)
+        _mark_touched(candidate, name)
         self._ensure_unique_bank_locked(candidate)
         return candidate
 
@@ -514,6 +544,7 @@ class LedPadService:
             meta = candidate.setdefault("_pad_meta", {})
             meta.setdefault("looks", {})[new_name] = copy.deepcopy(meta.get("looks", {}).get(source, {}))
             _add_to_bank(candidate, new_name, "drafts")
+            _mark_touched(candidate, new_name)
             self._ensure_unique_bank_locked(candidate)
             errors, warnings = self._validate(candidate)
             if errors:
@@ -534,6 +565,7 @@ class LedPadService:
                 raise ValueError(f"unknown look: {name}")
             self._guard_mutable(candidate, name, move=True)
             _add_to_bank(candidate, name, bank)
+            _mark_touched(candidate, name)
             self._ensure_unique_bank_locked(candidate)
             errors, warnings = self._validate(candidate)
             if errors:
@@ -557,6 +589,7 @@ class LedPadService:
                 if isinstance(engine.get(key), dict):
                     engine[key].pop(name, None)
             candidate.setdefault("_pad_meta", {}).setdefault("looks", {}).pop(name, None)
+            _mark_deleted(candidate, name)
             self._ensure_unique_bank_locked(candidate)
             errors, warnings = self._validate(candidate)
             if errors:
@@ -888,14 +921,86 @@ class LedPadService:
         self._playback.request_takeover()
         return {"ok": True, "ownership": self._playback.ownership()}
 
+    def _merged_commit_config(self, draft: dict[str, Any], live: dict[str, Any]) -> dict[str, Any]:
+        """Read-modify-merge for commit: unmanaged live blocks always survive.
+
+        Every top-level block comes from LIVE (including blocks the pad has never
+        heard of). Only what this pad session actually changed is overlaid from
+        the draft: the touched looks, their placement in the role banks, the
+        three per-look ``color_engine`` maps, and pad-owned ``_pad_meta``.
+        Looks the pad never touched keep their LIVE contents, so a stale draft
+        can no longer clobber f2/f4/looks added by other tools. Pure transform.
+        """
+        session = (draft.get("_pad_meta") or {}).get("pad_session") or {}
+        touched = [str(name) for name in (session.get("touched") or [])]
+        deleted = {str(name) for name in (session.get("deleted") or [])}
+        touched_set = set(touched)
+        changed = touched_set | deleted
+
+        merged = copy.deepcopy(live)
+
+        # looks: LIVE base, overlay only touched looks, drop only deleted looks.
+        live_looks = live.get("looks") or {}
+        draft_looks = draft.get("looks") or {}
+        merged_looks = {name: copy.deepcopy(look) for name, look in live_looks.items()}
+        for name in touched:
+            if name in draft_looks:
+                merged_looks[name] = copy.deepcopy(draft_looks[name])
+        for name in deleted:
+            merged_looks.pop(name, None)
+        merged["looks"] = merged_looks
+
+        # banks.default role lists: keep LIVE order for untouched looks, then
+        # apply the pad's own placement for the looks it moved/created.
+        live_default = (live.get("banks") or {}).get("default") or {}
+        draft_default = (draft.get("banks") or {}).get("default") or {}
+        default = merged.setdefault("banks", {}).setdefault("default", {})
+        for bank in _ROLE_BANKS:
+            live_list = live_default.get(bank) if isinstance(live_default.get(bank), list) else []
+            draft_list = draft_default.get(bank) if isinstance(draft_default.get(bank), list) else []
+            kept = [str(item) for item in live_list if str(item) not in changed]
+            added = [str(item) for item in draft_list if str(item) in touched_set and str(item) not in deleted]
+            default[bank] = _dedupe(kept + added)
+
+        # color_engine: everything from LIVE; only the three per-look maps merge.
+        engine = merged.setdefault("color_engine", {})
+        draft_engine = draft.get("color_engine") or {}
+        for key in ("slot_fill_strategy_by_look", "slot_mono_chance_by_look", "locked_palette_by_look"):
+            merged_map = dict(engine.get(key)) if isinstance(engine.get(key), dict) else {}
+            draft_map = draft_engine.get(key) if isinstance(draft_engine.get(key), dict) else {}
+            for name in touched:
+                if name in draft_map:
+                    merged_map[name] = copy.deepcopy(draft_map[name])
+                else:
+                    merged_map.pop(name, None)
+            for name in deleted:
+                merged_map.pop(name, None)
+            engine[key] = merged_map
+
+        # _pad_meta: pad-owned, taken from the draft. The session bookkeeping is
+        # pad-internal and never belongs in the operator's live config.
+        merged_meta = copy.deepcopy(draft.get("_pad_meta") or {})
+        merged_meta.pop("pad_session", None)
+        merged["_pad_meta"] = merged_meta
+
+        return merged
+
     def commit(self, _payload: dict[str, Any] | None = None) -> dict[str, Any]:
         with self._lock:
-            config = copy.deepcopy(self._draft)
-            errors, warnings = self._validate(config)
+            draft = copy.deepcopy(self._draft)
+            _ensure_pad_meta(draft)
+            _default_bank(draft)
+            live = _load_json(self._config_path) if self._config_path.exists() else {}
+            _ensure_pad_meta(live)
+            _default_bank(live)
+            merged = self._merged_commit_config(draft, live)
+            errors, warnings = self._validate(merged)
             if errors:
                 return {"ok": False, "errors": errors, "warnings": warnings}
-            backup = save_config_atomically(config, self._config_path)
-            self._draft = copy.deepcopy(config)
+            backup = save_config_atomically(merged, self._config_path)
+            # Rebase: next commit starts clean — draft == what we just wrote, and
+            # touched/deleted tracking resets (re-added empty by _ensure_pad_meta).
+            self._draft = copy.deepcopy(merged)
             self._persist_draft_locked()
             self._write_draft_base()
         return {
@@ -936,6 +1041,11 @@ class LedPadService:
         errors, warnings = self._validate(config)
         if errors:
             return {"ok": False, "errors": errors, "warnings": warnings}
+        # Restoring a backup is an explicit whole-snapshot intent, so mark every
+        # restored look touched — otherwise merge-commit (which only re-applies
+        # touched looks) would treat the restore as untouched and no-op it.
+        # Unmanaged live blocks still win, so restore never re-clobbers f2/f4.
+        config["_pad_meta"]["pad_session"] = {"touched": sorted((config.get("looks") or {}).keys()), "deleted": []}
         with self._lock:
             self._draft = config
             self._persist_draft_locked()

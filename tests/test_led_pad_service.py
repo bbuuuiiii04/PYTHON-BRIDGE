@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import http.client
 import json
 import shutil
@@ -174,7 +175,11 @@ class LedPadServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             service, _playback, path = self._service(td)
             before = path.read_bytes()
+            # Commit now validates the MERGED result. Only a *touched* look reaches
+            # the merge, so mark it — otherwise the invalid param would be dropped
+            # (live's clean copy wins) and commit would wrongly succeed.
             service._draft["looks"]["rt_groove_chase"]["params"]["not_allowed"] = 1
+            service._draft["_pad_meta"]["pad_session"]["touched"] = ["rt_groove_chase"]
 
             result = service.commit({})
 
@@ -193,6 +198,83 @@ class LedPadServiceTests(unittest.TestCase):
             self.assertTrue(Path(result["backup_path"]).exists())
             self.assertTrue(service.draft_path.exists())
             self.assertEqual(json.loads(path.read_text())["_pad_meta"]["ui"]["bpm"], 131)
+
+    def test_commit_merge_preserves_unmanaged_blocks(self) -> None:
+        # F2/F4 present before == present after: a stale draft can't clobber them.
+        with tempfile.TemporaryDirectory() as td:
+            service, _playback, path = self._service(td)
+            live = json.loads(path.read_text(encoding="utf-8"))
+            live["zz_future"] = {"hello": [1, 2, 3]}  # a block the pad never heard of
+            path.write_text(json.dumps(live), encoding="utf-8")
+            before = json.loads(path.read_text(encoding="utf-8"))
+            self.assertIn("f2", before)
+            self.assertIn("f4", before)
+            # Draft predates those blocks — simulate the 14:29 stale-draft state.
+            for block in ("f2", "f4", "zz_future"):
+                service._draft.pop(block, None)
+            service._persist_draft_locked()
+
+            self.assertTrue(service.save_look(
+                {"name": "rt_groove_chase", "look": {"scene_ref": "rt_groove_chase"}, "params": {}}
+            )["ok"])
+            self.assertTrue(service.commit({})["ok"])
+
+            after = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(after["f2"], before["f2"])
+            self.assertEqual(after["f4"], before["f4"])
+            self.assertEqual(after["zz_future"], {"hello": [1, 2, 3]})
+
+    def test_commit_merge_preserves_untouched_live_look(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service, _playback, path = self._service(td)
+            # Another tool adds a look after the draft was created.
+            live = json.loads(path.read_text(encoding="utf-8"))
+            new_look = copy.deepcopy(live["looks"]["rt_groove_chase"])
+            new_look["params"] = {"loop_beats": 8.0, "width": 1.0}
+            live["looks"]["zz_new_live"] = new_look
+            path.write_text(json.dumps(live), encoding="utf-8")
+
+            self.assertTrue(service.save_look(
+                {"name": "rt_groove_chase", "look": {"scene_ref": "rt_groove_chase"}, "params": {}}
+            )["ok"])
+            self.assertTrue(service.commit({})["ok"])
+
+            after = json.loads(path.read_text(encoding="utf-8"))
+            self.assertIn("zz_new_live", after["looks"])
+            self.assertEqual(after["looks"]["zz_new_live"]["params"], {"loop_beats": 8.0, "width": 1.0})
+
+    def test_commit_merge_applies_deletion_and_keeps_unrelated(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service, _playback, path = self._service(td)
+            self.assertTrue(service.duplicate_look({"source": "rt_groove_chase", "new_name": "zz_del"})["ok"])
+            self.assertTrue(service.commit({})["ok"])
+            self.assertIn("zz_del", json.loads(path.read_text(encoding="utf-8"))["looks"])
+
+            self.assertTrue(service.delete_look({"name": "zz_del"})["ok"])
+            self.assertTrue(service.commit({})["ok"])
+
+            after = json.loads(path.read_text(encoding="utf-8"))
+            self.assertNotIn("zz_del", after["looks"])
+            self.assertNotIn("zz_del", after.get("_pad_meta", {}).get("drafts", []))
+            for names in after["banks"]["default"].values():
+                self.assertNotIn("zz_del", names)
+            self.assertIn("f2", after)
+            self.assertIn("rt_groove_chase", after["looks"])
+
+    def test_commit_merge_keeps_live_params_for_untouched_stale_look(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service, _playback, path = self._service(td)
+            live_params = dict(json.loads(path.read_text(encoding="utf-8"))["looks"]["rt_groove_chase"]["params"])
+            self.assertTrue(live_params)  # the example ships real params here
+            # Draft's copy of an untouched look goes stale (loses its params).
+            service._draft["looks"]["rt_groove_chase"]["params"] = {}
+            service._persist_draft_locked()
+
+            self.assertTrue(service.duplicate_look({"source": "rt_twinkle", "new_name": "zz_other"})["ok"])
+            self.assertTrue(service.commit({})["ok"])
+
+            after = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(after["looks"]["rt_groove_chase"]["params"], live_params)
 
     def test_discard_deletes_draft_and_reloads_live(self) -> None:
         with tempfile.TemporaryDirectory() as td:
