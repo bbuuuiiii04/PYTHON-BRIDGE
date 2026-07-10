@@ -8,7 +8,7 @@ from __future__ import annotations
 import random
 from dataclasses import asdict, replace
 from fractions import Fraction
-from typing import Callable, Iterable, Optional
+from typing import Callable, Iterable, Optional, Sequence
 
 from .led_models import (
     LEDConfig,
@@ -315,7 +315,9 @@ class LEDLookDirector:
         role: str,
         *,
         diy_eligible: Optional[Callable[[str], bool]] = None,
-        look_preference: Optional[Callable[[str], bool]] = None,
+        look_preference: Optional[
+            Callable[[str], bool] | Sequence[Callable[[str], bool]]
+        ] = None,
     ) -> LEDLookDecision | None:
         """Select the next automation look for a role and advance once."""
         if not self._config.enabled or not self._config.automation_enabled:
@@ -330,7 +332,9 @@ class LEDLookDirector:
         self,
         *,
         diy_eligible: Optional[Callable[[str], bool]] = None,
-        look_preference: Optional[Callable[[str], bool]] = None,
+        look_preference: Optional[
+            Callable[[str], bool] | Sequence[Callable[[str], bool]]
+        ] = None,
     ) -> LEDLookDecision | None:
         """AWR-150: pick a realtime drop look to render on the beat when the
         committed drop pick is cloud (which can't own the impact -- internet
@@ -361,9 +365,15 @@ class LEDLookDirector:
             if eligible:
                 look_names = eligible
         if look_preference is not None:
-            preferred = tuple(n for n in look_names if look_preference(n))
-            if preferred:
-                look_names = preferred
+            preds = (
+                tuple(look_preference)
+                if isinstance(look_preference, (list, tuple))
+                else (look_preference,)
+            )
+            for pred in preds:
+                preferred = tuple(n for n in look_names if pred(n))
+                if preferred:
+                    look_names = preferred
         known = tuple(n for n in look_names if n in self._config.looks)
         subset = tuple(
             n for n in known if self._config.looks[n].backend == "realtime_razer"
@@ -418,7 +428,9 @@ class LEDLookDirector:
         role: str,
         *,
         diy_eligible: Optional[Callable[[str], bool]] = None,
-        look_preference: Optional[Callable[[str], bool]] = None,
+        look_preference: Optional[
+            Callable[[str], bool] | Sequence[Callable[[str], bool]]
+        ] = None,
         expected_post_drop_stamp: float | None = None,
     ) -> LEDLookDecision | None:
         if role not in _AUTOMATION_ROLES:
@@ -457,10 +469,19 @@ class LEDLookDirector:
             eligible = tuple(n for n in look_names if diy_eligible(n))
             if eligible:
                 look_names = eligible
+        # Preference terms narrow in order, and each term independently fails
+        # open when its intersection is empty. Earlier routing choices therefore
+        # survive a later optional preference with no matching look.
         if look_preference is not None:
-            preferred = tuple(n for n in look_names if look_preference(n))
-            if preferred:
-                look_names = preferred
+            preds = (
+                tuple(look_preference)
+                if isinstance(look_preference, (list, tuple))
+                else (look_preference,)
+            )
+            for pred in preds:
+                preferred = tuple(n for n in look_names if pred(n))
+                if preferred:
+                    look_names = preferred
         # AWR-149: drop unknown names, then let the deterministic plan choose the
         # transport for this pick and the (role, backend) bag choose the look.
         # Both transports stay reachable in every role that has both -- this

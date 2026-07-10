@@ -234,6 +234,35 @@ class LEDLookDirectorPriorityTests(unittest.TestCase):
         ]
         self.assertEqual(set(picks), subset)
 
+    def test_preference_terms_narrow_independently(self) -> None:
+        cfg = _director_config()
+        cfg["automation_enabled"] = True
+        for name in ("drop_a", "drop_b", "drop_c", "drop_outside"):
+            cfg["looks"][name] = copy.deepcopy(cfg["looks"]["room_manual"])
+        cfg["banks"]["default"]["drop"] = [
+            "drop_a", "drop_b", "drop_c", "drop_outside",
+        ]
+        result = load_led_look_director_config_from_dict(cfg)
+        self.assertTrue(result.available, msg=result.errors)
+
+        f2 = {"drop_a", "drop_b"}
+        disjoint_f4 = {"drop_c"}
+        disjoint = LEDLookDirector(result.config, rng=random.Random(0), shuffled_roles=("drop",))
+        self.assertIn(
+            disjoint.commit_role(
+                "drop", look_preference=[lambda n: n in f2, lambda n: n in disjoint_f4],
+            ).look,
+            f2,
+        )
+
+        intersecting = LEDLookDirector(result.config, rng=random.Random(0), shuffled_roles=("drop",))
+        self.assertEqual(
+            intersecting.commit_role(
+                "drop", look_preference=[lambda n: n in f2, lambda n: n in {"drop_b", "drop_c"}],
+            ).look,
+            "drop_b",
+        )
+
     def test_unknown_manual_override_returns_safe_default(self) -> None:
         director = self._build_director()
         self.assertFalse(director.set_manual_override("missing-look"))

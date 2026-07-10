@@ -6,7 +6,7 @@ transport layers can exchange immutable decisions without runtime-side mutation.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Mapping, Optional, Dict, Tuple
+from typing import Any, Callable, Mapping, Optional, Dict, Sequence, Tuple
 
 RGB = Tuple[int, int, int]
 
@@ -434,7 +434,9 @@ class LEDContext:
     # M1b WI-3: optional DIY-eligibility predicate supplied by the color engine.
     # When None (engine off), the director applies no palette filtering.
     diy_eligible: Optional[Callable[[str], bool]] = field(default=None, compare=False)
-    look_preference: Optional[Callable[[str], bool]] = field(default=None, compare=False)
+    look_preference: Optional[
+        Callable[[str], bool] | Sequence[Callable[[str], bool]]
+    ] = field(default=None, compare=False)
     # Part J: anchor beat of the drop currently in post_drop. The director checks
     # it against the queued pair's stamp so a leftover pair from a different drop
     # is rejected. None on non-post_drop ticks / unit ticks => no stamp check.

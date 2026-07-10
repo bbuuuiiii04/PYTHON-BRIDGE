@@ -16,6 +16,7 @@ consumed.
 
 import sys
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -24,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from rb_ss_bridge_v2 import lighting_moments_v2 as M  # noqa: E402
 from rb_ss_bridge_v2 import led_dispatch_policy as P  # noqa: E402
 from rb_ss_bridge_v2 import led_config  # noqa: E402
+from rb_ss_bridge_v2.led_look_director import LEDLookDirector  # noqa: E402
 from rb_ss_bridge_v2.led_models import F4Config, LEDLookDecision  # noqa: E402
 
 _EXAMPLE = str(Path(__file__).resolve().parents[1]
@@ -281,9 +283,30 @@ class TestEuphoricPreference(unittest.TestCase):
         pol._led_v2_look_preference_predicate = lambda: base
         pol._led_f2_drop_look_names = lambda: {"b", "c", "d"}
         pol._led_f4_euphoric_bright = lambda: bright
-        pred = pol._led_look_preference_predicate()
-        passing = [n for n in ("a", "b", "c", "d", "z") if pred(n)]
+        preds = pol._led_look_preference_predicate()
+        passing = ["a", "b", "c", "d", "z"]
+        for pred in preds:
+            narrowed = [n for n in passing if pred(n)]
+            if narrowed:
+                passing = narrowed
         self.assertEqual(passing, ["c"])   # intersection only; never z (outside)
+
+    def test_empty_f2_f4_intersection_commits_inside_f2_cell(self):
+        loaded = led_config.load_led_look_director_config(_EXAMPLE)
+        self.assertTrue(loaded.available, msg=loaded.errors)
+        director = LEDLookDirector(replace(loaded.config, enabled=True, automation_enabled=True))
+        f2_cell = {"rt_drop_chase_blue", "rt_drop_chase_cyan"}
+        bright = {"rt_drop_strobe_red"}
+        pol = FakePolicy(enabled=True, cfg=cfg_on())
+        pol._led_v2_look_preference_predicate = lambda: None
+        pol._led_f2_drop_look_names = lambda: f2_cell
+        pol._led_f4_euphoric_bright = lambda: bright
+
+        decision = director.commit_role(
+            "drop", look_preference=pol._led_look_preference_predicate(),
+        )
+
+        self.assertIn(decision.look, f2_cell)
 
 
 class TestSemanticsLocks(unittest.TestCase):

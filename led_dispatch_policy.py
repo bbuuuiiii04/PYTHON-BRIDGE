@@ -2043,13 +2043,11 @@ class LEDDispatchPolicyMixin:
         return set(names) if names else None
 
     def _led_look_preference_predicate(self) -> Any:
-        # Compose (AND) the eligible look predicates: the v2 dressing filter, the
-        # F2 family×tier routing set, and the F4 euphoric bright-weight. Each term
-        # only NARROWS; the director applies the result fail-open (an empty
-        # preferred subset keeps the full bank), so no term can change routing/
-        # family/tier or empty a bank. With F4 off (bright is None) and F2's
-        # routing unchanged this is byte-identical to the prior base/f2_names
-        # composition — the F4 euphoric term is purely additive preference (D§5.5).
+        # Return independently fail-open narrowing terms in authority order: v2
+        # dressing, F2 family×tier routing, then F4 euphoric bright preference.
+        # The director applies each term to the current subset, so an empty later
+        # intersection keeps the earlier routing choice instead of reopening the
+        # full bank.
         base = self._led_v2_look_preference_predicate()
         f2_names = self._led_f2_drop_look_names()
         bright = self._led_f4_euphoric_bright()
@@ -2062,9 +2060,7 @@ class LEDDispatchPolicyMixin:
             preds.append(lambda name, s=bright: name in s)
         if not preds:
             return None
-        if len(preds) == 1:
-            return preds[0]
-        return lambda name: all(p(name) for p in preds)
+        return tuple(preds)
 
     def _led_v2_look_preference_predicate(self) -> Any:
         if not bool(getattr(self, "_led_v2_latch", False)):
