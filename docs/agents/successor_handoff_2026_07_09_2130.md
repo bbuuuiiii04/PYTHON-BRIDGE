@@ -275,8 +275,23 @@ SINCE-KICKSTART DELTAS (kickstart went ~21:05; you may have read docs older than
    over-rates are void-approached drops, the under-rate is wall-of-sound —
    violence terms are contrast-shaped. Operator fixed a SECOND live marker defect
    mid-review (OCHO phrase labels 1 beat off) — marker cleanup is a running side
-   effect of the labels protocol. B2-4/5 pending at handoff; operator: "STANDBY
-   FOR MORE INFO" — check the corpus for the final entries.
+   effect of the labels protocol. B3 COMPLETE (~20:55, committed): 3 T3s CONFIRMED by ear
+   (Anti Up/FETISH/Chainsmokers — energetic zones HOLD; the scorer is not globally
+   broken), 3 soft over-rates ALL CALM-ZONE → tier-fix hypothesis REFINED:
+   character/zone-context damping, NOT blanket contrast. 2 excluded: variable-BPM
+   (s.o.s, 4th input-defect case) + BLACKPINK scripted → DERIVED PROTOCOL RULE:
+   scripted tracks are excluded from tier calibration sets. THREE growl pins with
+   measured amplitude JOIN THE P1 SWEEP ACCEPTANCE SET: Anti Up 33dB
+   (7bt-growl/11bt-euphoric-sustain loop structure + durations = richest case),
+   FETISH 4bt, Drake 4bt. CONFIG FINDING from his desk (queued: config-semantics +
+   per-family visual language desk session): same-drop-replay playing different
+   looks is design (rotation + fail-open, led_dispatch_policy.py:2045-2054), BUT
+   the COMET family's T2/T3 routing pools contain NO comet-class look — all four
+   families share an IDENTICAL 11-look pool and T2==T3 (the pools that remained
+   after the rainbow pull) — comets only arrive via fail-open. Per-family tier
+   pools were never differentiated beyond tier-1's quartet. B4 (borderline-T3s at
+   violence 0.698-0.700, the exact threshold edge) was at his ear at handoff —
+   check the corpus.
 10. Final HEAD at handoff: [FILL]; sweeps: P1 running PID 78394; stick sweep
    awaits rename → re-fire → THEN payload export (order mandatory).
 
