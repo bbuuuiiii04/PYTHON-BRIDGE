@@ -86,12 +86,16 @@ EXCLUSIONS: tuple[dict[str, str], ...] = (
      "source": "OCHO — charter §D: marker-indexed cases blocked until remapped against current ANLZ"},
     {"id": "B4-5", "reason": "marker_blocked_pending_remap",
      "source": "Latch — charter §D: marker-indexed cases blocked until remapped against current ANLZ"},
-    {"id": "B1-5", "reason": "superseded_by_amendment",
-     "source": "B1-5 old-grid MISREAD superseded by B1-5-AMEND-1 (post-re-analysis 8-drop result); charter §D includes REWIND's post-reanalysis result, not the stale-grid snapshot"},
+    # NOTE: REWIND (B1-5) is NOT excluded. Charter §D: "Include REWIND's
+    # post-reanalysis eight-drop result now" and "Exclude invalid observations,
+    # not repaired tracks." The old-grid snapshot in B1-5.measured is stale, but
+    # it is never used for scoring (accuracy axes are unavailable) and REWIND
+    # resolves live through its current grid; B1-5-AMEND-1 carries the current
+    # truth. The lineage stays usable.
 )
 EXCLUSION_REASONS = (
     "scripted", "unusable_grid", "variable_bpm", "unresolved_version",
-    "marker_blocked_pending_remap", "superseded_by_amendment",
+    "marker_blocked_pending_remap",
 )
 
 # Metric axes and whether a structured operator gold field exists in the labels.
@@ -594,10 +598,18 @@ def render_report(
             L.append(f"  - blocker: {a['blocker']}")
     L.append("")
     L.append("## Marker-sensitivity axis (model-only; the one axis needing no operator gold)")
+    usable = manifest["lineages_usable"]
     if resolution_summary is not None:
-        L.append("- resolution (usable lineages):")
+        resolved = resolution_summary.get("resolved", 0)
+        not_in_db = resolution_summary.get("not_in_db", 0)
+        L.append(f"- resolution: {resolved} of {usable} usable lineages resolved")
         for status in sorted(resolution_summary):
             L.append(f"  - {status}: {resolution_summary[status]}")
+        if not_in_db:
+            L.append(f"  - COVERAGE LIMIT: {not_in_db} usable lineages carry no content_id in the "
+                     "label layer (only Sexy/Utopia do), so they cannot be DB-resolved. Adding "
+                     "content_ids to the B-row labels is a curation task — until then the marker "
+                     "axis is a proof-of-function pilot, NOT the corpus baseline.")
     if marker is not None and marker.get("markers"):
         L.append(f"- measured over {marker['tracks']} resolved tracks / "
                  f"{marker['markers']} markers ({marker['skipped']} skipped):")
@@ -606,14 +618,15 @@ def render_report(
         L.append(f"  - +-2 beat flips — family {marker['pm2']['family']}%, "
                  f"tier {marker['pm2']['tier']}%, darkness {marker['pm2']['darkness']}%")
         ref = SOL_MARKER_REFERENCE
-        L.append(f"  - SOL reference (like-for-like target, {ref['method']}):")
+        L.append(f"  - SOL published reference (DIFFERENT sample — {ref['method']}):")
         L.append(f"    +-1 family {ref['pm1']['family']}%, tier {ref['pm1']['tier']}%, "
                  f"darkness {ref['pm1']['darkness']}%; "
                  f"+-2 family {ref['pm2']['family']}%, tier {ref['pm2']['tier']}%, "
                  f"darkness {ref['pm2']['darkness']}%")
-        L.append("  - NOTE: this is an independent re-implementation; the aggregation is documented "
-                 "in marker_sensitivity(). Treat any delta from SOL as method/corpus/cache "
-                 "difference, not proof either number is wrong.")
+        L.append("  - NOT like-for-like: this pilot resolved far fewer tracks/markers than SOL's "
+                 "15/113. Do NOT compare the percentages or claim improvement/regression. The "
+                 "aggregation is documented in marker_sensitivity(); this only proves the harness "
+                 "computes the axis through the real planner.")
     else:
         L.append("- UNAVAILABLE this run (pass --resolve-db, or resolution was incomplete — see above).")
     L.append("")

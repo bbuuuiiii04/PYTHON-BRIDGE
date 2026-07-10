@@ -55,6 +55,11 @@ Coverage expectations:
 - Docs/agent workflow changes need `tests/test_docs_orphan_check.py` for active-doc
   classification and `tests/test_check_docs_staleness.py` for advisory staleness
   contract parsing, glob expansion, and implementation-file filtering.
+- Spectral ear-benchmark (offline tooling) changes need `tests/test_spectral_ear_benchmark.py`
+  (AWR-200): row taxonomy, explicit exclusions with reasons, grouped leave-one-lineage-out
+  folds never splitting a lineage, anti-leak field rejection, accuracy axes staying
+  UNAVAILABLE (never zero/PASS), deterministic output, and marker-sensitivity flip counting
+  against a synthetic planner seam. Stdlib-only tests; no real cache/DB/planner.
 - Config schema changes need validation tests.
 - LED/Govee rendering changes need deterministic renderer/runner tests where practical.
 - Laser changes need config/executor/director tests.

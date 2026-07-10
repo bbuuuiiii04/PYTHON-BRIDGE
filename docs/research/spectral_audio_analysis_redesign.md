@@ -645,6 +645,32 @@ re-run recipe: `docs/research/spectral_calibration_expansion_2026_07_08.md`.
 
 ---
 
+## 9. Stage-1 EAR benchmark (AWR-200, 2026-07-10)
+
+The v4 extractor/cache this report built is the KEEP layer; the SOL review
+(`docs/research/sol_spectral_review_2026_07_09.md`) split the *decision* layer into the
+AWR-195 refactor program whose blocking first stage is a real ear benchmark. That harness
+now exists — read-only offline tooling, no runtime behavior change:
+
+- `tools/spectral_ear_benchmark.py` + `tests/test_spectral_ear_benchmark.py` (15 tests).
+- Spec: `docs/plans/active/spectral_ear_benchmark_spec_2026_07_10.md`.
+- Frozen run: `docs/research/spectral_ear_benchmark_stage1_report_2026_07_10.md`.
+
+It loads the AWR-182 ear-truth labels, validates/normalizes them without mutation, applies
+the charter's explicit exclusions with reasons, groups whole track/remix lineages, emits a
+deterministic coverage manifest + grouped leave-one-lineage-out fold inventory, and audits
+per-axis metric availability. It imports and calls `lighting_moments_v2.build_track_plan`
+for the one axis needing no operator gold — marker sensitivity (drop marker ±1/±2 flip
+rate) — resolving each track through its current library filepath + beatgrid fingerprint
+(never iterating raw cache files) and reading the v4 cache read-only. **AWR-200 is PARTIAL:**
+the labels are the operator's free-text verdicts, so every accuracy axis
+(tier/family/darkness/growl/laser) is reported UNAVAILABLE — never a fabricated zero/PASS —
+blocked on a curation pass; and the marker axis currently resolves only Sexy/Utopia (the
+B-row labels carry no content_id), making it a proof-of-function pilot, not SOL's
+15-track/113-marker baseline.
+
+---
+
 ## Appendix A — corpus recon (2026-07-05, this session, read-only)
 
 - Rekordbox DB opened exactly as `filepath_resolver.py:281-283` does (pyrekordbox
