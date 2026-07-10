@@ -224,3 +224,13 @@ No test may instantiate `BridgeMenuBar` or touch `NSStatusBar`.
 ## When you finish
 You report evidence; the AWR-192 manager adversarially reviews at its own desk; the
 executive gates. You never declare the round shipped.
+
+## Fix-round addendum (manager review, 2026-07-10 ~01:0x)
+
+Part B Task 2 item 19 was WRONG about the install item: the AWR-186 M2 spec (Task 2)
+requires "Install on this Mac…" as the PRIMARY item (top of menu — the DMG-guest
+flow). The ordered fix restores M2's original index-0 + separator placement verbatim
+and removes the install entry from `MENU_BLUEPRINT`; the maintenance slot holds only
+the purge item, then Quit. Tests re-pinned accordingly (blueprint asserts
+`installOnMac:` NOT present; M2's own gate tests keep pinning the install source).
+The build lane flagged this in its round-1 NOTES before the manager ordered the fix.

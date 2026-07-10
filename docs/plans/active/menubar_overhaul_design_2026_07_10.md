@@ -81,14 +81,19 @@ Decisions + why:
   `# AWR-186 M2 SLOT: "Purge RBSS Bridge…" lands here (manifest-gated; function owned
   by the usbm2 round — fold in unchanged)`. If M2 has landed by build time, the
   builder MOVES M2's item into this position verbatim (title/action/gating untouched).
+  REVIEW CORRECTION (this manager, fix round): M2's INSTALL item does NOT move here —
+  the M2 spec (Task 2) requires "Install on this Mac…" as the PRIMARY item (top of
+  menu, DMG-guest flow); it keeps M2's original index-0 + separator placement. Only
+  the purge item lives in maintenance.
 - **D5 Testable seam.** Extract a pure `menu_blueprint()` → ordered list of row
   descriptors `(kind, title_or_key, selector|None)`; `init` iterates it. Tests pin:
   block order, blackout at top level + absent from submenu, purge slot position,
   selector SET identical to HEAD's (no command lost, none invented), LED row
   formatter truth table. Matches the file's existing pure-function test pattern.
-- **D6 Naming pass.** Only two retitles: "Emergency Blackout"→"Laser Blackout" (D2)
-  and "Quit Menu"→"Quit Menubar (bridge keeps running)". Everything else keeps its
-  name — muscle memory is a feature.
+- **D6 Naming pass.** Three retitles (build round corrected this note's original
+  "two" miscount): "Emergency Blackout"→"Laser Blackout", "Clear Blackout"→"Clear
+  Laser Blackout" (D2), and "Quit Menu"→"Quit Menubar (bridge keeps running)".
+  Everything else keeps its name — muscle memory is a feature.
 
 ## Explicit non-scope (unchanged behavior, verified untouchable)
 
