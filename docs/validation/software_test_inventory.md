@@ -253,6 +253,28 @@ and playing automation returning to the normal realtime beat branch.
 This is software validation only. It does not prove the Govee firmware fallback
 explanation or the room-visible pause behavior.
 
+## SOL2 LED/Beat Launch-Blocker Fixes (AWR-201)
+
+- `tests/test_govee_realtime_runner.py`: `test_recovered_feed_clears_idle_grace`
+  and `test_idle_grace_still_fires_when_feed_stays_bad` cover recovered versus
+  continuously bad beat feeds.
+- `tests/test_beat_sync_engine.py`: `test_reanchor_preserves_whole_beat_age`,
+  `test_feed_gap_resets_divergence_timer`, `test_zero_bpm_sample_clears_divergence`,
+  and `test_paused_animate_clears_divergence` cover continuity and continuous
+  evidence hygiene.
+- `tests/test_led_look_director.py`:
+  `test_shuffle_bag_rebuilds_when_preference_subset_changes`,
+  `test_shuffle_bag_cycle_intact_for_stable_subset`, and
+  `test_preference_terms_narrow_independently` cover family/tier pool changes,
+  stable shuffle cycles, and ordered independently fail-open narrowing.
+- `tests/test_lighting_moments_v2_f4.py`:
+  `test_empty_f2_f4_intersection_commits_inside_f2_cell` covers the policy-to-
+  director path when euphoric-bright and F2 routing pools do not overlap.
+
+The five scoped suites pass 268/268. Full discovery runs 4142 tests with the
+nine named pre-existing failures recorded in AWR-201 and no new SOL2 failure.
+This is SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
+
 ## Govee Health Reporting
 
 `tests/test_govee_runtime_sender.py` covers mirror target failure and recovery

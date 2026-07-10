@@ -322,7 +322,9 @@ Deterministic mixed-transport look rotation (AWR-149, 2026-07-08):
   per-role cursor advances the plan (which transport comes next); a per-`(role,
   backend)` cursor advances only for the transport actually picked and drives
   that transport's shuffle bag, so RNG decides only WHICH look within a
-  transport, never WHICH transport.
+  transport, never WHICH transport. The bag rebuilds whenever the filtered
+  subset's membership changes, so a new family/tier route cannot reuse looks
+  cached for the previous route.
 - Operator contract (taste decision 2026-07-08, do not re-litigate): both cloud
   DIY looks and realtime looks stay reachable in every role whose bank has both.
   Pinning a role exclusively to one transport is rejected. No code path filters
@@ -539,7 +541,10 @@ LED idle/pause ambient fix (2026-07-07):
 - If the realtime runner still reaches idle-grace teardown, it now sends a
   blackout frame before deactivating and logs
   `[RGB] deactivate reason=idle_grace blackout_sent=1`, so the failure mode is
-  dark instead of leaving a previous cloud DIY scene on the strip. The
+  dark instead of leaving a previous cloud DIY scene on the strip. Every
+  permitted healthy frame clears the grace timer, so separate brief feed
+  hiccups cannot combine into a later blackout; a continuously bad feed still
+  blackouts and deactivates after the grace window. The
   firmware-revert explanation remains hardware-assumed until an operator live
   pause validates the room-visible behavior. SOFTWARE-VALIDATED ONLY /
   HARDWARE-UNVALIDATED.
@@ -561,9 +566,12 @@ Continuous-look sustained-divergence BPM re-anchor (AWR-189, 2026-07-09):
   ONLY when |live − current rate| exceeds `REANCHOR_BPM_DELTA` (2.0)
   CONTINUOUSLY for `REANCHOR_SUSTAIN_S` (3.0 s) — one in-band sample resets
   the timer, so AWR-141's jitter immunity stands and nothing raw-tracks.
-  The re-anchor re-bases only the beat phase (one snap onto the real grid);
-  `local_t`, bucket identity, and progress stay born-based so time-based
-  layers and comet sweeps never restart. Retrigger/overlap modes are
+  The re-anchor snaps fractional phase onto the real grid while preserving the
+  effect's accumulated whole-beat age, so a tempo correction cannot replay a
+  multi-beat opening envelope. `local_t`, bucket identity, and progress stay
+  born-based so time-based layers and comet sweeps never restart. Feed gaps
+  over 1 s, zero-BPM samples, and paused/unpermitted animation clear divergence
+  evidence, so the 3 s window must be continuously observed. Retrigger/overlap modes are
   untouched. Both knobs are per-look config-overridable via params
   (`reanchor_bpm_delta` / `reanchor_sustain_s`). Never-diverged behavior is
   byte-identical. Operator acceptance look on record: `rt_groove_heartbeat`
@@ -731,7 +739,10 @@ LIGHTING ENGINE v2 F4 texture layer (AWR-164, 2026-07-09):
   drop cue's `decision.params` (family+texture key → `f4.variant_seasoning` cell; a HOUSE growl-bar drop's
   bass-forward B/K mask scales sparkle density — a scalar stand-in, not literal per-beat alternation). It
   also seasons quiet role cues with sparse-dim `simmer_seasoning` params during a measured simmer.
-  Euphoric windows add a bright/white-end preference through the EXISTING `_led_look_preference_predicate`.
+  Euphoric windows add a bright/white-end preference through the existing
+  `_led_look_preference_predicate`. The v2-dressing, F2 family/tier, and F4
+  bright terms narrow independently in that order; an empty F4 intersection
+  keeps the F2-routed pool instead of reopening the full drop bank.
 - Kill switch: the `/f4` config block, example-ON / absent-OFF (`led_config.load_f4_config` /
   `led_models.F4Config`), so an un-mirrored live config stays byte-identical to F2-only. `busy_pulse`
   is COMPUTED-NOT-CONSUMED behind `busy_pulse_experimental` (renders nothing; C§6d). `sustained_synth`
