@@ -109,6 +109,11 @@
     if (!state.current) return;
     try {
       await save();
+    } catch (err) {
+      showError(`Save failed: ${(err && err.message) || err}`);
+      return;
+    }
+    try {
       const mine = labScene(state.current.name);
       if (state.playingLook && state.playingLook.startsWith("lab_") && state.playingLook !== mine) {
         const sw = await api.labSwitch({name: state.current.name, params: JSON.parse($("paramsInput").value || "{}")});
@@ -225,8 +230,9 @@
   async function previewDraft() {
     if (!state.current) return;
     stopPreview();
-    await save();
-    const res = await api.labPreview({name: state.current.name});
+    // No implicit save: preview posts the current editor params directly.
+    const params = JSON.parse($("paramsInput").value || "{}");
+    const res = await api.labPreview({name: state.current.name, params, cue_beats: cue()});
     if (!res.ok) {
       $("traceText").textContent = res.traceback || res.error || "preview failed";
       $("tracePanel").open = true;

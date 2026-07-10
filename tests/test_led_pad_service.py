@@ -86,9 +86,11 @@ class LedPadServiceTests(unittest.TestCase):
         path = self._copy_config(td)
         lab_dir = Path(td) / "led_lab"
         lab_dir.mkdir(parents=True, exist_ok=True)
+        # No white-slot weight: 'level' alone controls brightness, so level 0.0
+        # renders fully dark (used by the preview params-overlay test).
         (lab_dir / "effects_lab.py").write_text(
             "def pulse(beat_pos, local_t, frame_index, params, segments, seed):\n"
-            "    return [[params.get('level', 1.0), 0, 0, 0, 0, 1] for _ in range(segments)]\n"
+            "    return [[params.get('level', 1.0), 0, 0, 0, 0, 0] for _ in range(segments)]\n"
             "LAB_EFFECTS = {'pulse': ('slot', pulse)}\n",
             encoding="utf-8",
         )
@@ -354,6 +356,21 @@ class LedPadServiceTests(unittest.TestCase):
             self.assertFalse(result["snapshotted"])
             self.assertEqual(entry["status"], "accepted")
             self.assertEqual(entry["params"], {"level": 0.3})
+
+    def test_lab_preview_honors_posted_params_without_prior_save(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service, _playback = self._lab_service(td)
+            service.lab_save({"name": "pulse", "kind": "slot", "fn": "pulse", "params": {"level": 0.0}, "cue_beats": 8})
+
+            dark = service.lab_preview({"name": "pulse", "beats": 1.0, "bpm": 120.0})
+            lit = service.lab_preview({"name": "pulse", "params": {"level": 1.0}, "beats": 1.0, "bpm": 120.0})
+
+            self.assertTrue(dark["ok"])
+            self.assertTrue(all(tuple(pixel) == (0, 0, 0) for frame in dark["frames"] for pixel in frame))
+            self.assertTrue(lit["ok"])
+            self.assertTrue(any(tuple(pixel) != (0, 0, 0) for frame in lit["frames"] for pixel in frame))
+            # The overlay never persisted.
+            self.assertEqual(service._lab.get("pulse")["params"], {"level": 0.0})
 
     def test_http_lab_archive_route_and_unknown_name_400(self) -> None:
         with tempfile.TemporaryDirectory() as td:
