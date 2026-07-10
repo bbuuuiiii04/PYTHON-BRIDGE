@@ -22,10 +22,15 @@ pad.PADOVH.report.md` + `.done`/`.blocked`.
 - [x] Spec (= design note) committed `25eeab3`:
   `docs/plans/active/led_pad_overhaul_spec.md` (Part A–E, 10 tasks, one commit
   each). Registry row AWR-193 added same commit. Hard checks green at commit.
-- [x] Build lane DISPATCHED: tmux `padbuild`, Opus/HIGH (pin verified by
-  dispatch_lane.sh), tag BUILD → signals `padbuild.BUILD.done|.blocked`, report
-  `padbuild.BUILD.report.md`, sentinel `PADOVH-BUILD-COMPLETE`. ONE watcher
-  running (watch_lane.sh, 3h deadline) from the manager session.
+- [x] Build lane DISPATCHED: tmux `padbuild`, tag BUILD → signals
+  `padbuild.BUILD.done|.blocked`, report `padbuild.BUILD.report.md`, sentinel
+  `PADOVH-BUILD-COMPLETE`. ONE watcher running (watch_lane.sh, 3h deadline) from
+  the manager session. SEAT CORRECTED mid-round (executive ~00:4x, standing
+  operator order "Fable/XHIGH for everything"): dispatched Opus/HIGH →
+  interrupted during read-only task-0 verification (zero commits) → `/model
+  fable` ACKED on-screen; `/effort xhigh` queued + verification pending; quota
+  park-with-state rail delivered (limits hit twice today — on a wall: commit
+  done work explicit-paths, write .blocked naming last completed task, stop).
 - [ ] NEXT: adversarial review at this desk when the build signals (checklist
   below), then executive gate via pad.PADOVH signals, then activation.
 
