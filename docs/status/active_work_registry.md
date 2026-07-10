@@ -156,3 +156,5 @@ Deprecated plans belong in `docs/architecture/doc_index.md` or `docs/archive/` w
 | COMP-001 | Rekordbox versions beyond my current setup | reader/offset validation plus tests/logs | unknown |
 | COMP-002 | macOS versions beyond my current setup | launch/read/status validation | unknown |
 | COMP-003 | Windows/Linux | architecture decision, not docs optimism | unsupported/unknown |
+
+| AWR-195 | Spectral v4 decision-layer refactor PROGRAM (SOL-review-derived charter; ear-benchmark first; Fable/MAX owner seat pending) | `docs/plans/active/spectral_v4_refactor_program_2026_07_10.md`; provenance `docs/research/sol_spectral_review_2026_07_09.md` | **CHARTER AUTHORED 2026-07-10 00:3x (superman4)** — SOL one-shot design review at 00:35, then the dedicated owner seat dispatches; wave-2 look authoring keys off its axes |
