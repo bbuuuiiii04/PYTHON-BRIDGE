@@ -136,8 +136,12 @@ main { padding: var(--pad); }
 .empty .panel-label { margin: 0; }
 .lab-badge { color: var(--lab); border: 1px dashed var(--lab); border-radius: 999px; padding: 2px 8px; font-size: 12px; vertical-align: middle; }
 .lab-layout { display: grid; grid-template-columns: minmax(240px, 360px) 1fr; gap: var(--gap); }
-.lab-list-panel, .lab-detail-panel, .promotion-panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--pad); }
+.lab-list-panel, .lab-detail-panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--pad); }
 .trace-panel { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--danger); border-radius: var(--radius); padding: var(--pad); }
+.trace-panel[hidden] { display: none; }
+.cue-wrap { display: flex; flex-direction: column; gap: 4px; }
+.cue-wrap .panel-label { margin: 0; }
+.danger-zone { border-top: 1px solid var(--border); margin-top: var(--gap); padding-top: var(--pad); display: flex; align-items: center; justify-content: space-between; gap: var(--gap); }
 .preview-row { display: flex; align-items: center; gap: var(--gap); }
 .preview-row canvas { flex: 1; width: 100%; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .param-controls { display: flex; flex-direction: column; gap: var(--sp-2); }
@@ -170,7 +174,6 @@ main { padding: var(--pad); }
 .prod-chip { border: 1px solid var(--warn); color: var(--warn); border-radius: 999px; padding: 1px 7px; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
 .collision-banner { border: 1px solid var(--warn); background: rgb(232 177 63 / .08); color: var(--warn); border-radius: var(--radius); padding: var(--sp-3) var(--pad); display: flex; align-items: center; justify-content: space-between; gap: var(--gap); flex-wrap: wrap; }
 .trace-panel pre { white-space: pre-wrap; overflow: auto; font-family: var(--mono); }
-.promotion-panel ul { margin: 0; padding-left: 18px; color: var(--text-dim); }
 @keyframes card-in { from { opacity: 0; transform: translateY(6px); } }
 @keyframes playing-pulse { 50% { box-shadow: 0 0 14px rgb(63 214 143 / .38); } }
 @media (prefers-reduced-motion: reduce) { .look-card { animation: none; } .look-card.playing { animation: none; } button, .look-card { transition: none; } }

@@ -3,6 +3,8 @@
   const $ = (id) => document.getElementById(id);
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
   const state = {entries: [], current: null, playingLook: "", showRejected: false};
+  // Raw tracebacks are agent-facing: render the panel only with ?dev=1.
+  const DEV = new URLSearchParams(location.search).get("dev") === "1";
 
   function showError(err) {
     $("errorBanner").hidden = false;
@@ -137,8 +139,12 @@
   async function reloadCode() {
     const res = await api.labReload();
     $("traceText").textContent = res.traceback || res.error || `Loaded: ${(res.effects || []).join(", ")}`;
-    $("tracePanel").open = !res.ok;
-    if (!res.ok) showError(res.error);
+    if (!res.ok) {
+      showError(`Your effect code failed to load: ${String(res.error || "").split("\n")[0]}`);
+      if (DEV) $("tracePanel").open = true;
+    } else {
+      $("tracePanel").open = false;
+    }
   }
 
   async function updateRuntime() {
@@ -283,8 +289,8 @@
     const res = await api.labPreview({name: state.current.name, params, cue_beats: cue()});
     if (!res.ok) {
       $("traceText").textContent = res.traceback || res.error || "preview failed";
-      $("tracePanel").open = true;
-      throw new Error(res.error || "preview failed");
+      if (DEV) $("tracePanel").open = true;
+      throw new Error(`Your effect code failed to load: ${String(res.error || "preview failed").split("\n")[0]}`);
     }
     renderSwatches(res.slot_colors);
     const canvas = $("previewStrip");
@@ -349,6 +355,7 @@
   $("stopBtn").onclick = () => api.emergencyStop().then(updateRuntime).catch(showError);
   $("ownershipBtn").onclick = async () => { const rt = await api.runtime(); if ((rt.ownership || {}).state === "pad_owned") await api.release(); else await api.takeover(); await updateRuntime(); };
   document.addEventListener("keydown", ev => { if (ev.key === "Escape" && PadModal.isOpen()) PadModal.close(); });
+  $("tracePanel").hidden = !DEV;
   setInterval(updateRuntime, 2000);
   refresh().catch(showError);
 }());

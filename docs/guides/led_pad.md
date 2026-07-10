@@ -139,9 +139,28 @@ They play as `lab_<name>` through the same standalone playback slot as LED Pad l
 a lab draft preempts pad playback and starting a pad look preempts lab playback.
 
 The Lab page supports draft brief/notes, param controls (see below), cue length, Play/Stop, Reload
-code, traceback display, Accept/Reject status, and a static promotion checklist. Accepting a draft
-does not promote code by itself; promotion is a later agent task that moves tested code into
-`govee_frame_renderer.py`, updates allowlists/docs/tests, and then requires a safe bridge restart.
+code, Accept/Reject/Archive status, and a plain-language error banner (the raw traceback panel is
+agent-facing and renders only with `?dev=1` in the URL). Accepting a draft does not promote code by
+itself; promotion is a later agent task — see the runbook below.
+
+### Promotion runbook (agent-facing)
+
+The old in-page promotion checklist moved here (AWR-193 Task 7; the operator UI no longer carries
+agent-facing content). To promote an accepted draft:
+
+1. Move the accepted function into `govee_frame_renderer.py`.
+2. Register it and allowlist its params with value validation.
+3. Add renderer tests for determinism, clamping, defaults, and slot-5 white if slot-based.
+4. Update the example config and LED docs, then run unittest plus the hard docs checks.
+5. Restart the bridge only at a safe approved moment.
+6. Archive the source draft (AWR-193 Task 1 flow): the Lab detail panel shows an
+   "in production" chip and an Archive button once the name collides with a production
+   effect, or POST `/api/lab/archive {"name"}` directly. Archiving sets status `promoted`
+   and files the draft under the Archived toggle — the entry stays in `drafts.json` as
+   the record.
+7. Renamed drafts note (AWR-193 Task 2): play/preview resolve a draft's effect name-first,
+   then by its stored `fn` — a draft renamed after authoring keeps rendering as long as
+   `effects_lab.py` still registers the original fn name.
 
 ### Param controls and slot swatches (Round 2)
 
