@@ -43,6 +43,35 @@ BRIDGE_ENV: dict[str, str] = {
 # so it is NOT a member of the static BRIDGE_ENV set above).
 LASER_CONFIG_ENV = "RBSS_LASER_CONFIG"
 
+# Home-parity config overrides (AWR-186 M2): the live-config files the native
+# installer lands in App Support, mapped to each subsystem's existing env seam
+# (laser_config.py / led_config.py / soundswitch_pack_player_config.py /
+# laser_color_engine.py resolve these). Installed copy present -> env points at
+# it; absent -> the subsystem keeps today's default resolution, byte-identical.
+APP_SUPPORT_CONFIG_ENV: dict[str, str] = {
+    "laser_director.json": LASER_CONFIG_ENV,
+    "led_look_director.json": "RBSS_LED_CONFIG",
+    "soundswitch_pack_player.json": "RBSS_SOUNDSWITCH_PACK_PLAYER_CONFIG",
+    "laser_color_map.json": "RBSS_LASER_COLOR_MAP_CONFIG",
+}
+
+
+def app_support_config_env(
+    app_support_dir: str, present_names: "set[str] | frozenset[str] | list[str]"
+) -> dict[str, str]:
+    """Env overrides for the App Support config copies that actually exist.
+
+    Pure: the caller supplies the directory listing (``present_names``); no
+    filesystem access here (the test seam, same rule as the rest of this
+    module).
+    """
+    present = set(present_names)
+    return {
+        env: f"{app_support_dir}/{name}"
+        for name, env in APP_SUPPORT_CONFIG_ENV.items()
+        if name in present
+    }
+
 
 def bridge_env(laser_config_path: str, extra: dict[str, str] | None = None) -> dict[str, str]:
     """Return the full bridge launch env: the 19 flags + the laser config path.

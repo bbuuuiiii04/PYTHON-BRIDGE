@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -208,9 +209,15 @@ class LaserColorEngine:
 # resolved to a nonexistent path and silently loaded an all-null/disabled map —
 # which disabled the whole laser-color-from-LED-palette feature at runtime.
 _DEFAULT_COLOR_MAP_PATH = Path(__file__).resolve().parent / "config" / "laser_color_map.json"
+# Frozen-bundle home-parity seam (AWR-186 M2): the bundle carries only example
+# configs, so the installer lands the tracked map in App Support and the launch
+# profile points this env at it. Unset (every source run) -> default unchanged.
+_COLOR_MAP_ENV = "RBSS_LASER_COLOR_MAP_CONFIG"
 
 
-def load_laser_color_map(path: str | Path = _DEFAULT_COLOR_MAP_PATH) -> LaserColorMap:
+def load_laser_color_map(path: str | Path | None = None) -> LaserColorMap:
+    if path is None:
+        path = os.environ.get(_COLOR_MAP_ENV) or _DEFAULT_COLOR_MAP_PATH
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
     except Exception as exc:

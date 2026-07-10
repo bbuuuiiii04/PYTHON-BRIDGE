@@ -85,12 +85,29 @@ def _run_bridge() -> int:
     # Source govee.env first (the watcher does too) so GOVEE_API_KEY is present
     # -- otherwise Govee cloud is dead in a bundled / Test-the-Lights run.
     _load_govee_env()
+    # Home-parity config overrides (AWR-186 M2): configs the native installer
+    # landed in App Support win over the bundle-internal examples. Precedence
+    # per config: explicit operator env > installed App Support copy > default.
+    support_dir = GOVEE_ENV_PATH.parent
+    try:
+        present = {p.name for p in support_dir.iterdir()}
+    except OSError:
+        present = set()
+    overrides = {
+        env: path
+        for env, path in launch_profile.app_support_config_env(
+            str(support_dir), present
+        ).items()
+        if not os.environ.get(env)
+    }
     # Force the 19 launch flags (parity with the watcher, which hardcodes them),
     # honoring an operator RBSS_LASER_CONFIG override for the config path.
-    laser_cfg = os.environ.get("RBSS_LASER_CONFIG") or str(
-        _REPO_ROOT / "config" / "laser_director.json"
+    laser_cfg = (
+        os.environ.get("RBSS_LASER_CONFIG")
+        or overrides.pop(launch_profile.LASER_CONFIG_ENV, None)
+        or str(_REPO_ROOT / "config" / "laser_director.json")
     )
-    os.environ.update(launch_profile.bridge_env(laser_cfg))
+    os.environ.update(launch_profile.bridge_env(laser_cfg, extra=overrides))
     bridge_main()
     return 0
 
