@@ -214,18 +214,27 @@
     const basic = $("controlRows"), adv = $("advancedRows");
     basic.innerHTML = ""; adv.innerHTML = "";
     if (!render) return;
+    // Engine-colored looks audition with palette-injected colors: badge
+    // rgb-kind and color-signature rows.
+    const engineColored = String((state.editor.look || {}).color_source || "engine") === "engine";
     for (const control of render.controls || []) {
-      if (control.kind === "rgb") continue;
-      (control.advanced ? adv : basic).insertAdjacentHTML("beforeend", controlRow(control));
+      const badged = engineColored && (control.kind === "rgb" || Boolean(control.color_sig));
+      (control.advanced ? adv : basic).insertAdjacentHTML("beforeend", controlRow(control, badged));
     }
     $("advancedDetails").hidden = !adv.innerHTML;
     document.querySelectorAll("[data-param]").forEach(input => input.addEventListener("input", ev => {
       const key = ev.currentTarget.dataset.param;
       let value = ev.currentTarget.type === "checkbox" ? ev.currentTarget.checked : ev.currentTarget.value;
       if (ev.currentTarget.type === "number" || ev.currentTarget.type === "range") value = Number(value);
+      if (ev.currentTarget.type === "color") {
+        const hex = ev.currentTarget.value;
+        value = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
+        const chip = ev.currentTarget.closest(".control-row").querySelector("[data-swatch-for]");
+        if (chip) chip.style.background = hex;
+      }
       state.editor.params[key] = value;
       const out = document.querySelector(`[data-output="${CSS.escape(key)}"]`);
-      if (out) out.textContent = String(value);
+      if (out) out.textContent = ev.currentTarget.type === "color" ? ev.currentTarget.value : String(value);
       const resetBtn = document.querySelector(`[data-reset="${CSS.escape(key)}"]`);
       if (resetBtn) { resetBtn.style.visibility = "visible"; resetBtn.removeAttribute("tabindex"); }
       setDirty(); liveUpdate();
