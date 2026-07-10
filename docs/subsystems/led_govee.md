@@ -569,6 +569,32 @@ Continuous-look sustained-divergence BPM re-anchor (AWR-189, 2026-07-09):
   byte-identical. Operator acceptance look on record: `rt_groove_heartbeat`
   at next play. SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
 
+Palette-cycling comet — rainbow generalization (AWR-188 Part G, 2026-07-09):
+- New slot effect `palette_comet` (`govee_frame_renderer.py`): the accepted
+  `rainbow_ordered` dual-head movement and position-plus-time color phase,
+  quantized onto the runtime-injected palette slots instead of the HSV wheel —
+  a palette, not a renderer branch, so rainbow-classified tracks (rainbow
+  palette) render rainbow and every other track cycles its own colors. Cycles
+  palette slots 0-4 only (slot 5 stays the reserved white accent); any
+  injected palette length works (a 3-slot palette cycles slots 0-2; no
+  injection fails bright-white on slot 0). Deterministic with a seeded
+  palette start offset (same seed + beat + local_t ⇒ same frame). Not a
+  strobe. C5 param allowlist: `width`, `cycle_beats`, `palette_span`,
+  `travel_per_beat`, `loop_beats`, `duration_beats` (+ sync keys).
+- Example config: `rt_drop_palette_comet` (drop, `color_source engine`,
+  movement params mirroring the pulled `rt_rainbow_drop`) paired via
+  `drop_pairs` to `rt_post_drop_palette_comet` (post_drop). The bespoke
+  `rt_rainbow_*` looks stay DEFINED but unrouted; their kill is a later
+  cleanup after the operator accepts the replacement live.
+- LIVE-config banking ships as `tools/apply_partg_palette_comet.py`
+  (add-if-missing, loader-gated, timestamped backup, atomic write,
+  self-verifying, idempotent): look defs + pair, `rt_drop_palette_comet`
+  into the COMET-family tier-2/3 routing pools and `banks.default.drop`,
+  the post_drop look into `banks.default.post_drop`. The executive runs it
+  after the Round A routing rewrite lands — no live-config edit shipped
+  in-round. Tests: `tests/test_partg_palette_comet.py`. SOFTWARE-VALIDATED
+  ONLY / HARDWARE-UNVALIDATED.
+
 Smart-drop blackout transport + runway observability (AWR-142, 2026-07-07):
 - `_dispatch_led_smart_drop_blackout` now tags each accepted pre-drop room
   blackout with which transport carried it and how much runway it had. The
