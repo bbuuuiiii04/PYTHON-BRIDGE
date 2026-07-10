@@ -169,7 +169,8 @@ class PatchResult:
 
 def _default_runner(argv: list[str]) -> tuple[int, str]:
     try:
-        p = subprocess.run(argv, capture_output=True, text=True, timeout=300)
+        # 600s: a --deep re-sign of the ~2.4 GB universal Rekordbox bundle.
+        p = subprocess.run(argv, capture_output=True, text=True, timeout=600)
         return p.returncode, p.stderr or ""
     except (OSError, subprocess.SubprocessError) as exc:
         return 1, f"codesign did not run: {exc}"
