@@ -130,9 +130,25 @@ G-round's job). ROOT CAUSE stays open for YOUR G round: the AWR-180 Part G
 palette-cycling comet (spec'd in 606177e, build slipped batch-2 triage) replaces
 the baked-rainbow comets properly. NOTE ALSO: the bridge came UP at 19:46 (his
 menubar) — AWR-185 + the two-leg filter fix are ALREADY LIVE; only drain_ms 400 +
-this rainbow pull await the next restart. A live beat-sync complaint ("beatsynced
-looks do not look beatsynced") is under ledtune's live diagnosis with the operator
-— its findings message routes to the executive seat. His ride-home CFX test
+this rainbow pull await the next restart. BEAT-SYNC ROOT CAUSE (ledtune live diagnosis with the operator, ~20:40, VERDICT
+DELIVERED — likely your top fix round with the pre-chorus one): operator signature
+"inconsistent even when bpm is stable". Transport latency DEAD (anchors grid-true
+within 0.013 beat); extrapolation correct, anchors carry LIVE bpm. ROOT CAUSE:
+continuous looks freeze `born_bpm` at spawn (beat_sync_engine.py:31, AWR-141
+by-design) and never re-anchor, while the live-BPM feed swings hard through his
+fast transitions (127↔130↔150↔160, deltas to 33, one suspect 150 held >10s) —
+each look runs forever on whatever the reader said at its spawn instant; caught
+live twice (spawn at a 130→127 flip; spawn inside a 150 window). The AWR-180
+grid-quantize fix REVEALED this (random phase used to mask it; drift now visible
+with no snap-back; 25% faster accrual at 160 — tonight's OCHO). FIX SHAPE
+(operator-ratified {{PENDING-HIS-WORD}}): continuous instances re-anchor to
+anchor.bpm on SUSTAINED divergence (|anchor−born| > threshold for N seconds) —
+preserves AWR-141's jitter immunity; do NOT track raw live bpm outright (re-opens
+the wrap/spawn-storm class AWR-141 killed). NOT built, NOT staged. SECONDARY
+(own question): live-BPM reader confidence during transitions — the >10s-held 150
+with deck attribution unverified. BONUS live datum: Part J pairing CONFIRMED
+working in the room (white_aggressive→white_shatter as configured) — an
+operator-room observation upgrade for the J row's evidence class. His ride-home CFX test
 = first attended item next session.
 
 **Suite board at handoff:** 3889 tests, 4F+1E — same signature as the by-name
