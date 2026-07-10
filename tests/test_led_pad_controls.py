@@ -114,6 +114,16 @@ class LedPadControlDefaultsTests(unittest.TestCase):
             'params.get("sparkle_density", 0.35)',
             'params.get("sparkle_size", 1.0)',
             'params.get("sparkle_life_s", 0.8)',
+            # AWR-191 wiring audit — AWR-187's drop_firework_explosion_2
+            # divergent fallbacks (PARAM_DEFAULT_OVERRIDES rows, v1 keeps the
+            # CONTROL_META globals above).
+            'params.get("surge_beats", 0.25)',
+            'params.get("bg_hold", 0.25)',
+            'params.get("sparkle_density", 0.5)',
+            'params.get("sparkle_life_s", 0.15)',
+            # AWR-191 wiring audit — AWR-188's palette_comet (single global
+            # default, same shape as rainbow_span).
+            'params.get("palette_span", 1.0)',
         ]
         for literal in expected_literals:
             self.assertIn(literal, source, literal)
@@ -155,6 +165,8 @@ class LedPadControlDefaultsTests(unittest.TestCase):
         self.assertEqual(CONTROL_META["sparkle_density"]["default"], 0.35)
         self.assertEqual(CONTROL_META["sparkle_size"]["default"], 1.0)
         self.assertEqual(CONTROL_META["sparkle_life_s"]["default"], 0.8)
+        # AWR-191: palette_comet's one new key (AWR-188).
+        self.assertEqual(CONTROL_META["palette_span"]["default"], 1.0)
 
         # Divergent-by-scene or never-read-from-params keys: no single global
         # default exists, so the catalog must say "auto" (None), not guess.

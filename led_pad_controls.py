@@ -105,6 +105,9 @@ CONTROL_META: dict[str, dict[str, Any]] = {
     "bg_hold": _meta("Flash Hold", "number", min=0, max=1, step=0.05, help="Brightness the flash settles to after the surge.", default=0.7),
     "spark_a": _meta("Spark Color A", "rgb", help="First ember spark color."),
     "spark_b": _meta("Spark Color B", "rgb", help="Second ember spark color."),
+    # AWR-191 (wiring AWR-188's palette_comet): hand-extracted from
+    # govee_frame_renderer.py's `params.get("palette_span", 1.0)`.
+    "palette_span": _meta("Palette Span", "number", min=0.1, max=2, step=0.05, help="How much of the palette cycle spans the strip.", default=1.0),
 }
 
 for _key, _entry in CONTROL_META.items():
@@ -193,6 +196,7 @@ RENDER_GROUPS: dict[str, tuple[str, ...]] = {
         "drop_firework_explosion",
         "drop_firework_explosion_2",
         "rainbow_ordered",
+        "palette_comet",
     ),
     "Post-drop": (
         "post_drop_chase_blue",
