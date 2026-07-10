@@ -1507,22 +1507,25 @@
     "rt_drop_firework_explosion": {
       "target": "room_perimeter",
       "action": "realtime",
-      "scene_ref": "drop_firework_explosion",
+      "scene_ref": "drop_firework_explosion_2",
       "fallback": "rt_blackout",
       "safety_class": "drop",
       "brightness": 100,
-      "allow_strobe": false,
+      "allow_strobe": true,
       "backend": "realtime_razer",
-      "color_source": "baked",
+      "color_source": "engine",
       "params": {
         "color_a": [255, 240, 220],
+        "color_b": [255, 170, 60],
         "spark_a": [255, 170, 60],
         "spark_b": [255, 240, 220],
-        "surge_beats": 0.5,
-        "bg_hold": 0.7,
-        "sparkle_density": 0.35,
+        "surge_beats": 0.25,
+        "bg_hold": 0.25,
+        "sparkle_density": 0.5,
         "sparkle_size": 1.0,
-        "sparkle_life_s": 0.35
+        "sparkle_life_s": 0.15,
+        "hz": 6.0,
+        "duty": 0.3
       }
     },
     "rt_groove_heartbeat": {
