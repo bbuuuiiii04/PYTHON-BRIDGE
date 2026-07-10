@@ -20,7 +20,7 @@ from ..govee_frame_renderer import (
 
 _IDENT_RE = re.compile(r"^[a-z0-9_]+$")
 _KINDS = {"slot", "frame"}
-_STATUSES = {"iterating", "accepted", "rejected"}
+_STATUSES = {"iterating", "accepted", "rejected", "promoted"}
 
 
 def _now() -> str:
@@ -66,7 +66,15 @@ class LabRegistry:
         _write_json_atomic(self.path, data)
 
     def list(self) -> list[dict[str, Any]]:
-        return [copy.deepcopy(item) for item in self._load()["entries"]]
+        # "production_collision" is a decoration for callers (UI chips/banners),
+        # never persisted: save() copies only its known payload keys.
+        out: list[dict[str, Any]] = []
+        for item in self._load()["entries"]:
+            entry = copy.deepcopy(item)
+            name = str(entry.get("name", ""))
+            entry["production_collision"] = name in REALTIME_EFFECT_NAMES or f"lab_{name}" in REALTIME_EFFECT_NAMES
+            out.append(entry)
+        return out
 
     def get(self, name: str) -> dict[str, Any]:
         for item in self.list():

@@ -13,6 +13,8 @@ from pathlib import Path
 
 import objc
 from AppKit import (
+    NSAlert,
+    NSAlertFirstButtonReturn,
     NSApplication,
     NSApplicationActivationPolicyAccessory,
     NSColor,
@@ -863,6 +865,28 @@ class BridgeMenuBar(NSObject):
         self.led_engine_v2_item = self._add_action("LED Engine v2", "toggleLedEngineV2:")
         self.menu.addItem_(NSMenuItem.separatorItem())
         self.quit_item = self._add_action("Quit Menu", "quit:")
+        # Native install offer (AWR-186 M2) — frozen runs only, so source-run
+        # menubars never import install_controller and stay byte-identical.
+        # Shown only when running from the DMG/translocation with no manifest.
+        self.install_item = None
+        self._install_in_progress = False
+        if getattr(sys, "frozen", False):
+            from rb_ss_bridge_v2.install_controller import (
+                APP_SUPPORT_DIR,
+                MANIFEST_NAME,
+                bundle_root,
+                should_offer_install,
+            )
+
+            bundle = bundle_root(sys.executable)
+            manifest_exists = (APP_SUPPORT_DIR / MANIFEST_NAME).exists()
+            if should_offer_install(bundle, manifest_exists):
+                self.install_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                    "Install on this Mac…", "installOnMac:", ""
+                )
+                self.install_item.setTarget_(self)
+                self.menu.insertItem_atIndex_(self.install_item, 0)
+                self.menu.insertItem_atIndex_(NSMenuItem.separatorItem(), 1)
         self.status_item.setMenu_(self.menu)
         self._status = None
         self._snapshot = {}
@@ -1217,6 +1241,92 @@ class BridgeMenuBar(NSObject):
                 start_new_session=True,
             )
         self.refresh_(None)
+
+    def installOnMac_(self, _sender):
+        if self._install_in_progress:
+            return
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_("Install RBSS Bridge on this Mac?")
+        alert.setInformativeText_(
+            "Copies the app to ~/Applications and installs the lighting payload "
+            "(pre-analyzed tracks, configs, Govee key) into Application Support. "
+            "The bridge never starts by itself — you still start it from this menu."
+        )
+        alert.addButtonWithTitle_("Install")
+        alert.addButtonWithTitle_("Cancel")
+        if alert.runModal() != NSAlertFirstButtonReturn:
+            return
+        self._install_in_progress = True
+        self.install_item.setEnabled_(False)
+        self.install_item.setTitle_("Installing…")
+        threading.Thread(target=self._run_install, daemon=True).start()
+
+    def _run_install(self):
+        from rb_ss_bridge_v2.install_controller import bundle_root, perform_install
+
+        try:
+            result = perform_install(bundle_root(sys.executable))
+            payload = {
+                "ok": result.ok,
+                "failed_step": result.failed_step,
+                "app_dest": str(result.app_dest or ""),
+                "installed_files": result.installed_files,
+            }
+        except Exception as exc:  # marshal to a visible dialog — never die silently
+            payload = {
+                "ok": False,
+                "failed_step": f"unexpected error ({type(exc).__name__})",
+                "app_dest": "",
+                "installed_files": 0,
+            }
+        self.performSelectorOnMainThread_withObject_waitUntilDone_(
+            "finishInstall:", payload, False,
+        )
+
+    def finishInstall_(self, payload):
+        self._install_in_progress = False
+        if not payload.get("ok"):
+            self.install_item.setTitle_("Install on this Mac…")
+            self.install_item.setEnabled_(True)
+            alert = NSAlert.alloc().init()
+            alert.setMessageText_("Install didn't finish")
+            alert.setInformativeText_(
+                f"Failed step: {payload.get('failed_step') or 'unknown'}. "
+                "Nothing is half-broken: the app keeps running from the installer "
+                "disk, and the install record lists exactly what was copied."
+            )
+            alert.addButtonWithTitle_("OK")
+            alert.runModal()
+            return
+        # Relaunch the installed copy (menubar only — never starts the bridge),
+        # offer to eject the DMG, then quit this DMG-run copy.
+        subprocess.Popen(["open", payload["app_dest"]])
+        from rb_ss_bridge_v2.install_controller import bundle_root
+
+        bundle = bundle_root(sys.executable)
+        mount = None
+        if bundle is not None and str(bundle).startswith("/Volumes/"):
+            mount = Path(*bundle.parts[:3])
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_("Installed")
+        alert.setInformativeText_(
+            f"{payload['installed_files']} payload file(s) installed. The installed "
+            "copy is opening from ~/Applications now."
+            + (" Eject the installer disk?" if mount else "")
+        )
+        if mount:
+            alert.addButtonWithTitle_("Eject")
+            alert.addButtonWithTitle_("Keep Mounted")
+        else:
+            alert.addButtonWithTitle_("OK")
+        response = alert.runModal()
+        if mount and response == NSAlertFirstButtonReturn:
+            # Detached: the eject can only succeed once this DMG-run copy exits.
+            subprocess.Popen(
+                ["/bin/sh", "-c", f'sleep 1; hdiutil detach "{mount}" -quiet'],
+                start_new_session=True,
+            )
+        NSApplication.sharedApplication().terminate_(self)
 
     def runValidation_(self, _sender):
         append_command({"cmd": "run_validation"})

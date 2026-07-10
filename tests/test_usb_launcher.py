@@ -106,6 +106,40 @@ class RunBridgeEnvTests(unittest.TestCase):
             usb_launcher._run_bridge()
             self.assertEqual(os.environ["RBSS_LASER_CONFIG"], "/custom/laser.json")
 
+    def test_run_bridge_prefers_installed_app_support_configs(self) -> None:
+        # AWR-186 M2: configs the native installer landed in App Support win
+        # over the bundle-internal examples (home parity on a guest Mac).
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            support = Path(tmp)
+            (support / "laser_director.json").write_text("{}")
+            (support / "led_look_director.json").write_text("{}")
+            with mock.patch.dict(os.environ, {}, clear=False), \
+                 mock.patch.object(usb_launcher, "GOVEE_ENV_PATH", support / "govee.env"), \
+                 mock.patch("rb_ss_bridge_v2.__main__.main"):
+                os.environ.pop("RBSS_LASER_CONFIG", None)
+                os.environ.pop("RBSS_LED_CONFIG", None)
+                usb_launcher._run_bridge()
+                self.assertEqual(
+                    os.environ["RBSS_LASER_CONFIG"], str(support / "laser_director.json")
+                )
+                self.assertEqual(
+                    os.environ["RBSS_LED_CONFIG"], str(support / "led_look_director.json")
+                )
+
+    def test_run_bridge_explicit_env_beats_app_support_copy(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            support = Path(tmp)
+            (support / "led_look_director.json").write_text("{}")
+            with mock.patch.dict(os.environ, {"RBSS_LED_CONFIG": "/operator/led.json"}, clear=False), \
+                 mock.patch.object(usb_launcher, "GOVEE_ENV_PATH", support / "govee.env"), \
+                 mock.patch("rb_ss_bridge_v2.__main__.main"):
+                usb_launcher._run_bridge()
+                self.assertEqual(os.environ["RBSS_LED_CONFIG"], "/operator/led.json")
+
 
 class GoveeEnvSourcingTests(unittest.TestCase):
     def test_parse_tolerates_export_comments_blanks_quotes(self) -> None:
