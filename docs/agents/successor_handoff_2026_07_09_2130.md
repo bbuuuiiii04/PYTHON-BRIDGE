@@ -144,7 +144,12 @@ with no snap-back; 25% faster accrual at 160 — tonight's OCHO). FIX SHAPE
 (operator-ratified {{PENDING-HIS-WORD}}): continuous instances re-anchor to
 anchor.bpm on SUSTAINED divergence (|anchor−born| > threshold for N seconds) —
 preserves AWR-141's jitter immunity; do NOT track raw live bpm outright (re-opens
-the wrap/spawn-storm class AWR-141 killed). NOT built, NOT staged. SECONDARY
+the wrap/spawn-storm class AWR-141 killed). NOT built, NOT staged. ACCEPTANCE LOOK for the fix round (operator-sourced ~20:5x): `rt_groove_heartbeat`
+— his own authored look (AWR-156, "expands and contracts like a heartbeat"), pure
+beat-pulse by construction (govee_frame_renderer.py:1939-1964), ran 47x tonight
+while reading as unrecognizable mush — the maximally-affected look. The fix is
+DONE when the heartbeat reads as a heartbeat through a 127->160 transition set,
+by his eyes. SECONDARY
 (own question): live-BPM reader confidence during transitions — the >10s-held 150
 with deck attribution unverified. BONUS live datum: Part J pairing CONFIRMED
 working in the room (white_aggressive→white_shatter as configured) — an
