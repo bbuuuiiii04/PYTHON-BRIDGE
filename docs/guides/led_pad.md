@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: software-tested
-last_verified_commit: 14e2170
+last_verified_commit: 0c1392f
 last_verified_date: 2026-07-10
-validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (live-apply + variant switch + preview), Round 2 (param_specs sliders/toggles, slot swatches, JSON demoted to Advanced), Round 3 (rejected-drafts filter, draft delete), QR same-network access, the iOS/iPad touch pass, the editor unset-param-defaults fix, the AWR-193 pad/lab overhaul (accept snapshot, decoupled preview, archive flow, fn fallback, effective bounds, color pickers + regime badges, reconnect, freshness watchdog + live fingerprint + no-cache), and the AWR-202 commit read-modify-merge (Apply overlays only pad-touched looks/banks/color-maps over a fresh read of live; unmanaged blocks and untouched looks survive); SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
+validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (live-apply + variant switch + preview), Round 2 (param_specs sliders/toggles, slot swatches, JSON demoted to Advanced), Round 3 (rejected-drafts filter, draft delete), QR same-network access, the iOS/iPad touch pass, the editor unset-param-defaults fix, the AWR-193 pad/lab overhaul (accept snapshot, decoupled preview, archive flow, fn fallback, effective bounds, color pickers + regime badges, reconnect, freshness watchdog + live fingerprint + no-cache), and the AWR-202 commit read-modify-merge with the gate fix that tracks look CONTENT (`touched`) separately from role-bank PLACEMENT (`moved`) so a params-only edit keeps the look's LIVE bank while an explicit pad move still applies; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # LED Pad
@@ -117,13 +117,21 @@ Logs are written to `/tmp/led_pad.log` and `/tmp/led_pad.err`.
   `scripted_mode`/`blank_role_hold`, 17 looks, and six `loop_beats`). Commit re-reads
   `config/led_look_director.json` fresh, keeps EVERY top-level block from LIVE — including blocks
   the pad does not manage (`f2`, `f4`, `cfx_sweep`, `automation`, `safety`, and any block the pad
-  has never heard of) — and overlays only what THIS pad session changed: the looks it
-  touched/created, their role-bank placement, deletions, and the three per-look `color_engine`
-  maps (`slot_fill_strategy_by_look`, `slot_mono_chance_by_look`, `locked_palette_by_look`). Looks
-  the pad never touched keep their LIVE contents, so a stale draft can no longer wipe f2/f4 or
-  looks added by another tool. Touched/deleted tracking lives in `_pad_meta.pad_session` (persisted
-  with the draft, so it survives a pad-server restart) and rebases to empty after each commit. The
-  merged result is validated before any write; a `.bak-*` backup of live is taken first.
+  has never heard of) — and overlays only what THIS pad session changed. Content and
+  placement are tracked separately in `_pad_meta.pad_session` (AWR-202 gate fix): `touched` names
+  the looks whose CONTENT the pad edited/created (look body + the three per-look `color_engine`
+  maps `slot_fill_strategy_by_look` / `slot_mono_chance_by_look` / `locked_palette_by_look`);
+  `moved` names the looks whose role-bank PLACEMENT the pad changed or created; `deleted` names the
+  looks removed through the pad. So a params-only edit is `touched` but NOT `moved`, and commit
+  keeps that look's LIVE bank placement — if live moved the look to another bank after the draft
+  went stale, the stale draft placement is not replayed; an explicit pad move still repositions it.
+  Looks the pad never touched keep their LIVE contents, and looks it never moved keep their LIVE
+  bank, so a stale draft can no longer wipe f2/f4 or move looks the operator didn't touch. The
+  tracking is persisted with the draft (survives a pad-server restart) and rebases to empty after
+  each commit. The merged result is validated before any write; a `.bak-*` backup of live is taken
+  first. A history restore marks every restored look both `touched` and `moved`, so a restore
+  brings back the backup's look content AND bank placement while unmanaged live blocks and
+  live-only looks still survive.
 - Detect live config moving underneath the draft (AWR-193): a gitignored fingerprint sidecar
   `config/led_look_director.draft.base` records the sha256 of the live config the draft is based
   on (written when the draft is first created from live, on Apply/Discard/history restore, and
