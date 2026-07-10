@@ -107,7 +107,17 @@ status) are allowed during boot; mutations are not.
 
 - 17:48 bridge stop: reconstructed-probable as his menubar click — unconfirmed,
   one-line confirm still open.
-- `rebuild_stick.sh` wrapper offer (usb lane): yes/no still open.
+- `rebuild_stick.sh` offer: CLOSED (folded into AWR-186 make_stick.sh).
+- SECRETS-ON-STICK: **APPROVED by operator ~22:40, verbatim on file** ("I approve
+  of secrets on stick") — CLOSED, risk accepted, do-not-relitigate.
+- AWR-186 (M2) + AWR-165 (move-invariance): **full build scope OPERATOR-APPROVED
+  ~22:40** except physical-validation gates (Saturday memory-read test + parity
+  walkthrough stay operator gates). Both specs are dispatch-ready with ZERO open
+  decisions except launch-on-click (default stands, veto open). These two are the
+  successor's ready-to-fire implementation queue — alongside the NEW flagship: the
+  spectral decision-layer refactor per docs/research/sol_spectral_review_2026_07_09.md
+  (SOL/GPT-5.6-ULTRA independent verdict: NEEDS REFACTORING — keep v4, rebuild the
+  judgment layer; ear-benchmark FIRST, stages + costs in the doc).
 - D1-F1 phantom-load fix: OPERATOR-DEFERRED (his word stands; offered twice).
 - ~~Pre-drop tease~~ RULED DEAD ~21:5x: "i will never use pre_drop" — look-role dead forever, pre-drop darkness UNAFFECTED. Also on record same exchange: baked-color inventory delivered (7 drop strobes + t1 chase quartet are fixed-color; palette-conversion round offered, no verdict yet).
 - Full veto list + parked items: resume doc "Undecided operator items" row.
