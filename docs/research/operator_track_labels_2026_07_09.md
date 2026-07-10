@@ -35,6 +35,62 @@ once the backfill lands.
 
 ---
 
+## Session summary (standalone — read this first)
+
+**The night in one paragraph.** The session ran in three phases: (1) operator
+track walkthroughs (Sexy carried over as the seam smoke test; Utopia fully labeled —
+which shipped AWR-184, the deep-sub-void blackout rung, same evening,
+seam-verified); (2) machine-picked review batches over the AWR-184 blast radius
+(707 tracks swept offline, 104 firings / 80 tracks) with operator verdicts per case
+(B1–B3); (3) a threshold-edge tier audit (B4). The protocol that emerged —
+**offline sweep for likely-wrong moments → operator verdicts in small batches →
+bounded same-evening round when a clean fix shape exists** — is the standing shape
+for label batches (executive-ratified). Batch questions must state exactly when
+darkness starts and ends (operator's phrasing rule, B1-3).
+
+**Final tallies (33 primary entries):** AGREES 8 · PARTIAL 6 · BLIND 1 ·
+MISREAD 12 · BEHAVIOR VERDICT 1 (+1 laser exclusion inside B2-2) · DESIGN WANT 1 ·
+EXCLUDED 2 · OBSERVATION 1 · N/A-SCRIPTED 1.
+
+**Key findings index (details in the batch entries):**
+1. **AWR-184 blackout-rule boundary pinned from both sides** — false positive B2-4
+   (buildup-shaped quiet ≠ cut), false negatives B4-2 + B4-3 (real sub-voids blocked
+   by the growl-dark gate when a melodic layer rides above; Cocaine adds a
+   void-depth-margin note). A complete bounded-fix brief lives in those three
+   entries. Cap-raise datum: B1-3 (32-beat blackout acceptable at a breakdown tail).
+2. **Tier scorer is the broken axis** — 12 misreads: over-rates cluster on
+   calm/dark-groovy-character tracks (B1-4, B2-1, B2-2, B2-4, B3-1, B3-7, B4-1,
+   B4-3, B4-5→T1, B4-6); under-rates hit his hardest wall-of-sound tracks (REWIND
+   B1-5: all-T1 on clean input with distortion maxed at 1.00 while the aggression
+   formula takes no distortion input; SIGNAL B4-2: one borderline T3 of 8 vs "every
+   drop warrants WALL T3"). B4 threshold tally: at the 0.70 violence line, 4 of 5
+   tier answers were over-rates — the line is too low as a pure violence cut.
+   Scripted tracks are excluded from tier calibration sets (B3-8 rule).
+3. **Look-delivery reliability defect class (3 observations)** — the look picker
+   prefers rather than guarantees (rotation + fail-open,
+   `led_dispatch_policy.py:2045-2054`); operator expectation recorded: family+tier
+   should GUARANTEE the look class. Config finding: `drop_look_routing` pools are
+   identical across families and T2 ≡ T3 on LEDs; COMET pools contain no comet-class
+   look (B3-6 mechanism). Desk item: per-family visual languages (+ B3-4 "big bright
+   sparkles" want).
+4. **Input quality is a real error source — 5 live operator fixes/exclusions:**
+   REWIND beatgrid (2 beats), OCHO phrase labels (1 beat), Britney Toxic (excluded,
+   unusable), s.o.s (excluded, variable BPM), Latch (drop↔buildup swap). Grid edits
+   orphan the v4 cache (fingerprint key) and Rekordbox drops phrase markers until
+   re-analysis — REWIND/OCHO/Latch need post-re-analysis re-measures.
+5. **P1 growl acceptance set (amplitude measured tonight, timbre pending backfill):**
+   Sexy 3:38 (the original case), Anti Up 1:20 (33 dB, richest: 7-beat growl /
+   11-beat euphoric sustain, looping, drops 2–3 same), FETISH 1:45 (4-beat),
+   Drake 1:28 (4-beat). Structure labels: Never Be Like You synth sustains (all drop
+   sections except first), Utopia eighth-note rattle (needs a rhythm-pattern
+   dimension, BLIND).
+6. **Behavior verdicts relayed to the executive:** lasers warranted at Utopia 3:02.5
+   (UT-8); zero lasers ever on OMG (B2-2); design want: 1-bar no-void blackout
+   before Never Be Like You 1:41 (B4-4); OCHO wants a 5-bar blackout at 3:24 where
+   the system has nothing (B2-3).
+
+---
+
 ## Sexy (Extended Mix) — Matt Sassari (content_id 216468125)
 
 Track dossier (measured 2026-07-09): 708 beats / 5:21, 8 drops, 5 buildups; identity

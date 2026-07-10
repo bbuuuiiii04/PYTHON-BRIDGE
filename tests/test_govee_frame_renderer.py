@@ -970,26 +970,98 @@ class GrooveHeartbeatTests(unittest.TestCase):
 
 
 class DropFireworkExplosionTests(unittest.TestCase):
-    """AWR-161 Task 3: contrast-gated firework explosion promotion.
+    """AWR-187: firework redesign (drop_firework_explosion_2).
 
-    The operator's condition is promote-only-if-verified: this class's
-    test_post_surge_ember_contrast_gate is the measured gate from the spec
-    (max per-pixel deviation from the plain background >= 60/255 at default
-    params, sampled post-surge). If this fails, the effect must not ship.
+    Operator visual spec (verbatim acceptance): 'the firework background
+    explosion should strobe with sparkling hues and then when the firework
+    explosion background quickly dims, the embers continue to aggressively
+    spark.' Rewritten from the AWR-161 v1 pins per the final-round brief;
+    the AWR-153 time-based-embers ruling STANDS and stays pinned. The
+    contrast gate is measured the same way as AWR-161's (max per-pixel
+    deviation from the plain dimmed background at default params, sampled
+    post-dim over 400 frames at 40 fps) against the same >= 60/255 bar.
     """
 
-    # bg (255, 240, 220) * bg_hold (0.7) * bg_level (1.0), clamped -- the
-    # plain background color once the post-surge settle finishes.
-    _BG_REF = (178, 168, 154)
+    _NAME = "drop_firework_explosion_2"
+    # bg (255, 240, 220) * bg_hold (0.25) * bg_level (1.0), clamped -- the
+    # plain dimmed background once the quick dim finishes.
+    _BG_REF = (64, 60, 55)
 
-    def test_post_surge_ember_contrast_gate(self) -> None:
+    def test_registered_as_strobe_with_hz_duty_allowlist(self) -> None:
+        self.assertIn(self._NAME, REALTIME_EFFECT_NAMES)
+        self.assertIn(self._NAME, REALTIME_STROBE_EFFECTS)
+        allowed = REALTIME_EFFECT_PARAM_KEYS[self._NAME]
+        self.assertLessEqual(
+            {"hz", "duty", "color_a", "color_b", "spark_a", "spark_b",
+             "surge_beats", "bg_level", "bg_hold", "sparkle_density",
+             "sparkle_size", "sparkle_life_s", "duration_beats"},
+            allowed,
+        )
+
+    def test_v1_stays_registered_and_not_a_strobe_until_the_gate(self) -> None:
+        # The pre-apply live config still references drop_firework_explosion
+        # with allow_strobe=false; v1 must keep validating until the executive
+        # gate runs tools/apply_firework_redesign.py. Retire v1 (and this pin)
+        # after the gate.
+        self.assertIn("drop_firework_explosion", REALTIME_EFFECT_NAMES)
+        self.assertNotIn("drop_firework_explosion", REALTIME_STROBE_EFFECTS)
+
+    def test_explosion_phase_strobes_multi_hue_not_solid_white(self) -> None:
+        renderer = GoveeFrameRenderer()
+        seg = 40
+        tints = {(255, 0, 0), (0, 0, 255), (0, 255, 0), (255, 255, 0)}
+        params = {
+            "sparkle_density": 0.0,  # isolate the background field
+            "color_a": [255, 0, 0], "color_b": [0, 0, 255],
+            "spark_a": [0, 255, 0], "spark_b": [255, 255, 0],
+            "hz": 5.0, "duty": 0.3,
+        }
+        on_frames = 0
+        off_frames = 0
+        for tick in range(40):  # one second of frames at the surge peak
+            t = tick / 40.0
+            frame = renderer.render(self._NAME, beat_pos=0.25, local_t=t,
+                                    frame_index=tick, params=params, segments=seg, seed=7)
+            if _hz_strobe_on(t, params):
+                on_frames += 1
+                pixels = set(frame)
+                # Multi-hue: every lit pixel is one of the palette tints at
+                # full level, at least two distinct hues per flash, and the
+                # field is NOT the old solid near-white burst.
+                self.assertLessEqual(pixels, tints)
+                self.assertGreaterEqual(len(pixels), 2)
+            else:
+                off_frames += 1
+                self.assertEqual(set(frame), {(0, 0, 0)})
+        # The Hz gate must actually strobe within the explosion: both states seen.
+        self.assertGreater(on_frames, 0)
+        self.assertGreater(off_frames, 0)
+
+    def test_quick_dim_to_much_lower_hold(self) -> None:
+        renderer = GoveeFrameRenderer()
+        seg = 20
+        params = {"sparkle_density": 0.0}
+        # Default surge_beats 0.25: explosion window ends at beat 0.5. The
+        # background must already sit at the dimmed hold right after it, and
+        # stay there (no strobe outside the explosion window).
+        for beat, t in ((0.55, 0.0), (2.0, 0.0), (2.0, 0.37), (16.0, 3.11)):
+            frame = renderer.render(self._NAME, beat_pos=beat, local_t=t,
+                                    frame_index=0, params=params, segments=seg, seed=1)
+            self.assertEqual(frame, [self._BG_REF] * seg, msg=f"beat={beat} t={t}")
+        # 'much lower bg_hold': the dimmed hold is dark (max channel well under
+        # v1's 178/255 hold -- 0.25 * 255 rounds to 64).
+        self.assertLessEqual(max(self._BG_REF), 64)
+
+    def test_post_dim_aggressive_ember_contrast_gate(self) -> None:
+        # Same measurement as the AWR-161 gate, same >= 60/255 bar: embers must
+        # keep full intensity against the dimmed background at default params.
         renderer = GoveeFrameRenderer()
         seg = 40
         max_dev = 0
         for tick in range(400):
             frame = renderer.render(
-                "drop_firework_explosion",
-                beat_pos=2.0,  # well past surge_beats(0.5) + the 0.5-beat settle
+                self._NAME,
+                beat_pos=2.0,  # well past the 2*surge_beats(0.25) window
                 local_t=tick / 40.0,
                 frame_index=tick,
                 params={},
@@ -1001,35 +1073,31 @@ class DropFireworkExplosionTests(unittest.TestCase):
                 max_dev = max(max_dev, dev)
         self.assertGreaterEqual(max_dev, 60, msg=f"measured ember contrast {max_dev}/255")
 
-    def test_registered_and_not_a_strobe(self) -> None:
-        self.assertIn("drop_firework_explosion", REALTIME_EFFECT_NAMES)
-        self.assertNotIn("drop_firework_explosion", REALTIME_STROBE_EFFECTS)
-
-    def test_surge_resolves_down_to_bg_hold_not_stuck_at_full(self) -> None:
-        renderer = GoveeFrameRenderer()
-        seg = 20
-        # No embers (density 0) isolates the background/surge math.
-        params = {"sparkle_density": 0.0}
-        peak = renderer.render("drop_firework_explosion", beat_pos=0.5, local_t=0.0,
-                                frame_index=0, params=params, segments=seg, seed=1)
-        settled = renderer.render("drop_firework_explosion", beat_pos=2.0, local_t=0.0,
-                                   frame_index=0, params=params, segments=seg, seed=1)
-        self.assertEqual(peak, [(255, 240, 220)] * seg)
-        self.assertEqual(settled, [self._BG_REF] * seg)
+    def test_ember_envelope_is_fast_in_exp_out(self) -> None:
+        # The aggressive spark shape: full brightness by 15% of life (the sine
+        # needed 50%), then exponential decay to near-zero by end of life.
+        self.assertAlmostEqual(_ember_env(0.15, True), 1.0)
+        self.assertGreater(_ember_env(0.075, True), _ember_env(0.075, False))
+        self.assertLess(_ember_env(1.0, True), 0.01)
+        # Monotone decay after the attack (no second swell).
+        samples = [_ember_env(x / 100.0, True) for x in range(15, 101)]
+        self.assertEqual(samples, sorted(samples, reverse=True))
+        # sharp=False is the untouched AWR-161 sine (v1 behavior unchanged).
+        self.assertAlmostEqual(_ember_env(0.5, False), 1.0)
 
     def test_embers_are_time_based_not_beat_tied(self) -> None:
         """AWR-153 sparkle ruling: sparkles are continuous/time-based, never
         beat-tied -- the ember layer must depend on local_t, not beat."""
         renderer = GoveeFrameRenderer()
         seg = 40
-        frame_a = renderer.render("drop_firework_explosion", beat_pos=5.0, local_t=0.3,
+        frame_a = renderer.render(self._NAME, beat_pos=5.0, local_t=0.3,
                                    frame_index=0, params={}, segments=seg, seed=3)
-        frame_b = renderer.render("drop_firework_explosion", beat_pos=99.0, local_t=0.3,
+        frame_b = renderer.render(self._NAME, beat_pos=99.0, local_t=0.3,
                                    frame_index=0, params={}, segments=seg, seed=3)
-        # Beat only drives the surge/settle background level, which is already
-        # fully settled by beat 5; embers at the same local_t must match.
+        # Beat only drives the explosion window, long over by beat 5; embers
+        # at the same local_t must match.
         self.assertEqual(frame_a, frame_b)
-        frame_c = renderer.render("drop_firework_explosion", beat_pos=5.0, local_t=0.9,
+        frame_c = renderer.render(self._NAME, beat_pos=5.0, local_t=0.9,
                                    frame_index=0, params={}, segments=seg, seed=3)
         self.assertNotEqual(frame_a, frame_c)
 

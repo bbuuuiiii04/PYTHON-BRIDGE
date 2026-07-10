@@ -236,7 +236,7 @@ class CfxSweepConfig:
     flood_ramp_ms: float = 250.0       # TUNE-LIVE: "quick but not instant" flood-in
     release_ramp_ms: float = 400.0     # TUNE-LIVE: flood-out when knob returns to 12
     dim_floor: float = 0.08            # brightness at the drained floor (never fully black)
-    drain_ms: float = 800.0            # TUNE-LIVE: drain feel — dim 1.0 -> floor after the trigger
+    drain_ms: float = 400.0            # TUNE-LIVE: drain feel — dim 1.0 -> floor after the trigger (operator pin 2026-07-09, was 800)
 ```
 
 Example JSON: add the block with `"enabled": false` to
@@ -425,6 +425,21 @@ the bloom point. Software-tested only — your desk run is the live gate."
 
 ## Part F - Desk calibration runbook (operator in session)
 
+**RAN 2026-07-09 (operator at the desk) — outcomes now pinned:** step 0 direction check
+PASSED live (param0 read 0.000 full-CCW / 0.500 at 12 / 1.000 full-CW, `[VALID]`
+throughout — the Part A [assumed] mapping is now CONFIRMED, no flip needed). Bloom
+captured 3× by ear (0.661 / 0.635 / 0.642) → **median 0.642 pinned** in the live
+config's `cfx_sweep.bloom_threshold_norm` (the example keeps the 0.75 placeholder).
+Operator re-rulings from the session, all landed: **trigger-not-hold** (crossing the
+bloom fires a one-shot peak-then-drain; holding does nothing), **one-way resume**
+(riding home releases the overlay until the knob re-arms at 12), **dim_floor 0.0**
+(drain lands at full black), **drain_ms 400** ("the bloom needs to last shorter",
+800 → 400 — mirrored as the shipped default in the example config and
+`CfxSweepConfig`). The ride-home re-bloom found in the feel pass is fixed (sequential
+release + blip-latch preservation) and staged; the operator ride-home retest is the
+remaining gate (see `docs/prompts/active/filter_lane_state_2026_07_09.md`).
+
+The steps below remain the repeatable procedure for any future re-calibration.
 Step 0 happens BEFORE trusting any LED behavior; the bridge is not needed for steps 0-2.
 
 0. **Direction check (kills the one [assumed] claim).** Rekordbox running, FILTER

@@ -22,6 +22,19 @@ WRAP_HOLD_BEATS = 0.5    # backward moves smaller than this are extrapolation ji
 VALID_SYNC_MODES = frozenset({"retrigger", "overlap", "continuous"})
 _EPS = 1e-6
 
+# AWR-189 (operator-ratified): a CONTINUOUS look that spawned while the live-BPM
+# feed was mid-transition (127<->160 churn) free-ran at the stale rate forever —
+# "beatsynced looks do not look beatsynced". Fix: re-anchor the beat-phase origin
+# to the live anchor bpm, but ONLY on SUSTAINED divergence — never raw tracking,
+# so AWR-141's jitter immunity stands (sub-delta wobble and brief flaps re-anchor
+# nothing). Both knobs are per-look config-overridable via params
+# ("reanchor_bpm_delta" / "reanchor_sustain_s").
+REANCHOR_BPM_DELTA = 2.0   # |live bpm - current rate| must EXCEED this to count as
+                           # divergence; pitch nudges and reader wobble sit below it.
+REANCHOR_SUSTAIN_S = 3.0   # divergence must hold CONTINUOUSLY this long; one
+                           # in-delta sample resets the timer (transition flap-back
+                           # never re-anchors).
+
 
 @dataclass
 class AnimInstance:
@@ -29,6 +42,12 @@ class AnimInstance:
     born_abs_beat: float
     bucket: int
     born_bpm: float       # bpm at launch; travel speed is locked to this, not the live bpm
+    # AWR-189: beat-phase re-anchor snapshot (monotonic, abs_beat, bpm), set only
+    # after sustained live-bpm divergence in continuous mode. None = never
+    # re-anchored = render math identical to the born fields. local_t, bucket,
+    # and progress always stay born-based, so time-based layers (ember fields)
+    # and comet sweeps never restart on a re-anchor.
+    reanchor: tuple[float, float, float] | None = None
 
 
 @dataclass(frozen=True)
@@ -94,6 +113,11 @@ class BeatSyncEngine:
         self._instances: list[AnimInstance] = []
         self._spawn_seq = 0
         self._spawn_count = 0
+        # AWR-189 divergence tracker (continuous mode): wall-clock instant the live
+        # bpm first left the delta band around the current rate, or None while in-band.
+        self._reanchor_delta = REANCHOR_BPM_DELTA
+        self._reanchor_sustain = REANCHOR_SUSTAIN_S
+        self._diverged_since: float | None = None
 
     # ── public read-only state (for runner status + render branch) ──
     @property
@@ -128,6 +152,10 @@ class BeatSyncEngine:
         self._width = max(1e-3, float(params.get("width", 0.8)))
         self._direction = -1 if bool(params.get("reverse", False)) else 1
         self._max_pulses = min(MAX_PULSES, max(1, int(params.get("max_pulses", MAX_PULSES))))
+        # AWR-189 sustained-divergence re-anchor knobs (continuous mode only).
+        self._reanchor_delta = max(0.0, float(params.get("reanchor_bpm_delta", REANCHOR_BPM_DELTA)))
+        self._reanchor_sustain = max(0.0, float(params.get("reanchor_sustain_s", REANCHOR_SUSTAIN_S)))
+        self._diverged_since = None
         self._clock = TriggerClock(beat_division, spawn_on_wrap=bool(params.get("spawn_on_wrap", True)))
         self._clock.seed(abs_beat)
         self._instances = []
