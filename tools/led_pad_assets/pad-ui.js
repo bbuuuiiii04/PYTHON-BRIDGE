@@ -246,19 +246,26 @@
       setDirty(); liveUpdate();
     }));
   }
-  function controlRow(c) {
+  function controlRow(c, badged) {
     const isSet = Object.prototype.hasOwnProperty.call(state.editor.params, c.key);
     const hasDefault = c.default !== null && c.default !== undefined;
     const value = isSet ? state.editor.params[c.key] : (hasDefault ? c.default : (c.kind === "bool" ? false : c.min ?? ""));
-    const outputText = isSet ? String(value) : (hasDefault ? String(c.default) : "auto");
+    let outputText = isSet ? String(value) : (hasDefault ? String(c.default) : "auto");
     let input = "";
     if (c.kind === "bool") input = `<input data-param="${esc(c.key)}" type="checkbox" ${value ? "checked" : ""}>`;
     else if (c.kind === "choice") input = `<select data-param="${esc(c.key)}">${(c.choices || []).map(v => `<option value="${esc(v)}" ${String(v)===String(value)?"selected":""}>${esc(v)}</option>`).join("")}</select>`;
+    else if (c.kind === "rgb") {
+      const rgb = Array.isArray(value) && value.length === 3 ? value : [0, 0, 0];
+      const hex = `#${rgb.map(v => Math.max(0, Math.min(255, Math.round(Number(v) || 0))).toString(16).padStart(2, "0")).join("")}`;
+      input = `<span class="color-cell"><input data-param="${esc(c.key)}" type="color" value="${hex}"><span class="swatch-chip small" data-swatch-for="${esc(c.key)}" style="background:${hex}"></span></span>`;
+      outputText = isSet ? hex : "auto";
+    }
     else input = `<input data-param="${esc(c.key)}" type="number" min="${esc(c.min ?? "")}" max="${esc(c.max ?? "")}" step="${esc(c.step ?? 1)}" value="${esc(value)}">`;
     const tag = isSet ? "" : `<span class="default-tag">default</span>`;
+    const badge = badged ? `<span class="regime-badge">palette overrides this in the room</span>` : "";
     const resetHidden = isSet ? "" : ` style="visibility:hidden" tabindex="-1"`;
     const reset = `<button type="button" class="icon ghost reset-param" data-reset="${esc(c.key)}" aria-label="Reset to default" title="Reset to default"${resetHidden}>↺</button>`;
-    return `<label class="control-row"><span>${esc(c.label)}</span>${input}<output data-output="${esc(c.key)}">${esc(outputText)}${tag}</output>${reset}</label>`;
+    return `<label class="control-row${badged ? " palette-fed" : ""}"><span>${esc(c.label)}${badge}</span>${input}<output data-output="${esc(c.key)}">${esc(outputText)}${tag}</output>${reset}</label>`;
   }
   async function playEditor(takeover) {
     try {

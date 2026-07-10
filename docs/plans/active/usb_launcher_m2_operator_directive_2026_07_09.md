@@ -28,12 +28,16 @@ validation_scope: >
 
 | # | Requirement (his words → engineering) | Status |
 |---|---|---|
-| R1 | One-action install: open DMG → installs to the Mac (app copy + payload) → menubar ready | M2 build item (design doc §3.3 install modes — designed, not built) |
-| R2 | Cache-copy automated: the spectral pre-warm folder (and payload) installs itself — no manual folder copy | M2 build item; payload rides the stick next to the DMG (stick-builder step) |
-| R3 | "Performs JUST LIKE my current macbook": live configs + govee.env ride the stick and install | M2 build item; **secrets-on-stick decision inferred YES from his words — one-line veto open** (purge must remove them; see R6) |
-| R4 | Survives unplug: bridge keeps running/reinstalls not needed after stick removal | Follows from R1 (install-to-disk). Note: TRACKS still need the stick present — rekordbox plays audio from it |
+| R1 | One-action install: open DMG → installs to the Mac (app copy + payload) → menubar ready | **IMPLEMENTED 2026-07-10 (AWR-186 M2 build: `install_controller.py` + menubar "Install on this Mac…"; software-tested, walkthrough pending)** |
+| R2 | Cache-copy automated: the spectral pre-warm folder (and payload) installs itself — no manual folder copy | **IMPLEMENTED 2026-07-10 (payload rides INSIDE the DMG via `packaging/make_stick.sh`; installer copies it file-level; software-tested)** |
+| R3 | "Performs JUST LIKE my current macbook": live configs + govee.env ride the stick and install | **IMPLEMENTED 2026-07-10 (secrets-on-stick operator-APPROVED ~22:40; installed App Support copies win via existing env seams + new `RBSS_LASER_COLOR_MAP_CONFIG`; frozen `local/state` → App Support `state/`; software-tested)** |
+| R4 | Survives unplug: bridge keeps running/reinstalls not needed after stick removal | **IMPLEMENTED via R1 (install-to-disk; DMG eject offered post-install).** Note stands: TRACKS still need the stick present — rekordbox plays audio from it |
 | R5 | Read USB-exported tracks while the stick is in the **XDJ-RX3** and the bridge stays on the MacBook | **IMPOSSIBLE — hardware, settled 2026-07-09 ~03:00 (P0 STOP, AWR-167, dual-confirmed: beat-link README + official AlphaTheta).** RX-family emits no Pro DJ Link: standalone stick playback broadcasts nothing the laptop can hear, on any cable. Working equivalent, same gear: performance mode with the stick in the LAPTOP port (the XDJ stays the hands). Revive trigger stands for link-capable gear (XZ / 1000-family / CDJ) |
-| R6 | PURGE: menubar action, explicit confirmation → bridge fully removes itself (app copy, LaunchAgent if any, App Support incl. cache/configs/secrets, logs) | M2 build item. Honest residue: macOS TCC permission rows can't be self-deleted by the app — everything else goes |
+| R6 | PURGE: menubar action, explicit confirmation → bridge fully removes itself (app copy, LaunchAgent if any, App Support incl. cache/configs/secrets, logs) | **IMPLEMENTED 2026-07-10 (menubar "Purge RBSS Bridge…": explicit Purge confirm, stop-child-first, manifest allowlist + whole App Support + logs, own bundle to Trash; software-tested).** Honest residue stands: macOS TCC permission rows can't be self-deleted — everything else goes. No LaunchAgent exists (M3 not built) |
+
+*(All "IMPLEMENTED" rows are SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED —
+code + unit tests at HEAD; no M2 bundle has been built or run yet. The
+operator walkthrough in the runbook parity table is the physical gate.)*
 
 ## Saturday bridge (proposed, small, this lane)
 
