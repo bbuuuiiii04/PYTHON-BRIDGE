@@ -211,7 +211,7 @@ class LedPadService:
         self._lock = Lock()
         self._draft = self._load_initial_draft()
         self._lab = LabRegistry(lab_dir or (self._config_path.parent / "led_lab"))
-        self._lab_renderer = LabRenderer(self._lab.module_path)
+        self._lab_renderer = LabRenderer(self._lab.module_path, fn_for=self._lab_fn_for)
         self._playback = playback
         if self._playback is None:
             result = self._load_config_result(self._draft)
@@ -233,6 +233,15 @@ class LedPadService:
         shutdown = getattr(self._playback, "shutdown", None)
         if callable(shutdown):
             shutdown()
+
+    def _lab_fn_for(self, name: str) -> str:
+        # Non-throwing resolver for LabRenderer's name-first/fn-fallback lookup:
+        # registry entry's fn, else the name itself.
+        try:
+            entry = self._lab.get(str(name))
+        except Exception:
+            return str(name)
+        return str(entry.get("fn") or name)
 
     def _load_initial_draft(self) -> dict[str, Any]:
         source = self._draft_path if self._draft_path.exists() else self._config_path
@@ -621,9 +630,10 @@ class LedPadService:
             raise RuntimeError(reload_result["traceback"] or reload_result["error"])
         name = str(entry["name"])
         kind = str(entry["kind"])
+        fn = str(entry.get("fn") or name)
         effects = reload_result["effects"]
-        if name not in effects:
-            raise ValueError(f"lab effect not registered: {name}")
+        if name not in effects and fn not in effects:
+            raise ValueError(f"lab effect not registered: {name} (fn: {fn})")
         params = copy.deepcopy(entry.get("params") or {})
         if isinstance(payload.get("params"), dict):
             params.update(copy.deepcopy(payload["params"]))
@@ -690,12 +700,13 @@ class LedPadService:
         with self._lock:
             config = copy.deepcopy(self._draft)
             session = copy.deepcopy(self._session(config))
-        renderer = LabRenderer(self._lab.module_path)
+        renderer = LabRenderer(self._lab.module_path, fn_for=self._lab_fn_for)
         result = renderer.reload()
         if not result["ok"]:
             return {"ok": False, "error": result["error"], "traceback": result["traceback"]}
-        if name not in renderer.effects:
-            raise ValueError(f"lab effect not registered: {name}")
+        fn = str(entry.get("fn") or name)
+        if name not in renderer.effects and fn not in renderer.effects:
+            raise ValueError(f"lab effect not registered: {name} (fn: {fn})")
         params = copy.deepcopy(entry.get("params") or {})
         if isinstance(payload.get("params"), dict):
             params.update(copy.deepcopy(payload["params"]))

@@ -233,9 +233,16 @@ def render_preview_frames(
 
 
 class LabRenderer:
-    def __init__(self, module_path: Path | str, delegate: GoveeFrameRenderer | None = None) -> None:
+    def __init__(
+        self,
+        module_path: Path | str,
+        delegate: GoveeFrameRenderer | None = None,
+        *,
+        fn_for: Callable[[str], str] | None = None,
+    ) -> None:
         self.module_path = Path(module_path)
         self.delegate = delegate or GoveeFrameRenderer()
+        self.fn_for = fn_for
         self.effects: dict[str, tuple[str, Callable[..., Any]]] = {}
         self.last_error = ""
         self.last_traceback = ""
@@ -254,7 +261,16 @@ class LabRenderer:
         text = str(name)
         if not text.startswith("lab_"):
             return self.delegate.render(name, beat_pos=beat_pos, local_t=local_t, frame_index=frame_index, params=params, segments=segments, seed=seed)
-        found = self.effects.get(text.removeprefix("lab_"))
+        key = text.removeprefix("lab_")
+        found = self.effects.get(key)
+        if found is None and self.fn_for is not None:
+            # Name first, entry-fn fallback: renamed drafts whose module still
+            # registers the original fn keep rendering. A resolver failure must
+            # not raise out of render — it just means name-only (blank) behavior.
+            try:
+                found = self.effects.get(str(self.fn_for(key)))
+            except Exception:
+                found = None
         if found is None:
             return self.delegate.blank(segments)
         kind, fn = found

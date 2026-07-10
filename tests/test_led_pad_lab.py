@@ -248,6 +248,56 @@ class LedPadLabTests(unittest.TestCase):
             self.assertEqual(unknown, [(0, 0, 0)] * 3)
             self.assertEqual(delegated, direct)
 
+    def test_renderer_fn_fallback_name_first_and_resolver_errors_contained(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            module = Path(td) / "effects_lab.py"
+            _write_two_effect_module(module)  # registers keys 'a' (slot 0) and 'b' (slot 1)
+            # Slot 5 dark: both module effects carry white-slot weight 1, which
+            # would otherwise saturate every render identical.
+            params = {"slot_colors": [(200, 0, 0), (0, 200, 0), (0, 0, 10), (1, 1, 1), (2, 2, 2), (0, 0, 0)]}
+            kw = dict(beat_pos=0, local_t=0, frame_index=0, params=params, segments=3, seed=1)
+            fn_map = {"c": "b", "a": "b"}
+            renderer = LabRenderer(module, fn_for=lambda key: fn_map.get(key, key))
+            renderer.reload()
+
+            via_fn = renderer.render("lab_c", **kw)
+            direct_b = renderer.render("lab_b", **kw)
+            name_first = renderer.render("lab_a", **kw)
+            direct_a_only = LabRenderer(module)
+            direct_a_only.reload()
+            direct_a = direct_a_only.render("lab_a", **kw)
+
+            self.assertEqual(via_fn, direct_b)  # renamed draft renders via fn
+            self.assertEqual(name_first, direct_a)  # registered name wins over fn
+            self.assertNotEqual(direct_a, direct_b)
+
+            def boom(_key: str) -> str:
+                raise RuntimeError("resolver blew up")
+
+            broken = LabRenderer(module, fn_for=boom)
+            broken.reload()
+            self.assertEqual(broken.render("lab_zzz", **kw), [(0, 0, 0)] * 3)
+
+    def test_lab_play_and_preview_resolve_renamed_draft_via_registry_fn(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config = root / "led_look_director.json"
+            shutil.copy2(_EXAMPLE_PATH, config)
+            lab_dir = root / "led_lab"
+            _write_lab_module(lab_dir / "effects_lab.py")  # registers only 'pulse'
+            registry = LabRegistry(lab_dir)
+            registry.save({"name": "renamed_pulse", "kind": "slot", "fn": "pulse", "params": {}, "cue_beats": 8})
+            playback = _FakePlayback()
+            service = LedPadService(config, dry_run=True, playback=playback, lab_dir=lab_dir)
+
+            play = service.lab_play({"name": "renamed_pulse"})
+            preview = service.lab_preview({"name": "renamed_pulse", "beats": 1.0, "bpm": 120.0})
+
+            self.assertTrue(play["ok"])
+            self.assertEqual(playback.play_calls[0]["spec"]["scene_ref"], "lab_renamed_pulse")
+            self.assertTrue(preview["ok"])
+            self.assertTrue(any(pixel != (0, 0, 0) and pixel != [0, 0, 0] for frame in preview["frames"] for pixel in frame))
+
     def test_lab_play_preempts_pad_play_in_shared_slot(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
