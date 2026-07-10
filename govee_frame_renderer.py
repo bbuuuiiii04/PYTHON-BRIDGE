@@ -629,14 +629,34 @@ def _rainbow_ordered(beat: float, local_t: float, frame_index: int, params: Mapp
     return [(_clamp_channel(r), _clamp_channel(g), _clamp_channel(b)) for r, g, b in acc]
 
 
+def _ember_env(x: float, sharp: bool) -> float:
+    """Ember brightness envelope over normalized life x in [0, 1).
+
+    sharp=False: the AWR-161 sine fade-in/out (drop_firework_explosion, kept
+    byte-identical). sharp=True (AWR-187): fast-in / exponential-out -- linear
+    attack over the first 15% of life to full, then exp decay to ~0.007 by end
+    of life, the operator's 'aggressively spark' shape (a spark pops instantly
+    and dies in a tail instead of swelling in and out)."""
+    if not sharp:
+        return math.sin(math.pi * x)
+    attack = 0.15
+    if x < attack:
+        return x / attack
+    return math.exp(-5.0 * (x - attack) / (1.0 - attack))
+
+
 def _ember_field_frame(local_t: float, segments: int, seed: int, *,
-                       density: float, size: float, life_s: float, colors: tuple[RGB, RGB]) -> Frame:
+                       density: float, size: float, life_s: float, colors: tuple[RGB, RGB],
+                       sharp: bool = False) -> Frame:
     """AWR-161: frame-native ember field for drop_firework_explosion (ported
     from the lab _ember_field). Same independent-lifecycle timing as the
     production slot-based _ember_field (the remnants machinery: sine fade-in/
     out over life_s, a personal gap, fresh position + color each cycle,
     never beat-tied) -- colorized directly from the two spark params instead
-    of writing into palette slots, since this is a baked Frame effect."""
+    of writing into palette slots, since this is a baked Frame effect.
+    sharp=True (AWR-187) swaps only the brightness envelope to the aggressive
+    fast-in/exp-out shape (_ember_env); the AWR-153 time-based lifecycle
+    machinery is untouched."""
     seg = max(0, int(segments))
     acc = [[0.0, 0.0, 0.0] for _ in range(seg)]
     if seg == 0 or density <= 0.0:
@@ -656,7 +676,7 @@ def _ember_field_frame(local_t: float, segments: int, seed: int, *,
         cyc_rng = _rng(seed, "ember", k, cycle_idx)
         center = cyc_rng.uniform(0, seg)
         color = colors[cyc_rng.randrange(len(colors))]
-        env = math.sin(math.pi * cycle_pos / life) * cyc_rng.uniform(0.6, 1.0)
+        env = _ember_env(cycle_pos / life, sharp) * cyc_rng.uniform(0.6, 1.0)
         for idx in range(seg):
             w = max(0.0, 1.0 - (_distance_on_ring(idx, center, seg) / size))
             if w > 0.0:
@@ -691,6 +711,79 @@ def _drop_firework_explosion(beat: float, local_t: float, frame_index: int, para
     base = [(bg[0] * level, bg[1] * level, bg[2] * level) for _ in range(seg)]
     layer = _ember_field_frame(local_t, seg, seed, density=density, size=size,
                                life_s=life_s, colors=(spark_a, spark_b))
+    out: Frame = []
+    for i in range(seg):
+        w = max(0.0, min(1.0, max(layer[i]) / 255.0))
+        r0, g0, b0 = base[i]
+        if w > 0.0:
+            lr, lg, lb = layer[i]
+            px = (r0 * (1.0 - w) + lr, g0 * (1.0 - w) + lg, b0 * (1.0 - w) + lb)
+        else:
+            px = (r0, g0, b0)
+        out.append((_clamp_channel(px[0]), _clamp_channel(px[1]), _clamp_channel(px[2])))
+    return out
+
+
+def _drop_firework_explosion_2(beat: float, local_t: float, frame_index: int, params: Mapping[str, Any], segments: int, seed: int) -> Frame:
+    """AWR-187 firework redesign (operator visual spec, verbatim acceptance:
+    'the firework background explosion should strobe with sparkling hues and
+    then when the firework explosion background quickly dims, the embers
+    continue to aggressively spark').
+
+    Explosion window (first 2*surge_beats): the background is a STROBING
+    MULTI-HUE field -- the wall-clock Hz gate (_hz_strobe_on, the AWR-153/
+    AWR-161 strobe discipline) flashes a per-pixel color field whose hues are
+    drawn from the injected palette tints (color_a/color_b arrive from the
+    color engine's multi inject when the look is color_source=engine; spark_a/
+    spark_b join the pool). Each flash cycle re-deals the pixel hues. This
+    REPLACES the v1 solid near-white surge (the old BAKED_WHITE-era read).
+    Quick dim: the level ramps to bg_level over surge_beats (default 0.25,
+    was 0.5) and straight down to a much lower bg_hold (default 0.25, was
+    0.7) over the next surge_beats. Ember phase: the sharp fast-in/exp-out
+    ember field (_ember_env sharp), life_s default 0.15, density default 0.5,
+    blend-replaced over the dimmed background so embers keep full intensity
+    (the AWR-161 contrast bar is re-measured in the tests). Embers stay
+    time-based, never beat-tied (AWR-153). v1 stays registered for the
+    pre-apply live config; retire it after the executive gate flips the look
+    via tools/apply_firework_redesign.py."""
+    seg = max(0, int(segments))
+    surge_beats = max(0.1, float(params.get("surge_beats", 0.25)))
+    bg_level = max(0.2, min(1.0, float(params.get("bg_level", 1.0))))
+    density = max(0.0, min(0.8, float(params.get("sparkle_density", 0.5))))
+    size = max(0.5, min(3.0, float(params.get("sparkle_size", 1.0))))
+    life_s = max(0.1, min(2.0, float(params.get("sparkle_life_s", 0.15))))
+    bg = _color(params.get("color_a"), (255, 240, 220))
+    tint_b = _color(params.get("color_b"), (255, 170, 60))
+    spark_a = _color(params.get("spark_a"), (255, 170, 60))
+    spark_b = _color(params.get("spark_b"), (255, 240, 220))
+    # bg_hold floor is 0.0 here (v1 floored at 0.2): the operator's quick dim
+    # may go fully dark under the embers.
+    bg_hold = max(0.0, min(1.0, float(params.get("bg_hold", 0.25)))) * bg_level
+
+    if beat < surge_beats * 2.0:
+        # Explosion: triangle level envelope (up over surge_beats, straight
+        # down to bg_hold over the next surge_beats), strobed by the Hz gate.
+        if beat <= surge_beats:
+            level = max(0.0, min(1.0, beat / surge_beats)) * bg_level
+        else:
+            settle = max(0.0, min(1.0, (beat - surge_beats) / surge_beats))
+            level = bg_level + (bg_hold - bg_level) * settle
+        if _hz_strobe_on(local_t, params):
+            # Same hz clamp as the gate; one hue deal per flash cycle.
+            hz = max(0.5, min(10.0, float(params.get("hz", 6.0))))
+            flash_idx = int(max(0.0, float(local_t)) * hz)
+            tints = (bg, tint_b, spark_a, spark_b)
+            base = []
+            for idx in range(seg):
+                tint = tints[_rng(seed, "flash", flash_idx, idx).randrange(len(tints))]
+                base.append((tint[0] * level, tint[1] * level, tint[2] * level))
+        else:
+            base = [(0.0, 0.0, 0.0)] * seg
+    else:
+        base = [(bg[0] * bg_hold, bg[1] * bg_hold, bg[2] * bg_hold)] * seg
+
+    layer = _ember_field_frame(local_t, seg, seed, density=density, size=size,
+                               life_s=life_s, colors=(spark_a, spark_b), sharp=True)
     out: Frame = []
     for i in range(seg):
         w = max(0.0, min(1.0, max(layer[i]) / 255.0))
@@ -2166,7 +2259,15 @@ _EFFECTS["rainbow_ordered"] = _rainbow_ordered
 # AWR-161: contrast-gated firework explosion promotion (see the renderer
 # contrast test); baked (spark_a/spark_b are literal RGB params, not an
 # injected palette). Not a strobe -- the surge is a smooth resolve, not a gate.
+# AWR-187: superseded by drop_firework_explosion_2 (below); v1 stays registered
+# so the pre-apply live config keeps validating -- retire after the executive
+# gate runs tools/apply_firework_redesign.py.
 _EFFECTS["drop_firework_explosion"] = _drop_firework_explosion
+
+# AWR-187: firework redesign -- strobing multi-hue explosion + quick dim +
+# aggressive embers. IS a strobe (rides _hz_strobe_on), so looks referencing it
+# need allow_strobe=true + safety.allow_strobe=true (C5 validation).
+_EFFECTS["drop_firework_explosion_2"] = _drop_firework_explosion_2
 
 # AWR-187 Part G: palette-cycling comet — the rainbow generalization. A SLOT
 # effect (the point: the dispatch layer injects the track palette as
@@ -2190,6 +2291,8 @@ REALTIME_STROBE_EFFECTS = REALTIME_STROBE_EFFECTS | frozenset({
     # (returns a dark frame when off) but was never flagged as a strobe --
     # pre-existing gap. Its example/live looks already carry allow_strobe=true.
     "post_drop_center_comet_blue_cyan",
+    # AWR-187: the redesigned firework explosion strobes its background.
+    "drop_firework_explosion_2",
 })
 
 # Param allowlist for each new name = standard EDM keys (duration_beats +
@@ -2239,6 +2342,13 @@ _M2_PHASE2A_PARAM_KEYS: dict[str, frozenset[str]] = {
         frozenset({"surge_beats", "bg_level", "bg_hold", "color_a",
                    "spark_a", "spark_b", "sparkle_density", "sparkle_size",
                    "sparkle_life_s", "duration_beats"}) | _SYNC_PARAM_KEYS
+    ),
+    # AWR-187: v2 adds the strobe knobs (hz/duty) + color_b (second palette
+    # tint; also engine-injected via the multi path when color_source=engine).
+    "drop_firework_explosion_2": (
+        frozenset({"surge_beats", "bg_level", "bg_hold", "color_a", "color_b",
+                   "spark_a", "spark_b", "sparkle_density", "sparkle_size",
+                   "sparkle_life_s", "hz", "duty", "duration_beats"}) | _SYNC_PARAM_KEYS
     ),
     "rt_groove_heartbeat": (
         frozenset({"base_width", "pulse_width", "decay", "loop_beats",

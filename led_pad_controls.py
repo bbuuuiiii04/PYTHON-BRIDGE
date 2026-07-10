@@ -101,7 +101,8 @@ CONTROL_META: dict[str, dict[str, Any]] = {
     "travel_per_beat": _meta("Travel Per Beat", "number", min=2, max=120, step=1, help="Beat-locked head advance (auto = legacy loop pace).", advanced=True, default=None),
     "surge_beats": _meta("Surge Beats", "number", min=0.1, max=8, step=0.1, help="How many beats the explosion surge lasts.", default=0.5),
     "bg_level": _meta("Flash Brightness", "number", min=0.2, max=1, step=0.05, help="Peak brightness of the explosion flash.", default=1.0),
-    "bg_hold": _meta("Flash Hold", "number", min=0.2, max=1, step=0.05, help="Brightness the flash settles to after the surge.", default=0.7),
+    # AWR-187: min dropped 0.2 -> 0 (v2's quick dim may settle fully dark).
+    "bg_hold": _meta("Flash Hold", "number", min=0, max=1, step=0.05, help="Brightness the flash settles to after the surge.", default=0.7),
     "spark_a": _meta("Spark Color A", "rgb", help="First ember spark color."),
     "spark_b": _meta("Spark Color B", "rgb", help="Second ember spark color."),
 }
@@ -127,6 +128,13 @@ PARAM_DEFAULT_OVERRIDES: dict[str, dict[str, Any]] = {
     # (0.5, the global CONTROL_META default).
     "drop_white_aggressive": {"duty": 0.3},
     "drop_strobe_colorway": {"duty": 0.3},
+    # AWR-187: the redesigned firework's fallbacks diverge from v1's (which set
+    # the CONTROL_META globals): quicker surge, much lower hold, denser +
+    # shorter-lived embers, Hz-gate duty 0.3.
+    "drop_firework_explosion_2": {
+        "surge_beats": 0.25, "bg_hold": 0.25, "sparkle_density": 0.5,
+        "sparkle_life_s": 0.15, "duty": 0.3,
+    },
 }
 
 
@@ -183,6 +191,7 @@ RENDER_GROUPS: dict[str, tuple[str, ...]] = {
         "rt_drop_center_burst",
         "drop_strobe_colorway",
         "drop_firework_explosion",
+        "drop_firework_explosion_2",
         "rainbow_ordered",
     ),
     "Post-drop": (
