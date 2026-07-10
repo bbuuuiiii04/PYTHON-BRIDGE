@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 23d5c4a
-last_verified_date: 2026-07-08
-validation_scope: software-only; Stream Deck palette control runtime command rail plus AWR-121 gesture v2 interactions software-tested
+last_verified_commit: 9a432b8
+last_verified_date: 2026-07-10
+validation_scope: software-only; Stream Deck palette control runtime command rail plus AWR-121 gesture v2 interactions software-tested; AWR-192 menubar layout software-tested
 ---
 
 # Runtime Commands Subsystem
@@ -105,6 +105,26 @@ SoundSwitch pack-player boundary (T7c/T7e):
 - The menubar bridge toggle launches the canonical repo watcher at
   `scripts/ss_bridge_watcher.sh`. Menubar UI state is only a control surface; it
   does not prove watcher or bridge process health.
+- Menubar menu layout (AWR-192; software-tested, hardware-unvalidated): the menu
+  is declared as pure data (`MENU_BLUEPRINT` in `scripts/bridge_menubar.py`) and
+  built by one walker. Order: **10** disabled status glance rows (bridge, SS,
+  two deck pairs, checks, smart phrasing, lasers, and a new **LEDs** row) → sep
+  → bridge toggle → sep → LIVE block (**Laser Blackout** and **Clear Laser
+  Blackout** at top level — promoted out of the Laser Director submenu so the
+  mid-show panic control is one click, retitled from "Emergency
+  Blackout"/"Clear Blackout" with the same selectors and the same
+  enabled-gating expressions; then Smart Phrasing ▸, Laser Director ▸ — now
+  toggle + info rows only, LED Engine v2, Laser Pad…, LED Pad…) → sep →
+  AUTHORING + CHECKS block (Export, export status line, Record Session, Test
+  the Lights…, Run Health Check) → sep → MAINTENANCE block (the AWR-186 M2
+  install/purge slot, then Quit — retitled "Quit Menu" → "Quit Menubar (bridge
+  keeps running)"). The LEDs glance row reads the `led_look_director` status
+  block via the pure `led_row_fields()` helper: On/Off/— state, achieved fps
+  (only while realtime is active), active effect, current palette, and the
+  adapter `degraded_reason` as an orange suffix; every field fails soft to
+  "—"/blank on missing or malformed status. No commands were added, removed, or
+  reworded by the regroup — a test pins the selector inventory to the
+  pre-refactor 14 plus the 2 M2 selectors, each exactly once.
 - Frozen-bundle-only menu items (AWR-186 M2; both sit behind the same
   `getattr(sys, "frozen", False)` gate, so a source-run menubar is
   byte-identical and never imports `install_controller.py`): **"Install on this
@@ -116,6 +136,9 @@ SoundSwitch pack-player boundary (T7c/T7e):
   bridge child by handle first, removes manifest paths (allowlist, `..`
   rejected) then the whole App Support dir then `~/Library/Logs/rb_ss_bridge`,
   then Trashes its own bundle and quits. Neither sends runtime commands.
+  AWR-192 moved WHERE they sit (both now in the MAINTENANCE block between the
+  last separator and Quit, install first) — position only; titles, selectors,
+  gating, and confirmation flows are M2's, verbatim.
 
 Authoritative code:
 - `runtime_status.py`
