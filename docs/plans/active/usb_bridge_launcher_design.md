@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: spec
-last_verified_commit: 9ead100
-last_verified_date: 2026-07-09
+last_verified_commit: a31bde9
+last_verified_date: 2026-07-10
 validation_scope: >
   Design spec for a macOS-only self-contained USB bridge launcher (PyInstaller bundle +
   menubar with temporary/permanent install). Software-design only — no code, no build, no

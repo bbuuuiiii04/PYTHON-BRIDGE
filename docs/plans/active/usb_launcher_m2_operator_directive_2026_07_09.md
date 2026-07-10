@@ -1,14 +1,16 @@
 ---
 doc_status: current
 truth_level: operator-directive-capture
-last_verified_commit: 7b8555f
-last_verified_date: 2026-07-09
+last_verified_commit: a31bde9
+last_verified_date: 2026-07-10
 validation_scope: >
   Verbatim capture + decomposition of the operator's M2 product directive for the
   USB bridge launcher (2026-07-09 ~19:25, attended usb lane). Requirements only —
   nothing here authorizes code; routing/sequencing is the executive's (M2 build
   requires the fresh executive gate per the M1 close-out ruling). One requirement
   (R5) is recorded as hardware-impossible on RX-family with the settled evidence.
+  Status column updated 2026-07-10 after the AWR-186 M2 build: R1-R4/R6
+  implemented (software-tested; operator walkthrough = the physical gate).
 ---
 
 # USB launcher M2 — operator directive (2026-07-09 evening)
