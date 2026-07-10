@@ -2,8 +2,8 @@
 doc_status: current
 truth_level: code-verified
 last_verified_commit: 67b7d66
-last_verified_date: 2026-07-09
-validation_scope: software-only plus Rekordbox 7.2.11 passive mixer RE evidence routing; AWR-157 deck-2 chain freshness gating software-tested; AWR-160 phantom track-load stability gate software-tested; hardware-output unvalidated
+last_verified_date: 2026-07-10
+validation_scope: software-only plus Rekordbox 7.2.11 passive mixer RE evidence routing; AWR-157 deck-2 chain freshness gating software-tested; AWR-160 phantom track-load stability gate software-tested; AWR reader cross-version safety (direct-read BPM cap + emit clamp + symbol-derived offline version-extension tool) software-tested 2026-07-10; hardware-output unvalidated
 ---
 
 # Rekordbox Readers
@@ -191,3 +191,27 @@ CFX FILTER tracking (AWR-173) — the isolation rule:
   is exactly the trap CFX must never join.
 - CFX chains exist for RB 7.2.11 only; every other version leaves the six fields
   `None`, so `_tick_cfx` emits nothing and the feature is inert.
+
+Reader live-safety + cross-version extension (AWR reader-safety, 2026-07-10, software-tested):
+- **Direct-read BPM cap.** `_follow_float` (`rb_state_reader.py`) rejects a live-BPM
+  read outside `0 < v < _RB_BPM_READ_MAX` (default 300, env `RBSS_RB_BPM_READ_MAX`),
+  returning `None` (keep-prior). Tightened from the old `< 1000`: a garbage memory
+  read can no longer reach `d.meta.bpm` and drive beat-locked LED/laser flash timing.
+  The live-BPM SCANNER (`live_bpm.py` `_valid_bpm`) independently gates to
+  `LIVE_BPM_MIN..LIVE_BPM_MAX` (40..250), version-independent.
+- **Fail-closed on unknown version is partial by design.** `make_rb_state_reader`
+  is inert on an unsupported build (`_offs is None` ⇒ `run()` early-returns, no direct
+  reads); `LiveBPMService`/`RBMemoryReader` still scan (bounded 40..250). The
+  outgoing-tempo clamp `osl_output.clamp_emit_bpm` is the version-independent choke on
+  the SoundSwitch feed (see `soundswitch_output.md`).
+- **Version-extension mechanism (offline).** `tools/rekordbox_derive_offsets.py`
+  derives a new build's chain anchors from the rekordbox **arm64 symbol table**:
+  master/anlz/mixer anchor = `<Class>::singletonHolder + 0x40`
+  (`ApplicationMode` / `browse::LoadedContentsManager` / `djengine::DjEngineIF`),
+  reproduced against 7.2.11 by `--expect 7.2.11`. The deck (bpm/pos/track_info) anchor
+  is an LLVM `__MergedGlobals` with no clean symbol — carried forward from the nearest
+  known version and confirmed by a live read. Fails closed (raises) on a missing or
+  ambiguous anchor symbol or an implausible RVA — never a silent-wrong offset. Offline
+  dev-machine tool only (no runtime importers); adding a version = rebuild `rb_offsets.py`
+  + the USB bundle (the table is frozen into the bundle).
+- Pinned by `tests/test_rekordbox_reader_safety.py`.

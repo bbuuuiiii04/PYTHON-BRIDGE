@@ -47,12 +47,18 @@ DEFAULT_IMAGE_BASE = 0x100000000    # arm64 macOS __TEXT vmaddr
 DECK_ROLE = "deck"                  # bpm/pos/track_info root — NOT symbol-derivable (__MergedGlobals)
 
 
+_MAX_PLAUSIBLE_RVA = 0x10000000  # 256 MB; anchors live ~80 MB into __DATA — reject absurd/negative.
+
+
 def parse_nm(nm_text: str) -> dict[str, int]:
     """Parse ``nm --defined-only`` output into {symbol_name: address}.
 
     Lines are ``<hex-addr> <type> <name>``; undefined/malformed lines are
-    skipped. Later duplicate names win (harmless — the anchor symbols are unique).
+    skipped. Non-anchor names may legitimately repeat (e.g. ``__MergedGlobals``),
+    but an ANCHOR symbol appearing at two DIFFERENT addresses is ambiguous and
+    raises ValueError — a duplicated anchor must never silently pick an address.
     """
+    anchor_names = set(SINGLETON_ANCHORS.values())
     out: dict[str, int] = {}
     for line in nm_text.splitlines():
         parts = line.split(" ", 2)
@@ -62,24 +68,34 @@ def parse_nm(nm_text: str) -> dict[str, int]:
             addr = int(parts[0], 16)
         except ValueError:
             continue
-        out[parts[2]] = addr
+        name = parts[2]
+        if name in anchor_names and name in out and out[name] != addr:
+            raise ValueError(f"ambiguous anchor symbol {name}: 0x{out[name]:x} vs 0x{addr:x}")
+        out[name] = addr
     return out
 
 
 def derive_anchors(symbols: dict[str, int], image_base: int = DEFAULT_IMAGE_BASE) -> dict[str, int]:
     """Return {role: anchor RVA} for the three symbol-derivable chain roots.
 
-    ``anchor_rva = symbol_address + INSTANCE_OFF - image_base``. Fail-closed:
-    raises KeyError naming every missing singleton symbol so a build that
-    dropped/renamed a symbol produces NO offset rather than a silently wrong one.
+    ``anchor_rva = symbol_address + INSTANCE_OFF - image_base``. Expects arm64
+    symbols — the CLI enforces ``nm -arch arm64``; a wrong-arch slice reuses the
+    same __TEXT base (0x100000000) and would derive a wrong RVA. Fail-closed:
+    raises KeyError naming every missing singleton symbol, and ValueError if a
+    derived RVA is negative or implausibly large — never a silently wrong offset.
     """
     missing = [sym for sym in SINGLETON_ANCHORS.values() if sym not in symbols]
     if missing:
         raise KeyError("rekordbox binary missing singleton symbol(s): " + ", ".join(sorted(missing)))
-    return {
-        role: symbols[sym] + INSTANCE_OFF - image_base
-        for role, sym in SINGLETON_ANCHORS.items()
-    }
+    out: dict[str, int] = {}
+    for role, sym in SINGLETON_ANCHORS.items():
+        rva = symbols[sym] + INSTANCE_OFF - image_base
+        if not (0 < rva < _MAX_PLAUSIBLE_RVA):
+            raise ValueError(
+                f"{role} anchor RVA 0x{rva:x} out of plausible range "
+                f"(symbol 0x{symbols[sym]:x}, image_base 0x{image_base:x}) — wrong arch or bad symbol?")
+        out[role] = rva
+    return out
 
 
 def run_nm(binary: Path, arch: str = "arm64") -> str:

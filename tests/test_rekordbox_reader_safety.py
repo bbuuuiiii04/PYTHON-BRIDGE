@@ -12,6 +12,7 @@ chain anchors from the rekordbox symbol table reproduces the known 7.2.11 row.
 """
 from __future__ import annotations
 
+import queue
 import sys
 import unittest
 from pathlib import Path
@@ -23,8 +24,10 @@ from rb_ss_bridge_v2.osl_output import (  # noqa: E402
 )
 from rb_ss_bridge_v2.sound_switch_engine import SoundSwitchEngine  # noqa: E402
 from rb_ss_bridge_v2.rb_offsets import all_offsets, load_offsets_for_version  # noqa: E402
-from rb_ss_bridge_v2.rb_state_reader import _RB_BPM_READ_MAX  # noqa: E402
-from rb_ss_bridge_v2.live_bpm import _normalize_rb_version  # noqa: E402
+from rb_ss_bridge_v2.rb_state_reader import _RB_BPM_READ_MAX, make_rb_state_reader  # noqa: E402
+from rb_ss_bridge_v2.live_bpm import (  # noqa: E402
+    _normalize_rb_version, _valid_bpm, LIVE_BPM_MIN, LIVE_BPM_MAX,
+)
 from rb_ss_bridge_v2.tools.rekordbox_derive_offsets import (  # noqa: E402
     parse_nm, derive_anchors, SINGLETON_ANCHORS, INSTANCE_OFF, DEFAULT_IMAGE_BASE,
 )
@@ -104,6 +107,29 @@ class EmitBoundaryClampTests(unittest.TestCase):
         self.assertTrue(all(v == 0.0 for v in _emitted_bpms(self.conn.sent)))
 
 
+class InjectorClampTests(unittest.TestCase):
+    """os2l_injector (RBSS_OS2L_INJECT debug path) writes to the OS2L socket
+    directly, bypassing OS2LOutput; its bpm packets must be clamped too
+    (adversarial-review finding A)."""
+
+    def _packets(self, command: dict) -> list[dict]:
+        from rb_ss_bridge_v2.os2l_injector import OS2LInjector
+        return OS2LInjector(_RecordConn())._packets_for(command)
+
+    def test_bpm_cmd_clamped(self) -> None:
+        pkts = self._packets({"cmd": "bpm", "decks": [1], "bpm": 99999.0})
+        self.assertEqual([p["value"] for p in pkts], [BPM_EMIT_MAX])
+
+    def test_beat_change_clamped(self) -> None:
+        pkts = self._packets({"cmd": "beat_change", "decks": [1], "bpm": 99999.0, "pos": 0})
+        self.assertEqual([p["bpm"] for p in pkts], [BPM_EMIT_MAX])
+
+    def test_arm_clamped(self) -> None:
+        pkts = self._packets({"cmd": "arm", "decks": [1], "bpm": 99999.0, "filepath": "/x/y.mp3"})
+        bpms = [p["value"] for p in pkts if str(p.get("trigger", "")).endswith("get_bpm")]
+        self.assertEqual(bpms, [BPM_EMIT_MAX])
+
+
 class UnknownVersionFailClosedTests(unittest.TestCase):
     def test_unknown_version_returns_none(self) -> None:
         self.assertIsNone(load_offsets_for_version("9.9.9"))
@@ -115,7 +141,35 @@ class UnknownVersionFailClosedTests(unittest.TestCase):
         # build, but the version-INDEPENDENT emit clamp still bounds their output.
         conn = _RecordConn()
         SoundSwitchEngine(OS2LOutput(conn)).send_live_bpm_follow(1, 800.0)
-        self.assertTrue(all(v == BPM_EMIT_MAX for v in _emitted_bpms(conn.sent)))
+        vals = _emitted_bpms(conn.sent)
+        self.assertTrue(vals, "expected a fanned-out 4-deck route (guard against vacuous all([]))")
+        self.assertTrue(all(v == BPM_EMIT_MAX for v in vals))
+
+
+class InertReaderOnUnknownVersionTests(unittest.TestCase):
+    def test_unknown_version_reader_is_inert(self) -> None:
+        # make_rb_state_reader returns a reader with NO offsets on an unknown
+        # build; run() early-returns when _offs is None, so it issues no direct
+        # memory reads / BPM_UPDATE events (exercises the inert-reader limb).
+        r = make_rb_state_reader(queue.Queue(), "9.9.9")
+        self.assertIsNone(r._offs)
+
+    def test_supported_version_reader_has_offsets(self) -> None:
+        r = make_rb_state_reader(queue.Queue(), "7.2.11")
+        self.assertIsNotNone(r._offs)
+
+
+class ScannerBoundIsVersionIndependentTests(unittest.TestCase):
+    def test_valid_bpm_gate_rejects_out_of_band(self) -> None:
+        # The live-BPM scanner accepts only [40, 250] regardless of Rekordbox
+        # version — the primary bound on the scanner path.
+        self.assertLessEqual(LIVE_BPM_MAX, 250.0)
+        self.assertGreaterEqual(LIVE_BPM_MIN, 40.0)
+        for good in (LIVE_BPM_MIN, 128.0, 174.0, LIVE_BPM_MAX):
+            self.assertTrue(_valid_bpm(good), good)
+        for bad in (LIVE_BPM_MIN - 0.1, LIVE_BPM_MAX + 0.1, 999.0,
+                    float("nan"), float("inf"), -1.0):
+            self.assertFalse(_valid_bpm(bad), bad)
 
 
 class DirectReadBpmCeilingTests(unittest.TestCase):
@@ -179,6 +233,24 @@ class VersionExtensionToolTests(unittest.TestCase):
             derive_anchors({}, DEFAULT_IMAGE_BASE)
         with self.assertRaises(KeyError):
             derive_anchors({SINGLETON_ANCHORS["master"]: 0x104e18958}, DEFAULT_IMAGE_BASE)
+
+    def test_duplicate_anchor_symbol_fails_closed(self) -> None:
+        # An anchor symbol at two different addresses is ambiguous -> raise,
+        # never silently pick one (adversarial-review finding E).
+        txt = (
+            "0000000104e18958 s __ZN15ApplicationMode15singletonHolderE\n"
+            "0000000205e18958 s __ZN15ApplicationMode15singletonHolderE\n"
+        )
+        with self.assertRaises(ValueError):
+            parse_nm(txt)
+
+    def test_implausible_rva_fails_closed(self) -> None:
+        # A wrong-arch / bad address deriving an absurd RVA must raise, not
+        # return a silently-wrong offset (adversarial-review finding E).
+        base = DEFAULT_IMAGE_BASE
+        bad = {sym: base + 0x40000000 for sym in SINGLETON_ANCHORS.values()}
+        with self.assertRaises(ValueError):
+            derive_anchors(bad, base)
 
     def test_parse_nm_skips_malformed(self) -> None:
         txt = (

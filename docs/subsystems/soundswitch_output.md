@@ -2,8 +2,8 @@
 doc_status: current
 truth_level: code-verified
 last_verified_commit: 7d9ecdc
-last_verified_date: 2026-07-02
-validation_scope: software-only
+last_verified_date: 2026-07-10
+validation_scope: software-only; AWR reader-safety emit-boundary tempo clamp (clamp_emit_bpm) software-tested 2026-07-10
 ---
 
 # SoundSwitch Output
@@ -85,6 +85,16 @@ Tests:
 Change contract:
 - If changing OS2L payloads or routing, inspect `state_manager.py` and `sound_switch_engine.py` together.
 - Update `docs/status/feature_status_matrix.md` and this card.
+
+Live-safety tempo clamp (AWR reader-safety, 2026-07-10, software-tested):
+- Every BPM the bridge emits to SoundSwitch passes through `osl_output.clamp_emit_bpm`
+  (bounds to `[RBSS_BPM_EMIT_MIN, RBSS_BPM_EMIT_MAX]` = 20..300; non-finite or `<= 0` → 0).
+  Applied in `OS2LOutput.send_bpm` / `send_beat` / the `send_deck_load` `get_bpm` — so the
+  `SoundSwitchEngine.send_live_bpm_follow` (memory-scanner follow) and `send_autoloop_bpm`
+  fan-outs are covered — and in the `os2l_injector` (`RBSS_OS2L_INJECT`) debug path. A
+  garbage or out-of-range memory read can never feed SoundSwitch an absurd tempo. Scope:
+  this bounds only the tempo the bridge FEEDS SS; it cannot cap SoundSwitch's own authored
+  effect rates. Pinned by `tests/test_rekordbox_reader_safety.py`.
 
 Known risks:
 - breaking deck fanout

@@ -15,7 +15,7 @@ import time
 from typing import Any
 
 from .config import AUTOLOOP_BEATS
-from .osl_output import OS2LConnection
+from .osl_output import OS2LConnection, clamp_emit_bpm
 
 log = logging.getLogger("os2l_injector")
 
@@ -93,13 +93,14 @@ class OS2LInjector:
         if cmd == "clear":
             return _clear_packets(decks)
         if cmd == "bpm":
-            return [{"evt": "subscribed", "trigger": f"deck {d} get_bpm", "value": float(command["bpm"])}
+            return [{"evt": "subscribed", "trigger": f"deck {d} get_bpm",
+                     "value": clamp_emit_bpm(float(command["bpm"]))}
                     for d in decks]
         if cmd == "loop_on":
             beats = int(command.get("beats", AUTOLOOP_BEATS))
             return _loop_on_packets(decks, beats)
         if cmd == "beat_change":
-            bpm = float(command["bpm"])
+            bpm = clamp_emit_bpm(float(command["bpm"]))
             pos = int(command["pos"])
             return [{"evt": "beat", "deck": d, "bpm": round(bpm, 2), "pos": pos, "change": True}
                     for d in decks]
@@ -143,7 +144,7 @@ def _loop_on_packets(decks: list[int], beats: int) -> list[dict[str, Any]]:
 def _arm_packets(command: dict[str, Any], decks: list[int]) -> list[dict[str, Any]]:
     filepath = str(command["filepath"])
     title = str(command.get("title") or os.path.basename(filepath).rsplit(".", 1)[0])
-    bpm = float(command.get("bpm", 0.0))
+    bpm = clamp_emit_bpm(float(command.get("bpm", 0.0)))
     firstbeat = int(command.get("firstbeat", 0))
     elapsed = int(command.get("elapsed_ms", 0))
     total = command.get("total_ms")
