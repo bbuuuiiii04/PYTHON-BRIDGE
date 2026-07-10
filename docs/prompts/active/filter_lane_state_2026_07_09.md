@@ -85,5 +85,7 @@ STILL re-bloomed → two-leg root cause + staged fix (above) → routed side-fix
   extra pulse); one-way resume; full-black floor.
 - Next-session first steps: (1) bridge starts → staged fixes live; (2) operator rides
   up-over-bloom-and-home ONCE — expect black → normal rise, NO color flare, NO re-flood;
-  (3) taste knobs if wanted: flood_ramp_ms 250 / drain_ms 800 / release_ramp_ms 400
-  (sequential: worst-case ride-home restore ≈ 2× release_ramp_ms).
+  (3) taste knobs if wanted: flood_ramp_ms 250 / drain_ms **400** (operator re-ruled
+  "the bloom needs to last shorter" post-park; staged 800→400 in live config,
+  loader-validated) / release_ramp_ms 400 (sequential: worst-case ride-home restore ≈
+  2× release_ramp_ms).
