@@ -276,6 +276,65 @@ class LedPadServiceTests(unittest.TestCase):
             after = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(after["looks"]["rt_groove_chase"]["params"], live_params)
 
+    def test_commit_params_edit_preserves_live_bank_move(self) -> None:
+        # LIVE moves a look to a new bank after the draft was created; the pad
+        # only edits that look's params (no move). Commit must keep the LIVE
+        # placement, not replay the stale draft's placement.
+        with tempfile.TemporaryDirectory() as td:
+            service, _playback, path = self._service(td)
+            live = json.loads(path.read_text(encoding="utf-8"))
+            live["banks"]["default"]["groove"].remove("rt_groove_chase")
+            live["banks"]["default"]["ambient"].append("rt_groove_chase")
+            path.write_text(json.dumps(live), encoding="utf-8")
+
+            self.assertTrue(service.save_look(
+                {"name": "rt_groove_chase", "look": {"scene_ref": "rt_groove_chase"}, "params": {}}
+            )["ok"])
+            self.assertTrue(service.commit({})["ok"])
+
+            banks = json.loads(path.read_text(encoding="utf-8"))["banks"]["default"]
+            self.assertIn("rt_groove_chase", banks["ambient"])     # LIVE placement kept
+            self.assertNotIn("rt_groove_chase", banks["groove"])   # stale draft NOT replayed
+
+    def test_commit_applies_pad_move_over_live_bank(self) -> None:
+        # Same LIVE move, but this time the pad explicitly moves the look to a
+        # third bank. The pad's move must win.
+        with tempfile.TemporaryDirectory() as td:
+            service, _playback, path = self._service(td)
+            live = json.loads(path.read_text(encoding="utf-8"))
+            live["banks"]["default"]["groove"].remove("rt_groove_chase")
+            live["banks"]["default"]["ambient"].append("rt_groove_chase")
+            path.write_text(json.dumps(live), encoding="utf-8")
+
+            self.assertTrue(service.move_look({"name": "rt_groove_chase", "bank": "buildup"})["ok"])
+            self.assertTrue(service.commit({})["ok"])
+
+            banks = json.loads(path.read_text(encoding="utf-8"))["banks"]["default"]
+            self.assertIn("rt_groove_chase", banks["buildup"])     # pad move applied
+            self.assertNotIn("rt_groove_chase", banks["ambient"])  # live placement overridden
+            self.assertNotIn("rt_groove_chase", banks["groove"])
+
+    def test_history_restore_restores_bank_placement_on_commit(self) -> None:
+        # A restore must bring back the backup's bank placement, not just look
+        # content — so it marks restored looks moved as well as touched.
+        with tempfile.TemporaryDirectory() as td:
+            service, _playback, path = self._service(td)
+            first = service.commit({})  # writes a .bak-* of the pristine live
+            self.assertTrue(first["ok"])
+            backup_name = Path(first["backup_path"]).name
+
+            live = json.loads(path.read_text(encoding="utf-8"))
+            live["banks"]["default"]["groove"].remove("rt_groove_chase")
+            live["banks"]["default"]["ambient"].append("rt_groove_chase")
+            path.write_text(json.dumps(live), encoding="utf-8")
+
+            self.assertTrue(service.history_restore(backup_name)["ok"])
+            self.assertTrue(service.commit({})["ok"])
+
+            banks = json.loads(path.read_text(encoding="utf-8"))["banks"]["default"]
+            self.assertIn("rt_groove_chase", banks["groove"])      # backup placement restored
+            self.assertNotIn("rt_groove_chase", banks["ambient"])
+
     def test_discard_deletes_draft_and_reloads_live(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             service, _playback, _path = self._service(td)

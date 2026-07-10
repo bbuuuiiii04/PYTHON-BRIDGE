@@ -157,10 +157,15 @@ def _default_pad_meta(config: dict[str, Any]) -> dict[str, Any]:
         "drafts": [],
         "looks": {},
         "ui": {"bpm": 128, "test_palette": palettes[0] if palettes else "", "loop": True},
-        # Which looks THIS pad session edited/created vs deleted. Persisted with
-        # the draft (survives a pad-server restart) so commit can merge only the
-        # operator's real edits over live and never re-apply stale draft content.
-        "pad_session": {"touched": [], "deleted": []},
+        # What THIS pad session actually changed, tracked so commit merges only
+        # real edits over live and never re-applies stale draft content:
+        #   touched = look CONTENT edited/created (looks + per-look color maps)
+        #   moved   = look's role-bank PLACEMENT changed/created by the pad
+        #   deleted = look removed through the pad
+        # A params-only edit is touched but NOT moved, so commit preserves the
+        # look's LIVE bank placement. Persisted with the draft (survives a
+        # pad-server restart) and rebased to empty after each commit.
+        "pad_session": {"touched": [], "moved": [], "deleted": []},
     }
 
 
@@ -182,7 +187,7 @@ def _ensure_pad_meta(config: dict[str, Any]) -> None:
     session = meta.setdefault("pad_session", {})
     if not isinstance(session, dict):
         meta["pad_session"] = session = {}
-    for key in ("touched", "deleted"):
+    for key in ("touched", "moved", "deleted"):
         if not isinstance(session.get(key), list):
             session[key] = []
 
@@ -193,15 +198,25 @@ def _pad_session(config: dict[str, Any]) -> dict[str, list[str]]:
 
 
 def _mark_touched(config: dict[str, Any], name: str) -> None:
+    """Record a CONTENT change (look body / per-look color maps). Not a move."""
     session = _pad_session(config)
     session["deleted"] = [item for item in session["deleted"] if item != name]
     if name not in session["touched"]:
         session["touched"].append(name)
 
 
+def _mark_moved(config: dict[str, Any], name: str) -> None:
+    """Record a role-bank PLACEMENT change/creation by the pad. Not content."""
+    session = _pad_session(config)
+    session["deleted"] = [item for item in session["deleted"] if item != name]
+    if name not in session["moved"]:
+        session["moved"].append(name)
+
+
 def _mark_deleted(config: dict[str, Any], name: str) -> None:
     session = _pad_session(config)
     session["touched"] = [item for item in session["touched"] if item != name]
+    session["moved"] = [item for item in session["moved"] if item != name]
     if name not in session["deleted"]:
         session["deleted"].append(name)
 
@@ -544,7 +559,8 @@ class LedPadService:
             meta = candidate.setdefault("_pad_meta", {})
             meta.setdefault("looks", {})[new_name] = copy.deepcopy(meta.get("looks", {}).get(source, {}))
             _add_to_bank(candidate, new_name, "drafts")
-            _mark_touched(candidate, new_name)
+            _mark_touched(candidate, new_name)  # new look content
+            _mark_moved(candidate, new_name)  # and its drafts-bank placement
             self._ensure_unique_bank_locked(candidate)
             errors, warnings = self._validate(candidate)
             if errors:
@@ -565,7 +581,7 @@ class LedPadService:
                 raise ValueError(f"unknown look: {name}")
             self._guard_mutable(candidate, name, move=True)
             _add_to_bank(candidate, name, bank)
-            _mark_touched(candidate, name)
+            _mark_moved(candidate, name)  # placement only — content stays LIVE
             self._ensure_unique_bank_locked(candidate)
             errors, warnings = self._validate(candidate)
             if errors:
@@ -926,16 +942,25 @@ class LedPadService:
 
         Every top-level block comes from LIVE (including blocks the pad has never
         heard of). Only what this pad session actually changed is overlaid from
-        the draft: the touched looks, their placement in the role banks, the
-        three per-look ``color_engine`` maps, and pad-owned ``_pad_meta``.
-        Looks the pad never touched keep their LIVE contents, so a stale draft
-        can no longer clobber f2/f4/looks added by other tools. Pure transform.
+        the draft, and content vs placement are tracked separately:
+          - ``touched`` drives look CONTENT and the three per-look
+            ``color_engine`` maps.
+          - ``moved`` drives role-bank PLACEMENT.
+        So a params-only edit (touched, not moved) overlays the look body but
+        keeps its LIVE bank placement — if live moved that look to another bank
+        after the draft went stale, the stale draft placement is NOT replayed.
+        An explicit pad move (moved) still repositions it. ``deleted`` removes
+        the look from both content and banks. Looks the pad never touched/moved
+        keep their LIVE contents and placement, so a stale draft can no longer
+        clobber f2/f4/looks added by other tools. ``_pad_meta`` is pad-owned.
+        Pure transform.
         """
         session = (draft.get("_pad_meta") or {}).get("pad_session") or {}
         touched = [str(name) for name in (session.get("touched") or [])]
+        moved = [str(name) for name in (session.get("moved") or [])]
         deleted = {str(name) for name in (session.get("deleted") or [])}
-        touched_set = set(touched)
-        changed = touched_set | deleted
+        moved_set = set(moved)
+        placement_changed = moved_set | deleted
 
         merged = copy.deepcopy(live)
 
@@ -950,16 +975,18 @@ class LedPadService:
             merged_looks.pop(name, None)
         merged["looks"] = merged_looks
 
-        # banks.default role lists: keep LIVE order for untouched looks, then
-        # apply the pad's own placement for the looks it moved/created.
+        # banks.default role lists: keep LIVE placement for every look the pad
+        # did not move or delete, then apply the pad's own placement only for
+        # the looks it actually moved/created. A touched-but-not-moved look
+        # (params-only edit) is untouched here, so its LIVE bank wins.
         live_default = (live.get("banks") or {}).get("default") or {}
         draft_default = (draft.get("banks") or {}).get("default") or {}
         default = merged.setdefault("banks", {}).setdefault("default", {})
         for bank in _ROLE_BANKS:
             live_list = live_default.get(bank) if isinstance(live_default.get(bank), list) else []
             draft_list = draft_default.get(bank) if isinstance(draft_default.get(bank), list) else []
-            kept = [str(item) for item in live_list if str(item) not in changed]
-            added = [str(item) for item in draft_list if str(item) in touched_set and str(item) not in deleted]
+            kept = [str(item) for item in live_list if str(item) not in placement_changed]
+            added = [str(item) for item in draft_list if str(item) in moved_set and str(item) not in deleted]
             default[bank] = _dedupe(kept + added)
 
         # color_engine: everything from LIVE; only the three per-look maps merge.
@@ -1041,11 +1068,15 @@ class LedPadService:
         errors, warnings = self._validate(config)
         if errors:
             return {"ok": False, "errors": errors, "warnings": warnings}
-        # Restoring a backup is an explicit whole-snapshot intent, so mark every
-        # restored look touched — otherwise merge-commit (which only re-applies
-        # touched looks) would treat the restore as untouched and no-op it.
-        # Unmanaged live blocks still win, so restore never re-clobbers f2/f4.
-        config["_pad_meta"]["pad_session"] = {"touched": sorted((config.get("looks") or {}).keys()), "deleted": []}
+        # Restore brings back the backup's full look + bank state while unmanaged
+        # live top-level blocks (f2/f4/…) stay from live. Mark every restored look
+        # touched (its content overlays live) AND moved (its role-bank placement
+        # is restored) — without moved, merge-commit keeps live placement and the
+        # restore wouldn't actually put looks back in their backed-up banks. Looks
+        # that exist only in live (added since the backup) are preserved, not
+        # deleted, so a restore never destroys newer work.
+        names = sorted((config.get("looks") or {}).keys())
+        config["_pad_meta"]["pad_session"] = {"touched": names, "moved": names, "deleted": []}
         with self._lock:
             self._draft = config
             self._persist_draft_locked()
