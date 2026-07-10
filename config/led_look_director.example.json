@@ -1036,7 +1036,8 @@
       "motion_style": "flowing",
       "travel": "wide",
       "params": {
-        "width": 2.5
+        "width": 2.5,
+        "loop_beats": 4.0
       }
     },
     "rt_groove_freestyle_nebula": {
@@ -1120,7 +1121,8 @@
       "motion_style": "sharp",
       "travel": "wide",
       "params": {
-        "width": 4
+        "width": 4,
+        "travel_beats": 2.0
       }
     },
     "rt_drop_chase_freestyle_nebula": {
@@ -1213,7 +1215,8 @@
       "motion_style": "flowing",
       "travel": "calm",
       "params": {
-        "width": 4
+        "width": 4,
+        "travel_beats": 2.0
       }
     },
     "rt_post_drop_freestyle_nebula": {
@@ -1319,7 +1322,9 @@
       "allow_strobe": false,
       "backend": "realtime_razer",
       "color_source": "engine",
-      "params": {}
+      "params": {
+        "travel_beats": 1.0
+      }
     },
     "rt_groove_center_burst_retract": {
       "target": "room_perimeter",
@@ -1331,7 +1336,9 @@
       "allow_strobe": false,
       "backend": "realtime_razer",
       "color_source": "engine",
-      "params": {}
+      "params": {
+        "burst_beats": 1.0
+      }
     },
     "rt_post_drop_firework_chase": {
       "target": "room_perimeter",
@@ -1343,7 +1350,9 @@
       "allow_strobe": true,
       "backend": "realtime_razer",
       "color_source": "engine",
-      "params": {}
+      "params": {
+        "travel_beats": 1.0
+      }
     },
     "rt_breakdown_full_breathing": {
       "target": "room_perimeter",
@@ -1355,7 +1364,10 @@
       "allow_strobe": false,
       "backend": "realtime_razer",
       "color_source": "engine",
-      "params": {}
+      "params": {
+        "breath_beats": 8.0,
+        "drift_beats": 32.0
+      }
     },
     "rt_breakdown_star_twinkle": {
       "target": "room_perimeter",
@@ -1392,7 +1404,8 @@
       "backend": "realtime_razer",
       "color_source": "engine",
       "params": {
-        "width": 2.5
+        "width": 2.5,
+        "loop_beats": 4.0
       }
     },
     "rt_post_drop_remnant_nebula": {
@@ -1406,7 +1419,8 @@
       "backend": "realtime_razer",
       "color_source": "engine",
       "params": {
-        "width": 4
+        "width": 4,
+        "travel_beats": 2.0
       }
     },
     "rt_post_drop_nebula": {
@@ -1420,7 +1434,8 @@
       "backend": "realtime_razer",
       "color_source": "engine",
       "params": {
-        "width": 4
+        "width": 4,
+        "travel_beats": 2.0
       }
     },
     "rt_buildup_balloon_comet": {
@@ -1470,7 +1485,8 @@
       "color_source": "baked",
       "params": {
         "width": 2,
-        "cycle_beats": 8
+        "cycle_beats": 8,
+        "loop_beats": 4.0
       }
     },
     "rt_drop_palette_comet": {
@@ -1501,7 +1517,8 @@
       "color_source": "engine",
       "params": {
         "width": 2,
-        "cycle_beats": 8
+        "cycle_beats": 8,
+        "loop_beats": 4.0
       }
     },
     "rt_drop_firework_explosion": {

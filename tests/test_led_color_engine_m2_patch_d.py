@@ -206,9 +206,14 @@ class PatchDTests(unittest.TestCase):
         # pull (rt_rainbow_drop out of the drop bank) and the AWR-188 Part G
         # palette-comet banking (docs b6a2103) are the other two approved live
         # changes. Everything below is still an exact-literal tripwire.
+        # AWR-197 re-pin (2026-07-10, speed/size law): explicit beat-speed
+        # params landed on both configs at each look's previous effective value
+        # (tracked example direct; live via tools/apply_speed_size_law.py) —
+        # rt_post_drop_remnant_chase gained travel_beats 2.0 and
+        # rt_post_drop_palette_comet gained loop_beats 4.0 below.
         expected_by_rel = {
             "config/led_look_director.example.json": {
-                "rt_post_drop_remnant_chase": ("rt_drop_chase", "engine", {"width": 4}, "post_drop", "drop"),
+                "rt_post_drop_remnant_chase": ("rt_drop_chase", "engine", {"width": 4, "travel_beats": 2.0}, "post_drop", "drop"),
                 "rt_drop_center_burst": ("rt_drop_center_burst", "engine", {}, "drop", "drop"),
             },
             "config/led_look_director.json": {
@@ -225,7 +230,7 @@ class PatchDTests(unittest.TestCase):
                 "rt_rainbow_drop": ("rainbow_ordered", "baked", {"width": 6, "cycle_beats": 1, "travel_per_beat": 30}, None, "drop"),
                 # AWR-188 Part G palette-comet banking (drop + post_drop).
                 "rt_drop_palette_comet": ("palette_comet", "engine", {"width": 6, "cycle_beats": 1, "travel_per_beat": 30}, "drop", "drop"),
-                "rt_post_drop_palette_comet": ("palette_comet", "engine", {"width": 2, "cycle_beats": 8}, "post_drop", "post_drop"),
+                "rt_post_drop_palette_comet": ("palette_comet", "engine", {"width": 2, "cycle_beats": 8, "loop_beats": 4.0}, "post_drop", "post_drop"),
                 # AWR-187 post-apply firework redesign (single approved state).
                 "rt_drop_firework_explosion": ("drop_firework_explosion_2", "engine", {"color_a": [255, 240, 220], "color_b": [255, 170, 60], "spark_a": [255, 170, 60], "spark_b": [255, 240, 220], "surge_beats": 0.25, "bg_hold": 0.25, "sparkle_density": 0.5, "sparkle_size": 1.0, "sparkle_life_s": 0.15, "hz": 6.0, "duty": 0.3}, "drop", "drop"),
             },

@@ -84,7 +84,9 @@ LOOK_DEFS = {
         "allow_strobe": False,
         "backend": "realtime_razer",
         "color_source": "engine",
-        "params": {"width": 2, "cycle_beats": 8},
+        # AWR-197: loop_beats 4.0 is the explicit accepted-as-is legacy pace
+        # (kept example-synced; test_partg_palette_comet pins the match).
+        "params": {"width": 2, "cycle_beats": 8, "loop_beats": 4.0},
     },
 }
 
