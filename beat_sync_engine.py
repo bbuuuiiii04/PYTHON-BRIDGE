@@ -34,6 +34,8 @@ REANCHOR_BPM_DELTA = 2.0   # |live bpm - current rate| must EXCEED this to count
 REANCHOR_SUSTAIN_S = 3.0   # divergence must hold CONTINUOUSLY this long; one
                            # in-delta sample resets the timer (transition flap-back
                            # never re-anchors).
+DIVERGENCE_GAP_RESET_S = 1.0  # A longer gap interrupts observation; healthy frame
+                              # cadence is tens of ticks/s versus a 3 s sustain.
 
 
 @dataclass
@@ -42,7 +44,7 @@ class AnimInstance:
     born_abs_beat: float
     bucket: int
     born_bpm: float       # bpm at launch; travel speed is locked to this, not the live bpm
-    # AWR-189: beat-phase re-anchor snapshot (monotonic, abs_beat, bpm), set only
+    # AWR-189: beat-phase re-anchor snapshot (monotonic, local-beat origin, bpm), set only
     # after sustained live-bpm divergence in continuous mode. None = never
     # re-anchored = render math identical to the born fields. local_t, bucket,
     # and progress always stay born-based, so time-based layers (ember fields)
@@ -118,6 +120,7 @@ class BeatSyncEngine:
         self._reanchor_delta = REANCHOR_BPM_DELTA
         self._reanchor_sustain = REANCHOR_SUSTAIN_S
         self._diverged_since: float | None = None
+        self._last_continuous_tick: float | None = None
 
     # ── public read-only state (for runner status + render branch) ──
     @property
@@ -156,10 +159,13 @@ class BeatSyncEngine:
         self._reanchor_delta = max(0.0, float(params.get("reanchor_bpm_delta", REANCHOR_BPM_DELTA)))
         self._reanchor_sustain = max(0.0, float(params.get("reanchor_sustain_s", REANCHOR_SUSTAIN_S)))
         self._diverged_since = None
+        self._last_continuous_tick = None
         self._clock = TriggerClock(beat_division, spawn_on_wrap=bool(params.get("spawn_on_wrap", True)))
         self._clock.seed(abs_beat)
         self._instances = []
         self._spawn_seq = 0
+        self._diverged_since = None
+        self._last_continuous_tick = None
         # clock.seed() above set _last_idx to floor(abs_beat/division), so the first
         # on_tick() advance() returns spawn=0 for this same abs_beat -> no double-spawn.
         # This _spawn() is the single activation-frame instance.
@@ -193,6 +199,13 @@ class BeatSyncEngine:
                 self._instances = [self._make_instance(now, abs_beat, bpm)]
                 self._spawn_count += 1
         elif self._mode == "continuous":
+            gap_reset = (
+                self._last_continuous_tick is not None
+                and float(now) - self._last_continuous_tick > DIVERGENCE_GAP_RESET_S
+            )
+            self._last_continuous_tick = float(now)
+            if gap_reset:
+                self._diverged_since = None
             if wrapped:
                 self._instances = [self._make_instance(now, abs_beat, bpm)]
                 self._diverged_since = None
@@ -206,6 +219,7 @@ class BeatSyncEngine:
         comets finish their flight, then naturally expire."""
         if self._clock is None:
             return []
+        self._diverged_since = None
         self._expire(now)
         return self._render_list(now)
 
@@ -237,7 +251,10 @@ class BeatSyncEngine:
         If the feed is still wrong after a re-anchor, the tracker re-arms
         against the new rate and converges on the next sustain window.
         """
-        if not self._instances or bpm <= 0.0:
+        if not self._instances:
+            return
+        if bpm <= 0.0:
+            self._diverged_since = None
             return
         inst = self._instances[0]
         current_rate = inst.reanchor[2] if inst.reanchor is not None else inst.born_bpm
@@ -249,7 +266,21 @@ class BeatSyncEngine:
             return
         if float(now) - self._diverged_since < self._reanchor_sustain:
             return
-        inst.reanchor = (float(now), float(abs_beat), max(1.0, float(bpm)))
+        # Whole-beat continuity (SOL2 finding 3): snap the FRACTIONAL phase onto
+        # the live grid but keep the instance's accumulated whole-beat age, so
+        # multi-beat envelopes (firework explosion -> embers) never replay their
+        # opening beats after a BPM correction. origin = grid phase + nearest
+        # whole-beat count to the instance's current local_beat.
+        if inst.reanchor is not None:
+            prev_mono, prev_origin, prev_bpm = inst.reanchor
+            current_lb = prev_origin + max(0.0, float(now) - prev_mono) * (prev_bpm / 60.0)
+        else:
+            current_lb = inst.born_abs_beat % 1.0 + (
+                max(0.0, float(now) - inst.born_monotonic) * (inst.born_bpm / 60.0)
+            )
+        phase = float(abs_beat) % 1.0
+        whole = max(0.0, round(current_lb - phase))
+        inst.reanchor = (float(now), phase + whole, max(1.0, float(bpm)))
         self._diverged_since = None
 
     def _expire(self, now: float) -> None:
@@ -271,14 +302,13 @@ class BeatSyncEngine:
             # relative -- their TriggerClock spawns are already grid-locked.
             # progress stays spawn-relative for every mode (elapsed / travel), so
             # retrigger/overlap comets never start mid-sweep.
-            # AWR-189: after a sustained-divergence re-anchor the phase origin is
-            # the re-anchor snapshot instead of the born snapshot (one phase snap
-            # onto the real grid; whole-beat continuity across it is NOT promised,
-            # same class as a wrap restart). Never re-anchored ⇒ byte-identical
-            # born math. local_t/progress stay born-based either way.
+            # AWR-189/SOL2: after a sustained-divergence re-anchor the stored
+            # local-beat origin snaps phase to the grid while preserving whole-beat
+            # age. Never re-anchored ⇒ byte-identical born math. local_t/progress
+            # stay born-based either way.
             if quantize and inst.reanchor is not None:
-                ra_mono, ra_abs, ra_bpm = inst.reanchor
-                local_beat = ra_abs % 1.0 + max(0.0, float(now) - ra_mono) * (ra_bpm / 60.0)
+                ra_mono, ra_origin, ra_bpm = inst.reanchor
+                local_beat = ra_origin + max(0.0, float(now) - ra_mono) * (ra_bpm / 60.0)
             elif quantize:
                 local_beat = inst.born_abs_beat % 1.0 + elapsed_beats
             else:
