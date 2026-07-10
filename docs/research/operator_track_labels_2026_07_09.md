@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: labeled-evidence-corpus
-last_verified_commit: f0b40ba
+last_verified_commit: 6e40d38
 last_verified_date: 2026-07-09
 validation_scope: >
   Operator ear-truth labeling corpus (AWR-182, evening labels session 2026-07-09,

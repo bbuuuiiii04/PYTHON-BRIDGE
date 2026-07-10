@@ -22,6 +22,7 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Iterator, Literal, Mapping, Sequence
 
+from . import bridge_fmt as bf
 from .models import BridgeEvent, Ev
 from .soundswitch_pack_loader import PackMidiBinding
 
@@ -516,6 +517,11 @@ class SoundSwitchMidiInputAdapter:
     ) -> None:
         ever_ready = False
         ready = False
+        # AWR-190: edge-trigger the port-gone WARNING via the process-global
+        # log_changed registry (logging.md: edge guards are never per-instance).
+        # Primed False so a first boot does not log a spurious "connected".
+        gone_key = f"ss_midi_port_gone:{port_name}"
+        bf.log_changed(gone_key, False)
         source: Iterator[tuple[int, int, int] | None] | None = None
         try:
             while not self._stop_event.is_set():

@@ -271,7 +271,18 @@ class BeatSyncEngine:
             # relative -- their TriggerClock spawns are already grid-locked.
             # progress stays spawn-relative for every mode (elapsed / travel), so
             # retrigger/overlap comets never start mid-sweep.
-            local_beat = (inst.born_abs_beat % 1.0 + elapsed_beats) if quantize else elapsed_beats
+            # AWR-189: after a sustained-divergence re-anchor the phase origin is
+            # the re-anchor snapshot instead of the born snapshot (one phase snap
+            # onto the real grid; whole-beat continuity across it is NOT promised,
+            # same class as a wrap restart). Never re-anchored ⇒ byte-identical
+            # born math. local_t/progress stay born-based either way.
+            if quantize and inst.reanchor is not None:
+                ra_mono, ra_abs, ra_bpm = inst.reanchor
+                local_beat = ra_abs % 1.0 + max(0.0, float(now) - ra_mono) * (ra_bpm / 60.0)
+            elif quantize:
+                local_beat = inst.born_abs_beat % 1.0 + elapsed_beats
+            else:
+                local_beat = elapsed_beats
             out.append(InstanceRender(
                 local_beat=local_beat,
                 local_t=local_t,
