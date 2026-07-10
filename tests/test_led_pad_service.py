@@ -13,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from rb_ss_bridge_v2.tools.led_pad_web import LedPadService, build_handler  # noqa: E402
+from rb_ss_bridge_v2.tools.led_pad_web import LedPadService, build_handler, freshness_restart_due  # noqa: E402
 
 
 _EXAMPLE_PATH = Path(__file__).resolve().parents[1] / "config" / "led_look_director.example.json"
@@ -416,6 +416,93 @@ class LedPadServiceTests(unittest.TestCase):
             self.assertEqual(status, 400)
             self.assertFalse(payload["ok"])
             self.assertIn("error", payload)
+
+
+class FreshnessRestartDueTests(unittest.TestCase):
+    """Pure watchdog decision: change present, settled, and safe."""
+
+    BASE = {"a.py": 1.0, "b.py": 2.0}
+
+    def test_no_change_is_false(self) -> None:
+        self.assertFalse(freshness_restart_due(self.BASE, dict(self.BASE), playing=False, pad_owned=False, stable_age_s=60.0))
+
+    def test_change_while_playing_is_false(self) -> None:
+        current = {**self.BASE, "a.py": 9.0}
+        self.assertFalse(freshness_restart_due(self.BASE, current, playing=True, pad_owned=False, stable_age_s=60.0))
+
+    def test_change_while_pad_owned_is_false(self) -> None:
+        current = {**self.BASE, "a.py": 9.0}
+        self.assertFalse(freshness_restart_due(self.BASE, current, playing=False, pad_owned=True, stable_age_s=60.0))
+
+    def test_fresh_change_below_min_stable_is_false(self) -> None:
+        current = {**self.BASE, "a.py": 9.0}
+        self.assertFalse(freshness_restart_due(self.BASE, current, playing=False, pad_owned=False, stable_age_s=1.0))
+
+    def test_stable_change_idle_not_owned_is_true(self) -> None:
+        current = {**self.BASE, "a.py": 9.0}
+        self.assertTrue(freshness_restart_due(self.BASE, current, playing=False, pad_owned=False, stable_age_s=3.0))
+
+    def test_missing_watched_file_counts_as_changed_once_stable(self) -> None:
+        current = {"a.py": 1.0}  # b.py vanished
+        self.assertFalse(freshness_restart_due(self.BASE, current, playing=False, pad_owned=False, stable_age_s=1.0))
+        self.assertTrue(freshness_restart_due(self.BASE, current, playing=False, pad_owned=False, stable_age_s=5.0))
+
+
+class LiveChangedFingerprintTests(unittest.TestCase):
+    def test_live_changed_lifecycle(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "led_look_director.json"
+            shutil.copy2(_EXAMPLE_PATH, path)
+            service = LedPadService(path, dry_run=True, playback=_FakePlayback())
+
+            fresh = service.get_config_payload()
+            self.assertFalse(fresh["live_changed"])
+
+            # Dirty the draft, then mutate live underneath it.
+            service.session({"bpm": 141})
+            live = json.loads(path.read_text(encoding="utf-8"))
+            live["_external_touch"] = True
+            path.write_text(json.dumps(live), encoding="utf-8")
+            self.assertTrue(service.get_config_payload()["live_changed"])
+
+            # Discard reloads live and re-bases the fingerprint.
+            service.discard({})
+            self.assertFalse(service.get_config_payload()["live_changed"])
+
+            # Same again, healed by commit this time.
+            service.session({"bpm": 142})
+            live["_external_touch_2"] = True
+            path.write_text(json.dumps(live), encoding="utf-8")
+            self.assertTrue(service.get_config_payload()["live_changed"])
+            self.assertTrue(service.commit({})["ok"])
+            self.assertFalse(service.get_config_payload()["live_changed"])
+
+
+class CacheControlTests(unittest.TestCase):
+    def test_json_and_static_responses_send_no_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "led_look_director.json"
+            shutil.copy2(_EXAMPLE_PATH, path)
+            service = LedPadService(path, dry_run=True, playback=_FakePlayback())
+            server = ThreadingHTTPServer(("127.0.0.1", 0), build_handler(service))
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                headers = {}
+                for label, target in (("json", "/api/config"), ("static", "/static/pad.css")):
+                    conn = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=3)
+                    conn.request("GET", target)
+                    res = conn.getresponse()
+                    res.read()
+                    headers[label] = res.getheader("Cache-Control")
+                    conn.close()
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2.0)
+
+            self.assertEqual(headers["json"], "no-cache")
+            self.assertEqual(headers["static"], "no-cache")
 
 
 if __name__ == "__main__":

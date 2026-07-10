@@ -834,6 +834,51 @@ def led_row_fields(status: dict) -> dict:
     }
 
 
+# (kind, attr, title, selector) — kind: "status_rows" | "sep" | "action" | "info" | "submenu"
+# "submenu" carries a nested tuple of entries in slot 4.
+# AWR-192 layout: status glance → bridge toggle → LIVE block → AUTHORING +
+# CHECKS block → MAINTENANCE block. Pure data; the builder in
+# BridgeMenuBar._build_menu_entry walks it.
+MENU_BLUEPRINT: tuple = (
+    ("status_rows", "status_rows", 10, None),
+    ("sep", None, None, None),
+    ("action", "toggle_item", "", "toggleBridge:"),  # title set by refresh_
+    ("sep", None, None, None),  # LIVE block
+    ("action", "laser_blackout_item", "Laser Blackout", "laserBlackout:"),
+    ("action", "laser_clear_blackout_item", "Clear Laser Blackout", "laserClearBlackout:"),
+    ("submenu", "smart_phrasing_item", "Smart Phrasing", None, (
+        ("action", "smart_drop_item", "Smart Drops", "toggleSmartDrop:"),
+        ("action", "smart_breakdown_item", "Smart Breakdowns", "toggleSmartBreakdown:"),
+    )),
+    ("submenu", "laser_item", "Laser Director", None, (
+        ("action", "laser_toggle_item", "Laser Director", "toggleLaserDirector:"),
+        ("sep", None, None, None),
+        ("info", "laser_scene_item", "", None),
+        ("info", "laser_reason_item", "", None),
+        ("info", "laser_personality_item", "", None),
+        ("info", "laser_midi_item", "", None),
+        ("info", "laser_phrasing_item", "", None),
+    )),
+    # TEMPORARY (v2 rollout): remove after v2 color identity is the default operator surface.
+    ("action", "led_engine_v2_item", "LED Engine v2", "toggleLedEngineV2:"),
+    ("action", "map_lasers_item", "Laser Pad…", "mapLasers:"),
+    ("action", "led_pad_item", "LED Pad…", "openLedPad:"),
+    ("sep", None, None, None),  # AUTHORING + CHECKS block
+    ("action", "export_item", "Export", "exportFromSS:"),
+    ("info", "export_status_item", "", None),
+    ("action", "record_session_item", "Record Session: Off", "toggleRecordSession:"),
+    ("action", "test_lights_item", "Test the Lights…", "testLights:"),
+    ("action", "validation_item", "Run Health Check", "runValidation:"),
+    ("sep", None, None, None),  # MAINTENANCE block
+    # AWR-186 M2 SLOT: install/purge items — function owned by the usbm2 round;
+    # structure only. Both are frozen-gated at build time (m2_offer); when the
+    # gate is closed the attr stays None, exactly as M2 shipped it.
+    ("action", "install_item", "Install on this Mac…", "installOnMac:"),
+    ("action", "purge_item", "Purge RBSS Bridge…", "purgeBridge:"),
+    ("action", "quit_item", "Quit Menubar (bridge keeps running)", "quit:"),
+)
+
+
 class BridgeMenuBar(NSObject):
     def init(self):
         self = objc.super(BridgeMenuBar, self).init()

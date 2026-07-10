@@ -47,6 +47,7 @@
     state.renders = renders.renders || [];
     state.renderMap = new Map(state.renders.map(r => [r.name, r]));
     state.palettes = palettes.palettes || [];
+    $("liveChangedBanner").hidden = !cfg.live_changed;
     renderSession();
     renderBanks();
     renderCards();
@@ -395,7 +396,7 @@
   $("stopBtn").addEventListener("click", () => api.emergencyStop().then(refresh).catch(showError));
   $("ownershipBtn").addEventListener("click", async () => { try { const rt = await api.runtime(); if ((rt.ownership || {}).state === "pad_owned") await api.release(); else await api.takeover(); await updateRuntime(); } catch (err) { showError(err); } });
   $("qrBtn").addEventListener("click", openAccessModal);
-  $("commitBtn").addEventListener("click", () => confirmModal("Apply draft to live config", `Apply writes the draft to live config - ${($("commitCount").textContent || "0")} looks affected. Bridge restart required to take effect live.`, "Apply", async () => { const res = await api.commit(); if (!res.ok) throw new Error((res.errors || []).join("\n")); toast(res.restart_note || "Applied - bridge restart required to take effect live."); await refresh(); }));
+  $("commitBtn").addEventListener("click", () => confirmModal("Apply draft to live config", `Apply writes the draft to live config - ${($("commitCount").textContent || "0")} looks affected. Bridge restart required to take effect live.${(state.config || {}).live_changed ? "\nLive config changed underneath this draft (bridge or agent edit). Review before Apply — Discard reloads live." : ""}`, "Apply", async () => { const res = await api.commit(); if (!res.ok) throw new Error((res.errors || []).join("\n")); toast(res.restart_note || "Applied - bridge restart required to take effect live."); await refresh(); }));
   $("discardBtn").addEventListener("click", () => confirmModal("Discard draft", "Discard reloads the live config and deletes your draft changes.", "Discard", async () => { await api.discard(); await refresh(); }));
   $("closeEditorBtn").addEventListener("click", () => closeEditor(false));
   $("cancelBtn").addEventListener("click", () => closeEditor(false));

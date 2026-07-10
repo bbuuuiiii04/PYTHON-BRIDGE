@@ -33,6 +33,7 @@ config/laser_director.json
 config/laser_director.draft.json
 config/led_look_director.json
 config/led_look_director.draft.json
+config/led_look_director.draft.base
 config/led_lab/
 config/led_sim_profile.json
 config/soundswitch_pack_player.json
