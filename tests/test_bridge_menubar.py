@@ -8,6 +8,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+# The NativeInstallGateTests patch rb_ss_bridge_v2.install_controller.*, which
+# only resolves with the repo's PARENT on sys.path — the same convention as
+# test_usb_launcher/test_launch_profile/test_install_controller (M2 review fix:
+# without this, running this module alone from the repo root errors with
+# ModuleNotFoundError instead of testing anything).
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
 
 class BridgeMenubarTests(unittest.TestCase):
     def _import_module(self):

@@ -123,10 +123,21 @@ DMG="$REPO_ROOT/dist/RBSS Bridge.dmg"
 hdiutil create -volname "RBSS Bridge" -srcfolder "$STAGING" \
     -ov -format UDZO "$DMG" || fail "step 'DMG create' failed."
 
-# ── 4. ship to the stick ─────────────────────────────────────────────────────
-cp "$DMG" "$STICK/" || fail "step 'DMG to stick' failed."
-cp "$REPO_ROOT/packaging/stick/install.command" "$REPO_ROOT/packaging/stick/purge.command" "$STICK/" \
+# ── 4. ship to the stick — into the operator's folder layout (2026-07-09:
+#      everything bridge lives in "RBSS BRIDGE USB/" at the stick root) ───────
+DEST="$STICK/RBSS BRIDGE USB"
+mkdir -p "$DEST" || fail "step 'create stick folder' failed."
+cp "$DMG" "$DEST/" || fail "step 'DMG to stick' failed."
+cp "$REPO_ROOT/packaging/stick/install.command" "$REPO_ROOT/packaging/stick/purge.command" "$DEST/" \
     || fail "step 'stick commands copy' failed."
+# Keep the interim helpers' sibling payload fresh: install.command reads
+# RBSS_payload NEXT TO ITSELF, while the native installer reads it inside the
+# DMG — refresh the sibling so the two install paths never drift.
+if [ -d "$STAGING/RBSS_payload" ]; then
+    rm -rf "$DEST/RBSS_payload"
+    cp -R "$STAGING/RBSS_payload" "$DEST/RBSS_payload" \
+        || fail "step 'sibling payload refresh' failed."
+fi
 
 DMG_SIZE="$(du -h "$DMG" | cut -f1)"
 FREE="$(df -h "$STICK" | awk 'NR==2 {print $4}')"

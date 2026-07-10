@@ -45,12 +45,14 @@ staging dir so the DMG carries both `RBSS Bridge.app` and `RBSS_payload/`**
 (the pre-warmed spectral cache from App Support + the home-parity files:
 `govee.env`, `laser_director.json`, `led_look_director.json`,
 `soundswitch_pack_player.json`, `laser_color_map.json` — secrets-on-stick is
-operator-approved, AWR-186), then copies the DMG + the two stick `.command`
-helpers to the stick. It refuses any target volume without `PIONEER/` (wrong
-stick), stages only under `mktemp -d` (never the repo tree), skips absent
-payload files with a note, and aborts naming the step if a source exists but
-is unreadable. Summary line reports DMG size, payload file count, stick free
-space.
+operator-approved, AWR-186), then ships the DMG + the two stick `.command`
+helpers into the stick's **`RBSS BRIDGE USB/` folder** (the operator's layout,
+2026-07-09) and refreshes the folder's sibling `RBSS_payload/` so the interim
+helpers and the native installer never drift apart (M2 review fix). It refuses
+any target volume without `PIONEER/` (wrong stick), stages only under
+`mktemp -d` (never the repo tree), skips absent payload files with a note, and
+aborts naming the step if a source exists but is unreadable. Summary line
+reports DMG size, payload file count, stick free space.
 
 ### Manual reference (what make_stick.sh runs, M1 commands)
 
