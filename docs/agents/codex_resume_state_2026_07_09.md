@@ -101,6 +101,9 @@ still has no verdict.
 - Suite claims reconcile BY NAME against the named baseline (AWR-172 row).
 - Bridge↔SoundSwitch control plane: OS2L is transport only; look selection travels
   over MIDI (IAC Bus 1). Never infer selection state from OS2L alone.
+- Look routing (his words, 2026-07-09 B4): family+tier must GUARANTEE the look
+  CLASS; rotation happens within the class, never across it. Scripted tracks are
+  excluded from tier calibration sets (B3 derived rule).
 
 ## What made this org fast (preserve these, they are the transfer's point)
 1. One executive surface; parallel manager lanes; written-artifact hops.

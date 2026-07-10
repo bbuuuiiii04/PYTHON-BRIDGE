@@ -289,9 +289,24 @@ SINCE-KICKSTART DELTAS (kickstart went ~21:05; you may have read docs older than
    the COMET family's T2/T3 routing pools contain NO comet-class look — all four
    families share an IDENTICAL 11-look pool and T2==T3 (the pools that remained
    after the rainbow pull) — comets only arrive via fail-open. Per-family tier
-   pools were never differentiated beyond tier-1's quartet. B4 (borderline-T3s at
-   violence 0.698-0.700, the exact threshold edge) was at his ear at handoff —
-   check the corpus.
+   pools were never differentiated beyond tier-1's quartet. B4 PARTIAL (~21:10, all committed to corpus): (a)
+   AWR-184 FALSE NEGATIVE #1, mechanism measured — SIGNAL (ISOKNOCK) 0:27 sub
+   voids to −52dB ~6bt into drop b72 but growl_band rides 19–28dB (melodic layer
+   OVER the void) so the growl-dark gate (min<5.0) blocks → balloon; his ear:
+   2-bar blackout. With B2-4's false positive the rung boundary is pinned from
+   BOTH SIDES — complete bounded-fix brief in the corpus. CAUTION for that round:
+   SIGNAL's ringing growl (19–28) sits nearly on Caramelle's (18.5, MUST stay
+   balloon) — growl level alone cannot be the discriminator; thread the needle
+   with both pins + controls. (b) UNDER-RATE #2: SIGNAL = "EVERY DROP WALL T3"
+   by ear; plan gives ONE borderline T3 of 8 with family flapping WALL↔HOUSE
+   in-track (zone ION aggr 0.46 — same shape as REWIND). (c) LOOK-DELIVERY
+   RELIABILITY (3 observations): 3 replays to get the wall look, one drop section
+   NEVER fired it, b328's T1 pool contains no wall-strobe — rotation+fail-open
+   makes the T3 class a lottery. OPERATOR DESIGN RULING (explicit, his words):
+   family+tier should GUARANTEE the look CLASS — rotate within class, never
+   lottery the class itself. Pairs with B3's comet-pool finding as ONE routing
+   redesign round. B4 remainder (borderline-T3s at violence 0.698–0.700) may
+   still be landing — check the corpus for final entries.
 10. Final HEAD at handoff: [FILL]; sweeps: P1 running PID 78394; stick sweep
    awaits rename → re-fire → THEN payload export (order mandatory).
 
