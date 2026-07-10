@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: software-tested
-last_verified_commit: 60485f7
+last_verified_commit: 14e2170
 last_verified_date: 2026-07-10
-validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (live-apply + variant switch + preview), Round 2 (param_specs sliders/toggles, slot swatches, JSON demoted to Advanced), Round 3 (rejected-drafts filter, draft delete), QR same-network access, the iOS/iPad touch pass, the editor unset-param-defaults fix, and the AWR-193 pad/lab overhaul (accept snapshot, decoupled preview, archive flow, fn fallback, effective bounds, color pickers + regime badges, reconnect, freshness watchdog + live fingerprint + no-cache); SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
+validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (live-apply + variant switch + preview), Round 2 (param_specs sliders/toggles, slot swatches, JSON demoted to Advanced), Round 3 (rejected-drafts filter, draft delete), QR same-network access, the iOS/iPad touch pass, the editor unset-param-defaults fix, the AWR-193 pad/lab overhaul (accept snapshot, decoupled preview, archive flow, fn fallback, effective bounds, color pickers + regime badges, reconnect, freshness watchdog + live fingerprint + no-cache), and the AWR-202 commit read-modify-merge (Apply overlays only pad-touched looks/banks/color-maps over a fresh read of live; unmanaged blocks and untouched looks survive); SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # LED Pad
@@ -110,15 +110,29 @@ Logs are written to `/tmp/led_pad.log` and `/tmp/led_pad.err`.
   are shown but not previewed.
 - Lock a look to a named color-engine palette. Locked looks ignore the session Test Palette
   during pad playback and keep using their saved palette until cleared.
-- Derive renderer controls from `REALTIME_EFFECT_PARAM_KEYS` and validate the full draft before
-  writing live config.
-- Apply the draft to `config/led_look_director.json` with a `.bak-*` backup.
+- Derive renderer controls from `REALTIME_EFFECT_PARAM_KEYS` and validate the MERGED result (see
+  next bullet) before writing live config.
+- Apply is a read-modify-merge, never a wholesale overwrite (AWR-202, fixing the 2026-07-10 14:29
+  data loss where a stale draft Apply wiped `f2`/`f4`/`cfx_sweep`/`drop_presentation`/
+  `scripted_mode`/`blank_role_hold`, 17 looks, and six `loop_beats`). Commit re-reads
+  `config/led_look_director.json` fresh, keeps EVERY top-level block from LIVE — including blocks
+  the pad does not manage (`f2`, `f4`, `cfx_sweep`, `automation`, `safety`, and any block the pad
+  has never heard of) — and overlays only what THIS pad session changed: the looks it
+  touched/created, their role-bank placement, deletions, and the three per-look `color_engine`
+  maps (`slot_fill_strategy_by_look`, `slot_mono_chance_by_look`, `locked_palette_by_look`). Looks
+  the pad never touched keep their LIVE contents, so a stale draft can no longer wipe f2/f4 or
+  looks added by another tool. Touched/deleted tracking lives in `_pad_meta.pad_session` (persisted
+  with the draft, so it survives a pad-server restart) and rebases to empty after each commit. The
+  merged result is validated before any write; a `.bak-*` backup of live is taken first.
 - Detect live config moving underneath the draft (AWR-193): a gitignored fingerprint sidecar
   `config/led_look_director.draft.base` records the sha256 of the live config the draft is based
   on (written when the draft is first created from live, on Apply/Discard/history restore, and
   refreshed while the draft is clean). `/api/config` gains `"live_changed"`; when true the pad
   shows "Live config changed underneath this draft (bridge or agent edit). Review before Apply —
-  Discard reloads live." and repeats that line in the Apply confirm. No auto-merge, ever.
+  Discard reloads live." and repeats that line in the Apply confirm. Apply now merges rather than
+  overwrites (AWR-202), so an external edit to an unmanaged block or an untouched look survives the
+  Apply; the banner still warns because an external edit to the SAME look the pad is editing would
+  lose to the pad's version.
 - Render rgb-kind controls as native color pickers with a live swatch (AWR-193; previously
   skipped). On engine-colored looks, rgb-kind and color-signature rows carry the badge
   "palette overrides this in the room" — the controls still edit stored params, the badge states
