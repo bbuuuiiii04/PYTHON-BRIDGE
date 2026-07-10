@@ -121,7 +121,18 @@ re-bloom fix (sequential release + fired-latch preservation on inert paths; 211
 targeted green; its full-suite proof later PASSED at park: 3889 = named baseline
 exactly) + an operator taste pin from ~20:3x: LIVE config `cfx_sweep.drain_ms`
 800→400 ("the bloom needs to last shorter"), loader-validated at the executive
-desk, config-only. His ride-home CFX test
+desk, config-only. + the RAINBOW PULL (operator, all-caps, ~20:30: "RAINBOW COMETS
+STILL APPEARING IN SONGS THAT ARENT RAINBOW PALLETS"): `rt_rainbow_drop` removed
+from all 8 f2.drop_look_routing tier-2/3 slots + `rt_rainbow_drop`/`rt_rainbow_post_drop`
+from banks.default (LIVE config only; defs+pair+palette kept; backup
+`led_look_director.json.backup_rainbow_*`; example config + its test pins are the
+G-round's job). ROOT CAUSE stays open for YOUR G round: the AWR-180 Part G
+palette-cycling comet (spec'd in 606177e, build slipped batch-2 triage) replaces
+the baked-rainbow comets properly. NOTE ALSO: the bridge came UP at 19:46 (his
+menubar) — AWR-185 + the two-leg filter fix are ALREADY LIVE; only drain_ms 400 +
+this rainbow pull await the next restart. A live beat-sync complaint ("beatsynced
+looks do not look beatsynced") is under ledtune's live diagnosis with the operator
+— its findings message routes to the executive seat. His ride-home CFX test
 = first attended item next session.
 
 **Suite board at handoff:** 3889 tests, 4F+1E — same signature as the by-name
