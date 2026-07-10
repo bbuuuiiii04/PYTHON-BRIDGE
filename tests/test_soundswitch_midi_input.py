@@ -1,4 +1,5 @@
 """Tests for soundswitch_midi_input — no MIDI/serial/Art-Net hardware opened."""
+import logging
 import sys
 import time
 import types
@@ -702,6 +703,93 @@ class TestClearOnEvent(unittest.TestCase):
                 time.sleep(0.01)
             a.stop()
         self.assertGreaterEqual(len(attempts), 2)
+
+
+class TestPortGoneLogEdgeTrigger(unittest.TestCase):
+    """AWR-190: the port-gone WARNING is edge-triggered — once per gone
+    episode, DEBUG for the retries between, INFO once on rebind, and no
+    spurious 'connected' on a healthy first boot."""
+
+    def setUp(self):
+        from rb_ss_bridge_v2 import bridge_fmt as bf
+        bf.reset_rate_state()
+
+    def _wait_until(self, predicate, timeout_s=2.0):
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            if predicate():
+                return True
+            time.sleep(0.01)
+        return False
+
+    def test_never_seen_port_warns_once_then_debug(self):
+        from rb_ss_bridge_v2 import soundswitch_midi_input as ssmi
+        attempts = []
+
+        def never_found_source():
+            attempts.append(time.monotonic())
+            raise ssmi._InputPortGone("fake-port")
+            yield None  # pragma: no cover - unreachable, makes this a generator
+
+        a = _adapter(_SLOT8)
+        with mock.patch.object(ssmi, "_PORT_NEVER_SEEN_RETRY_INTERVAL_S", 0.02), \
+             self.assertLogs("soundswitch_midi_input", level="DEBUG") as cap:
+            a.start("fake-port", _message_source=never_found_source,
+                    readiness_timeout_s=0.3)
+            self.assertTrue(self._wait_until(lambda: len(attempts) >= 4))
+            a.stop()
+        gone = [r for r in cap.records if "input port gone" in r.getMessage()]
+        self.assertEqual(
+            len([r for r in gone if r.levelno == logging.WARNING]), 1)
+        self.assertGreaterEqual(
+            len([r for r in gone if r.levelno == logging.DEBUG]), 2)
+
+    def test_rebind_logs_info_once_and_rearms_warning(self):
+        from rb_ss_bridge_v2 import soundswitch_midi_input as ssmi
+        state = {"n": 0}
+
+        def flaky_source():
+            state["n"] += 1
+            if state["n"] == 1:
+                raise ssmi._InputPortGone("fake-port")
+                yield None  # pragma: no cover - unreachable
+            if state["n"] == 2:
+                yield None  # ready once (rebind edge) ...
+                raise ssmi._InputPortGone("fake-port")  # ... then drops again
+            while True:
+                yield None  # ready again (second rebind)
+
+        a = _adapter(_SLOT8)
+        with mock.patch.object(ssmi, "_PORT_RETRY_INTERVAL_S", 0.02), \
+             mock.patch.object(ssmi, "_PORT_NEVER_SEEN_RETRY_INTERVAL_S", 0.02), \
+             self.assertLogs("soundswitch_midi_input", level="DEBUG") as cap:
+            a.start("fake-port", _message_source=flaky_source,
+                    readiness_timeout_s=0.3)
+            self.assertTrue(self._wait_until(
+                lambda: state["n"] >= 3 and a.snapshot().worker_alive))
+            a.stop()
+        warnings = [r for r in cap.records
+                    if r.levelno == logging.WARNING
+                    and "input port gone" in r.getMessage()]
+        connected = [r for r in cap.records
+                     if "input port connected" in r.getMessage()]
+        self.assertEqual(len(warnings), 2)  # one per gone episode, re-armed
+        self.assertEqual(len(connected), 2)  # one INFO per rebind
+        self.assertTrue(all(r.levelno == logging.INFO for r in connected))
+
+    def test_first_boot_healthy_port_logs_no_connected_edge(self):
+        def healthy_source():
+            while True:
+                yield None
+
+        a = _adapter(_SLOT8)
+        with self.assertLogs("soundswitch_midi_input", level="DEBUG") as cap:
+            a.start("fake-port", _message_source=healthy_source,
+                    readiness_timeout_s=0.5)
+            a.stop()
+        self.assertEqual(
+            [r for r in cap.records if "input port connected" in r.getMessage()],
+            [])
 
 
 # ---------------------------------------------------------------------------

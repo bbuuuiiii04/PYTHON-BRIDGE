@@ -409,10 +409,11 @@ class PatchE1RegressionTests(unittest.TestCase):
             self.assertIn(key, SLOT_EFFECTS, f"{key} missing from SLOT_EFFECTS")
 
     def test_slot_effects_preserves_e1_entries_after_later_patches(self) -> None:
-        # AWR-156 added rt_groove_heartbeat + rt_post_drop_firework_remnants.
+        # AWR-156 added rt_groove_heartbeat + rt_post_drop_firework_remnants;
+        # AWR-188 Part G added palette_comet.
         self.assertEqual(
-            len(SLOT_EFFECTS), 16,
-            f"Expected 16 SLOT_EFFECTS after AWR-156, got {len(SLOT_EFFECTS)}: "
+            len(SLOT_EFFECTS), 17,
+            f"Expected 17 SLOT_EFFECTS after AWR-188, got {len(SLOT_EFFECTS)}: "
             f"{sorted(SLOT_EFFECTS.keys())}"
         )
 

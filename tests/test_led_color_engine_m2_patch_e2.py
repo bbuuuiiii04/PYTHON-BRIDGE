@@ -209,6 +209,8 @@ class PatchE2RegistrationTests(unittest.TestCase):
             # AWR-156: promoted accepted looks.
             "rt_groove_heartbeat",
             "rt_post_drop_firework_remnants",
+            # AWR-188 Part G: palette-cycling comet (rainbow generalization).
+            "palette_comet",
         }
         self.assertEqual(set(SLOT_EFFECTS), expected)
 

@@ -214,7 +214,16 @@ class PatchDTests(unittest.TestCase):
                 "rt_drop_strobe_blue_cyan": ("drop_strobe_colorway", "baked", {"color_a": [0, 0, 255], "color_b": [0, 135, 255], "hz": 5.0, "duty": 0.25}, "drop"),
                 "rt_drop_strobe_cyan_white": ("drop_strobe_colorway", "baked", {"color_a": [0, 255, 255], "color_b": [100, 105, 255], "hz": 5.0, "duty": 0.25}, "drop"),
                 "rt_rainbow_drop": ("rainbow_ordered", "baked", {"width": 6, "cycle_beats": 1, "travel_per_beat": 30}, "drop"),
-                "rt_drop_firework_explosion": ("drop_firework_explosion", "baked", {"color_a": [255, 240, 220], "spark_a": [255, 170, 60], "spark_b": [255, 240, 220], "surge_beats": 0.5, "bg_hold": 0.7, "sparkle_density": 0.35, "sparkle_size": 1.0, "sparkle_life_s": 0.35}, "drop"),
+                # AWR-187: TWO approved states for the firework look — the
+                # pre-apply v1 (until the executive gate runs
+                # tools/apply_firework_redesign.py against the live config) and
+                # the post-apply redesign. Any THIRD state still turns red.
+                # Collapse to the post-apply literal at the next drift pass
+                # after the gate.
+                "rt_drop_firework_explosion": (
+                    ("drop_firework_explosion", "baked", {"color_a": [255, 240, 220], "spark_a": [255, 170, 60], "spark_b": [255, 240, 220], "surge_beats": 0.5, "bg_hold": 0.7, "sparkle_density": 0.35, "sparkle_size": 1.0, "sparkle_life_s": 0.35}, "drop"),
+                    ("drop_firework_explosion_2", "engine", {"color_a": [255, 240, 220], "color_b": [255, 170, 60], "spark_a": [255, 170, 60], "spark_b": [255, 240, 220], "surge_beats": 0.25, "bg_hold": 0.25, "sparkle_density": 0.5, "sparkle_size": 1.0, "sparkle_life_s": 0.15, "hz": 6.0, "duty": 0.3}, "drop"),
+                ),
             },
         }
         for rel in ("config/led_look_director.example.json", "config/led_look_director.json"):
@@ -225,12 +234,17 @@ class PatchDTests(unittest.TestCase):
                 continue
             result = load_led_look_director_config(str(cfg_path))
             self.assertEqual(tuple(result.errors), (), f"{rel}: {result.errors}")
-            for name, (scene_ref, color_source, params, role) in expected_by_rel[rel].items():
+            for name, entry in expected_by_rel[rel].items():
+                alternatives = entry if isinstance(entry[0], tuple) else (entry,)
                 self.assertIn(name, result.config.looks)
                 look = result.config.looks[name]
-                self.assertEqual(look.scene_ref, scene_ref)
-                self.assertEqual(look.color_source, color_source, msg=f"{rel}:{name}")
-                self.assertEqual(look.params, params, msg=f"{rel}:{name}")
+                actual = (look.scene_ref, look.color_source, look.params)
+                self.assertIn(
+                    actual,
+                    [(s, c, p) for s, c, p, _ in alternatives],
+                    msg=f"{rel}:{name}: {actual}",
+                )
+                role = alternatives[0][3]
                 self.assertEqual(look.safety_class, "drop")
                 self.assertIn(name, getattr(result.config.banks["default"], role), msg=f"{rel}:{name}")
 

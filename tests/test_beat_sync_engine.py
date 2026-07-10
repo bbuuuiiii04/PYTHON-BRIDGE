@@ -507,14 +507,16 @@ class Awr189ReanchorTests(unittest.TestCase):
 
     def test_reanchor_preserves_local_t_bucket_and_progress(self) -> None:
         engine = self._continuous(born_bpm=120.0)
-        before = engine.on_tick(self._true_abs(3.5), 3.5, 160.0)[0]
+        engine.on_tick(self._true_abs(0.5), 0.5, 160.0)             # timer arms at 0.5
+        before = engine.on_tick(self._true_abs(3.0), 3.0, 160.0)[0] # 2.5 s: not yet
+        self.assertIsNone(engine._instances[0].reanchor)
         bucket_before = before.bucket
-        after = engine.on_tick(self._true_abs(4.5), 4.5, 160.0)[0]
+        after = engine.on_tick(self._true_abs(4.0), 4.0, 160.0)[0]  # 3.5 s: re-anchors
         self.assertIsNotNone(engine._instances[0].reanchor)
         self.assertEqual(after.bucket, bucket_before)
-        self.assertAlmostEqual(after.local_t, 4.5)                  # never resets
+        self.assertAlmostEqual(after.local_t, 4.0)                  # never resets
         self.assertAlmostEqual(after.local_t - before.local_t, 1.0)
-        self.assertAlmostEqual(after.progress, 4.5 * 2.0)           # born-based, travel=1.0
+        self.assertAlmostEqual(after.progress, 4.0 * 2.0)           # born-based, travel=1.0
 
     def test_params_override_delta_and_sustain(self) -> None:
         wide = self._continuous(born_bpm=120.0, params={"reanchor_bpm_delta": 50.0})

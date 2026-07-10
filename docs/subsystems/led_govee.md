@@ -530,6 +530,22 @@ Realtime LED wrap-flicker guard (AWR-141, 2026-07-07):
   clamp, and config are unchanged. SOFTWARE-VALIDATED ONLY /
   HARDWARE-UNVALIDATED.
 
+Continuous-look sustained-divergence BPM re-anchor (AWR-189, 2026-07-09):
+- A continuous realtime look that spawned while the live-BPM feed was
+  mid-transition free-ran at the stale rate forever (live-diagnosed on
+  `rt_groove_heartbeat`: "beatsynced looks do not look beatsynced"). The
+  engine now re-anchors the beat-phase origin to the live anchor bpm, but
+  ONLY when |live − current rate| exceeds `REANCHOR_BPM_DELTA` (2.0)
+  CONTINUOUSLY for `REANCHOR_SUSTAIN_S` (3.0 s) — one in-band sample resets
+  the timer, so AWR-141's jitter immunity stands and nothing raw-tracks.
+  The re-anchor re-bases only the beat phase (one snap onto the real grid);
+  `local_t`, bucket identity, and progress stay born-based so time-based
+  layers and comet sweeps never restart. Retrigger/overlap modes are
+  untouched. Both knobs are per-look config-overridable via params
+  (`reanchor_bpm_delta` / `reanchor_sustain_s`). Never-diverged behavior is
+  byte-identical. Operator acceptance look on record: `rt_groove_heartbeat`
+  at next play. SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
+
 Smart-drop blackout transport + runway observability (AWR-142, 2026-07-07):
 - `_dispatch_led_smart_drop_blackout` now tags each accepted pre-drop room
   blackout with which transport carried it and how much runway it had. The
