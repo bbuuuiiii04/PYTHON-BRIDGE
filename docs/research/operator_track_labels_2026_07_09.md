@@ -340,7 +340,62 @@ cleared by ear, NO AWR-186; misread evidence below hands to the successor.
   from this track carry no calibration weight.
 - **systems:** f2 (input-quality note)
 
-### B2 emerging pattern (HYPOTHESIS — unverified, for the successor tier round)
+## Review batch B3 — rapid tier audit (void-approached T3s) + LED routing finding
+
+**Routing-table finding (measured in live config, `drop_look_routing`):** the LED
+look pools are IDENTICAL across all four families at the same tier, and T2 ≡ T3
+(same 11-look aggressive pool). Family currently differentiates LEDs only via F4
+HOUSE seasoning; the real family/tier consequences live in darkness + lasers. Named
+desk item queued: per-family visual languages (his "wall hits on a tech house
+track" complaint + B3-4 "big bright sparkles" want).
+
+### B3-1 · Like I Like It — Mau P · HOUSE T3 @0:58
+- **his words:** "maybe t2" — soft over-rate (T3→T2).
+
+### B3-2 · I Cannot (Extended Mix) — Anti Up · HOUSE T3 @1:19 · T3 CONFIRMED + P1 GOLD
+- **his words:** "this track has the GROWL and EUPHORIC SUSTAIN that the bridge
+  should be able to recognize T3 is warranted. from 1:20 1 beat after the drop there
+  is a distorted mid growl about 7 beats long and then a euphoric synth sustain at
+  1:27 for approx 11 beats and then repeats the loop once more until breakdown. same
+  for drop 2 / 3."
+- **measured:** zone ION (aggression 0.59). @1:20 (b177, 1 beat after drop b176 —
+  matches his count): growl_band 32.8–33.9 dB across 8 beats — the HOTTEST growl
+  amplitude of the night. @1:27: sustain_mid 18.6–20.9 sustained. Amplitude sees the
+  growl plainly; the growl↔euphoric-sustain alternation (7bt/11bt, looping, drops
+  2/3 same) is timbre structure = the P1 centroid's job. Richest P1 acceptance case
+  in the corpus (durations given).
+- **classification:** tier AGREES; growl structure PARTIAL pending P1 backfill.
+- **systems:** f2, led, p1, stems (wobble/growl window)
+
+### B3-3 · s.o.s (extended) — Jigitz, Tabi · HOUSE T3 @1:54 · EXCLUDED (4th input case)
+- **his words:** "this track changes bpm for some reason, exclude but yes the bridge
+  got the energy right at 1:54" — variable BPM; excluded from calibration weight,
+  energy read noted as right.
+
+### B3-4 · FETISH x Haluna - Taste That · HOUSE T3 @1:45 · T3 CONFIRMED + look verdict + growl
+- **his words:** "yes house t3 but a wall look is not warranted, more like big
+  bright sparkles. 1:45 is also where the bridge should recognize the 4 beat bass
+  growl"
+- **measured:** zone VOLT. @1:45 (1 beat before drop b224): growl_band 3.1 →
+  25.6/29.1/28.9/33.0 — rises exactly at the drop, hot for ~4 beats then eases
+  (his "4 beat bass growl" visible on amplitude).
+- **classification:** tier AGREES; growl amplitude AGREES (timbre pending P1);
+  LOOK verdict = presentation want ("big bright sparkles", not wall slams) —
+  feeds the per-family routing desk item above.
+- **systems:** f2, led, p1
+
+### B3-5 · White Wine & Adderall (YUSSI Remix) — Chainsmokers · NEUTRAL T3 @1:08
+- **his words:** "yes t3 neutral i think" — CONFIRMED (soft).
+
+### Hypothesis update after B3 (honest revision)
+B3 weakens the simple contrast story: 3 of 5 void-approached T3s CONFIRMED (Anti Up
+ION, FETISH VOLT, Chainsmokers), 1 soft over-rate, 1 excluded. Over-rates so far
+cluster on tracks whose CHARACTER is chill/dark-groovy (Scary Monsters GLACIER,
+OMG chill piano, Radiohead dark techno, TOXIC dark tech house) while energetic-zone
+T3s hold. Refined candidate: tier needs zone/character context (calm-zone tracks
+reaching T3 = suspect), NOT a blanket void-contrast damp. Counter-note: REWIND is
+GLACIER *because* the same aggression under-read drags its zone — zone is
+downstream of the defect, not independent. Successor tests both.
 
 All three tier over-rates tonight (Scary Monsters, TOXIC EVIL, OMG) are drops
 approached through a deep sub void; the under-rate (REWIND) is a continuous
