@@ -84,10 +84,13 @@ class LabRegistry:
 
     def save(self, payload: dict[str, Any]) -> dict[str, Any]:
         name = str(payload.get("name", "")).strip()
-        self._validate_name(name)
         data = self._load()
         entries = data["entries"]
         existing = next((item for item in entries if item.get("name") == name), None)
+        # Collision with production renderer names blocks CREATE only. An
+        # existing entry whose name later became a production effect must stay
+        # saveable (Save/Accept/Reject/Archive) — otherwise promotion bricks it.
+        self._validate_name(name, check_collision=existing is None)
         created = existing.get("created") if existing else _now()
         current = copy.deepcopy(existing or {})
         current.update({
@@ -113,10 +116,13 @@ class LabRegistry:
 
     def set_status(self, name: str, status: str) -> dict[str, Any]:
         if status not in _STATUSES:
-            raise ValueError("lab status must be iterating, accepted, or rejected")
+            raise ValueError("lab status must be iterating, accepted, rejected, or promoted")
         entry = self.get(name)
         entry["status"] = status
         return self.save(entry)
+
+    def archive(self, name: str) -> dict[str, Any]:
+        return self.set_status(name, "promoted")
 
     def delete(self, name: str) -> dict[str, Any]:
         data = self._load()
@@ -157,20 +163,21 @@ class LabRegistry:
         return out
 
     @staticmethod
-    def _validate_name(name: str) -> None:
+    def _validate_name(name: str, *, check_collision: bool = True) -> None:
         if not name or not _IDENT_RE.fullmatch(name):
             raise ValueError("lab name must match [a-z0-9_]+")
-        if name in REALTIME_EFFECT_NAMES or f"lab_{name}" in REALTIME_EFFECT_NAMES:
+        if check_collision and (name in REALTIME_EFFECT_NAMES or f"lab_{name}" in REALTIME_EFFECT_NAMES):
             raise ValueError(f"lab name collides with production renderer: {name}")
 
     def _validate_entry(self, entry: dict[str, Any]) -> None:
-        self._validate_name(str(entry.get("name", "")))
+        # Validates stored entries: no collision check (see save()).
+        self._validate_name(str(entry.get("name", "")), check_collision=False)
         if entry.get("kind") not in _KINDS:
             raise ValueError("lab kind must be slot or frame")
         if not str(entry.get("fn", "")).isidentifier():
             raise ValueError("lab fn must be a Python identifier")
         if entry.get("status") not in _STATUSES:
-            raise ValueError("lab status must be iterating, accepted, or rejected")
+            raise ValueError("lab status must be iterating, accepted, rejected, or promoted")
 
 
 def load_lab_effects(path: Path | str) -> dict[str, Any]:

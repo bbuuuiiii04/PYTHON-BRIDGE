@@ -360,6 +360,24 @@ class LaserColorMapperTests(unittest.TestCase):
             "when cwd == repo root; the bridge runs from the repo parent",
         )
 
+    def test_env_seam_overrides_default_map_path(self) -> None:
+        # AWR-186 M2: the frozen bundle carries no laser_color_map.json, so the
+        # launch profile points RBSS_LASER_COLOR_MAP_CONFIG at the App Support
+        # copy. Env set + no arg -> that path; env unset -> default unchanged.
+        import json as _json
+        import os
+        import tempfile
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as td:
+            override = Path(td) / "laser_color_map.json"
+            override.write_text(_json.dumps({"enabled": False, "fixed": {"red": 5}}))
+            with mock.patch.dict(
+                os.environ, {"RBSS_LASER_COLOR_MAP_CONFIG": str(override)}, clear=False
+            ):
+                loaded = load_laser_color_map()
+        self.assertEqual((loaded.fixed or {}).get("red"), 5)
+
     def test_white_path_ch9_always_none_preserves_authored_speed(self) -> None:
         # White (moment or white_sand) takes CH8 only; CH9 is left for whatever
         # speed the pack already authored, regardless of fixed_ch9 configuration.

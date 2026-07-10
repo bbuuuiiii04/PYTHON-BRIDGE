@@ -606,6 +606,9 @@ class LedPadService:
     def lab_reject(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._lab.set_status(str(payload.get("name", "")).strip(), "rejected")
 
+    def lab_archive(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._lab.archive(str(payload.get("name", "")).strip())
+
     def lab_delete(self, payload: dict[str, Any]) -> dict[str, Any]:
         name = str(payload.get("name", "")).strip()
         if self._playing_name == LabRegistry.scene_ref(name):
@@ -873,6 +876,7 @@ def build_handler(service: LedPadService) -> type[BaseHTTPRequestHandler]:
             "/api/lab/reload": service.lab_reload,
             "/api/lab/accept": service.lab_accept,
             "/api/lab/reject": service.lab_reject,
+            "/api/lab/archive": service.lab_archive,
             "/api/lab/delete": service.lab_delete,
         }
 
