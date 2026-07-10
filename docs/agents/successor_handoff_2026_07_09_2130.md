@@ -118,8 +118,10 @@ status) are allowed during boot; mutations are not.
 start it — his menubar owns starts. **STAGED, loads automatically at next start:**
 AWR-185 stop-precedence guard (gated PASS) + the filter lane's two-leg AWR-173
 re-bloom fix (sequential release + fired-latch preservation on inert paths; 211
-targeted green; its own full-suite proof was finishing at handoff with
-flag-on-deviation promised — check the filter state brief). His ride-home CFX test
+targeted green; its full-suite proof later PASSED at park: 3889 = named baseline
+exactly) + an operator taste pin from ~20:3x: LIVE config `cfx_sweep.drain_ms`
+800→400 ("the bloom needs to last shorter"), loader-validated at the executive
+desk, config-only. His ride-home CFX test
 = first attended item next session.
 
 **Suite board at handoff:** 3889 tests, 4F+1E — same signature as the by-name
