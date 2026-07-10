@@ -50,9 +50,15 @@ Operator renames the stick → the after-20:00 stick sweep MUST run against the 
 volume name (`/Volumes/<NewName>`), and Saturday's mount-name match is against that
 name. Rename BEFORE the sweep fires or the pre-warm keys all miss.
 
-## Open operator decisions (veto-style, defaults labeled)
+## Operator decisions
 
-1. Secrets/configs ride the stick + install to the friend's Mac — **default YES**
-   (inferred from "JUST LIKE my current macbook"); veto if the Govee key must not travel.
+1. Secrets/configs ride the stick + install to the friend's Mac — **ANSWERED YES
+   (operator, in-chat 2026-07-09 ~22:40: "I approve of secrets on stick")**. Decision
+   closed; the Part A security line stands as accepted risk.
 2. Auto-start on login vs launch-on-click — **default launch-on-click** (same as home
-   today; simpler purge); veto if he wants boot-time start.
+   today; simpler purge); veto still open if he wants boot-time start.
+
+**Same message, broader ruling:** the operator approved the full CANNOT-DO-YET build
+list (native install/PURGE = AWR-186, home-parity payload, AWR-165 move-invariance)
+EXCEPT items requiring physical validation — the foreign-Mac memory-read test and the
+parity walkthrough remain tests/gates, not approvals, correctly.

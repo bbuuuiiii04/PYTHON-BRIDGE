@@ -45,10 +45,12 @@ validation_scope: >
   (design §5 [confirmed in design]); an Apple Development identity fixes stability
   when the operator mints the cert (`packaging/sign.sh` auto-upgrades, re-runnable
   [confirmed]).
-- **Security line (mandated, operator default YES with veto open — do not
-  re-litigate):** with secrets riding the stick/DMG, a lost or borrowed stick
-  exposes the operator's `GOVEE_API_KEY` and venue configs to whoever holds it;
-  PURGE removes them from the Mac but never from the stick itself.
+- **Security line (mandated):** with secrets riding the stick/DMG, a lost or
+  borrowed stick exposes the operator's `GOVEE_API_KEY` and venue configs to
+  whoever holds it; PURGE removes them from the Mac but never from the stick
+  itself. **Operator APPROVED secrets-on-stick in-chat 2026-07-09 ~22:40
+  ("I approve of secrets on stick") — decision closed, risk accepted; do not
+  re-litigate.**
 
 ## Part B — Tasks (implement exactly, in order; one commit per task)
 
