@@ -317,6 +317,29 @@ cleared by ear, NO AWR-186; misread evidence below hands to the successor.
   one wanted blackout entirely missing).
 - **systems:** f2, led
 
+### B2-4 · Everything In Its Right Place (SCRIPT Remix) — Radiohead · 3:05.8 · FIRST VOID-RULE FALSE POSITIVE
+
+- **his words:** "this is a balloon buildup at 3:05.8 and this track is like a dark
+  techno track, not t3 more like t1"
+- **measured:** WALL T3, blackout 8 via deep-sub-void (5-beat void). Ear: the moment
+  is a balloon buildup (he used the system's own darkness vocabulary), the track is
+  dark techno, tier ~T1.
+- **classification:** MISREAD ×3 — darkness kind (the AWR-184 rung's FIRST false
+  positive: a buildup-shaped quiet is not a cut-shaped quiet; balloon was right,
+  blackout wrong), tier (over-rate #4), family (dark techno vs WALL, misread #2).
+- **systems:** f2, led
+
+### B2-5 · Toxic (Levity Remix) — Britney Spears · 0:43.9 · EXCLUDED
+
+- **his words:** "the track analysis on this song is completely fucked lmao
+  rekordbox is struggling to compute this one skip this one or actually exclude it
+  from the corpus"
+- **classification:** EXCLUDED at operator order — input analysis (Rekordbox
+  grid/phrases) is broken beyond use; THIRD input-defect track tonight (REWIND grid,
+  OCHO phrases, Toxic total). ANLZ input quality is a real error source; entries
+  from this track carry no calibration weight.
+- **systems:** f2 (input-quality note)
+
 ### B2 emerging pattern (HYPOTHESIS — unverified, for the successor tier round)
 
 All three tier over-rates tonight (Scary Monsters, TOXIC EVIL, OMG) are drops
