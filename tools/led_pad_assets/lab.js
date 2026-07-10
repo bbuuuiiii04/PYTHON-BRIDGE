@@ -356,6 +356,18 @@
   $("ownershipBtn").onclick = async () => { const rt = await api.runtime(); if ((rt.ownership || {}).state === "pad_owned") await api.release(); else await api.takeover(); await updateRuntime(); };
   document.addEventListener("keydown", ev => { if (ev.key === "Escape" && PadModal.isOpen()) PadModal.close(); });
   $("tracePanel").hidden = !DEV;
-  setInterval(updateRuntime, 2000);
+  const RECONNECT_TEXT = "Pad server unreachable — reconnecting…";
+  PadHealth.start({
+    poll: updateRuntime,
+    refresh,
+    banner: (down) => {
+      if (down) {
+        $("errorBanner").hidden = false;
+        $("errorBanner").textContent = RECONNECT_TEXT;
+      } else if ($("errorBanner").textContent === RECONNECT_TEXT) {
+        clearError();
+      }
+    },
+  });
   refresh().catch(showError);
 }());

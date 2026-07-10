@@ -120,6 +120,41 @@
     return {show, confirm, prompt, close, isOpen, setErrorHandler};
   }());
 
+  // Shared reconnect helper for both pages' runtime polls: after >=2
+  // consecutive poll failures show a persistent "reconnecting" banner and back
+  // off (2s -> 5s cap); on the first success after downtime run the page's
+  // full refresh() and clear the banner, so pages heal instead of corpsing
+  // when the pad server restarts.
+  window.PadHealth = (function () {
+    const state = {fails: 0, down: false, timer: 0, delay: 2000, poll: null, refresh: null, banner: null};
+    function schedule() { clearTimeout(state.timer); state.timer = setTimeout(tick, state.delay); }
+    async function tick() {
+      let ok = true;
+      try { await state.poll(); } catch (_) { ok = false; }
+      if (ok && state.down) {
+        try { await state.refresh(); } catch (_) { ok = false; }
+      }
+      if (ok) {
+        if (state.down) { state.down = false; state.banner(false); }
+        state.fails = 0;
+        state.delay = 2000;
+      } else {
+        state.fails += 1;
+        if (state.fails >= 2 && !state.down) { state.down = true; state.banner(true); }
+        if (state.down) state.delay = Math.min(5000, state.delay + 1500);
+      }
+      schedule();
+    }
+    function start(hooks) {
+      state.poll = hooks.poll;
+      state.refresh = hooks.refresh;
+      state.banner = hooks.banner;
+      state.delay = 2000;
+      schedule();
+    }
+    return {start};
+  }());
+
   window.LedPadApi = {
     config: () => request("/api/config"),
     renders: () => request("/api/renders"),

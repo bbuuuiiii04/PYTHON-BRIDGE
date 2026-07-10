@@ -7,6 +7,7 @@
   const $ = (id) => document.getElementById(id);
   const api = window.LedPadApi;
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  const RECONNECT_TEXT = "Pad server unreachable — reconnecting…";
 
   function showError(err) {
     $("errorBanner").hidden = false;
@@ -360,27 +361,27 @@
     }
     $("editorDrawer").hidden = true; state.editor = null; if (state.lastFocus) state.lastFocus.focus(); renderCards();
   }
+  // Failures propagate to callers: PadHealth's poll counts them toward the
+  // reconnect banner, and direct calls surface them via showError.
   async function updateRuntime() {
-    try {
-      const rt = await api.runtime();
-      const stateName = ((rt.ownership || {}).state || "free");
-      const warning = (rt.ownership || {}).warning || "";
-      const playing = (rt.playback || {}).playing ? (rt.playback.playing_look || rt.playing_look || "") : "";
-      const changed = playing !== state.playingLook;
-      state.playingLook = playing;
-      $("ownershipPill").textContent = stateName === "bridge_owned" ? "Bridge owns LEDs" : stateName === "pad_owned" ? "Pad owns LEDs" : "Free";
-      $("ownershipPill").className = `pill ${stateName === "bridge_owned" ? "bridge" : stateName === "pad_owned" ? "pad" : ""}`;
-      $("ownershipBtn").hidden = stateName === "free";
-      $("ownershipBtn").textContent = stateName === "pad_owned" ? "Release" : "Take over";
-      if (warning) {
-        $("errorBanner").hidden = false;
-        $("errorBanner").textContent = "Bridge reappeared - pad re-asserted control.";
-        $("errorBanner").classList.add("warn-banner");
-      } else if ($("errorBanner").classList.contains("warn-banner")) {
-        clearError();
-      }
-      if (changed) { renderCards(); renderEditorLive(); }
-    } catch (_) {}
+    const rt = await api.runtime();
+    const stateName = ((rt.ownership || {}).state || "free");
+    const warning = (rt.ownership || {}).warning || "";
+    const playing = (rt.playback || {}).playing ? (rt.playback.playing_look || rt.playing_look || "") : "";
+    const changed = playing !== state.playingLook;
+    state.playingLook = playing;
+    $("ownershipPill").textContent = stateName === "bridge_owned" ? "Bridge owns LEDs" : stateName === "pad_owned" ? "Pad owns LEDs" : "Free";
+    $("ownershipPill").className = `pill ${stateName === "bridge_owned" ? "bridge" : stateName === "pad_owned" ? "pad" : ""}`;
+    $("ownershipBtn").hidden = stateName === "free";
+    $("ownershipBtn").textContent = stateName === "pad_owned" ? "Release" : "Take over";
+    if (warning) {
+      $("errorBanner").hidden = false;
+      $("errorBanner").textContent = "Bridge reappeared - pad re-asserted control.";
+      $("errorBanner").classList.add("warn-banner");
+    } else if ($("errorBanner").classList.contains("warn-banner") && $("errorBanner").textContent !== RECONNECT_TEXT) {
+      clearError();
+    }
+    if (changed) { renderCards(); renderEditorLive(); }
   }
   document.addEventListener("keydown", ev => {
     if (ev.key !== "Escape") return;
@@ -411,5 +412,17 @@
   $("slotFillSelect").addEventListener("change", ev => { state.editor.slot_fill = ev.target.value; $("monoChanceWrap").hidden = state.editor.slot_fill !== "random_with_mono_chance"; setDirty(); liveUpdate(); });
   $("monoChanceInput").addEventListener("input", ev => { state.editor.mono_chance = Number(ev.target.value); $("monoChanceOutput").textContent = ev.target.value; setDirty(); liveUpdate(); });
   refresh().catch(showError);
-  setInterval(updateRuntime, 2000);
+  PadHealth.start({
+    poll: updateRuntime,
+    refresh,
+    banner: (down) => {
+      if (down) {
+        $("errorBanner").hidden = false;
+        $("errorBanner").textContent = RECONNECT_TEXT;
+        $("errorBanner").classList.add("warn-banner");
+      } else if ($("errorBanner").textContent === RECONNECT_TEXT) {
+        clearError();
+      }
+    },
+  });
 }());
