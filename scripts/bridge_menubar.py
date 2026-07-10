@@ -901,97 +901,17 @@ class BridgeMenuBar(NSObject):
         self._detect_generation = 0
         self._pack_auto_pending_enabled = None
         self._pack_auto_retried_enabled = None
-        self.status_rows = []
-        for _ in range(10):
-            item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("", None, "")
-            item.setEnabled_(False)
-            self.menu.addItem_(item)
-            self.status_rows.append(item)
-        self.menu.addItem_(NSMenuItem.separatorItem())
-        self.toggle_item = self._add_action("", "toggleBridge:")
-
-        self.export_item = self._add_action("Export", "exportFromSS:")
-        self.export_status_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "", None, ""
-        )
-        self.export_status_item.setEnabled_(False)
-        self.menu.addItem_(self.export_status_item)
-        
-        self.smart_phrasing_menu = NSMenu.alloc().init()
-        self.smart_phrasing_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Smart Phrasing", None, "")
-        self.smart_phrasing_item.setSubmenu_(self.smart_phrasing_menu)
-        self.menu.addItem_(self.smart_phrasing_item)
-        
-        self.smart_drop_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Smart Drops", "toggleSmartDrop:", "")
-        self.smart_drop_item.setTarget_(self)
-        self.smart_phrasing_menu.addItem_(self.smart_drop_item)
-        
-        self.smart_breakdown_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Smart Breakdowns", "toggleSmartBreakdown:", "")
-        self.smart_breakdown_item.setTarget_(self)
-        self.smart_phrasing_menu.addItem_(self.smart_breakdown_item)
-
-        self.laser_menu = NSMenu.alloc().init()
-        self.laser_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Laser Director", None, "")
-        self.laser_item.setSubmenu_(self.laser_menu)
-        self.menu.addItem_(self.laser_item)
-
-        self.laser_toggle_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "Laser Director", "toggleLaserDirector:", ""
-        )
-        self.laser_toggle_item.setTarget_(self)
-        self.laser_menu.addItem_(self.laser_toggle_item)
-
-        self.laser_blackout_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "Emergency Blackout", "laserBlackout:", ""
-        )
-        self.laser_blackout_item.setTarget_(self)
-        self.laser_menu.addItem_(self.laser_blackout_item)
-
-        self.laser_clear_blackout_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "Clear Blackout", "laserClearBlackout:", ""
-        )
-        self.laser_clear_blackout_item.setTarget_(self)
-        self.laser_menu.addItem_(self.laser_clear_blackout_item)
-
-        self.laser_menu.addItem_(NSMenuItem.separatorItem())
-
-        self.laser_scene_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("", None, "")
-        self.laser_scene_item.setEnabled_(False)
-        self.laser_menu.addItem_(self.laser_scene_item)
-
-        self.laser_reason_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("", None, "")
-        self.laser_reason_item.setEnabled_(False)
-        self.laser_menu.addItem_(self.laser_reason_item)
-
-        self.laser_personality_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("", None, "")
-        self.laser_personality_item.setEnabled_(False)
-        self.laser_menu.addItem_(self.laser_personality_item)
-
-        self.laser_midi_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("", None, "")
-        self.laser_midi_item.setEnabled_(False)
-        self.laser_menu.addItem_(self.laser_midi_item)
-
-        self.laser_phrasing_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("", None, "")
-        self.laser_phrasing_item.setEnabled_(False)
-        self.laser_menu.addItem_(self.laser_phrasing_item)
-
-        self.menu.addItem_(NSMenuItem.separatorItem())
-        self.validation_item = self._add_action("Run Health Check", "runValidation:")
-        self.record_session_item = self._add_action("Record Session: Off", "toggleRecordSession:")
-        self.test_lights_item = self._add_action("Test the Lights…", "testLights:")
-        self.map_lasers_item = self._add_action("Laser Pad…", "mapLasers:")
-        self.led_pad_item = self._add_action("LED Pad…", "openLedPad:")
-        # TEMPORARY (v2 rollout): remove after v2 color identity is the default operator surface.
-        self.led_engine_v2_item = self._add_action("LED Engine v2", "toggleLedEngineV2:")
-        self.menu.addItem_(NSMenuItem.separatorItem())
-        self.quit_item = self._add_action("Quit Menu", "quit:")
-        # Native install offer (AWR-186 M2) — frozen runs only, so source-run
-        # menubars never import install_controller and stay byte-identical.
-        # Shown only when running from the DMG/translocation with no manifest.
+        # Native install offer + purge (AWR-186 M2) — frozen runs only, so
+        # source-run menubars never import install_controller and stay
+        # byte-identical. Install offered only when running from the DMG/
+        # translocation with no manifest; purge only on installed copies.
+        # AWR-192 moved WHERE the items sit (MENU_BLUEPRINT maintenance slot);
+        # the gating below and the handlers are M2's, verbatim.
         self.install_item = None
         self.purge_item = None
         self._install_in_progress = False
         self._purge_in_progress = False
+        m2_offer = {"install_item": False, "purge_item": False}
         if getattr(sys, "frozen", False):
             from rb_ss_bridge_v2.install_controller import (
                 APP_SUPPORT_DIR,
@@ -1003,27 +923,20 @@ class BridgeMenuBar(NSObject):
 
             bundle = bundle_root(sys.executable)
             manifest_exists = (APP_SUPPORT_DIR / MANIFEST_NAME).exists()
-            if should_offer_install(bundle, manifest_exists):
-                self.install_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-                    "Install on this Mac…", "installOnMac:", ""
-                )
-                self.install_item.setTarget_(self)
-                self.menu.insertItem_atIndex_(self.install_item, 0)
-                self.menu.insertItem_atIndex_(NSMenuItem.separatorItem(), 1)
+            m2_offer["install_item"] = bool(
+                should_offer_install(bundle, manifest_exists)
+            )
             # PURGE (AWR-186 Task 4): installed copies only — manifest present
             # and not running from the DMG/translocation.
-            if (
+            m2_offer["purge_item"] = bool(
                 manifest_exists
                 and bundle is not None
                 and not running_from_read_only_location(bundle)
-            ):
-                self.purge_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-                    "Purge RBSS Bridge…", "purgeBridge:", ""
-                )
-                self.purge_item.setTarget_(self)
-                self.menu.insertItem_atIndex_(
-                    self.purge_item, self.menu.indexOfItem_(self.quit_item)
-                )
+            )
+
+        self.status_rows = []
+        for entry in MENU_BLUEPRINT:
+            self._build_menu_entry(self.menu, entry, m2_offer)
         self.status_item.setMenu_(self.menu)
         self._status = None
         self._snapshot = {}
@@ -1040,6 +953,50 @@ class BridgeMenuBar(NSObject):
         item.setTarget_(self)
         self.menu.addItem_(item)
         return item
+
+    def _build_menu_entry(self, menu, entry, m2_offer):
+        """Materialize one MENU_BLUEPRINT entry into `menu` (AWR-192).
+
+        Reproduces the pre-blueprint per-item mechanics exactly: _add_action
+        for top-level actions, disabled no-action items for info rows,
+        setSubmenu_ for submenus, setattr for every named entry.
+        """
+        kind, attr, title, selector = entry[0], entry[1], entry[2], entry[3]
+        if kind == "sep":
+            menu.addItem_(NSMenuItem.separatorItem())
+        elif kind == "status_rows":
+            for _ in range(title):
+                item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("", None, "")
+                item.setEnabled_(False)
+                menu.addItem_(item)
+                self.status_rows.append(item)
+        elif kind == "submenu":
+            submenu = NSMenu.alloc().init()
+            item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(title, None, "")
+            item.setSubmenu_(submenu)
+            menu.addItem_(item)
+            setattr(self, attr, item)
+            # smart_phrasing_item -> smart_phrasing_menu, laser_item -> laser_menu
+            setattr(self, attr.replace("_item", "_menu"), submenu)
+            for sub_entry in entry[4]:
+                self._build_menu_entry(submenu, sub_entry, m2_offer)
+        elif kind == "info":
+            item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(title, None, "")
+            item.setEnabled_(False)
+            menu.addItem_(item)
+            setattr(self, attr, item)
+        else:  # "action"
+            if attr in m2_offer and not m2_offer[attr]:
+                return  # M2 gate closed: attr stays None (set before the loop)
+            if menu is self.menu:
+                item = self._add_action(title, selector)
+            else:
+                item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                    title, selector, ""
+                )
+                item.setTarget_(self)
+                menu.addItem_(item)
+            setattr(self, attr, item)
 
     def refresh_(self, _timer):
         self._snapshot = read_status()

@@ -967,6 +967,67 @@ class BridgeMenubarTests(unittest.TestCase):
         self.assertEqual(got["fps"], None)
         self.assertEqual(got["degraded_reason"], "")
 
+    def _flatten_blueprint(self, blueprint) -> list:
+        entries = []
+        for entry in blueprint:
+            entries.append(entry)
+            if entry[0] == "submenu":
+                entries.extend(entry[4])
+        return entries
+
+    def test_menu_blueprint_selector_inventory_exact(self) -> None:
+        # The regroup adds/removes NO commands: the selector multiset is the
+        # pre-refactor 14 plus the two AWR-186 M2 selectors — each exactly once.
+        bridge_menubar = self._import_module()
+        flat = self._flatten_blueprint(bridge_menubar.MENU_BLUEPRINT)
+        selectors = sorted(e[3] for e in flat if e[3])
+        self.assertEqual(
+            selectors,
+            sorted([
+                "toggleBridge:", "exportFromSS:", "toggleSmartDrop:",
+                "toggleSmartBreakdown:", "toggleLaserDirector:",
+                "laserBlackout:", "laserClearBlackout:", "runValidation:",
+                "toggleRecordSession:", "testLights:", "mapLasers:",
+                "openLedPad:", "toggleLedEngineV2:", "quit:",
+                "installOnMac:", "purgeBridge:",
+            ]),
+        )
+
+    def test_menu_blueprint_blackout_promoted_to_top_level(self) -> None:
+        bridge_menubar = self._import_module()
+        top_selectors = [
+            e[3] for e in bridge_menubar.MENU_BLUEPRINT if e[0] == "action"
+        ]
+        self.assertIn("laserBlackout:", top_selectors)
+        self.assertIn("laserClearBlackout:", top_selectors)
+        laser_sub = next(
+            e for e in bridge_menubar.MENU_BLUEPRINT
+            if e[0] == "submenu" and e[1] == "laser_item"
+        )
+        sub_selectors = [s[3] for s in laser_sub[4] if s[3]]
+        self.assertNotIn("laserBlackout:", sub_selectors)
+        self.assertNotIn("laserClearBlackout:", sub_selectors)
+
+    def test_menu_blueprint_maintenance_block_order(self) -> None:
+        # Purge sits after the last separator and before quit; quit is last.
+        bridge_menubar = self._import_module()
+        blueprint = bridge_menubar.MENU_BLUEPRINT
+        self.assertEqual(blueprint[-1][1], "quit_item")
+        attrs = [e[1] for e in blueprint]
+        last_sep = max(i for i, e in enumerate(blueprint) if e[0] == "sep")
+        install_i = attrs.index("install_item")
+        purge_i = attrs.index("purge_item")
+        quit_i = attrs.index("quit_item")
+        self.assertLess(last_sep, install_i)
+        self.assertLess(install_i, purge_i)
+        self.assertLess(purge_i, quit_i)
+
+    def test_menu_blueprint_attrs_unique(self) -> None:
+        bridge_menubar = self._import_module()
+        flat = self._flatten_blueprint(bridge_menubar.MENU_BLUEPRINT)
+        attrs = [e[1] for e in flat if e[1]]
+        self.assertEqual(len(attrs), len(set(attrs)))
+
     def test_compact_status_lines_returns_ten_rows_both_branches(self) -> None:
         # Pins the zip contract in refresh_: a row-count mismatch silently
         # drops rows, so both branches must agree with the range(10) allocation.
