@@ -245,7 +245,7 @@ class CfxSweepConfig:
     flood_ramp_ms: float = 250.0       # TUNE-LIVE: "quick but not instant" flood-in
     release_ramp_ms: float = 400.0     # TUNE-LIVE: flood-out when knob returns to 12
     dim_floor: float = 0.08            # brightness at the drained floor (never fully black)
-    drain_ms: float = 800.0            # TUNE-LIVE: drain feel — dim 1.0->floor after the trigger
+    drain_ms: float = 400.0            # TUNE-LIVE: drain feel — dim 1.0->floor after the trigger (operator pin 2026-07-09)
 
     @classmethod
     def from_dict(cls, data: Any) -> "CfxSweepConfig":
@@ -259,7 +259,7 @@ class CfxSweepConfig:
                 flood_ramp_ms=float(data.get("flood_ramp_ms", 250.0)),
                 release_ramp_ms=float(data.get("release_ramp_ms", 400.0)),
                 dim_floor=float(data.get("dim_floor", 0.08)),
-                drain_ms=float(data.get("drain_ms", 800.0)),
+                drain_ms=float(data.get("drain_ms", 400.0)),
             )
         except (TypeError, ValueError):
             return cls()

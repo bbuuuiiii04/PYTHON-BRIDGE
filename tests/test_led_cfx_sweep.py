@@ -616,7 +616,8 @@ class ConfigLoaderTests(unittest.TestCase):
             self.assertFalse(load_cfx_sweep_config(self._write(block)).enabled, msg=str(bad))
 
     def test_drain_ms_field_defaults(self) -> None:
-        self.assertEqual(CfxSweepConfig().drain_ms, 800.0)
+        # Approved literal: the operator's 2026-07-09 desk pin (drain 800 -> 400).
+        self.assertEqual(CfxSweepConfig().drain_ms, 400.0)
 
     def test_drain_ms_field_loads(self) -> None:
         cfg = load_cfx_sweep_config(self._write({"enabled": True, "drain_ms": 500.0}))
