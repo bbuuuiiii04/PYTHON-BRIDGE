@@ -339,3 +339,11 @@ Item 10 final HEAD = the commit that carries THIS addendum (git log -1). superma
     (BAKED_WHITE_SLOT5_EFFECTS, AWR-156 T9). His report may implicate the surge
     shape, the baked white vs palette, ember colors, or coverage — do not guess;
     get his answer, then route one bounded round.
+
+13. STICK HARDWARE FLAG (Saturday risk, ~22:05): MINK disconnected TWICE tonight —
+    once operator-confessed (21:25), once SILENT (~21:50, nobody touched it, RB not
+    running) — flaky port or cable suspected by the usb lane. Payload export
+    nonetheless COMPLETE + verified (1,083 v4 entries / 505MB on stick, 22:02).
+    Sweep no_anlz class = 221/567 stick tracks (diagnostic retry was running at
+    handoff-prep as usb run 3). RECOMMEND to operator pre-Saturday: different USB
+    port test + a backup stick with the same payload.
