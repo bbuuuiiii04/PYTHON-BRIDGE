@@ -311,6 +311,21 @@ class LedPadServiceTests(unittest.TestCase):
             self.assertIsNone(payload["lan_url"])
             self.assertEqual(payload["bound_host"], "127.0.0.1")
 
+    def test_http_lab_archive_route_and_unknown_name_400(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service, _playback, _path = self._service(td)
+            service.lab_save({"name": "pulse", "kind": "slot", "fn": "pulse", "params": {}})
+            with self._running_server(service) as port:
+                status, payload = self._request_json(port, "POST", "/api/lab/archive", {"name": "pulse"})
+                bad_status, bad_payload = self._request_json(port, "POST", "/api/lab/archive", {"name": "missing"})
+
+            self.assertEqual(status, 200)
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["entry"]["status"], "promoted")
+            self.assertEqual(bad_status, 400)
+            self.assertFalse(bad_payload["ok"])
+            self.assertIn("unknown lab draft", bad_payload["error"])
+
     def test_http_smoke_post_invalid_look_save_returns_400(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             service, _playback, _path = self._service(td)

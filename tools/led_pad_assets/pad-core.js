@@ -147,6 +147,7 @@
     labReload: () => request("/api/lab/reload", {method: "POST", body: {}}),
     labAccept: (name) => request("/api/lab/accept", {method: "POST", body: {name}}),
     labReject: (name) => request("/api/lab/reject", {method: "POST", body: {name}}),
+    labArchive: (body) => request("/api/lab/archive", {method: "POST", body}),
     labDelete: (body) => request("/api/lab/delete", {method: "POST", body}),
     access: () => request("/api/access")
   };

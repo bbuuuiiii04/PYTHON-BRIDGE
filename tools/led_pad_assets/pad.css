@@ -161,6 +161,9 @@ main { padding: var(--pad); }
 .status-pill { border: 1px solid var(--border); border-radius: 999px; padding: 3px 8px; font-size: 12px; }
 .status-pill.accepted { border-color: var(--ok); color: var(--ok); }
 .status-pill.rejected { color: var(--text-dim); text-decoration: line-through; }
+.status-pill.promoted { border-color: var(--lab); color: var(--lab); }
+.prod-chip { border: 1px solid var(--warn); color: var(--warn); border-radius: 999px; padding: 1px 7px; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
+.collision-banner { border: 1px solid var(--warn); background: rgb(232 177 63 / .08); color: var(--warn); border-radius: var(--radius); padding: var(--sp-3) var(--pad); display: flex; align-items: center; justify-content: space-between; gap: var(--gap); flex-wrap: wrap; }
 .trace-panel pre { white-space: pre-wrap; overflow: auto; font-family: var(--mono); }
 .promotion-panel ul { margin: 0; padding-left: 18px; color: var(--text-dim); }
 @keyframes card-in { from { opacity: 0; transform: translateY(6px); } }

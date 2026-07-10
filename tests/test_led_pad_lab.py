@@ -102,6 +102,62 @@ class LedPadLabTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "collides"):
                 registry.save({"name": "rt_groove_chase", "kind": "slot", "fn": "pulse"})
 
+    def _write_colliding_entry(self, lab_dir: Path, name: str) -> None:
+        # Simulates the live-bricked state: the entry was written when the name
+        # was free, then the name became a production effect. save() would
+        # refuse to CREATE it now, so write drafts.json directly.
+        lab_dir.mkdir(parents=True, exist_ok=True)
+        (lab_dir / "drafts.json").write_text(
+            json.dumps({"entries": [{
+                "name": name, "kind": "slot", "fn": name, "params": {},
+                "cue_beats": 8.0, "notes": "", "brief": "", "status": "iterating",
+                "param_specs": {}, "created": "2026-01-01T00:00:00+00:00",
+                "updated": "2026-01-01T00:00:00+00:00",
+            }]}),
+            encoding="utf-8",
+        )
+
+    def test_collision_blocks_create_but_not_update_or_status_change(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            registry = LabRegistry(Path(td) / "led_lab")
+            with self.assertRaisesRegex(ValueError, "collides"):
+                registry.save({"name": "beat_chase", "kind": "slot", "fn": "beat_chase"})
+            self._write_colliding_entry(registry.lab_dir, "beat_chase")
+
+            updated = registry.save({"name": "beat_chase", "notes": "still saveable"})
+            accepted = registry.set_status("beat_chase", "accepted")
+            rejected = registry.set_status("beat_chase", "rejected")
+
+            self.assertEqual(updated["entry"]["notes"], "still saveable")
+            self.assertEqual(accepted["entry"]["status"], "accepted")
+            self.assertEqual(rejected["entry"]["status"], "rejected")
+
+    def test_archive_sets_promoted_and_unknown_name_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            registry = LabRegistry(Path(td) / "led_lab")
+            registry.save({"name": "pulse", "kind": "slot", "fn": "pulse", "params": {}})
+
+            result = registry.archive("pulse")
+
+            self.assertEqual(result["entry"]["status"], "promoted")
+            self.assertEqual(registry.get("pulse")["status"], "promoted")
+            with self.assertRaisesRegex(ValueError, "unknown lab draft"):
+                registry.archive("missing")
+
+    def test_list_flags_production_collision_without_persisting_it(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            registry = LabRegistry(Path(td) / "led_lab")
+            self._write_colliding_entry(registry.lab_dir, "beat_chase")
+            registry.save({"name": "pulse", "kind": "slot", "fn": "pulse", "params": {}})
+
+            flags = {item["name"]: item["production_collision"] for item in registry.list()}
+            registry.save({"name": "beat_chase", "notes": "resave"})
+            raw = json.loads((registry.lab_dir / "drafts.json").read_text(encoding="utf-8"))
+
+            self.assertEqual(flags, {"beat_chase": True, "pulse": False})
+            for item in raw["entries"]:
+                self.assertNotIn("production_collision", item)
+
     def test_registry_delete_removes_entry_and_unknown_name_raises(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             registry = LabRegistry(Path(td) / "led_lab")

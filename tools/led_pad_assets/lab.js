@@ -36,12 +36,12 @@
   }
 
   function renderList() {
-    const rejectedCount = state.entries.filter(e => e.status === "rejected").length;
-    $("rejectedToggle").textContent = `Rejected (${rejectedCount})`;
-    const visible = state.entries.filter(e => state.showRejected || e.status !== "rejected");
+    const archived = (e) => e.status === "rejected" || e.status === "promoted";
+    $("rejectedToggle").textContent = `Archived (${state.entries.filter(archived).length})`;
+    const visible = state.entries.filter(e => state.showRejected || !archived(e));
     $("draftList").innerHTML = visible.length ? visible.map(e => `
       <button type="button" class="lab-row ${state.current && state.current.name === e.name ? "active" : ""}" data-name="${esc(e.name)}">
-        <span>${esc(e.name)}</span>
+        <span>${esc(e.name)}${e.production_collision && e.status !== "promoted" ? ` <span class="prod-chip">in production</span>` : ""}</span>
         <span class="status-pill ${esc(e.status)}">${esc(e.status)}</span>
         <span class="dim">${esc((e.updated || "").slice(0, 10))}</span>
       </button>`).join("") : `<div class="empty"><span class="panel-label">No drafts</span><span>Create one with New.</span></div>`;
@@ -60,7 +60,8 @@
     const e = state.current;
     const disabled = !e;
     for (const id of ["briefInput", "notesInput", "paramsInput", "saveDraftBtn", "playDraftBtn", "acceptBtn", "rejectBtn", "previewBtn", "deleteBtn"]) $(id).disabled = disabled;
-    if (!e) { $("paramControls").innerHTML = ""; return; }
+    if (!e) { $("paramControls").innerHTML = ""; $("collisionBanner").hidden = true; return; }
+    $("collisionBanner").hidden = !(e.production_collision && e.status !== "promoted");
     $("draftTitle").textContent = e.name;
     $("draftFn").textContent = `${e.kind} · ${e.fn}`;
     $("briefInput").value = e.brief || "";
@@ -259,6 +260,10 @@
   $("acceptBtn").onclick = () => state.current && api.labAccept(state.current.name).then(refresh).catch(showError);
   $("rejectBtn").onclick = () => state.current && api.labReject(state.current.name).then(refresh).catch(showError);
   $("rejectedToggle").onclick = () => { state.showRejected = !state.showRejected; renderList(); };
+  $("archiveBtn").onclick = () => state.current && PadModal.confirm(`Archive draft ${state.current.name}?`, "Marks it promoted and files it under Archived. The drafts.json entry stays for the record.", "Archive", async () => {
+    await api.labArchive({name: state.current.name});
+    await refresh();
+  });
   $("deleteBtn").onclick = () => state.current && PadModal.confirm(`Delete draft ${state.current.name}?`, "Removes the drafts.json entry. Its function in effects_lab.py stays — clean that up separately.", "Delete", async () => {
     try {
       await api.labDelete({name: state.current.name});
