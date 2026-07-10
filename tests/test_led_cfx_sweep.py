@@ -81,8 +81,9 @@ class EnvelopeTests(unittest.TestCase):
         # Three DIFFERENT held knob values above the threshold, same elapsed time ->
         # identical dim. Knob position above threshold has NO effect (timed, not tracked).
         def held_dim(hold: float) -> float:
-            fired = cfx_sweep_envelope(0.9, CfxEnvState(), 0.2, CFG)  # fire, partial drain
-            return cfx_sweep_envelope(hold, fired, 0.2, CFG).dim      # keep holding
+            step = CFG.drain_ms / 4000.0  # quarter-drain per tick — mid-ramp for any pin
+            fired = cfx_sweep_envelope(0.9, CfxEnvState(), step, CFG)  # fire, partial drain
+            return cfx_sweep_envelope(hold, fired, step, CFG).dim      # keep holding
         dims = {round(held_dim(h), 9) for h in (0.80, 0.90, 1.0)}
         self.assertEqual(len(dims), 1, msg=f"held dims differ: {dims}")
         self.assertGreater(dims.pop(), CFG.dim_floor)  # partial (proves it is a timed ramp)
