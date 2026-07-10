@@ -872,6 +872,113 @@ class BridgeMenubarTests(unittest.TestCase):
         self.assertTrue(result["ok"])
 
 
+    def test_led_row_fields_truth_table(self) -> None:
+        bridge_menubar = self._import_module()
+        fields = bridge_menubar.led_row_fields
+
+        # Empty snapshot → unknown, all-safe defaults.
+        self.assertEqual(
+            fields({}),
+            {"state": "unknown", "fps": None, "effect": "", "palette": "",
+             "degraded_reason": ""},
+        )
+
+        # Director present but disabled → off.
+        self.assertEqual(
+            fields({"led_look_director": {"enabled": False}})["state"], "off"
+        )
+
+        # Fully live: enabled + realtime active + fps + effect + palette.
+        status = {
+            "led_look_director": {
+                "enabled": True,
+                "adapter": {
+                    "degraded": False,
+                    "degraded_reason": "",
+                    "realtime": {
+                        "active": True,
+                        "achieved_fps": 59.63,
+                        "active_effect": "razer_pulse",
+                    },
+                },
+            },
+            "state_manager": {
+                "led_color_engine": {"engine": "v2", "current_palette": "ember"}
+            },
+        }
+        self.assertEqual(
+            fields(status),
+            {"state": "on", "fps": 59.63, "effect": "razer_pulse",
+             "palette": "ember", "degraded_reason": ""},
+        )
+
+        # Degraded adapter surfaces the reason.
+        degraded = {
+            "led_look_director": {
+                "enabled": True,
+                "adapter": {"degraded": True, "degraded_reason": "circuit_open"},
+            }
+        }
+        self.assertEqual(fields(degraded)["degraded_reason"], "circuit_open")
+        # degraded False → reason suppressed even if the string is present.
+        not_degraded = {
+            "led_look_director": {
+                "enabled": True,
+                "adapter": {"degraded": False, "degraded_reason": "circuit_open"},
+            }
+        }
+        self.assertEqual(fields(not_degraded)["degraded_reason"], "")
+
+    def test_led_row_fields_malformed_never_raises(self) -> None:
+        bridge_menubar = self._import_module()
+        fields = bridge_menubar.led_row_fields
+
+        # led_look_director not a dict → unknown + defaults.
+        self.assertEqual(
+            fields({"led_look_director": "x"}),
+            {"state": "unknown", "fps": None, "effect": "", "palette": "",
+             "degraded_reason": ""},
+        )
+        # adapter not a dict → state still resolves, adapter fields default.
+        got = fields({"led_look_director": {"enabled": True, "adapter": "nope"}})
+        self.assertEqual(
+            got,
+            {"state": "on", "fps": None, "effect": "", "palette": "",
+             "degraded_reason": ""},
+        )
+        # fps a string / a bool → None (never a crash, never a lie).
+        for bad_fps in ("59", True):
+            got = fields({
+                "led_look_director": {
+                    "enabled": True,
+                    "adapter": {
+                        "realtime": {"active": True, "achieved_fps": bad_fps}
+                    },
+                }
+            })
+            self.assertIsNone(got["fps"])
+        # realtime not a dict, degraded_reason not a string → defaults.
+        got = fields({
+            "led_look_director": {
+                "enabled": True,
+                "adapter": {"realtime": 7, "degraded": True, "degraded_reason": 3},
+            }
+        })
+        self.assertEqual(got["fps"], None)
+        self.assertEqual(got["degraded_reason"], "")
+
+    def test_compact_status_lines_returns_ten_rows_both_branches(self) -> None:
+        # Pins the zip contract in refresh_: a row-count mismatch silently
+        # drops rows, so both branches must agree with the range(10) allocation.
+        bridge_menubar = self._import_module()
+        self.assertEqual(len(bridge_menubar.compact_status_lines({})), 10)
+        self.assertEqual(
+            len(bridge_menubar.compact_status_lines({"stale": True, "stale_age_s": 4})),
+            10,
+        )
+        self.assertEqual(len(bridge_menubar.compact_status_lines({"schema": 1})), 10)
+
+
 class NativeInstallGateTests(BridgeMenubarTests):
     """AWR-186 M2: the install offer must be frozen-gated so source-run menubars
     never import install_controller (source behavior byte-identical)."""

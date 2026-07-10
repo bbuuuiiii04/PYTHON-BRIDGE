@@ -603,6 +603,7 @@ def compact_status_lines(status: dict, pids: list[str] | None = None) -> list:
             _seg("  Checks  —", color=_cs()),
             _join(_seg("  Smart Phrasing  ", color=_cs()), _seg("—", color=_cs())),
             _join(_seg("  Lasers  ", color=_cs()), _seg("—", color=_cs())),
+            _join(_seg("  LEDs  ", color=_cs()), _seg("—", color=_cs())),
         ]
 
     sm = status.get("state_manager", {})
@@ -740,7 +741,41 @@ def compact_status_lines(status: dict, pids: list[str] | None = None) -> list:
         _seg(f"  {degraded_reason[:14]}", color=_co()) if degraded_reason else _seg(""),
     )
 
-    return [bridge_row, ss_row] + deck_rows + [checks_row, smart_row, laser_row]
+    # Row 9: LEDs glance (AWR-192) — same shape discipline as the laser row.
+    led_fields = led_row_fields(status)
+    led_state = led_fields["state"]
+    led_degraded = led_fields["degraded_reason"]
+    if led_state == "on":
+        led_txt = "On"
+        led_col = _co() if led_degraded else _cg()
+    elif led_state == "off":
+        led_txt = "Off"
+        led_col = _cs()
+    else:
+        led_txt = "—"
+        led_col = _cs()
+
+    led_segs = [_seg("  LEDs  ", color=_cs()), _seg(led_txt, color=led_col)]
+    if led_state == "on":
+        led_fps = led_fields["fps"]
+        if led_fps is not None:
+            led_segs.append(_seg(f"  {led_fps:.0f}fps", color=_cs()))
+        led_effect = led_fields["effect"]
+        if led_effect:
+            if len(led_effect) > 18:
+                led_effect = led_effect[:15] + "..."
+            led_segs.append(_seg(f"  {led_effect}", color=_cs()))
+        led_palette = led_fields["palette"]
+        if led_palette:
+            if len(led_palette) > 18:
+                led_palette = led_palette[:15] + "..."
+            led_segs.append(_seg(f"  {led_palette}", color=_cs()))
+    led_segs.append(
+        _seg(f"  {led_degraded[:14]}", color=_co()) if led_degraded else _seg("")
+    )
+    led_row = _join(*led_segs)
+
+    return [bridge_row, ss_row] + deck_rows + [checks_row, smart_row, laser_row, led_row]
 
 
 def _phrasing_summary(sp_block: dict | None) -> str:
@@ -757,6 +792,46 @@ def _phrasing_summary(sp_block: dict | None) -> str:
         in_txt = str(int(round(float(beats_to_drop))))
     anchor_txt = "-" if anchor is None else str(int(anchor))
     return f"Phrasing: {phrase}  next_drop={next_drop_txt}  in={in_txt}b  anchor={anchor_txt}"
+
+
+def led_row_fields(status: dict) -> dict:
+    """Glance fields for the LEDs status row; every field degrades to a
+    safe default when absent (director off, bridge starting, stale)."""
+    led = status.get("led_look_director") if isinstance(status, dict) else None
+    if isinstance(led, dict):
+        state = "on" if led.get("enabled") else "off"
+    else:
+        led = {}
+        state = "unknown"
+    adapter = led.get("adapter")
+    if not isinstance(adapter, dict):
+        adapter = {}
+    realtime = adapter.get("realtime")
+    if not isinstance(realtime, dict):
+        realtime = {}
+    fps = None
+    if realtime.get("active"):
+        raw_fps = realtime.get("achieved_fps")
+        if isinstance(raw_fps, (int, float)) and not isinstance(raw_fps, bool):
+            fps = float(raw_fps)
+    effect = realtime.get("active_effect")
+    if not isinstance(effect, str):
+        effect = ""
+    palette = _led_color_engine_status(status).get("current_palette")
+    if not isinstance(palette, str):
+        palette = ""
+    degraded_reason = ""
+    if adapter.get("degraded"):
+        raw_reason = adapter.get("degraded_reason")
+        if isinstance(raw_reason, str):
+            degraded_reason = raw_reason
+    return {
+        "state": state,
+        "fps": fps,
+        "effect": effect,
+        "palette": palette,
+        "degraded_reason": degraded_reason,
+    }
 
 
 class BridgeMenuBar(NSObject):
@@ -782,7 +857,7 @@ class BridgeMenuBar(NSObject):
         self._pack_auto_pending_enabled = None
         self._pack_auto_retried_enabled = None
         self.status_rows = []
-        for _ in range(9):
+        for _ in range(10):
             item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("", None, "")
             item.setEnabled_(False)
             self.menu.addItem_(item)
