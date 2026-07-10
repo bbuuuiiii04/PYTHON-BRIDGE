@@ -3,13 +3,17 @@ from __future__ import annotations
 import argparse
 import copy
 import difflib
+import hashlib
 import json
 import logging
 import mimetypes
+import os
 import re
 import shutil
 import sys
 import tempfile
+import threading
+import time
 from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -35,6 +39,58 @@ _ROLE_BANKS = ("ambient", "groove", "buildup", "pre_drop", "drop", "post_drop", 
 _VISIBLE_BANKS = ("drafts", "ambient", "groove", "buildup", "drop", "post_drop", "breakdown", "utility")
 _STOP_LOOKS = frozenset({"safe_default", "blackout"})
 logger = logging.getLogger("led_pad_web")
+
+# Freshness watchdog (AWR-193 Task 9): the launchd-supervised pad process
+# outlives code changes, so a stale catalog surface (import-time module state)
+# ships to the operator until something restarts it. Watch these modules'
+# mtimes and exit(3) — launchd (KeepAlive/SuccessfulExit=false) relaunches —
+# ONLY when playback is idle and the pad does not own the LEDs.
+_FRESHNESS_WATCHED: tuple[Path, ...] = (
+    _REPO_ROOT / "govee_frame_renderer.py",
+    _REPO_ROOT / "led_pad_controls.py",
+    _REPO_ROOT / "govee_realtime_runner.py",
+    _REPO_ROOT / "led_color_engine.py",
+    _REPO_ROOT / "led_config.py",
+    _REPO_ROOT / "tools" / "led_pad_web.py",
+    _REPO_ROOT / "tools" / "led_pad_lab.py",
+    _REPO_ROOT / "tools" / "led_pad_playback.py",
+    _REPO_ROOT / "tools" / "pad_access.py",
+)
+
+
+def _sample_watched_mtimes() -> dict[str, float]:
+    out: dict[str, float] = {}
+    for path in _FRESHNESS_WATCHED:
+        try:
+            out[str(path)] = path.stat().st_mtime
+        except FileNotFoundError:
+            # Absent key differs from the baseline: a missing watched file
+            # counts as changed once stable.
+            pass
+    return out
+
+
+def freshness_restart_due(
+    baseline: dict[str, float],
+    current: dict[str, float],
+    *,
+    playing: bool,
+    pad_owned: bool,
+    stable_age_s: float,
+    min_stable_s: float = 3.0,
+) -> bool:
+    """Pure restart decision: change present, settled, and safe.
+
+    True iff any watched mtime differs from baseline AND the newest change is
+    at least ``min_stable_s`` old AND playback is idle AND the pad does not
+    own the LEDs. A restart while pad-owned would drop the room dark — this
+    function refuses that by construction.
+    """
+    if playing or pad_owned:
+        return False
+    if current == baseline:
+        return False
+    return stable_age_s >= min_stable_s
 
 
 def _resolved_config_path(explicit: Path | str | None = None) -> Path:
@@ -207,6 +263,9 @@ class LedPadService:
     ) -> None:
         self._config_path = _resolved_config_path(config_path)
         self._draft_path = _draft_path_for(self._config_path)
+        # Fingerprint sidecar: sha256 of the live config the draft is based on
+        # (gitignored — derived from live operator data).
+        self._draft_base_path = self._config_path.with_name("led_look_director.draft.base")
         self._status_path = Path(status_path)
         self._lock = Lock()
         self._draft = self._load_initial_draft()
@@ -246,13 +305,30 @@ class LedPadService:
             return str(name)
         return str(entry.get("fn") or name)
 
+    def _live_fingerprint(self) -> str:
+        live = _load_json(self._config_path) if self._config_path.exists() else {}
+        return hashlib.sha256(_normalized(live).encode("utf-8")).hexdigest()
+
+    def _write_draft_base(self, live_hash: str | None = None) -> None:
+        self._draft_base_path.write_text((live_hash or self._live_fingerprint()) + "\n", encoding="utf-8")
+
+    def _read_draft_base(self) -> str | None:
+        try:
+            return self._draft_base_path.read_text(encoding="utf-8").strip()
+        except (FileNotFoundError, OSError):
+            return None
+
     def _load_initial_draft(self) -> dict[str, Any]:
-        source = self._draft_path if self._draft_path.exists() else self._config_path
+        draft_exists = self._draft_path.exists()
+        source = self._draft_path if draft_exists else self._config_path
         if not source.exists():
             raise FileNotFoundError(f"LED config not found: {source}")
         config = _load_json(source)
         _ensure_pad_meta(config)
         _default_bank(config)
+        if not draft_exists:
+            # Draft freshly derived from live: record the base fingerprint.
+            self._write_draft_base()
         return config
 
     def _persist_draft_locked(self) -> None:
@@ -331,13 +407,20 @@ class LedPadService:
         with self._lock:
             config = copy.deepcopy(self._draft)
         errors, warnings = self._validate(config)
+        dirty = self._dirty_for(config)
+        live_hash = self._live_fingerprint()
+        if not dirty["global"]:
+            # Clean draft tracks live: refresh the base fingerprint.
+            self._write_draft_base(live_hash)
+        recorded = self._read_draft_base()
         return {
             "ok": True,
             "config": config,
             "errors": errors,
             "warnings": warnings,
-            "dirty": self._dirty_for(config),
+            "dirty": dirty,
             "banks": self._bank_payload(config),
+            "live_changed": recorded is not None and recorded != live_hash,
         }
 
     def get_renders(self) -> dict[str, Any]:
@@ -814,6 +897,7 @@ class LedPadService:
             backup = save_config_atomically(config, self._config_path)
             self._draft = copy.deepcopy(config)
             self._persist_draft_locked()
+            self._write_draft_base()
         return {
             "ok": True,
             "backup_path": str(backup) if backup else "",
@@ -826,6 +910,7 @@ class LedPadService:
             _ensure_pad_meta(self._draft)
             _default_bank(self._draft)
             self._draft_path.unlink(missing_ok=True)
+            self._write_draft_base()
         return self.get_config_payload()
 
     def history(self) -> dict[str, Any]:
@@ -854,6 +939,7 @@ class LedPadService:
         with self._lock:
             self._draft = config
             self._persist_draft_locked()
+            self._write_draft_base()
         return {"ok": True, "errors": [], "warnings": warnings, "dirty": self._dirty_for(config)}
 
     def runtime_status(self) -> dict[str, Any]:
@@ -919,6 +1005,7 @@ def build_handler(service: LedPadService) -> type[BaseHTTPRequestHandler]:
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(raw)))
+            self.send_header("Cache-Control", "no-cache")
             self.end_headers()
             self.wfile.write(raw)
 
@@ -931,6 +1018,7 @@ def build_handler(service: LedPadService) -> type[BaseHTTPRequestHandler]:
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(raw)))
+            self.send_header("Cache-Control", "no-cache")
             self.end_headers()
             self.wfile.write(raw)
 
@@ -996,6 +1084,29 @@ def build_handler(service: LedPadService) -> type[BaseHTTPRequestHandler]:
     return _LedPadHandler
 
 
+def _freshness_watchdog(service: LedPadService) -> None:
+    baseline = _sample_watched_mtimes()
+    previous = baseline
+    last_change = time.monotonic()
+    while True:
+        time.sleep(5.0)
+        current = _sample_watched_mtimes()
+        if current != previous:
+            previous = current
+            last_change = time.monotonic()
+        playing = bool(service._playback.status().get("playing"))
+        pad_owned = service._playback.ownership().get("state") == "pad_owned"
+        if freshness_restart_due(
+            baseline,
+            current,
+            playing=playing,
+            pad_owned=pad_owned,
+            stable_age_s=time.monotonic() - last_change,
+        ):
+            logger.info("source changed on disk — restarting for freshness")
+            os._exit(3)
+
+
 def _resolve_bind_host(value: str) -> str:
     if value == "localhost":
         return "127.0.0.1"
@@ -1019,6 +1130,7 @@ def run_server(
             file=sys.stderr,
         )
     service = LedPadService(config_path=config_path, dry_run=dry_run)
+    threading.Thread(target=_freshness_watchdog, args=(service,), name="LedPadFreshness", daemon=True).start()
     server = ThreadingHTTPServer((host, int(port)), build_handler(service))
     setattr(server, "led_pad_service", service)
     logger.info("LED Pad listening on http://%s:%s", host, port)
