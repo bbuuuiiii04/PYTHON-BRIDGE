@@ -178,6 +178,7 @@ class BeatSyncEngine:
         else:  # retrigger / continuous: manual fire restarts the single instance
             self._instances = [self._make_instance(now, abs_beat, bpm)]
             self._spawn_count += 1
+            self._diverged_since = None  # AWR-189: fresh instance, fresh baseline
 
     def on_tick(self, abs_beat: float, now: float, bpm: float) -> list[InstanceRender]:
         if self._clock is None:
@@ -194,6 +195,9 @@ class BeatSyncEngine:
         elif self._mode == "continuous":
             if wrapped:
                 self._instances = [self._make_instance(now, abs_beat, bpm)]
+                self._diverged_since = None
+            else:
+                self._maybe_reanchor(abs_beat, now, bpm)
         return self._render_list(now)
 
     def animate(self, now: float) -> list[InstanceRender]:
@@ -219,6 +223,34 @@ class BeatSyncEngine:
         self._spawn_count += 1
         if len(self._instances) > self._max_pulses:
             self._instances = self._instances[-self._max_pulses:]
+
+    def _maybe_reanchor(self, abs_beat: float, now: float, bpm: float) -> None:
+        """AWR-189: continuous-mode sustained-divergence re-anchor.
+
+        Compares the live anchor bpm against the instance's CURRENT rate (the
+        last re-anchor's bpm, else born_bpm). In-band ⇒ divergence timer resets
+        — sub-delta wobble and transition flap-backs never re-anchor (AWR-141
+        jitter immunity, no raw tracking). Out of band CONTINUOUSLY for the
+        sustain window ⇒ re-base the beat-phase origin to grid truth: the phase
+        snaps once onto the real grid and accrues at the live rate from here.
+        local_t / bucket / progress stay born-based (nothing restarts).
+        If the feed is still wrong after a re-anchor, the tracker re-arms
+        against the new rate and converges on the next sustain window.
+        """
+        if not self._instances or bpm <= 0.0:
+            return
+        inst = self._instances[0]
+        current_rate = inst.reanchor[2] if inst.reanchor is not None else inst.born_bpm
+        if abs(float(bpm) - current_rate) <= self._reanchor_delta:
+            self._diverged_since = None
+            return
+        if self._diverged_since is None:
+            self._diverged_since = float(now)
+            return
+        if float(now) - self._diverged_since < self._reanchor_sustain:
+            return
+        inst.reanchor = (float(now), float(abs_beat), max(1.0, float(bpm)))
+        self._diverged_since = None
 
     def _expire(self, now: float) -> None:
         ttl = self._travel_beats + self._trail_beats

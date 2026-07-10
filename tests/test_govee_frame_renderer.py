@@ -14,6 +14,7 @@ from rb_ss_bridge_v2.govee_frame_renderer import (  # noqa: E402
     SLOT_EFFECTS,
     GoveeFrameRenderer,
     _drop_chase_spawn_times,
+    _ember_env,
     _ember_field,
     _head_weights,
     _hz_strobe_on,
