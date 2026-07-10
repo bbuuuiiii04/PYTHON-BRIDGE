@@ -211,6 +211,17 @@ exist as the labeled Saturday interim (app + pre-warm only, manifest-scoped purg
 helpers); they are conveniences, not this controller. The M2 operator directive + decomposition:
 `docs/plans/active/usb_launcher_m2_operator_directive_2026_07_09.md`.*
 
+*IMPLEMENTED NOW (2026-07-10, AWR-186 M2, software-tested / hardware-unvalidated): the permanent
+half of this controller exists as `install_controller.py` + frozen-gated menubar items — DMG-run
+detection (`/Volumes/` + AppTranslocation), "Install on this Mac…" (app → `~/Applications`,
+DMG-carried `RBSS_payload/` → App Support incl. `govee.env`/live configs, interim-compatible
+file-level manifest, relaunch + eject offer, never auto-starts the bridge), config-override env
+wiring via `launch_profile.app_support_config_env`, frozen-only `local/state` →
+App Support `state/` (`launch_profile.resolve_state_path`), and the menubar PURGE (§R6:
+confirm-gated, stop-child-first, three-root allowlist, Trash own bundle, honest TCC residue note).
+`packaging/make_stick.sh` is the one-command operator-side builder. No LaunchAgent/auto-start (M3)
+and no temporary/stage-to-scratch mode was built.*
+
 **3.4 Menubar UI** — extend the existing PyObjC app `scripts/bridge_menubar.py` (`confirmed`
 re-verified 2026-07-09: raw AppKit/`NSStatusBar`, not rumps; 1224 lines). Adds a Setup section
 (Run temporarily / Install permanently / Uninstall) above the current status display. Purpose:

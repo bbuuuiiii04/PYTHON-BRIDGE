@@ -1,17 +1,19 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: c030540
-last_verified_date: 2026-07-09
+last_verified_commit: a31bde9
+last_verified_date: 2026-07-10
 validation_scope: >
-  USB bridge launcher Milestone-1 runbook. Build/sign/DMG commands verified on the
-  maintainer's Mac (PyInstaller 6.21.0 × Python 3.14.6): the .app builds, ad-hoc
-  signs, and a DMG is produced. SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED —
-  whether the bundled bridge drives the real rig identically to a source run is the
-  operator's §2 parity run (below), not proven here.
+  USB bridge launcher runbook, M1 build + M2 native install/PURGE (AWR-186).
+  M1 build/sign/DMG commands verified on the maintainer's Mac (PyInstaller
+  6.21.0 × Python 3.14.6). M2 (make_stick.sh, native menubar install, config
+  overrides, frozen state dir, menubar PURGE) is code + unit tests only —
+  make_stick.sh has NOT been run against the stick and no M2 bundle has been
+  built yet. SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED — the operator
+  walkthrough (parity table below) is the physical gate.
 ---
 
-# USB Bridge Launcher — M1 Runbook
+# USB Bridge Launcher — Runbook (M1 build · M2 install/PURGE)
 
 What M1 delivers: a double-clickable macOS app (`RBSS Bridge.app`, shipped as
 `RBSS Bridge.dmg`) that carries its own Python and the whole `rb_ss_bridge_v2`
@@ -32,9 +34,26 @@ operator parity run at the end.
   ```
 - Test suite passes on this interpreter at the M1 baseline (known 5 pre-existing reds).
 
-## Build → sign → DMG
+## Build → ship: `make_stick.sh` (M2 — THE build path)
 
-Run from the repo root:
+One command from the repo root, with the renamed stick mounted:
+```bash
+bash packaging/make_stick.sh /Volumes/<stick>
+```
+It runs the whole chain: PyInstaller build → `sign.sh` → DMG **built from a
+staging dir so the DMG carries both `RBSS Bridge.app` and `RBSS_payload/`**
+(the pre-warmed spectral cache from App Support + the home-parity files:
+`govee.env`, `laser_director.json`, `led_look_director.json`,
+`soundswitch_pack_player.json`, `laser_color_map.json` — secrets-on-stick is
+operator-approved, AWR-186), then copies the DMG + the two stick `.command`
+helpers to the stick. It refuses any target volume without `PIONEER/` (wrong
+stick), stages only under `mktemp -d` (never the repo tree), skips absent
+payload files with a note, and aborts naming the step if a source exists but
+is unreadable. Summary line reports DMG size, payload file count, stick free
+space.
+
+### Manual reference (what make_stick.sh runs, M1 commands)
+
 ```bash
 # 1. Build the .app (onedir, windowed). build/ and dist/ are gitignored.
 ./.build-venv-314/bin/pyinstaller packaging/rbss_launcher.spec \
@@ -45,10 +64,12 @@ rm -rf build                                   # delete the intermediate (disk)
 bash packaging/sign.sh "dist/RBSS Bridge.app"
 
 # 3. DMG for the exFAT stick (never a raw .app / Finder-zip on exFAT).
+#    make_stick.sh points -srcfolder at its staging dir (app + RBSS_payload).
 hdiutil create -volname "RBSS Bridge" -srcfolder "dist/RBSS Bridge.app" \
     -ov -format UDZO "dist/RBSS Bridge.dmg"
 ```
-Result: `dist/RBSS Bridge.app` (~252 MB) and `dist/RBSS Bridge.dmg` (~111 MB).
+M1 reference sizes: `dist/RBSS Bridge.app` ~252 MB, app-only DMG ~111 MB (the
+M2 DMG is larger — it carries the payload).
 
 ### Signing status (A1/A8)
 
@@ -103,39 +124,72 @@ exclusive flock (`/tmp/rb_ss_bridge_v2.lock`); a second bridge of ANY form refus
 to start. If the dev watcher is running, a bundled launch is correctly refused, but
 the watcher will log adopt/start churn. One bridge at a time.
 
-## Deliberately NOT built in M1 (say so, don't assume)
+## Native install (M2 — the one-action flow, AWR-186)
 
-- **Install modes** — temporary "stage to scratch" and permanent (`~/Applications`
-  copy + LaunchAgent + `StartOnMount` + Uninstall) are M2/M3. `launch_agent_plist.py`
-  can *render* an Interactive LaunchAgent plist, but nothing installs/loads it.
-  Interim stick-side helpers exist (below) — they are NOT the designed install modes.
-- **Foreign-Mac** anything (the memory grant, permission cascade) — M4.
+On the guest Mac: plug the stick → double-click `RBSS Bridge.dmg` → launch the
+app (right-click → Open the first time) → the menubar's PRIMARY item is
+**"Install on this Mac…"** (it appears only when running from the DMG/
+translocation with no manifest on that Mac). Confirm the NSAlert and it:
+
+1. copies the app to `~/Applications/RBSS Bridge.app`;
+2. installs `RBSS_payload/spectral_cache` (from inside the DMG) into App
+   Support — pre-warmed analysis, full-strength lights from the first beat;
+3. installs `RBSS_payload/home/*` into App Support — `govee.env` + the live
+   configs, so the bridge **performs like the home Mac** (`usb_launcher`
+   points each subsystem's env seam at those copies; an exported env wins);
+4. writes the SAME file-level `install_manifest.txt` the interim commands use
+   (app path + every installed file — the two purge paths stay interoperable);
+5. relaunches from `~/Applications` (menubar only — the bridge NEVER starts by
+   itself) and offers to eject the DMG.
+
+A failed step is reported BY NAME; the DMG-run app stays fully usable and the
+manifest lists only what actually landed. Learned stores (`local/state/*`)
+live in App Support `state/` in frozen runs, so they persist and PURGE removes
+them (source runs keep today's paths, byte-identical).
+
+## Native PURGE (M2 — the operator's exact ask, AWR-186)
+
+Installed copies (manifest present, not DMG-run) show **"Purge RBSS Bridge…"**.
+Explicit **Purge** button + Cancel; the dialog states exactly what goes. On
+confirm it: stops the owned bridge child by handle + flock (never
+pkill/pattern), removes the manifest paths (allowlist: `~/Applications` + App
+Support only, `..` rejected), then the whole `~/Library/Application Support/
+RBSS Bridge/` dir (configs, secrets, caches, learned state), then
+`~/Library/Logs/rb_ss_bridge/`, reports the honest result (removed count,
+leftovers by name), moves its own bundle to Trash and quits. Never touches the
+stick, the DMG, or anything outside those three roots. Honest residue: macOS
+System Settings permission rows stay (inert) — and the stick itself still
+carries the secrets it shipped with.
+
+## Deliberately NOT built (say so, don't assume)
+
+- **LaunchAgent / `StartOnMount` / auto-start** — M3. Launch-on-click stands
+  (operator default). `launch_agent_plist.py` can *render* a plist; nothing
+  installs/loads it.
+- **Foreign-Mac** memory-grant/permission cascade — M4; the walkthrough below
+  is the gate.
+- **XDJ-RX3 stick reading (R5)** — settled IMPOSSIBLE (AWR-167).
 - **Dev-only watcher features** not carried into the bundle: the
   `RBSS_BRIDGE_TRUTH=1` Art-Net truth-check and the `WATCHER_NO_LOOP` test hook.
 
-## Stick helpers (Saturday interim — AWR-122; the native M2 installer/PURGE replaces these)
+## Stick helpers (AWR-122 interim — still ride the stick as the no-menubar fallback)
 
-`packaging/stick/install.command` + `purge.command` ride the stick next to the DMG:
+`packaging/stick/install.command` + `purge.command` sit next to the DMG
+(make_stick.sh copies them). The NATIVE menubar install/PURGE above is the
+primary flow; these remain for a Mac where the app won't launch:
 
-- **install.command** (double-click; right-click → Open on a fresh Mac): mounts the
-  DMG, copies the app to `~/Applications`, installs `RBSS_payload/spectral_cache`
-  into `~/Library/Application Support/RBSS Bridge/spectral_cache`, and records every
-  path it creates in `install_manifest.txt`. App + pre-warm ONLY — no configs or
-  secrets (M2 scope, operator veto open on secrets-on-stick).
-- **purge.command**: requires typing `PURGE`, then removes EXACTLY the manifest
-  paths (allowed roots only, `..` rejected), prunes emptied dirs, deletes the
-  manifest. Not the full M2 menubar PURGE: System Settings permission entries and
-  `~/Library/Logs/rb_ss_bridge` run logs are not the installer's and remain.
-- **Stick layout:** `RBSS Bridge.dmg` + both `.command` files + `RBSS_payload/
-  spectral_cache/` at the stick root. Payload export (run AFTER the AWR-183 stick
-  sweep completes; copying home-keyed extras along is harmless — they are never
-  looked up on the foreign Mac):
-  ```bash
-  mkdir -p "/Volumes/<stick>/RBSS_payload" && \
-  cp -R "$HOME/Library/Application Support/RBSS Bridge/spectral_cache" "/Volumes/<stick>/RBSS_payload/"
-  ```
-- Tests: `tests/test_stick_commands.py` (purge deletion scoping, 4 cases);
-  install.command proven by a desk smoke (real DMG → throwaway `$HOME` → purge).
+- **install.command**: mounts the DMG, copies the app to `~/Applications`,
+  installs stick-side `RBSS_payload/spectral_cache` if present, records every
+  path in the same `install_manifest.txt`. App + pre-warm only — the native
+  installer is what carries configs/secrets.
+- **purge.command**: requires typing `PURGE`, removes exactly the manifest
+  paths (same allowlist discipline), prunes emptied dirs. Narrower than the
+  native PURGE: App Support extras and run logs remain.
+- Tests: `tests/test_stick_commands.py` (purge deletion scoping);
+  `tests/test_make_stick.py` (builder staging layout, existence-gating,
+  fail-closed unreadable, PIONEER refusal); `tests/test_install_controller.py`
+  (native install/purge pure seams: detection, manifest exactness, allowlist +
+  `..` + three-root order, frozen state-dir resolution).
 
 ## Operator parity run (Task 7 — the gate, do on a TEST session, never a live show)
 
@@ -144,6 +198,11 @@ against a watcher run. Nothing here is "working" until these pass.
 
 | Check | Expected | Pass? |
 |---|---|---|
+| `make_stick.sh <mount>` run | builds, stages, ships; summary prints DMG size / payload count / free space | ☐ |
+| Native install (guest Mac/user) | DMG-run menubar shows "Install on this Mac…"; confirm → app in `~/Applications`, payload + configs + `govee.env` in App Support, manifest superset written, relaunch + eject offered | ☐ |
+| Installed run = home parity | bridge behaves like the home Mac (Govee cloud up, laser/LED configs live, laser colors mapped, pre-warm hits) | ☐ |
+| Learned stores persist (frozen) | after a run, `~/Library/Application Support/RBSS Bridge/state/` gains/updates the identity + laser-solo stores | ☐ |
+| Native PURGE | "Purge RBSS Bridge…" on the installed copy: bridge child stops, all three roots removed, app in Trash, honest residue note | ☐ |
 | App launches, menubar appears | menubar icon present | ☐ |
 | One-bridge count | anchored `…rb_ss_bridge_v2$` count reads ONE bridge (+ frame-engine child = two processes total) | ☐ |
 | SoundSwitch rotation | autoloops rotate as in a watcher run | ☐ |

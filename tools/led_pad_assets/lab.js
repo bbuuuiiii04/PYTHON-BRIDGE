@@ -175,6 +175,9 @@
     }, 400);
   }
 
+  function hexByte(v) { return Math.max(0, Math.min(255, Math.round(Number(v) || 0))).toString(16).padStart(2, "0"); }
+  function rgbHex(r, g, b) { return `#${hexByte(r)}${hexByte(g)}${hexByte(b)}`; }
+
   function renderParamControls() {
     const specs = (state.current && (state.current.effective_param_specs || state.current.param_specs)) || {};
     const conflicts = (state.current && state.current.spec_conflicts) || [];
@@ -183,16 +186,60 @@
     if (!keys.length) { container.innerHTML = ""; return; }
     let params;
     try { params = JSON.parse($("paramsInput").value || "{}"); } catch { params = {}; }
-    container.innerHTML = (conflicts.length ? `<div class="dim">Slider ranges updated from the production controls table</div>` : "") + keys.map(key => {
+    // Slot-kind drafts audition with palette-injected colors: badge color rows.
+    const slotKind = Boolean(state.current && state.current.kind === "slot");
+    const badge = `<span class="regime-badge">palette overrides this in the room</span>`;
+    // Complete <base>_r/_g/_b slider triplets collapse into one color picker.
+    const triplets = {};
+    for (const key of keys) {
+      const m = /^(.+)_(r|g|b)$/.exec(key);
+      if (m && specs[key].kind !== "toggle") (triplets[m[1]] ||= {})[m[2]] = key;
+    }
+    const bases = Object.keys(triplets).filter(b => triplets[b].r && triplets[b].g && triplets[b].b);
+    const tripletKey = new Set(bases.flatMap(b => [triplets[b].r, triplets[b].g, triplets[b].b]));
+    const renderedBases = new Set();
+    const rows = [];
+    if (conflicts.length) rows.push(`<div class="dim">Slider ranges updated from the production controls table</div>`);
+    for (const key of keys) {
       const spec = specs[key];
+      const m = /^(.+)_(r|g|b)$/.exec(key);
+      if (m && tripletKey.has(key)) {
+        const base = m[1];
+        if (renderedBases.has(base)) continue;
+        renderedBases.add(base);
+        const t = triplets[base];
+        const chan = (c) => params[t[c]] === undefined ? Number(specs[t[c]].min || 0) : Number(params[t[c]]);
+        const hex = rgbHex(chan("r"), chan("g"), chan("b"));
+        const label = base.replaceAll("_", " ").replace(/\b\w/g, c => c.toUpperCase());
+        rows.push(`<label class="param-row param-color${slotKind ? " palette-fed" : ""}"><span>${esc(label)}${slotKind ? badge : ""}</span><input type="color" data-color-base="${esc(base)}" value="${hex}"><span class="swatch-chip small" data-swatch="${esc(base)}" style="background:${hex}"></span></label>`);
+        continue;
+      }
       if (spec.kind === "toggle") {
         const checked = params[key] === undefined ? false : Boolean(params[key]);
-        return `<label class="param-row param-toggle"><span>${esc(spec.label)}</span><input type="checkbox" data-param="${esc(key)}" data-kind="toggle" ${checked ? "checked" : ""}></label>`;
+        rows.push(`<label class="param-row param-toggle"><span>${esc(spec.label)}</span><input type="checkbox" data-param="${esc(key)}" data-kind="toggle" ${checked ? "checked" : ""}></label>`);
+        continue;
       }
       const raw = params[key] === undefined ? spec.min : Number(params[key]);
-      return `<label class="param-row param-slider"><span>${esc(spec.label)}</span><input type="range" data-param="${esc(key)}" data-kind="slider" min="${esc(spec.min)}" max="${esc(spec.max)}" step="${esc(spec.step)}" value="${esc(raw)}"><output>${esc(raw)}</output></label>`;
-    }).join("");
+      const colorish = Boolean(m); // incomplete triplet channel stays a slider
+      rows.push(`<label class="param-row param-slider${slotKind && colorish ? " palette-fed" : ""}"><span>${esc(spec.label)}${slotKind && colorish ? badge : ""}</span><input type="range" data-param="${esc(key)}" data-kind="slider" min="${esc(spec.min)}" max="${esc(spec.max)}" step="${esc(spec.step)}" value="${esc(raw)}"><output>${esc(raw)}</output></label>`);
+    }
+    container.innerHTML = rows.join("");
     container.querySelectorAll("[data-param]").forEach(input => { input.oninput = () => applyParamControl(input); });
+    container.querySelectorAll("[data-color-base]").forEach(input => { input.oninput = () => applyColorControl(input, triplets[input.dataset.colorBase]); });
+  }
+
+  function applyColorControl(input, channels) {
+    let params;
+    try { params = JSON.parse($("paramsInput").value || "{}"); } catch (err) { showError(err); return; }
+    const hex = input.value;
+    params[channels.r] = parseInt(hex.slice(1, 3), 16);
+    params[channels.g] = parseInt(hex.slice(3, 5), 16);
+    params[channels.b] = parseInt(hex.slice(5, 7), 16);
+    const chip = input.closest(".param-row").querySelector("[data-swatch]");
+    if (chip) chip.style.background = hex;
+    $("paramsInput").value = JSON.stringify(params, null, 2);
+    setDirty();
+    queueAutoApply();
   }
 
   function applyParamControl(input) {

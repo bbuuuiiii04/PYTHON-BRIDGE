@@ -27,9 +27,16 @@ validation_scope: >
   config/led_sim_profile.json (example committed); canvas 2D not WebGL;
   indirect-wash pass is the photometric centerpiece; all device unknowns =
   calibration knobs, never constants.
-- Build lane `ledsimb` (Opus/high) DISPATCHED tag A196 with the spec; boot
-  verified (lane was re-verifying spec cites at HEAD on first capture).
-  Watcher armed: signal-file first, 5400 s deadline, ONE watcher.
+- Build lane `ledsimb` DISPATCHED tag A196 with the spec; boot verified (lane
+  re-verifying spec cites at HEAD on first capture). ~01:0x executive relay of
+  a standing operator order (FABLE XHIGH FOR EVERYTHING incl. build lanes):
+  lane interrupted BEFORE Task 1 landed, re-pinned to **Fable/xhigh**, both
+  acks verified on-screen, resumed with the quota park-with-state clause
+  (limit mid-round → commit done tasks by explicit paths, report exact stop
+  point, .blocked reason quota). Resume send initially sat UNSUBMITTED at the
+  prompt (field bug; first watcher exited IDLE on it) — bare Enter fixed,
+  processing confirmed, watcher re-armed (signal-file first, 5400 s, ONE
+  watcher).
 - Executive mailbox (superman4) notified of dispatch.
 
 ## Next step (for me or a successor)
