@@ -552,14 +552,17 @@ def darkness_ladder(v4: SpectralFeaturesV4, drop: int, family: str,
         growl_min = min(growl[e - deep + 1:e + 1])
         if growl_min < GROWL_DARK_DB:
             beats = _round_up_rung(deep)
+            abort_at = _pickup_abort(sub, e, drop) if _PICKUP_ABORT_ON else None
             return DarknessDecision(
-                "blackout", beats, (drop - beats, drop), None,
+                "blackout", beats, (drop - beats, drop), abort_at,
                 {"raw_gap": raw_gap, "bass_duty": round(bass_duty, 3),
                  "perc_build": round(perc_build, 3), "grade": grade, "stop": False,
-                 "sub_void": deep, "growl_min": round(growl_min, 2)},
+                 "sub_void": deep, "growl_min": round(growl_min, 2),
+                 "growl_tail": round(growl[e], 2)},
                 f"deep-sub-void blackout {beats}: sub voided {deep} beats "
                 f"(< {SUB_VOID_DB} dB) with the growl band dark "
-                f"(min {growl_min:.1f} < {GROWL_DARK_DB}) into the drop")
+                f"(min {growl_min:.1f} < {GROWL_DARK_DB}) into the drop"
+                + (f"; pickup abort@{abort_at}" if abort_at is not None else ""))
 
     # 1) BALLOON — melodic swell (low build percussion, NOT an audible vocal stop)
     #    shrinks instead of blacking, even into a hard drop (Stereo Love), so this

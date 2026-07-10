@@ -15,6 +15,7 @@ import sys
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -37,6 +38,19 @@ def gone_run(v4, drop, beats, sub_val=1.0):
     """Carve a sub-only-gone run of `beats` immediately before `drop`."""
     for i in range(drop - beats, drop):
         v4.series["sub_db"][i] = sub_val
+    return v4
+
+
+def pickup_void_v4(void_lo, void_hi, n=64):
+    """AWR-199 spec recipe: sub 20 / growl 18 / full 15 / perc 0.2 everywhere,
+    with a deep void (sub −15, full 5) over [void_lo, void_hi] and the growl
+    band dark (−4) at the void's last beat."""
+    v4 = mk_v4(n=n, perc_full=[0.2] * n, full_db=[15.0] * n,
+               growl_band_db=[18.0] * n)
+    for i in range(void_lo, void_hi + 1):
+        v4.series["sub_db"][i] = -15.0
+        v4.series["full_db"][i] = 5.0
+    v4.series["growl_band_db"][void_hi] = -4.0
     return v4
 
 
@@ -196,6 +210,74 @@ class TestDeepSubVoidBlackout(unittest.TestCase):
         self.assertEqual((r.kind, r.beats), ("blackout", 8))
         self.assertTrue(r.cap_inputs.get("stop"))
         self.assertNotIn("sub_void", r.cap_inputs)   # 0b yielded, did not fire
+
+    # --- AWR-199 pickup abort: the void may END before the drop (tolerant_scan
+    # --- accepts e in [D-4, D-1]) — only a >=3-beat returned-music pickup
+    # --- releases; the operator-verdicted gap-0/1/2 shapes stay dark.
+
+    def test_pickup_ended_dip_releases_early(self):
+        # SOL2 repro shape: deep run 39-44 ends at D-4 → 3 audible pickup beats
+        # (45-47) that were planned dark; the guard releases at the first.
+        r = M.darkness_ladder(pickup_void_v4(39, 44), 48, "NEUTRAL")
+        self.assertEqual((r.kind, r.beats), ("blackout", 8))
+        self.assertEqual(r.abort_at, 45)
+        self.assertIn("pickup abort@45", r.reason)
+        self.assertEqual(r.cap_inputs["growl_tail"], -4.0)
+
+    def test_two_beat_pickup_stays_dark(self):
+        # Void ends at D-3 → 2-beat pickup: the TOXIC b159 / OMG b400
+        # operator-verdicted shape ("blackout is perfect") — no release.
+        r = M.darkness_ladder(pickup_void_v4(40, 45), 48, "NEUTRAL")
+        self.assertEqual((r.kind, r.beats), ("blackout", 8))
+        self.assertIsNone(r.abort_at)
+
+    def test_lone_pickup_transient_stays_dark(self):
+        # Void ends at D-2, single present beat 47: the UT-6 / Utopia-b384
+        # semantics (a lone transient counts inside "1 bar blackout").
+        r = M.darkness_ladder(pickup_void_v4(44, 46), 48, "NEUTRAL")
+        self.assertEqual((r.kind, r.beats), ("blackout", 4))
+        self.assertIsNone(r.abort_at)
+
+    def test_void_into_drop_no_abort(self):
+        # Void runs 42-47 straight into the drop (ends at D-1) → nothing returns.
+        v4 = pickup_void_v4(42, 47)
+        for i in range(42, 48):
+            v4.series["growl_band_db"][i] = -4.0
+        r = M.darkness_ladder(v4, 48, "NEUTRAL")
+        self.assertEqual((r.kind, r.beats), ("blackout", 8))
+        self.assertIsNone(r.abort_at)
+
+    def test_kill_switch_restores_none(self):
+        # RBSS_F2_VOID_PICKUP_ABORT=0 restores today's exact decision.
+        with mock.patch.object(M, "_PICKUP_ABORT_ON", False):
+            r = M.darkness_ladder(pickup_void_v4(39, 44), 48, "NEUTRAL")
+        self.assertEqual((r.kind, r.beats), ("blackout", 8))
+        self.assertIsNone(r.abort_at)
+        self.assertNotIn("pickup abort", r.reason)
+
+    def test_utopia_pin_fixtures_hold(self):
+        # The frozen AWR-184 pins, MEASURED real-cache window values (AWR-199
+        # spec Part A) placed into the synthetic grid: both keep abort None
+        # (lone pickup transients), decisions unchanged.
+        b192_sub = [12.8, -28.7, -28.2, -25.1, -25.7, -27.6, -28.1, 5.3]
+        b192_growl = [20.6, 17.7, 14.7, 11.8, 7.8, -4.3, -1.7, 5.7]
+        v4 = mk_v4(n=64, perc_full=[0.2] * 64, growl_band_db=[18.0] * 64)
+        for i, (s, g) in enumerate(zip(b192_sub, b192_growl)):
+            v4.series["sub_db"][40 + i] = s
+            v4.series["growl_band_db"][40 + i] = g
+        r = M.darkness_ladder(v4, 48, "NEUTRAL")
+        self.assertEqual((r.kind, r.beats), ("blackout", 8))
+        self.assertIsNone(r.abort_at)
+
+        b384_sub = [-4.9, -10.9, -16.7, 13.7]
+        b384_growl = [3.3, -1.5, -4.4, -3.1]
+        v4 = mk_v4(n=64, perc_full=[0.2] * 64, growl_band_db=[18.0] * 64)
+        for i, (s, g) in enumerate(zip(b384_sub, b384_growl)):
+            v4.series["sub_db"][44 + i] = s
+            v4.series["growl_band_db"][44 + i] = g
+        r = M.darkness_ladder(v4, 48, "NEUTRAL")
+        self.assertEqual((r.kind, r.beats), ("blackout", 4))
+        self.assertIsNone(r.abort_at)
 
 
 class TestDipAndFlick(unittest.TestCase):
@@ -424,6 +506,16 @@ class TestTransitionRelease(unittest.TestCase):
         # abort_at == window start (drop - beats) => release == window length => zero dark beats.
         plan = self._plan("blackout", 16, drop_beat=32, abort_at=16)
         self.assertEqual(M.transition_release_for(plan, 20.0, [32]), 16.0)
+
+    def test_deep_sub_void_pickup_abort_releases(self):
+        # AWR-199: a REAL deep-sub-void decision carrying the pickup abort
+        # feeds the shared release surface as drop_beat - abort_at.
+        dark = M.darkness_ladder(pickup_void_v4(39, 44), 48, "NEUTRAL")
+        self.assertEqual((dark.kind, dark.abort_at), ("blackout", 45))
+        dec = M.DropDecision(48, "NEUTRAL", 0.7, 3, dark, "", "x")
+        entry = M.DropPlanEntry(48, dec, 0.5, 0)
+        plan = M.F2TrackPlan((entry,), "swell")
+        self.assertEqual(M.transition_release_for(plan, 40.0, [48]), 3.0)  # 48 - 45
 
 
 class TestKillSwitchByteIdentity(unittest.TestCase):
