@@ -766,6 +766,13 @@ LIGHTING ENGINE v2 F4 texture layer (AWR-164, 2026-07-09):
       wins instead of this rung's run-length rounding. Utopia's voids kill the full band below
       audibility so its b192/b384 blackouts are unchanged; no threshold moved (one guard only).
       Software-tested (`test_vocal_stop_yields_to_stop_rung`).
+    - Pickup abort (AWR-199, day-0 interim guard, 2026-07-10): the rung now carries an `abort_at`
+      when its void ended >= 3 beats before the drop with the sub floor audibly back the whole way
+      (the drop-anchored window otherwise keeps returned music dark), releasing at the first
+      returned beat through the existing F2 early-release path — 1- and 2-beat pickups stay dark
+      per the operator gap-0/1/2 verdicts, and env `RBSS_F2_VOID_PICKUP_ABORT=0` (read at import)
+      restores the always-`None` behavior. Software-tested (`TestDeepSubVoidBlackout` pickup
+      cases + `test_deep_sub_void_pickup_abort_releases`); no bridge/hardware validation.
 
 Drop presentation policy (Package 3, AWR-119, 2026-07-04):
 - The implemented behavior authority is `docs/architecture/drop_presentation_authority.md`; the
