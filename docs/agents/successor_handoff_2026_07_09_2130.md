@@ -342,8 +342,13 @@ Item 10 final HEAD = the commit that carries THIS addendum (git log -1). superma
 
 13. STICK HARDWARE FLAG (Saturday risk, ~22:05): MINK disconnected TWICE tonight —
     once operator-confessed (21:25), once SILENT (~21:50, nobody touched it, RB not
-    running) — flaky port or cable suspected by the usb lane. Payload export
-    nonetheless COMPLETE + verified (1,083 v4 entries / 505MB on stick, 22:02).
-    Sweep no_anlz class = 221/567 stick tracks (diagnostic retry was running at
-    handoff-prep as usb run 3). RECOMMEND to operator pre-Saturday: different USB
-    port test + a backup stick with the same payload.
+    running) — flaky port or cable suspected by the usb lane. Payload export state
+    CORRECTED by usb with counts: the 22:02 export was a PARTIAL snapshot (run 2
+    died at 346/567; ~221 disconnect-artifact tracks re-extracting in runs 3/4,
+    ETA ~22:45) — usb's merge-safe run 4 COMPLETES the partial in place;
+    `usb.SWEEPMINK.done` fires only after a clean pass + merged export (check it
+    landed). The no_anlz-221 class = disconnect artifacts, answered. usb also
+    caught its own wrapper's cp -R nesting trap pre-damage. RECOMMEND to operator
+    pre-Saturday: different USB port test + a backup stick — the clone MUST also
+    be volume-named MINK (pre-warm keys are mount-name-bound) and the two sticks
+    never plugged in simultaneously.
