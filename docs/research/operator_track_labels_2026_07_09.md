@@ -417,6 +417,39 @@ track" complaint + B3-4 "big bright sparkles" want).
   rule derived: scripted tracks are EXCLUDED from tier-calibration acceptance sets.
 - **systems:** f2 (calibration-set rule)
 
+## Review batch B4 — threshold-edge T3s (violence 0.698–0.700)
+
+### B4-1 · Age Of Love (Dave Summer Edit) · WALL T3 @1:30
+- **his words:** "played the track and it didn't do a wall3 look. doesn't warrant one
+  anyways since it's calmer dark techno track"
+- **classification:** tier over-rate (calm dark techno — pattern-consistent) + a
+  second live look-delivery non-fire observation (see B4-2 escalation).
+- **systems:** f2, led
+
+### B4-2 · SIGNAL — ISOKNOCK, Isoxo, Knock2, London Mars · UNDER-RATE #2 + AWR-184 FALSE NEGATIVE #1 + look-reliability escalation
+- **his words:** "I LOVE TJIS TRACK. EVERY DROP WARRANTS WALL T3. also there is
+  supposed to be a 2 bar blackout at 27s. and also it took me playing the first drop
+  3 times to get the wall drop at the beginning. the third drop section of this
+  track should be full wall drop strobe. and replaying the 3rd drop section multiple
+  times didn't give me the wall drop"
+- **measured (plan at HEAD):** 8 drops, only ONE T3 (b360 @2:34.3, v0.698 —
+  borderline); rest T1/T2 with family FLAPPING WALL↔HOUSE within the track (his ear:
+  all WALL T3). Second REWIND-class under-rate; zone ION aggression only 0.46.
+- **AWR-184 false negative, mechanism CONFIRMED by measurement:** @0:27 the sub is
+  voided to −52 dB for ~6 beats into drop b72 (@0:30.9 — his "2 bar" count matches
+  at 140 BPM), but growl_band stays 19–28 dB (melodic layer over the void), so the
+  rung's "growl dark (min < 5.0)" gate blocks the blackout. Plan gives balloon.
+  Paired with B2-4 (false positive: buildup-shaped quiet), the rule's boundary is
+  now pinned from BOTH sides: cut = sub void regardless of melodic overlay riding
+  above it; buildup-quiet = not a cut even when sub+growl both fade.
+- **look-delivery reliability (escalated):** 3 replays needed for the wall look on
+  drop 1; the 3rd drop section never produced it across multiple replays. Consistent
+  with rotation + fail-open preference (policy:2045-2054) making the T3 look class a
+  lottery draw; note b328 (the 3rd section's first drop) is HOUSE T1 whose pool has
+  NO wall-strobe at all. Operator expectation now explicit: family+tier should
+  GUARANTEE the look CLASS, not merely prefer it.
+- **systems:** f2, led, laser
+
 ### Hypothesis update after B3 (honest revision)
 B3 weakens the simple contrast story: 3 of 5 void-approached T3s CONFIRMED (Anti Up
 ION, FETISH VOLT, Chainsmokers), 1 soft over-rate, 1 excluded. Over-rates so far
