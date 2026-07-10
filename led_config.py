@@ -12,6 +12,7 @@ from typing import Any, Iterable, Optional
 
 _log = logging.getLogger(__name__)
 
+from .launch_profile import resolve_state_path
 from .govee_frame_renderer import (
     REALTIME_EFFECT_NAMES,
     REALTIME_EFFECT_PARAM_KEYS,
@@ -1451,7 +1452,11 @@ def _build_identity_v2_config(raw: dict[str, Any]) -> IdentityV2Config:
         enabled=bool(raw.get("enabled", False)),
         zones=zones,
         bass_norm=(float(bass_norm[0]), float(bass_norm[1])),
-        store_path=str(raw.get("store_path", "local/state/led_identity_v2.json")),
+        # Frozen runs resolve local/state/* to App Support (AWR-186 M2 Task 3);
+        # source runs get the configured/default path back byte-identical.
+        store_path=resolve_state_path(
+            str(raw.get("store_path", "local/state/led_identity_v2.json"))
+        ),
         soft_flip_beats=float(raw.get("soft_flip_beats", 8.0)),
         palate_reset_enabled=bool(raw.get("palate_reset_enabled", True)),
         palate_reset_beats=float(raw.get("palate_reset_beats", 4.0)),

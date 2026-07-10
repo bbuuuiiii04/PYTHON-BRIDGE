@@ -12,6 +12,9 @@ commit.
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path, PurePath
+
 # The 19 RBSS_* launch flags, verbatim from ss_bridge_watcher.sh start_bridge()
 # (the `exec env` block) at HEAD. All "1" except the transport cooldown, which
 # AWR-149 (2026-07-08) set to "0" when it removed RBSS_LED_TRANSPORT_STICKY in
@@ -90,3 +93,26 @@ def bridge_env(laser_config_path: str, extra: dict[str, str] | None = None) -> d
 def bridge_argv(python_exe: str) -> list[str]:
     """Return the argv that launches the bridge module with ``python_exe``."""
     return [python_exe, "-m", "rb_ss_bridge_v2"]
+
+
+# Where frozen runs keep the learned stores (AWR-186 M2 Task 3). A double-
+# clicked app's cwd is "/", so the repo's cwd-relative "local/state/*" paths
+# are unwritable there — the stores silently never persist.
+FROZEN_STATE_DIR = Path.home() / "Library" / "Application Support" / "RBSS Bridge" / "state"
+
+
+def resolve_state_path(path: str) -> str:
+    """Map relative ``local/state/*`` store paths to App Support — FROZEN ONLY.
+
+    Source runs (the watcher, tests, dev CLIs) return ``path`` unchanged,
+    byte-identical: no gate, no rewrite. Frozen runs rewrite ONLY relative
+    paths under local/state/ (an operator-configured absolute store path still
+    wins). Pure path math — no filesystem access, no directory creation (the
+    store owners already mkdir/degrade on failure).
+    """
+    if not getattr(sys, "frozen", False):
+        return path
+    parts = PurePath(path).parts
+    if PurePath(path).is_absolute() or parts[:2] != ("local", "state"):
+        return path
+    return str(FROZEN_STATE_DIR.joinpath(*parts[2:]))

@@ -28,6 +28,7 @@ import math
 from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
 
+from .launch_profile import resolve_state_path
 from .smart_phrasing import PhraseSegment
 
 log = logging.getLogger("drop_presentation")
@@ -48,7 +49,9 @@ LEARNED_TOLERANCE_BEATS = 2.0
 # else in this module resets with the process). state_manager.py owns the
 # actual load()/write-thread lifecycle; this is just the shared path constant,
 # mirroring PALETTE_STATE_PATH's role in led_palette_control.py.
-LEARNED_STORE_PATH = "local/state/laser_solo_learned.json"
+# Frozen runs resolve this to the App Support state dir (AWR-186 M2 Task 3);
+# source runs keep the cwd-relative path byte-identical.
+LEARNED_STORE_PATH = resolve_state_path("local/state/laser_solo_learned.json")
 AUDIBLE_DAMPER_BEATS = 16.0
 
 

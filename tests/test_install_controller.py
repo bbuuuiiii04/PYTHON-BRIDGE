@@ -154,5 +154,61 @@ class ConfigOverrideEnvTests(unittest.TestCase):
         )
 
 
+class FrozenStatePathTests(unittest.TestCase):
+    """Task 3: local/state/* resolution — frozen runs move to App Support,
+    source runs are byte-identical (the watcher's stores stay where they are)."""
+
+    def test_source_run_returns_input_unchanged(self) -> None:
+        for path in (
+            "local/state/led_identity_v2.json",
+            "local/state/laser_solo_learned.json",
+            "/abs/elsewhere.json",
+            "other/relative.json",
+        ):
+            self.assertEqual(launch_profile.resolve_state_path(path), path)
+
+    def _frozen(self):
+        from unittest import mock
+
+        return mock.patch.object(sys, "frozen", True, create=True)
+
+    def test_frozen_maps_local_state_to_app_support(self) -> None:
+        with self._frozen():
+            resolved = launch_profile.resolve_state_path(
+                "local/state/led_identity_v2.json"
+            )
+        self.assertEqual(
+            resolved, str(launch_profile.FROZEN_STATE_DIR / "led_identity_v2.json")
+        )
+
+    def test_frozen_keeps_nested_layout(self) -> None:
+        with self._frozen():
+            resolved = launch_profile.resolve_state_path("local/state/sub/x.json")
+        self.assertEqual(
+            resolved, str(launch_profile.FROZEN_STATE_DIR / "sub" / "x.json")
+        )
+
+    def test_frozen_leaves_absolute_and_foreign_paths_alone(self) -> None:
+        with self._frozen():
+            self.assertEqual(
+                launch_profile.resolve_state_path("/operator/store.json"),
+                "/operator/store.json",
+            )
+            self.assertEqual(
+                launch_profile.resolve_state_path("other/relative.json"),
+                "other/relative.json",
+            )
+
+    def test_seam_wiring_led_config_and_learned_store(self) -> None:
+        # Source-run import: both consumers must carry today's exact paths.
+        from rb_ss_bridge_v2 import drop_presentation, led_config
+
+        self.assertEqual(
+            drop_presentation.LEARNED_STORE_PATH, "local/state/laser_solo_learned.json"
+        )
+        cfg = led_config._build_identity_v2_config({})
+        self.assertEqual(cfg.store_path, "local/state/led_identity_v2.json")
+
+
 if __name__ == "__main__":
     unittest.main()
