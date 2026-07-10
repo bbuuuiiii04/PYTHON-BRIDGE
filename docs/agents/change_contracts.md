@@ -195,6 +195,40 @@ Forbidden assumptions:
 - LED Pad dry-run or software playback does not prove visual hardware behavior.
 - Output ownership must stay explicit when the bridge is live.
 
+## LED Sim changes
+
+Triggered by changes to:
+
+- `tools/led_sim_*.py`
+- `tools/led_sim_assets/**`
+- `config/led_sim_profile.example.json`
+
+Inspect:
+
+- `docs/guides/led_sim.md`
+- `docs/architecture/doc_index.md`
+- `docs/status/active_work_registry.md`
+
+Run:
+
+```bash
+python -m unittest discover tests
+python tools/check_docs_metadata.py
+python tools/check_agent_contracts.py
+python tools/check_docs_drift.py
+```
+
+Update:
+
+- `docs/guides/led_sim.md`
+- `docs/architecture/doc_index.md`
+- `docs/status/active_work_registry.md`
+
+Forbidden assumptions:
+
+- A matching sim render does not prove room-visible hardware behavior; the sim never contacts the Govee device.
+- Sim profile defaults (gamma, bleed, wash, latency) are calibration assumptions, not device measurements.
+
 ## Laser Pad changes
 
 Triggered by changes to:

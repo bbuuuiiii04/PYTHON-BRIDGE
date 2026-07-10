@@ -253,6 +253,28 @@ contracts:
       - LED Pad dry-run or software playback does not prove visual hardware behavior
       - output ownership must stay explicit when the bridge is live
 
+  led_sim:
+    code_globs:
+      - tools/led_sim_*.py
+      - tools/led_sim_assets/**
+      - config/led_sim_profile.example.json
+    inspect:
+      - docs/guides/led_sim.md
+      - docs/architecture/doc_index.md
+      - docs/status/active_work_registry.md
+    tests:
+      - python3 -m unittest discover tests
+      - python3 tools/check_docs_metadata.py
+      - python3 tools/check_agent_contracts.py
+      - python3 tools/check_docs_drift.py
+    docs_update:
+      - docs/guides/led_sim.md
+      - docs/architecture/doc_index.md
+      - docs/status/active_work_registry.md
+    forbidden_assumptions:
+      - a matching sim render does not prove room-visible hardware behavior; the sim never contacts the Govee device
+      - sim profile defaults (gamma, bleed, wash, latency) are calibration assumptions, not device measurements
+
   laser_pad:
     code_globs:
       - tools/laser_pad_web.py

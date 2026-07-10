@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "segments": 60,
+  "room_mm": [5216, 2284],
+  "corner_segments": [0.0, 20.9, 30.0, 50.9],
+  "start_corner": 0,
+  "direction": "cw",
+  "gamma": 1.0,
+  "white_point": [1.0, 1.0, 1.0],
+  "brightness": 1.0,
+  "diffusion_width_seg": 1.0,
+  "bleed": 0.15,
+  "wash_reach_mm": 800,
+  "wash_gain": 1.0,
+  "fps": 60,
+  "latency_ms": 0,
+  "hold_mode": "zoh",
+  "slew_ms": 0,
+  "bpm": 128
+}
