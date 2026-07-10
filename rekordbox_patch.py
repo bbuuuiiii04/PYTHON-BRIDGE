@@ -25,12 +25,14 @@ THIS MODIFIES A THIRD-PARTY APP, so it is deliberately conservative:
 CLI:
     python3 -m rb_ss_bridge_v2.rekordbox_patch --check
     python3 -m rb_ss_bridge_v2.rekordbox_patch --dry-run
-    python3 -m rb_ss_bridge_v2.rekordbox_patch --apply         # prompts to confirm
-    python3 -m rb_ss_bridge_v2.rekordbox_patch --apply --yes    # no prompt (menubar/admin use)
+    python3 -m rb_ss_bridge_v2.rekordbox_patch --apply          # prompts to confirm (always)
+
+The menubar / frozen app uses run_interactive_gui() (macOS dialogs), never the CLI.
 """
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import plistlib
@@ -97,11 +99,15 @@ def needs_patch(current: dict) -> bool:
 
 
 def codesign_argv(app: Path, entitlements_path: Path) -> list[str]:
-    """The ad-hoc re-sign command. NOT ``--deep``: only the main bundle is
-    re-signed (its executable is the process the bridge attaches to); nested
-    Pioneer-signed frameworks stay intact and load via disable-library-validation."""
+    """The ad-hoc re-sign command. ``--deep`` re-signs EVERY nested component
+    ad-hoc too — frameworks, helper apps (rekordboxAgent.app), dylibs — matching
+    the proven-working state on the maintainer's Mac, where `codesign -dv` shows
+    the main bundle AND every nested item ad-hoc. A stock notarized Rekordbox
+    will NOT launch as ad-hoc-main + Developer-ID/hardened nested, so a top-bundle-
+    only re-sign would produce an unlaunchable app. ``--entitlements`` applies to
+    the main executable, so get-task-allow lands where the bridge attaches."""
     return [
-        "codesign", "--force", "--sign", "-",
+        "codesign", "--force", "--deep", "--sign", "-",
         "--entitlements", str(entitlements_path), str(app),
     ]
 
@@ -229,28 +235,52 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
                            "Dry run — Rekordbox NOT modified. This command would add get-task-allow.",
                            command=argv)
 
-    rc, err = (runner or _default_runner)(argv)
-    if rc != 0:
-        hint = ""
-        if "not permitted" in err.lower() or "permission denied" in err.lower():
-            hint = " (needs admin — run with sudo, or use --admin / the menubar which prompt for your password)"
-        return PatchResult(False, "failed", f"codesign failed{hint}: {err.strip()}", command=argv)
+    # Exclusive lock so a double-click / two concurrent runs can't interleave two
+    # `codesign --force` writes on the same bundle (which would corrupt it).
+    lock_fh = open(Path(tempfile.gettempdir()) / "rbss_rekordbox_patch.lock", "w")
+    try:
+        try:
+            fcntl.flock(lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return PatchResult(False, "refused",
+                               "Another Rekordbox patch is already in progress — wait for it to finish.")
 
-    # Verify the re-sign is valid AND the entitlement actually took.
-    verify = subprocess.run(["codesign", "--verify", "--strict", str(app)],
-                            capture_output=True, text=True, timeout=120)
-    if verify.returncode != 0:
-        return PatchResult(False, "failed",
-                           "Re-sign did not verify — Rekordbox signature may be broken. "
-                           "Reinstall Rekordbox to restore it. Details: " + verify.stderr.strip(),
+        rc, err = (runner or _default_runner)(argv)
+        if rc != 0:
+            hint = ""
+            if "not permitted" in err.lower() or "permission denied" in err.lower():
+                hint = " (needs admin — run with sudo, or use --admin / the menubar which prompt for your password)"
+            # --force strips the old seal before writing the new one, so a mid-write
+            # failure can leave the signature damaged — always name the recovery.
+            return PatchResult(False, "failed",
+                               f"codesign failed{hint}: {err.strip()} — if Rekordbox now won't "
+                               "launch, reinstall it to restore its signature.", command=argv)
+
+        # Verify the re-sign is structurally valid AND the entitlement took. (This
+        # cannot prove Rekordbox LAUNCHES / that task_for_pid works — the operator
+        # confirms that by relaunching Rekordbox.)
+        try:
+            verify = subprocess.run(["codesign", "--verify", "--strict", str(app)],
+                                    capture_output=True, text=True, timeout=180)
+        except (OSError, subprocess.SubprocessError) as exc:
+            return PatchResult(False, "failed",
+                               f"could not verify the re-sign ({exc}) — relaunch Rekordbox; "
+                               "if it won't launch, reinstall it.", command=argv)
+        if verify.returncode != 0:
+            return PatchResult(False, "failed",
+                               "Re-sign did not verify — Rekordbox signature may be broken. "
+                               "Reinstall Rekordbox to restore it. Details: " + verify.stderr.strip(),
+                               command=argv)
+        if not has_get_task_allow(app):
+            return PatchResult(False, "failed",
+                               "Re-sign succeeded but get-task-allow is still absent — no change took effect.",
+                               command=argv)
+        return PatchResult(True, "patched",
+                           "Rekordbox patched. RELAUNCH Rekordbox and confirm it opens; then start the "
+                           "bridge and it will read it. If Rekordbox won't open, reinstall it.",
                            command=argv)
-    if not has_get_task_allow(app):
-        return PatchResult(False, "failed",
-                           "Re-sign succeeded but get-task-allow is still absent — no change took effect.",
-                           command=argv)
-    return PatchResult(True, "patched",
-                       "Rekordbox patched — relaunch Rekordbox, then start the bridge and it will read it.",
-                       command=argv)
+    finally:
+        lock_fh.close()  # releases the flock
 
 
 # ── macOS GUI flow (menubar / frozen-app dispatch) ───────────────────────────
@@ -307,7 +337,6 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--check", action="store_true", help="report whether Rekordbox is already patched (default)")
     g.add_argument("--dry-run", action="store_true", help="show the exact command without modifying anything")
     g.add_argument("--apply", action="store_true", help="apply the patch (Rekordbox must be quit)")
-    ap.add_argument("--yes", action="store_true", help="skip the confirmation prompt (for menubar/admin use)")
     ap.add_argument("--admin", action="store_true",
                     help="prompt for your admin password (osascript) instead of requiring sudo")
     args = ap.parse_args(argv)
@@ -318,13 +347,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if args.apply:
-        if not args.yes:
-            print(f"About to RE-SIGN {app} ad-hoc to add get-task-allow.")
-            print("  - This modifies Rekordbox (a Rekordbox update will revert it).")
-            print("  - Quit Rekordbox first. You may be asked for your admin password.")
-            if input("Type YES to proceed: ").strip() != "YES":
-                print("Aborted.")
-                return 1
+        print(f"About to RE-SIGN {app} ad-hoc (deep) to add get-task-allow.")
+        print("  - This modifies Rekordbox (a Rekordbox update will revert it).")
+        print("  - Quit Rekordbox first. You may be asked for your admin password.")
+        if input("Type YES to proceed: ").strip() != "YES":
+            print("Aborted.")
+            return 1
         result = apply_patch(app, dry_run=False, runner=(run_via_admin if args.admin else None))
     elif args.dry_run:
         result = apply_patch(app, dry_run=True)

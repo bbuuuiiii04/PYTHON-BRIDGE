@@ -4,6 +4,8 @@ All codesign/pgrep calls are mocked; no real re-signing happens.
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import plistlib
 import sys
 import unittest
@@ -52,11 +54,14 @@ class MergeLogicTests(unittest.TestCase):
 
 
 class CodesignArgvTests(unittest.TestCase):
-    def test_argv_shape_and_no_deep(self) -> None:
+    def test_argv_shape_is_deep(self) -> None:
+        # --deep: every nested component is re-signed ad-hoc too, matching the
+        # proven-working all-ad-hoc state (a stock notarized RB won't launch as
+        # ad-hoc-main + Developer-ID/hardened nested).
         argv = codesign_argv(APP, Path("/tmp/e.plist"))
-        self.assertEqual(argv, ["codesign", "--force", "--sign", "-",
+        self.assertEqual(argv, ["codesign", "--force", "--deep", "--sign", "-",
                                 "--entitlements", "/tmp/e.plist", str(APP)])
-        self.assertNotIn("--deep", argv)  # nested Pioneer frameworks stay intact
+        self.assertIn("--deep", argv)
 
 
 def _proc(returncode=0, stdout=b"", stderr=""):
@@ -119,17 +124,51 @@ class ApplyPatchRunTests(unittest.TestCase):
         r = self._apply([_proc(1, stderr="not permitted")], after_has_gta=False)
         self.assertFalse(r.ok)
         self.assertEqual(r.action, "failed")
-        self.assertIn("admin", r.message.lower())  # permission hint surfaced
+        self.assertIn("admin", r.message.lower())      # permission hint surfaced
+        self.assertIn("reinstall", r.message.lower())  # recovery named even on codesign-step failure
 
     def test_verify_failure_tells_user_to_reinstall(self) -> None:
         r = self._apply([_proc(0), _proc(1, stderr="invalid signature")], after_has_gta=True)
         self.assertFalse(r.ok)
         self.assertIn("reinstall", r.message.lower())
 
+    def test_verify_subprocess_error_is_failed_not_crash(self) -> None:
+        # codesign ok (via runner), but the verify subprocess.run RAISES -> caught,
+        # reported with recovery, never left claiming "patched".
+        with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
+             mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
+             mock.patch.object(rp, "read_entitlements", return_value={}), \
+             mock.patch.object(rp.subprocess, "run", side_effect=OSError("boom")):
+            r = apply_patch(APP, dry_run=False, runner=lambda argv: (0, ""))
+        self.assertFalse(r.ok)
+        self.assertEqual(r.action, "failed")
+        self.assertIn("reinstall", r.message.lower())
+
     def test_entitlement_did_not_take(self) -> None:
         r = self._apply([_proc(0), _proc(0)], after_has_gta=False)  # verify ok but gta absent
         self.assertFalse(r.ok)
         self.assertEqual(r.action, "failed")
+
+    def test_refuses_when_a_patch_is_already_running(self) -> None:
+        # A concurrent patch (double-click) holds the lock; the second refuses
+        # instead of running a second interleaving codesign --force.
+        import fcntl
+        import tempfile as _tf
+        lock_path = Path(_tf.gettempdir()) / "rbss_rekordbox_patch.lock"
+        holder = open(lock_path, "w")
+        fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        called = []
+        try:
+            with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
+                 mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
+                 mock.patch.object(rp, "read_entitlements", return_value={}):
+                r = apply_patch(APP, dry_run=False, runner=lambda argv: (called.append(argv), (0, ""))[1])
+        finally:
+            fcntl.flock(holder, fcntl.LOCK_UN)
+            holder.close()
+        self.assertFalse(r.ok)
+        self.assertEqual(r.action, "refused")
+        self.assertEqual(called, [])  # never ran codesign while another holds the lock
 
 
 class RunnerSeamTests(unittest.TestCase):
@@ -210,6 +249,28 @@ class InteractiveGuiTests(unittest.TestCase):
         ap.assert_called_once()
         self.assertFalse(ap.call_args.kwargs["dry_run"])          # real apply, not dry-run
         self.assertIs(ap.call_args.kwargs["runner"], rp.run_via_admin)  # admin-escalated
+
+
+class CliConsentTests(unittest.TestCase):
+    def test_apply_aborts_without_typed_yes(self) -> None:
+        with mock.patch.object(rp, "find_rekordbox", return_value=APP), \
+             mock.patch("builtins.input", return_value="no"), \
+             mock.patch.object(rp, "apply_patch") as ap, \
+             contextlib.redirect_stdout(io.StringIO()):
+            rc = rp.main(["--apply"])
+        self.assertEqual(rc, 1)
+        ap.assert_not_called()          # no typed YES -> no re-sign
+
+    def test_apply_proceeds_only_on_typed_yes(self) -> None:
+        with mock.patch.object(rp, "find_rekordbox", return_value=APP), \
+             mock.patch("builtins.input", return_value="YES"), \
+             mock.patch.object(rp, "apply_patch",
+                               return_value=rp.PatchResult(True, "patched", "ok")) as ap, \
+             contextlib.redirect_stdout(io.StringIO()):
+            rc = rp.main(["--apply"])
+        self.assertEqual(rc, 0)
+        ap.assert_called_once()
+        self.assertFalse(ap.call_args.kwargs["dry_run"])
 
 
 if __name__ == "__main__":

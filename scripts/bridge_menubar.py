@@ -1565,6 +1565,7 @@ class BridgeMenuBar(NSObject):
         else:
             argv = [sys.executable, str(REPO_ROOT / "usb_launcher.py"), "--patch-rekordbox"]
         subprocess.Popen(argv, start_new_session=True)
+        _notify("Enabling Rekordbox reads… follow the prompts (you'll be asked for your admin password).")
 
     def mapLasers_(self, _sender):
         open_browser_url(LASER_PAD_URL)
