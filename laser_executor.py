@@ -130,29 +130,32 @@ class LaserSceneExecutor:
                 self._last_role = role
             self._last_reason = decision.reason
 
-        # AWR-206: the arm intent reaches here either from an automatic role
-        # (scene MIDI would fire on the same tick) OR from the director's
-        # autoloop-not-ready idle decision (decision.blackout_arm) -- the normal
-        # pre-drop state during real mixing, where the director declines to pick
-        # a scene because the autoloop is mid-re-arm. Both must be able to arm
-        # the pre-drop blackout note.
-        should_arm_blackout = bool(
-            (ctx.smart_drop_blackout_arm or ctx.smart_phrasing_blackout_arm)
-            and (role in _AUTO_ROLES or decision.blackout_arm)
-        )
+        arm_signal = bool(ctx.smart_drop_blackout_arm or ctx.smart_phrasing_blackout_arm)
+        # Arm intent from an automatic-role decision whose scene MIDI would fire
+        # on this same tick (the normal, autoloop-ready pre-drop case).
+        auto_role_arm = bool(arm_signal and role in _AUTO_ROLES)
+        # AWR-206: arm intent the director carried ACROSS its autoloop_ready
+        # early return -- an idle decision with no scene but blackout_arm=True.
+        # This is the reachable pre-drop path during real mixing, when the
+        # autoloop is mid-re-arm and the director declines to pick a scene.
+        idle_blackout_arm = bool(arm_signal and decision.blackout_arm)
 
         if role == "idle" or not decision.scene:
             if is_drop_crossing:
                 self._resolve_pending_blackout(reason="drop_crossing_idle")
-            if should_arm_blackout:
-                # AWR-206: the automatic scene stays absent (the director picked
-                # none), but the manual blackout note only needs a genuinely live
-                # deck. Arm on the relaxed gate; the fixed manual_blackout_on
-                # command needs no scene mapping. Skips log at INFO, throttled.
+            if idle_blackout_arm:
+                # The automatic scene stays absent (the director picked none),
+                # but the manual blackout note only needs a genuinely live deck.
+                # Arm on the relaxed gate; the fixed manual_blackout_on command
+                # needs no scene mapping. Skips log at INFO, throttled.
                 if self._passes_blackout_gates(ctx):
                     self.trigger_blackout_on(ctx)
                 else:
                     self._log_blackout_skip(ctx)
+            elif auto_role_arm:
+                log.debug(
+                    "[LX] blackout skipped: decision has no scene (role=%s)", role
+                )
             return None
 
         if role in _AUTO_ROLES and not self._passes_automatic_gates(ctx):
@@ -164,7 +167,7 @@ class LaserSceneExecutor:
             self._record_gate("auto_gate_blocked")
             if is_drop_crossing:
                 self._resolve_pending_blackout(reason="drop_crossing_auto_gate_blocked")
-            if should_arm_blackout:
+            if auto_role_arm:
                 log.debug(
                     "[LX] blackout skipped: auto_gate_blocked (role=%s, scene=%s)",
                     role, decision.scene,
@@ -178,7 +181,7 @@ class LaserSceneExecutor:
         # the typical state for mini-drops <32 beats apart). Missing scene
         # mapping is still respected by checking the policy-supplied scene
         # against the configured scene catalog.
-        if should_arm_blackout:
+        if auto_role_arm:
             if decision.scene in self._config.scenes:
                 log.debug("[LX] blackout arming: role=%s, reason=%s", role, decision.reason)
                 self.trigger_blackout_on(ctx)
