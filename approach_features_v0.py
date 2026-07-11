@@ -163,9 +163,10 @@ class WindowStats:
     n_requested: int       # req_end - req_start (>= 0)
     n_available: int       # end - start (in-range beats)
     available: bool        # at least one in-range beat
-    sufficient: bool       # trend computable: >= _MIN_BEATS_FOR_TREND in-range beats
-                           # AND some series with that many FINITE samples (not slots)
-    reason: str            # "" when available, else why not
+    sufficient: bool       # OLS slope computable: >= _MIN_BEATS_FOR_TREND in-range
+                           # beats AND that many FINITE samples in ONE series (not slots).
+                           # Guarantees a slope, not necessarily a delta (half-split).
+    reason: str            # "" iff sufficient (a slope is computable), else why not
     series: Mapping[str, SeriesStats]
 
 

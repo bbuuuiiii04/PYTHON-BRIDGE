@@ -269,6 +269,15 @@ class FailSafeTests(unittest.TestCase):
         self.assertTrue(r_two.approach.sufficient)
         self.assertEqual(r_two.approach.reason, "")
         self.assertIsNotNone(r_two.approach.series["full_db"].slope)  # trend really computed
+        # (d) two finite samples in DIFFERENT series (1 each) is NOT enough: a slope
+        # needs two points in ONE series, so the gate is per-series `any(n_finite>=2)`,
+        # never a cross-series count -- pins that boundary against a sum() regression.
+        v_split = mk_v4(n=n, **{k: [float("nan")] * n for k in _ALL})
+        v_split.series["full_db"][30] = 5.0
+        v_split.series["sub_db"][30] = 7.0                  # 1 finite in each of two series
+        r_split = A.approach_features(v_split, drop, approach_len=8)
+        self.assertFalse(r_split.approach.sufficient)
+        self.assertEqual(r_split.approach.reason, "insufficient finite data for trend")
         # the too-few-beats path keeps its own distinct reason (regression guard)
         r_short = A.approach_features(mk_v4(n=n), drop, approach_len=1)
         self.assertFalse(r_short.approach.sufficient)
