@@ -101,6 +101,10 @@ Implementation notes:
   for frozen `SLOT_EFFECTS`-set/bank-membership/`drop_pairs`/look-params assertions that a bank
   recast, rename, or new registration can break — they are not named in this playbook's required
   test list but do need updating in the same change (AWR-156 touched all of them).
+- When rebuilding an existing effect and retiring its knobs, remove those params from the tracked
+  example and its renderer-default tests. If the ignored live config still carries them, keeping
+  them allowlisted as documented no-op compatibility input is permitted until an operator-approved
+  live mirror; do not edit the live config to make tests pass (AWR-215).
 
 Required tests:
 - Run the targeted tests listed in the subsystem card.

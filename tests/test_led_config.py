@@ -922,6 +922,8 @@ class Awr156Round2ConfigTests(unittest.TestCase):
         self.assertIn("rt_post_drop_firework_remnants", looks)
         self.assertEqual(looks["rt_groove_heartbeat"].color_source, "engine")
         self.assertEqual(looks["rt_post_drop_firework_remnants"].color_source, "engine")
+        self.assertEqual(looks["rt_post_drop_firework_remnants"].params, {})
+        self.assertFalse(looks["rt_post_drop_firework_remnants"].allow_strobe)
         self.assertEqual(looks["rt_buildup_balloon_comet"].color_source, "baked")
 
     def test_bank_membership_colorways_and_promotions_present(self) -> None:

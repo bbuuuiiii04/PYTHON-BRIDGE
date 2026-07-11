@@ -98,6 +98,11 @@ Config:
   `banks.default.post_drop` (their `drop_pairs` entries deleted); renderer `scene_ref` for both is
   unchanged. Local ignored `config/led_look_director.json` was not touched by this round — mirror
   with explicit operator approval, same as Patch F.
+- AWR-215 (2026-07-11) rebuilds `rt_post_drop_firework_remnants` as the sparse first-eight-beat
+  sparkle half of `rt_drop_chase`. Its tracked-example `params` are now empty because the old
+  `dim_beats`/ember/sparkle knobs drove the deleted wash-and-ember renderer. Those keys remain
+  allowlisted as ignored compatibility input so the local ignored config still validates; bank and
+  `drop_pairs` routing are unchanged. The live config was not edited.
 - AWR-161 (2026-07-09) adds `hz`/`duty` to `REALTIME_EFFECT_PARAM_KEYS` for 18 migrated strobe
   effect names (the last remaining BPM-tied gates, now on the AWR-156 `_hz_strobe_on` gate), and two
   new looks to the tracked example: `rt_rainbow_drop`/`rt_rainbow_post_drop` (`scene_ref:

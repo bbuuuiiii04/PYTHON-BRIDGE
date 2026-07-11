@@ -1573,14 +1573,7 @@
       "allow_strobe": false,
       "backend": "realtime_razer",
       "color_source": "engine",
-      "params": {
-        "dim_beats": 8,
-        "ember_hold_beats": 8,
-        "ember_decay_beats": 2,
-        "sparkle_density": 0.35,
-        "sparkle_size": 1.0,
-        "sparkle_life_s": 0.8
-      }
+      "params": {}
     },
     "rt_drop_strobe_blue": {
       "target": "room_perimeter",

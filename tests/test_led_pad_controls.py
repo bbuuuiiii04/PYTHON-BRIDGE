@@ -154,12 +154,8 @@ class LedPadControlDefaultsTests(unittest.TestCase):
             'params.get("base_width", 1.5)',
             'params.get("pulse_width", 3.0)',
             'params.get("color_mode", 2)',
-            'params.get("dim_beats", 8.0)',
-            'params.get("ember_hold_beats", 8.0)',
-            'params.get("ember_decay_beats", 2.0)',
             'params.get("sparkle_density", 0.35)',
             'params.get("sparkle_size", 1.0)',
-            'params.get("sparkle_life_s", 0.8)',
             # AWR-191 wiring audit — AWR-187's drop_firework_explosion_2
             # divergent fallbacks (PARAM_DEFAULT_OVERRIDES rows, v1 keeps the
             # CONTROL_META globals above).

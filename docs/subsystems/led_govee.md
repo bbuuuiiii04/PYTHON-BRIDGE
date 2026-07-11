@@ -37,6 +37,21 @@ with big drop looks paired to smaller post-drop echoes. The law's terms live in
 `tools/apply_speed_size_law.py` `SPEED_PARAMS`; the tracked example config carries them, and the
 idempotent live-config apply sets only missing values so it never overwrites operator tuning.
 
+Firework remnants rebuild (AWR-215, 2026-07-11; staged, software-tested, hardware-unvalidated):
+- `rt_post_drop_firework_remnants` no longer draws the old slot-5 full-strip wash or its separate
+  sine-envelope ember system. It reuses only the first eight beats of `_slot_drop_chase`: sparse,
+  frame-index-flickering palette sparks whose density falls across the tail. The drop-chase comet
+  half is excluded, and the field is dark from beat 8 until the normal 32-beat cue wrap.
+- The drop-chase synchronized Hz gate is held open for this tail. That keeps low-coverage per-pixel
+  flicker without classifying the effect as a whole-field strobe; `allow_strobe: false` remains.
+- At the physical-room shape of 60 segments, the dry-render test samples 480 frames and caps peak
+  simultaneous lit coverage at 20%; it also pins zero slot-5 background, changing frames, exact
+  drop-chase-intro parity, and the eight-beat cutoff. The tracked example removes the six obsolete
+  remnants params; legacy ignored live params remain accepted for config compatibility.
+- Bank membership and the `rt_drop_firework_explosion` pairing are unchanged because the temporary
+  unbank/repoint stopgap never landed. The ignored live config was not edited, no bridge restart was
+  performed, and room-visible acceptance remains an operator audition gate.
+
 Firework redesign (AWR-187, 2026-07-09; implemented, software-tested, hardware-unvalidated):
 - Operator visual spec (verbatim acceptance): "the firework background explosion should strobe with
   sparkling hues and then when the firework explosion background quickly dims, the embers continue
@@ -457,7 +472,8 @@ LED round 2: strobe-gate rebuild + accepted-look promotion (AWR-156, 2026-07-08;
   `rt_post_drop_firework_remnants` (slot effect, engine-palette) — slot-5 background dims 1.0→0
   over `dim_beats`; time-based embers (`_ember_field`, ported from the Template Lab reference) hold
   full to `ember_hold_beats` then decay to 0 over `ember_decay_beats` (accepted 8+2 — done by beat
-  10). All three share a peak-normalized head-weight helper (`_head_weights`, module-level): a
+  10). **Historical AWR-156 behavior; superseded by AWR-215's sparse drop-chase sparkle tail.**
+  All three share a peak-normalized head-weight helper (`_head_weights`, module-level): a
   triangle-falloff weight divided by its own max (not summed), so the brightest pixel always
   carries the full head level — this is the fix for a measured 0.53× between-pixel brightness dip
   that read as stutter.

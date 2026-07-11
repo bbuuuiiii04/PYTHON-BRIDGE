@@ -2072,86 +2072,19 @@ def _slot_rt_groove_heartbeat(beat: float, local_t: float, frame_index: int,
     return field
 
 
-# Bug 2 (2026-07-09 live round): embers route ONLY to accent slots 3-4 + white
-# slot 5, never the base-ramp slots 0-2. In dark zones (DEEP_POOL base_ramp
-# starts near-black [5,10,60]) a base-ramp ember colorizes to single-digit RGB =
-# invisible; accent/white slots always clear the visibility floor. Zone-agnostic:
-# the slot convention (accents 3-4, white 5) holds for every palette.
-_EMBER_SLOTS: tuple[int, ...] = (3, 4, 5)
-
-
-def _ember_field(local_t: float, segments: int, seed: int, *,
-                 density: float, size: float, life_s: float) -> MotionField:
-    """AWR-156: time-based sparkle field (ported from the lab _ember_field —
-    sparkles are continuous/time-based, never beat-tied; replaces the
-    diagnosed ~17 Hz synchronized whole-field re-roll flicker). Each ember
-    lives an independent cycle: sine fade-in/out over life_s seconds, a
-    personal gap, a fresh position + slot each cycle. Writes into MotionField
-    accent slots 3-4 + white slot 5 only (_EMBER_SLOTS; palette-fed, not baked
-    colors) so embers stay visible in dark zones."""
-    seg = max(0, int(segments))
-    field = _empty_motion_field(seg)
-    if seg == 0 or density <= 0.0:
-        return field
-    t = max(0.0, float(local_t))
-    n = max(1, int(seg * density / max(0.5, size)))
-    for k in range(n):
-        slot_rng = _rng(seed, "ember", k)
-        life = life_s * slot_rng.uniform(0.7, 1.3)
-        gap = life * slot_rng.uniform(0.2, 0.8)
-        period = life + gap
-        phase = slot_rng.uniform(0.0, period)
-        cycle_pos = (t + phase) % period
-        if cycle_pos >= life:
-            continue
-        cycle_idx = int((t + phase) / period)
-        cyc_rng = _rng(seed, "ember", k, cycle_idx)
-        center = cyc_rng.uniform(0, seg)
-        slot = _EMBER_SLOTS[cyc_rng.randrange(len(_EMBER_SLOTS))]
-        env = math.sin(math.pi * cycle_pos / life) * cyc_rng.uniform(0.6, 1.0)
-        for idx in range(seg):
-            w = max(0.0, 1.0 - (_distance_on_ring(idx, center, seg) / size))
-            if w > 0.0:
-                field[idx][slot] = min(1.0, field[idx][slot] + w * env)
-    return field
-
-
 def _slot_rt_post_drop_firework_remnants(beat: float, local_t: float, frame_index: int,
                                          params: Mapping[str, Any], segments: int, seed: int) -> MotionField:
-    """AWR-156: accepted firework remnants (ported from the lab
-    post_drop_firework_remnants) — slot-5 zone-tinted white background
-    dimming 1.0->0 over dim_beats; time-based embers (_ember_field) hold full
-    until ember_hold_beats then decay linearly to 0 over ember_decay_beats
-    (accepted 8+2, done by beat 10). Bug 2 (2026-07-09): embers route only to
-    accent slots 3-4 + white slot 5 (never base-ramp slots 0-2), so they clear
-    the visibility floor in dark zones; slot 5 now carries the dimming
-    background PLUS white embers layered over it. Not a strobe (embers fade on
-    sine envelopes)."""
-    seg = max(0, int(segments))
+    """AWR-215: sparse firework tail using only drop-chase's sparkle intro.
+
+    The synchronized drop-chase strobe gate is deliberately held open here:
+    frame-index re-rolls retain its aggressive per-pixel flicker without
+    turning this low-coverage tail into a whole-field strobe. The comet half
+    and the old full-strip background are both excluded.
+    """
     cue_beat = _edm_beat(beat, params)
-    dim_beats = max(0.5, float(params.get("dim_beats", 8.0)))
-    hold_beats = max(0.0, float(params.get("ember_hold_beats", 8.0)))
-    decay_beats = max(0.25, float(params.get("ember_decay_beats", 2.0)))
-    density = max(0.0, min(0.8, float(params.get("sparkle_density", 0.35))))
-    size = max(0.5, min(3.0, float(params.get("sparkle_size", 1.0))))
-    life_s = max(0.1, min(2.0, float(params.get("sparkle_life_s", 0.8))))
-
-    dim = max(0.0, 1.0 - cue_beat / dim_beats)
-    if cue_beat <= hold_beats:
-        ember_level = 1.0
-    else:
-        ember_level = max(0.0, 1.0 - (cue_beat - hold_beats) / decay_beats)
-
-    field = _empty_motion_field(seg)
-    for idx in range(seg):
-        field[idx][5] = dim
-    if ember_level > 0.0:
-        embers = _ember_field(local_t, seg, seed, density=density, size=size, life_s=life_s)
-        for idx in range(seg):
-            for slot in _EMBER_SLOTS:
-                if embers[idx][slot] > 0.0:
-                    field[idx][slot] = min(1.0, field[idx][slot] + embers[idx][slot] * ember_level)
-    return field
+    if cue_beat >= 8.0:
+        return _empty_motion_field(segments)
+    return _slot_drop_chase(beat, 0.0, frame_index, params, segments, seed)
 
 
 def _slot_palette_comet(beat: float, local_t: float, frame_index: int,

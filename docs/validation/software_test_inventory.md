@@ -10,6 +10,15 @@ validation_scope: software-validated only; hardware-unvalidated in repo evidence
 
 This inventory routes agents to tests without pretending software tests validate physical lighting hardware.
 
+AWR-215 firework-remnants coverage lives in `PostDropFireworkRemnantsTests` inside
+`tests/test_govee_frame_renderer.py`: exact first-eight-beat drop-chase sparkle parity, zero
+whole-strip/slot-5 background, frame-to-frame flicker, a 20% peak-lit ceiling across 480 frames at
+60 segments, and darkness after beat 8. `tests/test_led_config.py` pins the tracked empty params and
+non-strobe classification; `tests/test_led_pad_controls.py` pins the remaining renderer defaults.
+Focused suites: 180/180 green. Full discovery: 4381 tests with 6 failures + 1 error, all outside
+AWR-215 and no remnants failure. These are dry software renders only and do not prove room-visible
+Govee behavior.
+
 ## Broad command
 
 ```bash

@@ -15,7 +15,6 @@ from rb_ss_bridge_v2.govee_frame_renderer import (  # noqa: E402
     GoveeFrameRenderer,
     _drop_chase_spawn_times,
     _ember_env,
-    _ember_field,
     _head_weights,
     _hz_strobe_on,
     _slot_breakdown_star_twinkle,
@@ -1104,82 +1103,51 @@ class DropFireworkExplosionTests(unittest.TestCase):
 
 
 class PostDropFireworkRemnantsTests(unittest.TestCase):
-    """AWR-156 Task 7.4."""
+    """AWR-215: sparse drop-chase sparkle tail, no explosion or wash."""
 
-    def _params(self, **overrides):
-        base = {"dim_beats": 8, "ember_hold_beats": 8, "ember_decay_beats": 2,
-                "sparkle_density": 0.35, "sparkle_size": 1.0, "sparkle_life_s": 0.8}
-        base.update(overrides)
-        return base
+    def test_matches_drop_chase_sparkle_intro(self) -> None:
+        for beat, frame_index in ((0.0, 1), (3.5, 17), (7.9, 42)):
+            with self.subTest(beat=beat):
+                expected = _slot_drop_chase(beat, 0.0, frame_index, {}, 60, 7)
+                actual = _slot_rt_post_drop_firework_remnants(
+                    beat, 9.9, frame_index, {}, 60, 7)
+                self.assertEqual(actual, expected)
 
-    def test_ember_full_at_or_before_hold_beats(self) -> None:
-        # At beat 8 (== hold_beats) the background has dimmed to 0, so every lit
-        # pixel is a pure ember. Flavor (b) routes embers to slots 3-5, so sum
-        # the full row (not just 0-4) to catch slot-5 white embers too.
-        field = _slot_rt_post_drop_firework_remnants(8.0, 5.0, 0, self._params(), 20, 1)
-        ember_total = sum(sum(row) for row in field)
-        self.assertGreater(ember_total, 0.0)
-
-    def test_ember_zero_by_beat_ten_point_five(self) -> None:
-        field = _slot_rt_post_drop_firework_remnants(10.5, 5.0, 0, self._params(), 20, 1)
-        for row in field:
-            for slot in range(5):
-                self.assertEqual(row[slot], 0.0)
-
-    def test_slot_five_carries_only_background(self) -> None:
-        field = _slot_rt_post_drop_firework_remnants(0.0, 0.3, 0, self._params(), 20, 1)
-        for row in field:
-            self.assertAlmostEqual(row[5], 1.0, places=9)
-
-    def test_embers_route_only_to_accent_and_white_slots(self) -> None:
-        # Bug 2 flavor (b): embers land only on accent slots 3-4 + white slot 5,
-        # never the near-black base-ramp slots 0-2. Verified across the field.
-        field = _slot_rt_post_drop_firework_remnants(2.0, 1.5, 0, self._params(), 20, 1)
-        for row in field:
-            for slot in (0, 1, 2):
-                self.assertEqual(row[slot], 0.0)
-
-    def test_ember_luminance_clears_floor_in_deep_pool_dark_palette(self) -> None:
-        # Bug 2: DEEP_POOL-style dark palette -- base_ramp slots 0-2 near-black,
-        # accents 3-4, white slot 5. At beat 8 the background has dimmed to 0, so
-        # every lit pixel is a pure ember. Flavor (b) keeps embers on slots 3-5,
-        # so colorized embers clear a visibility floor; had one landed on slot 0
-        # ([5,10,60]) it would be single-digit RGB = invisible.
-        palette = [(5, 10, 60), (0, 40, 140), (0, 90, 140),
-                   (40, 0, 160), (0, 60, 200), (185, 215, 255)]
-        seg = 40
-        peak_luma = 0
-        saw_ember = False
-        for tick in range(400):
+    def test_zero_whole_strip_background_contribution(self) -> None:
+        for frame_index in range(120):
             field = _slot_rt_post_drop_firework_remnants(
-                8.0, tick / 40.0, tick, self._params(), seg, 7)
-            for row in field:
-                for slot in (0, 1, 2):
-                    self.assertEqual(row[slot], 0.0)
-            for px in universal_colorizer(field, palette):
-                luma = max(px)
-                if luma > 0:
-                    saw_ember = True
-                    peak_luma = max(peak_luma, luma)
-        self.assertTrue(saw_ember, "no embers rendered across the sampled window")
-        self.assertGreaterEqual(peak_luma, 60, msg=f"peak ember luma {peak_luma}/255")
+                2.0, frame_index / 60.0, frame_index, {}, 60, 7)
+            self.assertTrue(all(row[5] == 0.0 for row in field))
+            self.assertTrue(any(sum(row) == 0.0 for row in field))
 
-    def test_ember_field_deterministic_same_seed(self) -> None:
-        # Determinism pin at the layer Bug 2 changed: same seed => same field.
-        a = _ember_field(1.5, 40, 42, density=0.35, size=1.0, life_s=0.8)
-        b = _ember_field(1.5, 40, 42, density=0.35, size=1.0, life_s=0.8)
-        self.assertEqual(a, b)
-        # And embers touch only accent + white slots, never base-ramp 0-2.
-        wrote = {slot for row in a for slot in range(6) if row[slot] > 0.0}
-        self.assertTrue(wrote, "no embers present in the field")
-        self.assertTrue(wrote <= {3, 4, 5}, msg=f"embers wrote slots {sorted(wrote)}")
+    def test_flickers_over_time(self) -> None:
+        frames = [
+            _slot_rt_post_drop_firework_remnants(2.0, i / 60.0, i, {}, 60, 7)
+            for i in range(12)
+        ]
+        self.assertGreater(len({repr(frame) for frame in frames}), 1)
+        self.assertTrue(any(any(sum(row) > 0.0 for row in frame) for frame in frames))
 
-    def test_deterministic_for_same_seed_and_local_t(self) -> None:
-        a = _slot_rt_post_drop_firework_remnants(2.0, 1.5, 0, self._params(), 20, 7)
-        b = _slot_rt_post_drop_firework_remnants(2.0, 1.5, 0, self._params(), 20, 7)
-        self.assertEqual(a, b)
-        c = _slot_rt_post_drop_firework_remnants(2.0, 1.5, 0, self._params(), 20, 8)
-        self.assertNotEqual(a, c)
+    def test_peak_lit_fraction_stays_sparse_at_room_size(self) -> None:
+        peak = 0.0
+        for frame_index in range(480):
+            beat = frame_index / 60.0
+            field = _slot_rt_post_drop_firework_remnants(
+                beat, frame_index / 60.0, frame_index, {}, 60, 7)
+            lit = sum(any(value > 0.0 for value in row) for row in field)
+            peak = max(peak, lit / 60.0)
+        self.assertGreater(peak, 0.0)
+        self.assertLessEqual(peak, 0.20)
+
+    def test_tail_ends_before_drop_chase_comets_begin(self) -> None:
+        before = [
+            _slot_rt_post_drop_firework_remnants(7.9, i / 60.0, i, {}, 60, 7)
+            for i in range(120)
+        ]
+        self.assertTrue(any(any(sum(row) > 0.0 for row in frame) for frame in before))
+        for beat in (8.0, 8.5, 31.9):
+            field = _slot_rt_post_drop_firework_remnants(beat, 0.0, 0, {}, 60, 7)
+            self.assertFalse(any(value > 0.0 for row in field for value in row))
 
 
 class Knob4MashupDeathTests(unittest.TestCase):
@@ -1290,11 +1258,11 @@ class Task9BakedWhiteSlot5Tests(unittest.TestCase):
                 self.assertTrue(any(px == self._TINT[5] for px in frame), msg=name)
                 self.assertFalse(any(px == (255, 255, 255) for px in frame), msg=name)
 
-    def test_remnants_background_renders_the_injected_slot5_tint(self) -> None:
+    def test_remnants_have_no_injected_slot5_background(self) -> None:
         renderer = GoveeFrameRenderer()
         frame = renderer.render("rt_post_drop_firework_remnants", beat_pos=0.0, local_t=0.3,
                                  frame_index=0, params={"slot_colors": self._TINT}, segments=20, seed=1)
-        self.assertTrue(any(px == self._TINT[5] for px in frame))
+        self.assertFalse(any(px == self._TINT[5] for px in frame))
 
 
 if __name__ == "__main__":

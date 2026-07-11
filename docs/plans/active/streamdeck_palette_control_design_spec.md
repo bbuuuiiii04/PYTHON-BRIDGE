@@ -639,3 +639,7 @@ blackout dispatch while a deck is audibly playing (`led_dispatch_policy.py`),
 plus a deck-2 rekordbox chain-freshness gate (`rb_memory.py`). It does not
 change palette input, feedback-file semantics, mutes, Solo, Rainbow, or the
 Stream Deck surface this doc specifies.
+
+AWR-215 (2026-07-11) is renderer-only beside this surface: firework remnants still consume the
+same injected engine palette, but no longer draw a slot-5 room wash. It adds no Stream Deck binding,
+gesture, feedback, mute, Solo, Rainbow, or palette-authority behavior.

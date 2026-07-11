@@ -336,3 +336,7 @@ engine v2 branch in `led_color_engine.py`; async identity derivation, store
 writer ownership, and engine latch in `state_manager.py`; temporary menubar
 switch in `scripts/bridge_menubar.py`; v2 bindings in `led_config.py`,
 `soundswitch_midi_input.py`, and `streamdeck/streamdeck_midi.py`.
+
+AWR-215 changes no palette authority or control path. The rebuilt firework-remnants renderer
+continues to consume the already-injected engine palette; it only removes the full-strip slot-5
+background and reuses the sparse drop-chase sparkle intro.

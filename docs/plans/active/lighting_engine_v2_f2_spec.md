@@ -93,9 +93,9 @@ and consumes the interfaces named in Task 4.
    explosion arc when it passed its contrast gate, colorway strobes,
    rainbow_drop, knob-4 slot cues) via a config-shaped
    `drop_look_routing` table (family × tier → look preference list, bank
-   membership still the gate); remnants background dim length follows the
-   musical content (8-beat default when ambiguous — the F2 dim-routing
-   input); post-drop dynamic width decay (width 4 → groove width over
+   membership still the gate); AWR-215 removed the remnants background
+   entirely, so the former F2 dim-routing input is retired rather than
+   controlling an invisible layer; post-drop dynamic width decay (width 4 → groove width over
    ~16 beats) via the runtime width injection pattern.
 9. **Kill-switch discipline (D§7):** everything above lands under the F2
    switch; F2 off ⇒ fixed `led_predark_beats: 4` predark, v1 drop cues, no
