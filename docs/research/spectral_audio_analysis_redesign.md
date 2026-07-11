@@ -719,6 +719,52 @@ axis does not replace tier, feed darkness, or drive any output.
 
 ---
 
+## 11. Raw approach-descriptor layer (AWR-204, offline, 2026-07-11)
+
+`approach_features_v0.py` is the **offline raw measuring layer** for the SOL2 finding-1 refactor:
+pre-drop "go dark vs balloon vs stop" must be read from the *shape of the approach over time*, not
+the single lowest growl beat (a one-sample gate — the exact fragility being replaced). This layer
+**decides nothing** — no class, no threshold, no darkness length, no label. It is the raw material a
+later rules-first-vs-tiny-model bake-off will read. Zero runtime importers (only `tools/`+`tests/`
+may import it; a static AST+text test enforces it), no I/O, and it never times or triggers a cue.
+**SOL2 finding-1 is NOT fixed by this layer** — only its measuring surface exists.
+
+- **What it computes.** One pure function `approach_features(v4, drop_beat, ...)` returns a frozen
+  `ApproachFeatures` bundle over the four AWR-195 charter views of one drop: **(a)** track-wide
+  quantiles + an across-`genuine_drops` first-landing reference; **(b)** an explicit current section
+  (`section_start` XOR `section_len`, honestly unavailable when neither is given); **(c)** the
+  pre-drop approach (`approach_start` XOR `approach_len`); **(d)** `landed_first8` and `landed_next8`
+  kept **separate**. Per window, per series (`full/sub/growl_band/sustain_mid/sustain_high/perc_full`)
+  a `SeriesStats` carries robust quantiles `p05..p95` (p05 is the robust floor — **not** `min`),
+  `mean`, early/late half means + their `delta`, an OLS `slope`/beat, and finite-data coverage.
+- **Void + depth, raw.** `run_curves` reports the longest below-floor run in the approach at a
+  reference view's own p10/p25/p50 (data-derived quantiles, precedence track→section→self) — no
+  musical floor baked in — plus a `longest_run_below(values, floor)` primitive for a caller-supplied
+  floor (a non-finite beat BREAKS the run, never counted as below). `depth_vs_track`/`depth_vs_section`
+  are the approach FLOOR (p10) minus the reference's TYPICAL level (p50), a raw subtraction that stays
+  a true "deep for this track" signal (median-referenced so a long void does not contaminate it).
+- **Marker robustness.** The approach + both landed bundles are recomputed at drop ±k (k∈0..radius,
+  default 2); a length window slides with the marker, an explicit-start window keeps its start and
+  only its end moves; `descriptor_range(bundles, series, stat)` gives the (min,max) across offsets.
+  The Rekordbox marker stays authoritative — the module never re-times a cue.
+- **Fail-safe / honest.** Missing series → `present=False`, all stats `None`. Non-finite (NaN/±inf)
+  filtered before any `sorted()`/percentile; an all-hole half → `None`, never `0`. Short window →
+  `sufficient=False`, `slope=None`, reason string. Out-of-range → clamped, `n_requested` vs
+  `n_available` reported honestly. Empty track → `available=False` with a reason, **no exception**.
+  Only inconsistent CALLER inputs raise `ValueError` (both/neither of an XOR pair, non-positive
+  length, negative radius). **Missing/short/non-finite data can never fabricate a darkness event.**
+  Reuses `spectral_profile.percentile` (no new dependency); deterministic (repeated calls compare
+  equal, pinned by a test).
+- **Status:** `experimental` / `software-tested` (25 unit tests; independent ULTRACODE adversarial
+  review found zero module-logic defects — code/tests left unchanged). Offline raw layer only — **no
+  classifier, no tool, no live wiring, no hardware validation.** The taste calls (class boundaries,
+  darkness lengths, the uncertain fall-back, marker-radius policy, rules-vs-model promotion) are
+  deliberately left open for the operator. `tools/approach_feature_report.py` was NOT built (the raw
+  module + tests suffice until structured gold / classifier evaluation exists).
+  SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
+
+---
+
 ## Appendix A — corpus recon (2026-07-05, this session, read-only)
 
 - Rekordbox DB opened exactly as `filepath_resolver.py:281-283` does (pyrekordbox

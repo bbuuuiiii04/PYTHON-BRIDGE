@@ -90,6 +90,24 @@ zero-runtime-importer invariant, with a companion test proving the guard catches
 offline code — `hardness_v0.py` does no I/O and has zero runtime importers; the evaluator opens the
 Rekordbox DB + v4 cache READ-ONLY only. Not run in these tests: the real corpus, cache, or DB.
 
+AWR-204 adds `tests/test_approach_features_v0.py` (25 tests) for the offline raw approach-descriptor
+layer `approach_features_v0.py`. On duck-typed `SpectralFeaturesV4` synthetics (no cache/DB/ANLZ) it
+proves: rising/falling/held approach trajectories read out in `slope` + half-split `delta` sign; a
+ringing melodic layer over a cut sub is summarized independently (no min-masking); depth reads the
+approach FLOOR (p10) minus the reference's TYPICAL level (p50), so a broad collapse and a single-band
+filter separate without a count-threshold; separate first-8 vs following-8 landed windows; the
+track-wide baseline plus the across-`genuine_drops` first-landing reference (no drops → None,
+empty drops → an explicit zero reference); the track-referenced void run curve and the
+`longest_run_below` primitive where a non-finite beat breaks the run; the ±2 marker-offset bundles
+(a length window slides, an explicit-start window moves only its end, offset 0 equals the primary
+window, `descriptor_range` collapses to a point on a flat track); and the fail-safe honesty —
+boundary clamps reporting requested vs available, a short window insufficient with no slope, a
+missing series `present=False` with all-None stats, non-finite filtered and counted, an empty track
+unavailable (not an exception), inconsistent caller inputs raising `ValueError`, byte-identical
+determinism, and the AST+raw-text zero-runtime-importer invariant. The module is pure and does no
+I/O; **it decides nothing** — no class, threshold, darkness length, or live authority, and missing
+data can never fabricate a darkness event. Not run in these tests: the real corpus, cache, or DB.
+
 ## Required documentation update
 
 When adding or changing tests, update:

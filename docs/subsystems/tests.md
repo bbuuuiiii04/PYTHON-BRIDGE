@@ -73,6 +73,17 @@ Coverage expectations:
   phantom T3), and the AST-based zero-runtime-importer invariant (only `tools/`+`tests/` may
   import the offline module). Stdlib-only; duck-typed synthetics + one real `SpectralFeaturesV4`
   fixture, no cache/DB.
+- Offline raw approach descriptors (`approach_features_v0.py`, AWR-204) changes need
+  `tests/test_approach_features_v0.py` (25 tests): rising/falling/held trajectories (slope + delta
+  sign), ringing-layer-independent-of-sub-cut (no min-masking), broad-vs-single-band and
+  approach-floor (p10-not-p50) depth, section-relative depth, separate first-8/next-8 landed windows,
+  track baseline + across-`genuine_drops` landing reference (incl. no-drops → None and empty-drops →
+  zero-ref), the track-referenced void run curve + the `longest_run_below` primitive (a hole breaks
+  the run), the ±2 offset bundles (slides for a length window, end-only for an explicit start,
+  offset-0 == primary, `descriptor_range` stability), boundary clamp (requested vs available),
+  short-window insufficiency (no slope), missing series → `present=False`, non-finite filtered +
+  counted, empty track unavailable-not-error, inconsistent caller inputs raising, determinism, and
+  the AST+text zero-runtime-importer invariant. Stdlib-only; duck-typed synthetics, no cache/DB.
 - Config schema changes need validation tests.
 - LED/Govee rendering changes need deterministic renderer/runner tests where practical.
 - Laser changes need config/executor/director tests.
