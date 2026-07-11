@@ -120,16 +120,12 @@ else
         "$BUILD_PY" -m venv "$VENV"
         "$VENV/bin/python" -m pip install --upgrade pip
         "$VENV/bin/python" -m pip install pyinstaller
-        # Full rig first (analysis+spectral = numpy/scipy/librosa->numba/llvmlite).
-        # If a heavy universal2 wheel is missing on this interpreter (common on the
-        # NEWEST Python, e.g. no 3.14 llvmlite universal2 wheel), fall back to the
-        # core rig so the build still produces a WORKING bundle — without spectral
-        # analysis — rather than failing outright. Warn loudly; runbook covers it.
-        if ! "$VENV/bin/python" -m pip install ".[bundle,analysis,spectral]"; then
-            echo "make_stick: WARNING — analysis/spectral deps failed to install (likely no universal2 wheel for numba/llvmlite on this Python). Falling back to the core rig; the bundle will run WITHOUT spectral analysis. Install an older python.org 3.x (or set RBSS_BUILD_PYTHON) if you need it." >&2
-            "$VENV/bin/python" -m pip install ".[bundle]" \
-                || fail "core dependency install failed — see the runbook DEFECT-1 notes."
-        fi
+        # Spectral analysis is REQUIRED — never ship a bundle without it. The full
+        # rig (analysis+spectral = numpy/scipy/librosa->numba/llvmlite) installs
+        # fine on a stable python.org build; only the very newest Python may lack a
+        # numba wheel. Fail LOUD pointing at the fix rather than dropping the feature.
+        "$VENV/bin/python" -m pip install ".[bundle,analysis,spectral]" \
+            || fail "spectral deps failed to install on $("$VENV/bin/python" -V 2>&1) — numba/llvmlite likely have no wheel for this Python yet. Install a python.org 3.12 or 3.13 universal2 build (both have them), set RBSS_BUILD_PYTHON=/Library/Frameworks/Python.framework/Versions/3.13/bin/python3, and rerun. Spectral is required; the bundle is NOT shipped without it."
     fi
     "$VENV/bin/pyinstaller" packaging/rbss_launcher.spec \
         --noconfirm --distpath dist --workpath build

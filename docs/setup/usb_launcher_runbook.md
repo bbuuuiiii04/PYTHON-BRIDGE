@@ -50,15 +50,18 @@ prebuilt `libpython`. Only a low-target interpreter fixes it.
   ./.build-venv-u2/bin/python -m pip install pyinstaller
   ./.build-venv-u2/bin/python -m pip install ".[bundle,analysis,spectral]"
   ```
-  Caveat: for a fully universal2 app every C-extension wheel must have a
-  universal2 build; `librosa`→`numba`/`llvmlite` are the usual holdouts and the
-  NEWEST Python often has none yet. If the `analysis,spectral` install fails,
-  `make_stick.sh` warns and falls back to `.[bundle]` (the core rig) so the build
-  still produces a WORKING bundle — but **without spectral analysis**. If you need
-  spectral, install an older python.org 3.x (e.g. 3.12) whose numba/llvmlite
-  universal2 wheels exist and point `RBSS_BUILD_PYTHON` at it. If a wheel is
-  arm64-only the app still runs on the build arch (the mkfifoat fix stands);
-  Intel support is best-effort until universal2 wheels exist.
+  **Spectral analysis is REQUIRED, not optional.** It does NOT trade off against
+  the macOS-12 fix — that fix is purely the interpreter's deployment target and is
+  independent of the spectral deps. `numpy`/`scipy`/`librosa`→`numba`/`llvmlite`
+  install fine on a stable python.org build; only the very newest Python (e.g.
+  3.14) may lack a `numba` wheel yet, which is why `make_stick.sh` prefers a stable
+  version (3.13/3.12) and **fails loudly** — never ships without spectral — if the
+  chosen interpreter can't install it, telling you to point `RBSS_BUILD_PYTHON` at
+  a python.org 3.12/3.13. On Apple Silicon the app is arm64 and runs on any arm64
+  Mac ≥ the deployment floor with full spectral. Intel (x86_64) support is a
+  SEPARATE concern that needs universal2 wheels for the C extensions — only pursue
+  it if a target Mac is actually Intel (the `_mkfifoat` crash proved this one is
+  Apple Silicon).
 - **Gatekeeper/quarantine:** ad-hoc signing satisfies Apple-silicon's
   must-be-signed rule, and a plain USB/DMG copy applies no `com.apple.quarantine`,
   so the app launches without a notarization step. `make_stick.sh` runs
