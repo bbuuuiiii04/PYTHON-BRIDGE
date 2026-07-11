@@ -68,7 +68,10 @@ fail() { echo "make_stick: $1" >&2; exit 1; }
 find_build_python() {
     local candidates=() py v archs
     [ -n "${RBSS_BUILD_PYTHON:-}" ] && candidates+=("$RBSS_BUILD_PYTHON")
-    for v in 3.14 3.13 3.12 3.11; do
+    # Prefer a STABLE version — numba/llvmlite (librosa's deps, REQUIRED for
+    # spectral analysis) ship wheels for stable Pythons; the very newest Python
+    # often has none yet. Newest last so the build gets full spectral by default.
+    for v in 3.13 3.12 3.11 3.14; do
         candidates+=("/Library/Frameworks/Python.framework/Versions/$v/bin/python3")
     done
     for py in "${candidates[@]}"; do
