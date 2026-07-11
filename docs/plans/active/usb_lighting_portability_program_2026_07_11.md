@@ -1,0 +1,98 @@
+---
+doc_status: current
+truth_level: program-charter (design only; zero implementation authorized)
+last_verified_commit: 38e127a
+last_verified_date: 2026-07-11
+validation_scope: >
+  AWR-208 program charter — portable lighting data so the operator's USB stick
+  lights correctly on ANY laptop, including foreign machines with none of his
+  local Rekordbox collection. Operator mandate 2026-07-11: "THIS NEEDS CAREFUL
+  PLANNING, IMPLEMENTATION, AND REVIEW LOOPS." Every stage below gates on an
+  independent review before the next begins.
+---
+
+# AWR-208 — USB lighting portability program (charter)
+
+## The requirement (operator, verbatim intent)
+The USB stick is how ALL tracks are played. It must produce full lighting
+(phrase, drops, darkness/F2, spectral behavior, SoundSwitch, lasers) in two
+environments:
+- **E1 — his laptop** (full local collection): AWR-207 (in flight) solves this
+  by matching USB tracks to their local library twin and parsing phrase from
+  the local ANLZ files.
+- **E2 — a foreign laptop** (no collection, bridge running from the stick's
+  frozen app): nothing local exists, and **Rekordbox does not export phrase
+  data (PSSI) to USB** [operator-confirmed 2026-07-11]. The data must therefore
+  TRAVEL ON THE STICK.
+
+## Verified ground truth this design stands on
+- [confirmed] USB ANLZ paths are readable by the direct reader on load
+  (`[ANLZ][DIRECT] path=/Volumes/MINK/PIONEER/USBANLZ/...`, live log 2026-07-11).
+- [confirmed] USB export ANLZ lacks PSSI phrase sections (operator fact; the
+  runtime phrase parse consumes ANLZ paths at `state_manager.py:2259/:2567`).
+- [confirmed] The stick already carries a bridge payload: AWR-186 M2
+  `make_stick` builds "RBSS BRIDGE USB/" with the frozen app + pack carriage
+  (software-gated; foreign-Mac frozen-app fixes exist on branch
+  `claude/rbss-bridge-install-debug-59yrn6`, operator-unvalidated).
+- [confirmed] All lighting truth (phrase plans, v4 spectral features, SS
+  scripted ids, laser tags) exists ONLY on his laptop, derivable at
+  stick-build time.
+
+## Proposed architecture (to be attacked in D1 review, not assumed)
+**Build-time sidecar, runtime fallback chain.**
+1. At stick build/refresh (on his laptop), a `make_stick` step exports a
+   per-track **lighting sidecar** onto the stick: phrase data (PSSI-derived),
+   beatgrid fingerprint, the spectral fields the runtime actually consumes
+   (v4 or its derived subset — size question below), SoundSwitch scripted id,
+   laser-tag beats — keyed by the stick's own USBANLZ id AND fingerprint.
+2. Runtime resolution chain (extends AWR-207's payload-driven seam):
+   local DB twin → stick sidecar → honest unresolved. Foreign laptops hit the
+   sidecar path; his laptop keeps preferring local truth.
+3. Staleness: fingerprint mismatch (re-analyzed/re-gridded track) = honest
+   miss + a build-tool warning listing stale tracks; never guess.
+
+## Design questions D1 MUST settle (honest unknowns)
+- Sidecar payload size: full v4 per track vs the derived fields the runtime
+  needs; per-track cost × library size vs stick capacity.
+- Stability of USBANLZ ids (`P018/000086A0`) across Rekordbox re-exports —
+  if unstable, fingerprint becomes the primary key, id the hint.
+- Exact runtime consumer inventory: everything `_read_runtime_anlz_data` and
+  downstream actually need in E2 (phrase, ctx, v4, identity key, f2 plan).
+- Foreign-machine realities: frozen-app deps (no librosa extraction on a
+  foreign Mac mid-set — sidecar must make extraction unnecessary), Rekordbox
+  version on the foreign laptop, read-only stick mounts.
+- Refresh UX: when he re-exports tracks to the stick, how the sidecar rebuild
+  is triggered and verified (Test-the-Lights integration?).
+- Relationship to the pending foreign-Mac frozen-app gates (that branch's 9
+  fixes are operator-unvalidated — E2 cannot be validated before them).
+
+## Stages and review loops (operator-mandated; no stage starts before the
+## previous stage's gate passes)
+- **D1 Design review**: an independent strongest-tier seat attacks this
+  charter + produces the settled design (post quota reset; SOL or Fable
+  one-shot). Gate: executive accepts; operator vetoes surprises.
+- **D2 Spec**: codex-spec Part A–E with the full pre-handoff checklist;
+  separate specs for build-time (sidecar exporter in make_stick) and runtime
+  (resolution chain). Gate: adversarial spec self-review + executive pass.
+- **D3 Implement** (Codex/lane, staged): build-time first (testable offline
+  against the real stick), runtime second (behind the AWR-207 seam). Gate:
+  suites by name + hard checks + executive desk re-run.
+- **D4 Adversarial review**: independent reviewer per round (the AWR-206
+  lesson: reviews catch unreachable-path bugs the builder's tests can't).
+  Gate: PASS verdict committed.
+- **D5 Operator hardware gates**: E1 = his next USB session after restart
+  (AWR-207); E2 = the real foreign-Mac walkthrough (fold into the standing
+  Saturday MINK gate: memory-read test + install→parity→purge). Nothing is
+  called working until these pass — SOFTWARE-VALIDATED ONLY until then.
+
+## Non-goals (fail closed on all)
+- No spectral/librosa extraction on foreign machines at runtime.
+- No cloud/network dependency for lighting data.
+- No Rekordbox DB writes, ever, anywhere.
+- No silent degradation: a track the sidecar can't serve reads as unresolved
+  with a visible log reason, exactly like AWR-207's misses.
+
+## Status
+CHARTER ONLY. AWR-207 (E1 + the extensible seam) is the only authorized
+implementation. D1 dispatches when quota returns (2026-07-15) unless the
+operator re-prioritizes.
