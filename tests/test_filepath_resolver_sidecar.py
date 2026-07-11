@@ -119,6 +119,14 @@ class SidecarResolutionTests(unittest.TestCase):
         self.assertIs(selected, true_record)
         self.assertEqual(reason, "sidecar-pdb-match")
 
+        duplicate = {**true_record, "content_id": "43"}
+        selected, reason, ids = resolver._select_sidecar_record(
+            [true_record, duplicate], grid, device_track,
+        )
+        self.assertIsNone(selected)
+        self.assertEqual(reason, "usb-pdb-ambiguous")
+        self.assertEqual(ids, ["42", "43"])
+
     def test_sidecar_payload_carries_local_anlz_v4_ssid_and_tags(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -141,11 +149,25 @@ class SidecarResolutionTests(unittest.TestCase):
                  patch.object(resolver, "_features_v4_from_payload", return_value=sentinel_v4):
                 payload = resolver._payload_for_sidecar(root, record, "/Volumes/GUEST/PIONEER/x")
 
+            content = SimpleNamespace(
+                ID="42", FolderPath="/home/music/twin.wav", BPM=12800, Length=200,
+            )
+            with patch.object(resolver, "_read_soundswitch_id", return_value="{SSID}"), \
+                 patch.object(resolver, "_fetch_laser_tag_beats", return_value=[4.0, 68.0]), \
+                 patch.object(resolver, "_hotcue_marker", return_value="LASER"):
+                local_payload = resolver._payload_for_content(Mock(), content, grid)
+
         self.assertEqual(payload["filepath"], "/Volumes/GUEST/song.wav")
         self.assertEqual(payload["local_anlz_path"], str(dat.resolve()))
         self.assertIs(payload["sidecar_v4"], sentinel_v4)
         self.assertEqual(payload["soundswitch_id"], "{SSID}")
         self.assertEqual(payload["laser_tag_beats"], [4.0, 68.0])
+        for key in (
+            "bpm", "content_id", "first_beat_ms", "beatgrid_times_ms",
+            "beatgrid_bpms", "beatgrid_source", "soundswitch_id", "total_ms",
+            "laser_tag_beats",
+        ):
+            self.assertEqual(payload[key], local_payload[key], key)
 
     def test_local_uuid_hit_never_consults_sidecar(self) -> None:
         local_id = "938c2a63-a637-4000-8000-000000000001"
