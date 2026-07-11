@@ -105,18 +105,27 @@ _DEFAULT_COLOR_STATUS: dict[str, Any] = {
 
 def rekordbox_status(version: str, supported: bool, health: dict) -> dict:
     """Pure: the operator-facing 'rekordbox' status block from the detected version,
-    whether it's a SUPPORTED build, and the reader's attach health. An empty version
-    means Rekordbox isn't detected (benign — no reason). reason is one of
-    'unsupported_version' | 'reads_blocked' | 'attach_failed' | ''. The test seam."""
+    whether it's a SUPPORTED build (offset table), and the reader's attach health.
+
+    Empty version = Rekordbox not detected (benign, no reason). A live read failure
+    (reads_blocked/attach_failed) WINS over 'unsupported_version' — it's the actual
+    make-or-break, and it must not be masked when a guest is BOTH on an unknown build
+    and unauthorized. NOTE: 'supported' reflects only the direct-master offset table;
+    deck reads use a version-robust ObjC scan that does NOT need it, so
+    'unsupported_version' is a diagnostic caution, not a no-lights guarantee. The
+    test seam."""
     version = version or ""
     health = health if isinstance(health, dict) else {}
-    reads_ok = bool(health.get("reads_ok")) if supported else False
+    reads_ok = bool(health.get("reads_ok"))
+    health_reason = str(health.get("reason") or "")
     if not version:
         reason = ""
+    elif health_reason:
+        reason = health_reason          # a live read failure (auth) is the make-or-break
     elif not supported:
         reason = "unsupported_version"
     else:
-        reason = str(health.get("reason") or "")
+        reason = ""
     return {
         "version": version or "unknown",
         "supported": bool(supported),

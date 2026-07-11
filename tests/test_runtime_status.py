@@ -911,10 +911,12 @@ class RekordboxStatusTests(unittest.TestCase):
         from rb_ss_bridge_v2.runtime_status import rekordbox_status
         # Rekordbox not detected -> benign, no reason (never cry wolf).
         self.assertEqual(rekordbox_status("", False, {})["reason"], "")
-        # Detected but an unsupported RB build -> named, reads not ok.
+        # Detected, unsupported offset-table build, but ObjC reads still work: reason
+        # is the diagnostic 'unsupported_version' yet reads_ok stays True (the
+        # version-robust ObjC scan doesn't need the offset table).
         r = rekordbox_status("7.9.9", False, {"reads_ok": True})
         self.assertEqual(r["reason"], "unsupported_version")
-        self.assertFalse(r["reads_ok"])
+        self.assertTrue(r["reads_ok"])
         # Supported build but task_for_pid denied -> reader's reason passes through.
         r = rekordbox_status("7.2.11", True, {"reads_ok": False, "reason": "reads_blocked"})
         self.assertEqual(r["reason"], "reads_blocked")
@@ -924,6 +926,10 @@ class RekordboxStatusTests(unittest.TestCase):
         self.assertEqual(r["reason"], "")
         self.assertTrue(r["reads_ok"])
         self.assertEqual(r["version"], "7.2.11")
+        # A live read failure (auth) WINS over unsupported — must not be masked when a
+        # guest is BOTH on an unknown build AND unauthorized.
+        r = rekordbox_status("7.9.9", False, {"reads_ok": False, "reason": "reads_blocked"})
+        self.assertEqual(r["reason"], "reads_blocked")
 
 
 if __name__ == "__main__":

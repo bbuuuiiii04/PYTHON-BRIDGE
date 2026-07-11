@@ -274,13 +274,20 @@ class NumpyFailureFallbackTests(unittest.TestCase):
 
 
 class ClassifyAttachErrorTests(unittest.TestCase):
-    def test_task_for_pid_is_reads_blocked(self) -> None:
+    def test_auth_denial_is_reads_blocked(self) -> None:
         from rb_ss_bridge_v2.rb_memory import classify_attach_error
+        # task_for_pid failure = not authorized.
         self.assertEqual(
             classify_attach_error(OSError("task_for_pid(123) failed kern_return=5")),
             "reads_blocked",
         )
-        self.assertEqual(classify_attach_error(RuntimeError("vmmap timed out")), "attach_failed")
+        # On a guest, vmmap fails FIRST (same task-port auth) -> this ValueError.
+        self.assertEqual(
+            classify_attach_error(ValueError("Cannot determine RB base from vmmap output")),
+            "reads_blocked",
+        )
+        # A genuinely different failure stays generic.
+        self.assertEqual(classify_attach_error(RuntimeError("something else")), "attach_failed")
 
 
 if __name__ == "__main__":

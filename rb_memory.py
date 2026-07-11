@@ -1212,11 +1212,17 @@ class PositionCache:
 
 def classify_attach_error(exc: BaseException) -> str:
     """Name the reason the reader could not attach, for the operator-facing status.
-    task_for_pid failure = the bridge is not authorized to read Rekordbox on this
-    Mac (the make-or-break on a guest); anything else is a generic attach failure.
-    Pure — the test seam."""
-    msg = str(exc)
-    if "task_for_pid" in msg:
+    On a guest the make-or-break is authorization: the bridge isn't allowed to read
+    Rekordbox. That shows up as EITHER a task_for_pid failure OR a vmmap that returns
+    nothing (`_base_from_vmmap` then raises 'Cannot determine RB base') — vmmap runs
+    first and needs the SAME task port — so both map to 'reads_blocked'. Anything
+    else is a generic attach failure. Pure — the test seam."""
+    msg = str(exc).lower()
+    if (
+        "task_for_pid" in msg
+        or "cannot determine rb base" in msg
+        or "not permitted" in msg
+    ):
         return "reads_blocked"
     return "attach_failed"
 
@@ -1554,6 +1560,11 @@ class RBMemoryReader(threading.Thread):
     def _try_attach(self) -> None:
         pid = get_rb_pid()
         if pid is None:
+            # Rekordbox not running: not an error. Clear any stale reason so the
+            # menubar doesn't keep showing "reads blocked" after RB simply quit
+            # (the maintainer's normal quit/restart churn).
+            self._reads_ok = False
+            self._attach_reason = ""
             time.sleep(self._ATTACH_RETRY_S)
             return
         try:

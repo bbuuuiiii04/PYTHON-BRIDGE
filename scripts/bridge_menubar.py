@@ -780,16 +780,15 @@ def compact_status_lines(status: dict, pids: list[str] | None = None) -> list:
 
     # Row 0: bridge header
     multi_seg = _seg(f"  ⚠ {len(pids)} procs", color=_co()) if len(pids) > 1 else _seg("")
-    # Surface WHY the decks aren't being read (P1 diagnosability) — so a guest sees a
-    # named reason on the header instead of silent no-lights. No extra row (the 10-row
-    # zip contract holds); it rides on the BRIDGE line.
+    # Surface the ONE reliable make-or-break (P1 diagnosability): the bridge can't
+    # read Rekordbox on this Mac (authorization denied). No extra row (the 10-row zip
+    # contract holds); it rides on the BRIDGE line. We deliberately do NOT warn on
+    # 'unsupported_version' (deck reads use a version-robust ObjC scan that doesn't
+    # need the offset table, so it would false-alarm on an RB upgrade) or on a
+    # transient 'attach_failed'; both still ride in the status JSON for diagnostics.
     rb = status.get("rekordbox", {})
     rb_reason = rb.get("reason") if isinstance(rb, dict) else ""
-    rb_warn_text = {
-        "reads_blocked": "  ⚠ RB reads blocked",
-        "unsupported_version": "  ⚠ RB version unsupported",
-        "attach_failed": "  ⚠ RB not readable",
-    }.get(rb_reason, "")
+    rb_warn_text = "  ⚠ RB reads blocked" if rb_reason == "reads_blocked" else ""
     bridge_row = _join(
         _seg("●  ", color=_cg()),
         _seg("BRIDGE", bold=True),

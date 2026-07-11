@@ -1059,18 +1059,18 @@ class BridgeMenubarTests(unittest.TestCase):
         self.assertEqual(len(bridge_menubar.compact_status_lines({"schema": 1})), 10)
 
     def test_compact_status_lines_surfaces_rekordbox_reason(self) -> None:
-        # P1: why the decks aren't read must show on the BRIDGE row (still 10 rows).
+        # P1: the make-or-break (reads blocked) shows on the BRIDGE row (still 10 rows).
         bridge_menubar = self._import_module()
         rows = bridge_menubar.compact_status_lines(
             {"schema": 1, "rekordbox": {"reason": "reads_blocked"}}, ["123"])
         self.assertEqual(len(rows), 10)
         self.assertIn("RB reads blocked", rows[0].string())
-        rows = bridge_menubar.compact_status_lines(
-            {"schema": 1, "rekordbox": {"reason": "unsupported_version"}}, ["123"])
-        self.assertIn("RB version unsupported", rows[0].string())
-        rows = bridge_menubar.compact_status_lines(
-            {"schema": 1, "rekordbox": {"reason": ""}}, ["123"])
-        self.assertNotIn("⚠ RB", rows[0].string())
+        # We do NOT warn on unsupported_version (ObjC reads are version-robust) or on a
+        # transient attach_failed — those would false-alarm the maintainer.
+        for benign in ("unsupported_version", "attach_failed", ""):
+            rows = bridge_menubar.compact_status_lines(
+                {"schema": 1, "rekordbox": {"reason": benign}}, ["123"])
+            self.assertNotIn("⚠ RB", rows[0].string(), benign)
 
 
 class FrozenDefectHelperTests(BridgeMenubarTests):
