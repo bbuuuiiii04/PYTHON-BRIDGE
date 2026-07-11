@@ -904,5 +904,27 @@ class RuntimeStatusWriterTests(unittest.TestCase):
         self.assertEqual(len(led_messages), 1)
 
 
+class RekordboxStatusTests(unittest.TestCase):
+    """P1: the operator-facing 'rekordbox' status block (why the decks aren't read)."""
+
+    def test_reasons(self) -> None:
+        from rb_ss_bridge_v2.runtime_status import rekordbox_status
+        # Rekordbox not detected -> benign, no reason (never cry wolf).
+        self.assertEqual(rekordbox_status("", False, {})["reason"], "")
+        # Detected but an unsupported RB build -> named, reads not ok.
+        r = rekordbox_status("7.9.9", False, {"reads_ok": True})
+        self.assertEqual(r["reason"], "unsupported_version")
+        self.assertFalse(r["reads_ok"])
+        # Supported build but task_for_pid denied -> reader's reason passes through.
+        r = rekordbox_status("7.2.11", True, {"reads_ok": False, "reason": "reads_blocked"})
+        self.assertEqual(r["reason"], "reads_blocked")
+        self.assertFalse(r["reads_ok"])
+        # Supported + reading fine -> clean.
+        r = rekordbox_status("7.2.11", True, {"reads_ok": True, "reason": ""})
+        self.assertEqual(r["reason"], "")
+        self.assertTrue(r["reads_ok"])
+        self.assertEqual(r["version"], "7.2.11")
+
+
 if __name__ == "__main__":
     unittest.main()

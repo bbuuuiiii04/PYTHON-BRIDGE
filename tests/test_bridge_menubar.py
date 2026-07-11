@@ -1058,6 +1058,20 @@ class BridgeMenubarTests(unittest.TestCase):
         )
         self.assertEqual(len(bridge_menubar.compact_status_lines({"schema": 1})), 10)
 
+    def test_compact_status_lines_surfaces_rekordbox_reason(self) -> None:
+        # P1: why the decks aren't read must show on the BRIDGE row (still 10 rows).
+        bridge_menubar = self._import_module()
+        rows = bridge_menubar.compact_status_lines(
+            {"schema": 1, "rekordbox": {"reason": "reads_blocked"}}, ["123"])
+        self.assertEqual(len(rows), 10)
+        self.assertIn("RB reads blocked", rows[0].string())
+        rows = bridge_menubar.compact_status_lines(
+            {"schema": 1, "rekordbox": {"reason": "unsupported_version"}}, ["123"])
+        self.assertIn("RB version unsupported", rows[0].string())
+        rows = bridge_menubar.compact_status_lines(
+            {"schema": 1, "rekordbox": {"reason": ""}}, ["123"])
+        self.assertNotIn("⚠ RB", rows[0].string())
+
 
 class FrozenDefectHelperTests(BridgeMenubarTests):
     """Pure seams added for the frozen-app defect fixes (DEFECT 2/4/5/6)."""

@@ -309,6 +309,7 @@ contracts:
       - install_controller.py
       - rekordbox_patch.py
       - replay_event_source.py
+      - pyproject.toml
       - packaging/**
       - scripts/ss_bridge_watcher.sh
     inspect:

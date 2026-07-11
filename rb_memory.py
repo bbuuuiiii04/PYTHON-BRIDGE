@@ -1210,6 +1210,17 @@ class PositionCache:
 
 # ── Memory reader thread ─────────────────────────────────────────────────────
 
+def classify_attach_error(exc: BaseException) -> str:
+    """Name the reason the reader could not attach, for the operator-facing status.
+    task_for_pid failure = the bridge is not authorized to read Rekordbox on this
+    Mac (the make-or-break on a guest); anything else is a generic attach failure.
+    Pure — the test seam."""
+    msg = str(exc)
+    if "task_for_pid" in msg:
+        return "reads_blocked"
+    return "attach_failed"
+
+
 class RBMemoryReader(threading.Thread):
     """Polls RB memory at MEM_POLL_HZ and writes to PositionCache.
 
@@ -1230,6 +1241,11 @@ class RBMemoryReader(threading.Thread):
         rb_version: str = "",
     ) -> None:
         super().__init__(name="rb-memory-reader", daemon=True)
+        # Attach health for the operator-facing status (P1 diagnosability): reads_ok
+        # flips true once attached, and _attach_reason names WHY not (e.g. task_for_pid
+        # denied on a guest Mac). Written by this thread, read by the status thread.
+        self._reads_ok = False
+        self._attach_reason = ""
         self._cache    = cache
         self._drift    = drift_detector    # optional DriftDetector
         self._eq       = event_queue       # FM-11: optional queue for RB_RESTARTED events
@@ -1270,6 +1286,11 @@ class RBMemoryReader(threading.Thread):
 
     def get_session(self) -> Optional[RBSession]:
         return self._session
+
+    def read_health(self) -> dict:
+        """Operator-facing attach health: {reads_ok, reason}. reason names why reads
+        fail (e.g. 'reads_blocked' = task_for_pid denied on this Mac)."""
+        return {"reads_ok": self._reads_ok, "reason": self._attach_reason}
 
     def _log_drift(self, deck: int, warn: Optional[str]) -> None:
         """Edge-triggered health.reader emit: DriftDetector can re-report the
@@ -1561,7 +1582,11 @@ class RBMemoryReader(threading.Thread):
                 vmmap_ms,
                 task_ms,
             )
+            self._reads_ok = True
+            self._attach_reason = ""
         except Exception as exc:
-            log.warning("[RBMEM][ERROR] attach failed pid=%d error=%s retry_s=%d",
-                        pid, exc, int(self._ATTACH_RETRY_S))
+            self._reads_ok = False
+            self._attach_reason = classify_attach_error(exc)
+            log.warning("[RBMEM][ERROR] attach failed pid=%d error=%s retry_s=%d reason=%s",
+                        pid, exc, int(self._ATTACH_RETRY_S), self._attach_reason)
             time.sleep(self._ATTACH_RETRY_S)

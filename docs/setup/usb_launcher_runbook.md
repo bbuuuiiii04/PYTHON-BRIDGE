@@ -211,6 +211,29 @@ carries the secrets it shipped with.
 - **Dev-only watcher features** not carried into the bundle: the
   `RBSS_BRIDGE_TRUTH=1` Art-Net truth-check and the `WATCHER_NO_LOOP` test hook.
 
+### Supported target & known limitations (round-2 guest-Mac review)
+
+- **arm64 / Apple Silicon only.** The produced `.app` is thin arm64 (pip pulls
+  arm64 wheels on Apple Silicon; the spec sets no `target_arch`), floored at macOS
+  11 (`LSMinimumSystemVersion`). It does NOT run on Intel; `make_stick.sh` asserts
+  the built arch with `lipo` and **fails closed** if arm64 is missing. Real Intel
+  support would need `target_arch='universal2'` + universal2 wheels for every C
+  extension (numba/llvmlite have none for the newest Python) — not pursued.
+- **`mutagen` is a bundle dependency** (SoundSwitch track-id reads). It's in the
+  `[bundle]` extra + spec `hiddenimports`; the maintainer's Homebrew Python already
+  has it, but the clean build venv needs it or scripted/autoloop selection silently
+  dies on the guest.
+- **Read-authorization is surfaced, not solved.** If the guest blocks `task_for_pid`
+  (KERN_FAILURE) or runs an unsupported Rekordbox build, the menubar's BRIDGE row now
+  shows a named reason (`RB reads blocked` / `RB version unsupported`) instead of
+  silent no-lights. The bridge still can't read in that case — the reason is the
+  diagnostic, not a fix.
+- **KNOWN LIMITATION — Local Network (TCC) denial is not detected.** macOS has no
+  Python-visible API for the Local Network permission state, so if the guest denies
+  it, Govee/SoundSwitch discovery just finds nothing. There is no clean signal to
+  surface; if the rig is silent and reads are OK, check System Settings → Privacy →
+  Local Network for "RBSS Bridge".
+
 ## Stick helpers (AWR-122 interim — still ride the stick as the no-menubar fallback)
 
 `packaging/stick/install.command` + `purge.command` sit next to the DMG

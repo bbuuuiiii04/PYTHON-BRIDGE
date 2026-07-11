@@ -103,6 +103,28 @@ _DEFAULT_COLOR_STATUS: dict[str, Any] = {
 }
 
 
+def rekordbox_status(version: str, supported: bool, health: dict) -> dict:
+    """Pure: the operator-facing 'rekordbox' status block from the detected version,
+    whether it's a SUPPORTED build, and the reader's attach health. An empty version
+    means Rekordbox isn't detected (benign — no reason). reason is one of
+    'unsupported_version' | 'reads_blocked' | 'attach_failed' | ''. The test seam."""
+    version = version or ""
+    health = health if isinstance(health, dict) else {}
+    reads_ok = bool(health.get("reads_ok")) if supported else False
+    if not version:
+        reason = ""
+    elif not supported:
+        reason = "unsupported_version"
+    else:
+        reason = str(health.get("reason") or "")
+    return {
+        "version": version or "unknown",
+        "supported": bool(supported),
+        "reads_ok": reads_ok,
+        "reason": reason,
+    }
+
+
 class StatusWriter(threading.Thread):
     def __init__(
         self,
@@ -117,6 +139,7 @@ class StatusWriter(threading.Thread):
         led_status_provider: Optional[Callable[[], dict]] = None,
         color_engine_status_provider: Optional[Callable[[], dict]] = None,
         pack_status_provider: Optional[Callable[[], dict]] = None,
+        rekordbox_status_provider: Optional[Callable[[], dict]] = None,
         heartbeat_interval_s: float = HEARTBEAT_LOG_INTERVAL_S,
     ) -> None:
         super().__init__(name="runtime-status", daemon=True)
@@ -130,6 +153,7 @@ class StatusWriter(threading.Thread):
         self._led_status_provider = led_status_provider
         self._pack_status_provider = pack_status_provider
         self._color_engine_status_provider = color_engine_status_provider
+        self._rekordbox_status_provider = rekordbox_status_provider
         self._heartbeat_interval_s = max(0.5, float(heartbeat_interval_s))
         self._stop_event = threading.Event()
 
@@ -186,6 +210,15 @@ class StatusWriter(threading.Thread):
             ),
             "recent_errors": [],
         }
+        if self._rekordbox_status_provider is not None:
+            try:
+                data["rekordbox"] = self._rekordbox_status_provider()
+            except Exception:
+                # Fail benign — never cry "reads blocked" because the provider itself
+                # errored (that would be a false alarm on the menubar).
+                data["rekordbox"] = {
+                    "version": "unknown", "supported": True, "reads_ok": True, "reason": "",
+                }
         state_color = _dict_or_empty(state.get("led_color_engine"))
         color = (
             state_color

@@ -98,7 +98,7 @@ from .govee_lan_discovery import resolve_realtime_ip
 from .govee_frame_engine_client import GoveeFrameEngineClient
 from .led_dispatch_coordinator import LEDDispatchCoordinator
 from .personality_resolver import PersonalityResolver, PlaylistCache
-from .runtime_status import CommandReader, StatusWriter
+from .runtime_status import CommandReader, StatusWriter, rekordbox_status
 from .validation_runner import ValidationRunner
 from .tools.config_reloader import ConfigReloader, HOT_RELOAD_DISABLE_ENV
 
@@ -1497,6 +1497,20 @@ def main() -> None:
     sm_color_status_provider = getattr(sm, "color_engine_status_provider", None)
     if not callable(sm_color_status_provider):
         sm_color_status_provider = None
+    # Operator-facing Rekordbox read health (P1 diagnosability). The version + whether
+    # it's a supported build are known now; the reader (built later) is late-bound via
+    # the holder so a KERN_FAILURE task_for_pid or an unsupported RB build surfaces a
+    # NAMED reason in the menubar instead of silent no-lights.
+    _rb_supported = bool(rb_version_for_direct_master) and (
+        load_offsets_for_version(rb_version_for_direct_master) is not None
+    )
+    _rb_reader_holder: dict = {}
+
+    def _rekordbox_status_provider() -> dict:
+        reader = _rb_reader_holder.get("reader")
+        health = reader.read_health() if reader is not None else {}
+        return rekordbox_status(rb_version_for_direct_master or "", _rb_supported, health)
+
     status_writer = StatusWriter(
         sm,
         live_bpm,
@@ -1508,6 +1522,7 @@ def main() -> None:
         led_status_provider=sm_led_status_provider,
         color_engine_status_provider=sm_color_status_provider,
         pack_status_provider=sm.get_pack_status,
+        rekordbox_status_provider=_rekordbox_status_provider,
     )
 
     # Initialize master deck from guarded direct read when available, otherwise deck 1.
@@ -1641,6 +1656,9 @@ def main() -> None:
         deck_playing_hint=sm.get_deck_playing,
         rb_version=rb_version_for_direct_master,
     )
+    # Late-bind the reader so the status provider (built above) can report its
+    # attach health once it is running.
+    _rb_reader_holder["reader"] = mem_reader
 
     # MTC reader — ~25 fps position fallback from RB via IAC Bus 1.
     # Posts TC_UPDATE events for the active deck; state_manager ignores them
