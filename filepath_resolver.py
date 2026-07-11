@@ -533,6 +533,13 @@ class FilepathResolver:
                     payload=payload,
                 ))
             else:
+                if _is_device_export_anlz_path(anlz_path):
+                    log.info(
+                        "[FRES] resolve-miss  deck=%d  src=anlz"
+                        "  reason=usb-twin-unresolved  action=skip-lsof",
+                        deck,
+                    )
+                    return
                 log.debug("[FRES] resolve-miss  deck=%d  src=anlz  action=fallback-lsof", deck)
                 self.resolve_async(deck, load_gen, trace_id=trace_id)
         except Exception:
