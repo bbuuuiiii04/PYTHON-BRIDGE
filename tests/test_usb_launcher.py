@@ -43,6 +43,26 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(usb_launcher.main(["--run-led-pad"]), 0)
         run.assert_called_once_with()
 
+    def test_check_deps_dispatch(self) -> None:
+        with mock.patch.object(usb_launcher, "_run_check_deps", return_value=0) as run:
+            self.assertEqual(usb_launcher.main(["--check-deps"]), 0)
+        run.assert_called_once_with()
+
+    def test_check_deps_passes_when_present_and_fails_closed_when_missing(self) -> None:
+        # Every required dep is present on the maintainer's Python -> 0.
+        self.assertEqual(usb_launcher._run_check_deps(), 0)
+        # A missing dep -> nonzero, so the build fails closed (never ships degraded).
+        import importlib
+        real = importlib.import_module
+
+        def fake(name, *a, **k):
+            if name == "mutagen":
+                raise ImportError("simulated missing mutagen")
+            return real(name, *a, **k)
+
+        with mock.patch("importlib.import_module", side_effect=fake):
+            self.assertEqual(usb_launcher._run_check_deps(), 1)
+
     def test_pad_config_prefers_override_then_appsupport_then_repo(self) -> None:
         import tempfile
 

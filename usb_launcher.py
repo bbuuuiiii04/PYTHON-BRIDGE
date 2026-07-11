@@ -9,6 +9,8 @@ bundle needs no host Python and no shell:
   --run-streamdeck     → the Stream Deck MIDI controller
   --run-laser-pad      → the Laser Pad web server (port 8765)
   --run-led-pad        → the LED Pad web server (port 8766)
+  --check-deps         → import every required runtime dep; nonzero if any missing
+                         (build-time fail-closed guard against a stale bundle)
   --run-frame-engine --fd N → the headless Govee frame-engine child (the frozen
                               re-exec-self target; MUST stay clear of AppKit)
 
@@ -177,6 +179,39 @@ def _run_led_pad() -> int:
     return int(led_pad_main(["--config", config]) or 0)
 
 
+# Every runtime dependency the bundle MUST carry (import names). Kept as declared:
+# base (mido/pyobjc/pyrekordbox/python-osc/zeroconf) + bundle
+# (streamdeck/Pillow/python-rtmidi/pyserial/mutagen) + analysis (numpy/scipy) +
+# spectral (librosa/soundfile). PyInstaller (a build tool) is NOT bundled, so it's
+# excluded here.
+_REQUIRED_BUNDLE_MODULES = (
+    "mutagen", "rtmidi", "serial", "PIL", "mido", "objc",
+    "pyrekordbox", "pythonosc", "zeroconf", "StreamDeck",
+    "numpy", "scipy", "librosa", "soundfile",
+)
+
+
+def _run_check_deps() -> int:
+    """Import every required runtime dependency; exit nonzero naming the missing
+    ones. Run post-build against the FROZEN app so a stale/incomplete build venv
+    (e.g. missing mutagen, which only WARNs as a spec hiddenimport) FAILS THE BUILD
+    CLOSED instead of silently shipping a bundle that degrades on the guest — the
+    same fail-closed discipline as the lipo arch check. Imports third-party packages
+    only (no bridge modules, no AppKit), so it stays headless + side-effect-free."""
+    import importlib
+
+    missing = []
+    for mod in _REQUIRED_BUNDLE_MODULES:
+        try:
+            importlib.import_module(mod)
+        except Exception as exc:  # ImportError, or a submodule init failure
+            missing.append(f"{mod} ({type(exc).__name__})")
+    if missing:
+        sys.stderr.write("usb_launcher: MISSING bundle deps: " + ", ".join(missing) + "\n")
+        return 1
+    return 0
+
+
 def _run_menubar() -> int:
     """Run the PyObjC menubar app (imported lazily so headless modes never load Cocoa)."""
     from rb_ss_bridge_v2.scripts.bridge_menubar import main as menubar_main
@@ -230,6 +265,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_laser_pad()
     if mode == "--run-led-pad":
         return _run_led_pad()
+    if mode == "--check-deps":
+        return _run_check_deps()
     if mode == "--replay-session":
         if len(args) < 2 or not args[1]:
             sys.stderr.write("usb_launcher: --replay-session needs a session file path\n")

@@ -115,12 +115,12 @@ if [ -n "$PREBUILT_APP" ]; then
     APP="$PREBUILT_APP"
 else
     cd "$REPO_ROOT"
-    # Reuse the venv ONLY if it has the WHOLE rig (a real import), not merely
-    # pyinstaller — pyinstaller installs BEFORE the deps, so a prior run that died
-    # on the deps leaves pyinstaller present but numpy/scipy/librosa absent; a
-    # presence-only guard would reuse that and ship a bundle that crashes on the
-    # guest at import.
-    if ! "$VENV/bin/python" -c 'import PyInstaller, numpy, scipy, librosa' >/dev/null 2>&1; then
+    # Reuse the venv ONLY if it has pyinstaller AND every runtime dep (--check-deps
+    # imports the full required set). A narrow probe (pyinstaller + a few libs) would
+    # let a STALE venv built before a dep was added (e.g. mutagen) pass, skip the pip
+    # install, and ship a bundle missing that dep — the guest then silently degrades.
+    if [ ! -x "$VENV/bin/pyinstaller" ] || \
+       ! "$VENV/bin/python" "$REPO_ROOT/usb_launcher.py" --check-deps >/dev/null 2>&1; then
         BUILD_PY="$(find_build_python)" || fail "no python.org universal2 Python (target <13) found. Install the 'macOS 64-bit universal2 installer' for Python 3.12/3.13 from python.org, or set RBSS_BUILD_PYTHON=/path/to/python3. A Homebrew Python builds a bundle that crashes on macOS < 15 (DEFECT-1)."
         echo "make_stick: build interpreter → $BUILD_PY (universal2, target $MACOSX_DEPLOYMENT_TARGET)"
         # Rebuild from scratch: never carry a stale/partial venv (wrong interpreter,
@@ -150,11 +150,16 @@ else
     # Fail CLOSED if the built binary's arch drifts from the declared target
     # (arm64 / Apple Silicon). This ship is Apple-Silicon-only; a binary with no
     # arm64 slice would not run on the target and must never leave the build.
-    BUILT_ARCHS="$(lipo -archs "$REPO_ROOT/dist/RBSS Bridge.app/Contents/MacOS/rb_ss_bridge_v2" 2>/dev/null || echo "")"
+    APP_BIN="$REPO_ROOT/dist/RBSS Bridge.app/Contents/MacOS/rb_ss_bridge_v2"
+    BUILT_ARCHS="$(lipo -archs "$APP_BIN" 2>/dev/null || echo "")"
     case " $BUILT_ARCHS " in
         *" arm64 "*) echo "make_stick: built arch = [$BUILT_ARCHS] — arm64 present, Apple-Silicon target OK." ;;
         *) fail "built binary arch '[$BUILT_ARCHS]' has no arm64 slice — this ship is Apple-Silicon-only; refusing to ship a bundle that won't run on the target." ;;
     esac
+    # Fail CLOSED if the BUILT app is missing any required runtime dep — the reuse
+    # guard above cannot catch every way a venv might drift, so verify the real
+    # bundle can import the whole rig (mutagen etc.) exactly like the arch check.
+    "$APP_BIN" --check-deps || fail "the built app is missing a required runtime dependency (see the MISSING line above). Delete .build-venv-u2 and rebuild, or check pyproject/spec. Refusing to ship a bundle that would degrade on the guest."
     APP="$REPO_ROOT/dist/RBSS Bridge.app"
 fi
 
