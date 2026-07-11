@@ -93,8 +93,27 @@ and reviewed (AWR-207 extension round):
   pre-show checklist step with a verification command (e.g. the resolver's
   miss-reasons surfaced via runtime status) so R2 is checkable BEFORE guests
   arrive.
-E2 (foreign laptop, sidecar) and the degraded no-import tiers below remain the
-fallback ladder when the R2 workflow wasn't done.
+**R3 (operator addition 2026-07-11, verbatim intent): FOREIGN LAPTOPS,
+INCLUDING TWO-USB.** "The bridge/USB needs to keep a memory of every song ever
+analyzed and their phrase marking, and if there are 2 USBs plugged into the
+foreign laptop, as long as my rekordbox has analyzed their USB tracks before,
+bridge lighting should work." This makes the E2 sidecar BINDING and defines
+it: the sidecar = a portable lighting memory of EVERY track his Rekordbox has
+ever analyzed (phrase-bearing ANLZ copies + beatgrid fingerprints + tag
+identity + v4 spectral fields + ssid + laser tags), carried in the stick's
+bridge payload; at runtime on ANY laptop the resolver matches ANY loading
+track (his stick, a guest stick plugged alongside, local file) against the
+sidecar by the same fingerprint+tags levers, source order: local master.db
+(when present) → sidecar → honest miss. Delivery split: AWR-210 = the sidecar
+EXPORTER (offline tool, buildable in parallel tonight — no file overlap with
+AWR-209); AWR-211 = the runtime sidecar source behind the AWR-207/209 seam
+(specced after 209 lands, same lane sequence, same review doctrine). Key
+design note: the sidecar carries the local ANLZ FILES THEMSELVES (copied,
+phrase included), so the runtime handoff stays "here is an ANLZ path" — the
+proven AWR-207 consumer contract — plus a read-only v4 overlay for spectral.
+
+E3/E4 degraded no-import tiers below remain the fallback ladder when a track
+was NEVER analyzed by his Rekordbox.
 
 ## E3 — SOMEONE ELSE'S USB on his laptop (operator question 2026-07-11)
 A guest stick carries tracks that were NEVER in his collection: no local twin,
