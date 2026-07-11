@@ -203,7 +203,7 @@ class ApproachFeatures:
     # approach void run-length curves at data-derived quantiles
     run_curves: Mapping[str, RunCurve]
 
-    # section/track-relative depths (approach floor minus reference floor, p10)
+    # section/track-relative depths (approach floor p10 minus reference typical p50)
     depth_vs_track: Mapping[str, Optional[float]]
     depth_vs_section: Mapping[str, Optional[float]]
 
@@ -504,8 +504,20 @@ def approach_features(
             (off, _window_stats(series_map, n_beats, d + int(landed_len), d + 2 * int(landed_len)))
         )
 
-    available = approach.available
-    reason = "" if available else "approach window has no in-range beats: " + approach.reason
+    # Top-level availability is honest only if the approach window both intersects
+    # the track AND carries at least one finite datum in some series — an all-hole
+    # (missing / entirely non-finite) window is not usable even though its beat
+    # positions are in range. Per-series partial availability (each WindowStats /
+    # SeriesStats) is unchanged; only this top-level flag gains the finite check.
+    window_ok = approach.available
+    has_finite = any(ss.n_finite > 0 for ss in approach.series.values())
+    available = window_ok and has_finite
+    if not window_ok:
+        reason = "approach window has no in-range beats: " + approach.reason
+    elif not has_finite:
+        reason = "approach window has no finite data in any series"
+    else:
+        reason = ""
 
     return ApproachFeatures(
         drop_beat=drop,

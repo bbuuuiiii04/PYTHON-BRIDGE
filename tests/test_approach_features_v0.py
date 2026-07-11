@@ -259,6 +259,31 @@ class FailSafeTests(unittest.TestCase):
         self.assertEqual(ss.finite_frac, round(7 / 8, 4))
         self.assertTrue(all(math.isfinite(x) for x in (ss.p50, ss.mean)))
 
+    def test_all_nonfinite_top_level_unavailable_but_series_partial(self):
+        # The approach window intersects the track, but every series is entirely
+        # NaN: the TOP-LEVEL result must be honestly unavailable with a reason,
+        # while per-series partial availability (present / n_finite and the
+        # per-window WindowStats.available) is retained.
+        v = mk_v4(n=48, **{k: [float("nan")] * 48 for k in _ALL})
+        r = A.approach_features(v, 32, approach_len=8)
+        self.assertTrue(r.approach.available)          # window still intersects
+        self.assertFalse(r.available)                  # but no finite descriptor
+        self.assertEqual(r.reason, "approach window has no finite data in any series")
+        for k in _ALL:
+            self.assertTrue(r.approach.series[k].present)   # key WAS present
+            self.assertEqual(r.approach.series[k].n_finite, 0)
+        # every series missing -> also top-level unavailable, same honest reason
+        v2 = SimpleNamespace(series={}, scalars={}, n_beats=48)
+        r2 = A.approach_features(v2, 32, approach_len=8)
+        self.assertFalse(r2.available)
+        self.assertEqual(r2.reason, "approach window has no finite data in any series")
+        # a SINGLE finite beat inside the approach window is enough -> available
+        v3 = mk_v4(n=48, **{k: [float("nan")] * 48 for k in _ALL})
+        v3.series["full_db"][30] = 12.0            # approach [24,32) contains beat 30
+        r3 = A.approach_features(v3, 32, approach_len=8)
+        self.assertTrue(r3.available)
+        self.assertEqual(r3.reason, "")
+
     def test_empty_track_is_unavailable_not_error(self):
         v = mk_v4(n=0)
         r = A.approach_features(v, 0, approach_len=4)

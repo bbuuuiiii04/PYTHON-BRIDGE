@@ -37,6 +37,7 @@ and /tmp/rbss_lane_signals/sol46spectral_hardness_plan.HARDNESS_PLAN.report.md.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Optional, Sequence, Tuple
 
@@ -135,8 +136,26 @@ def _onset_term(onset_slice: Sequence[float]) -> float:
     return _clip01(((sum(onset_slice) / n) - ANCHORS[8]) / ANCHORS[9])
 
 
+def _isfinite(v: Any) -> bool:
+    """True only for a real, finite number. NaN, +/-inf, and non-numeric or
+    non-coercible values all read False -- hardness feeds raw slices straight into
+    ``percentile``/``sum`` with no hole filter, so any of these would poison H."""
+    try:
+        return math.isfinite(float(v))
+    except (TypeError, ValueError):
+        return False
+
+
 def _valid_v4(v4: Any) -> bool:
-    """A v4 usable for hardness: positive n_beats and every required series full-length."""
+    """A v4 usable for hardness: positive n_beats and every required series a
+    full-length sequence of finite numbers.
+
+    Rejects (so the caller returns ``None``, never a phantom T3): a missing / None
+    / wrong-length series, a non-sequence (scalar / no ``__len__``) series value,
+    and any series carrying a non-finite (NaN/+/-inf) or non-numeric beat. The last
+    two matter because the term math clips +inf to 1.0 (a phantom T3) and lets NaN
+    flow straight to H=NaN -- neither is real acoustic evidence.
+    """
     try:
         n = int(v4.n_beats)
     except (AttributeError, TypeError, ValueError):
@@ -151,7 +170,13 @@ def _valid_v4(v4: Any) -> bool:
             vals = series[key]
         except (KeyError, TypeError):
             return False
-        if vals is None or len(vals) != n:
+        try:
+            wrong_len = vals is None or len(vals) != n
+        except TypeError:            # scalar / no __len__ -> malformed, not usable
+            return False
+        if wrong_len:
+            return False
+        if not all(_isfinite(x) for x in vals):
             return False
     return True
 

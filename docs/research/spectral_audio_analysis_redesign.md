@@ -711,8 +711,11 @@ axis does not replace tier, feed darkness, or drive any output.
   standalone/unique counts, n_drop strata, micro + track-macro marker flips at ±1/±2,
   boundary-conditioned flips) and makes **no** taste-accuracy, held-out, or readiness claim; group
   bootstrap + accuracy scoring are skipped because no structured independent gold exists yet.
-- **Status:** `experimental` / `software-tested` (27 unit tests; 9-lens adversarial review found
-  zero module defects). Offline candidate only — live routing, tier replacement, and the later
+- **Status:** `experimental` / `software-tested` (28 unit tests; the AWR-203 9-lens adversarial
+  review reported zero module defects, but a later edge-fix lane (2026-07-11) closed a finiteness gap
+  it had missed — the shared `_valid_v4` gate now abstains (returns `None`, never a phantom T3) on a
+  non-finite (NaN, +inf which else clip01-saturated to a false T3, −inf) or unshaped/non-numeric
+  required series). Offline candidate only — live routing, tier replacement, and the later
   inert-shadow-logging step (Increment B) each require a separate operator gate. The AWR-200
   candidate-planner hook was deliberately NOT built: hardness is a binary shadow descriptor, not a
   production `DropDecision`. SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
@@ -751,12 +754,18 @@ may import it; a static AST+text test enforces it), no I/O, and it never times o
   filtered before any `sorted()`/percentile; an all-hole half → `None`, never `0`. Short window →
   `sufficient=False`, `slope=None`, reason string. Out-of-range → clamped, `n_requested` vs
   `n_available` reported honestly. Empty track → `available=False` with a reason, **no exception**.
-  Only inconsistent CALLER inputs raise `ValueError` (both/neither of an XOR pair, non-positive
-  length, negative radius). **Missing/short/non-finite data can never fabricate a darkness event.**
+  Top-level `available` additionally requires at least one finite approach descriptor, so a window
+  that intersects the track but is entirely missing/non-finite reads `available=False` with an honest
+  reason (per-series partial availability is unchanged). Only inconsistent CALLER inputs raise
+  `ValueError` (both/neither of an XOR pair, non-positive length, negative radius).
+  **Missing/short/non-finite data can never fabricate a darkness event.**
   Reuses `spectral_profile.percentile` (no new dependency); deterministic (repeated calls compare
   equal, pinned by a test).
-- **Status:** `experimental` / `software-tested` (25 unit tests; independent ULTRACODE adversarial
-  review found zero module-logic defects — code/tests left unchanged). Offline raw layer only — **no
+- **Status:** `experimental` / `software-tested` (26 unit tests; the AWR-204 independent ULTRACODE
+  review found zero per-series defects, but a later edge-fix lane (2026-07-11) corrected a hollow
+  top-level flag it did not examine — `ApproachFeatures.available` now requires at least one finite
+  approach descriptor (all-missing/all-non-finite → `available=False` with an honest reason;
+  per-series partial availability unchanged)). Offline raw layer only — **no
   classifier, no tool, no live wiring, no hardware validation.** The taste calls (class boundaries,
   darkness lengths, the uncertain fall-back, marker-radius policy, rules-vs-model promotion) are
   deliberately left open for the operator. `tools/approach_feature_report.py` was NOT built (the raw

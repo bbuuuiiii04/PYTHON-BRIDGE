@@ -309,6 +309,39 @@ class FailSafeTests(unittest.TestCase):
         # missing baseline
         self.assertIsNone(hardness_result(_ns(n_beats=16), 0, None))
 
+    def test_non_finite_or_unshaped_series_never_phantom_result(self):
+        # A required series is finite-blind in the old length-only gate: NaN would
+        # flow to H=NaN; +inf clip01-saturates every term to 1.0 and FIRES a phantom
+        # T3; -inf clips to 0.0. None is real acoustic evidence, so the validity gate
+        # must abstain (None) for all three — never a fabricated HardnessResult.
+        good_base = TrackBaseline(1.0, 1.0, 1.0, 1.0, 8, True, "max")
+        for bad in (float("nan"), float("inf"), float("-inf")):
+            v4 = _ns({k: [bad] * 16 for k in V4_SERIES_KEYS}, n_beats=16)
+            self.assertIsNone(track_baseline(v4, [0, 8], reducer="max"), bad)
+            self.assertIsNone(hardness_result(v4, 4, good_base, reducer="max"), bad)
+        # a SINGLE non-finite beat in one required series is enough to reject
+        hole = dict(_ns(n_beats=16).series)
+        vals = list(hole["full_db"])
+        vals[7] = float("nan")
+        hole["full_db"] = tuple(vals)
+        v4h = SimpleNamespace(n_beats=16, series=hole)
+        self.assertIsNone(track_baseline(v4h, [0, 8], reducer="max"))
+        self.assertIsNone(hardness_result(v4h, 4, good_base, reducer="max"))
+        # malformed SHAPE must abstain, never raise (was an uncaught TypeError/ValueError):
+        # a scalar (no __len__) series value ...
+        scalar = SimpleNamespace(
+            n_beats=16,
+            series={k: (3.5 if k == "full_db" else (0.0,) * 16) for k in V4_SERIES_KEYS},
+        )
+        self.assertIsNone(track_baseline(scalar, [0], reducer="max"))
+        self.assertIsNone(hardness_result(scalar, 0, good_base, reducer="max"))
+        # ... and a right-length but non-numeric (non-coercible) series
+        strings = SimpleNamespace(
+            n_beats=4, series={k: ("a", "b", "c", "d") for k in V4_SERIES_KEYS}
+        )
+        self.assertIsNone(track_baseline(strings, [0], reducer="max"))
+        self.assertIsNone(hardness_result(strings, 0, good_base, reducer="max"))
+
     def test_unknown_reducer_raises_not_phantom(self):
         v4 = _ns(n_beats=16)
         with self.assertRaises(ValueError):

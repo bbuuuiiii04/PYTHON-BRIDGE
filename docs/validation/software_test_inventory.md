@@ -74,7 +74,7 @@ warning/limitation (identity is not guessed — curation work); and the report i
 deterministic with the core run PARTIAL. These prove the harness's honesty guarantees in
 software only; they do not run the real planner, cache, or Rekordbox DB.
 
-AWR-203 adds `tests/test_hardness_v0.py` (27 tests) for the offline intrinsic-hardness shadow
+AWR-203 adds `tests/test_hardness_v0.py` (28 tests) for the offline intrinsic-hardness shadow
 descriptor `hardness_v0.py` and its read-only evaluator `tools/hardness_ablation.py`. It proves,
 on duck-typed synthetics plus one real `SpectralFeaturesV4` fixture (no cache/DB/ANLZ): the B/A/R/N
 term math and clip01 bounds against the frozen anchors; first-8/following-8 per-term averaging and
@@ -83,14 +83,16 @@ selection with the documented tie-break (constant-series ties pick offset 0; the
 rank indices for center/median/q75/max); the three-path math and winning-path diagnostics
 (`repeated_wall` uses only the per-track baseline, so it is offset-invariant); the per-term track
 median and the `MIN_STABLE_DROPS` stability flag; the marker-shift range bracketing H; that
-malformed/empty/out-of-range/None-baseline inputs return no result and an unknown reducer raises
-(never a phantom T3); determinism (same inputs → identical frozen result); and the AST-based
+malformed/empty/out-of-range/None-baseline inputs, and a non-finite (NaN, +inf which else
+clip01-saturates to a false T3, −inf) or unshaped/non-numeric required series, all return no result,
+while an unknown reducer raises (never a phantom T3); determinism (same inputs → identical frozen
+result); and the AST-based
 zero-runtime-importer invariant, with a companion test proving the guard catches multiline-paren,
 `importlib.import_module`, and `__import__` forms a line-anchored regex would miss. Read-only
 offline code — `hardness_v0.py` does no I/O and has zero runtime importers; the evaluator opens the
 Rekordbox DB + v4 cache READ-ONLY only. Not run in these tests: the real corpus, cache, or DB.
 
-AWR-204 adds `tests/test_approach_features_v0.py` (25 tests) for the offline raw approach-descriptor
+AWR-204 adds `tests/test_approach_features_v0.py` (26 tests) for the offline raw approach-descriptor
 layer `approach_features_v0.py`. On duck-typed `SpectralFeaturesV4` synthetics (no cache/DB/ANLZ) it
 proves: rising/falling/held approach trajectories read out in `slope` + half-split `delta` sign; a
 ringing melodic layer over a cut sub is summarized independently (no min-masking); depth reads the
@@ -102,7 +104,9 @@ empty drops → an explicit zero reference); the track-referenced void run curve
 (a length window slides, an explicit-start window moves only its end, offset 0 equals the primary
 window, `descriptor_range` collapses to a point on a flat track); and the fail-safe honesty —
 boundary clamps reporting requested vs available, a short window insufficient with no slope, a
-missing series `present=False` with all-None stats, non-finite filtered and counted, an empty track
+missing series `present=False` with all-None stats, non-finite filtered and counted, top-level
+availability requiring at least one finite approach descriptor (all-missing/all-non-finite →
+`available=False` with an honest reason, per-series partial availability retained), an empty track
 unavailable (not an exception), inconsistent caller inputs raising `ValueError`, byte-identical
 determinism, and the AST+raw-text zero-runtime-importer invariant. The module is pure and does no
 I/O; **it decides nothing** — no class, threshold, darkness length, or live authority, and missing
