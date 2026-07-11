@@ -89,8 +89,11 @@ required beyond enough to classify a row.
 
 **Output.** A deterministic markdown report (stdout or `--report PATH`), sections:
 
-1. Header — HEAD (caller-stamped), labels path, label sha256[:16], AWR-200 status
-   (PARTIAL until an accuracy axis is scorable), evidence class.
+1. Header — HEAD (caller-stamped), labels path, label sha256[:16], AWR-200 status, evidence
+   class. **Status is a single shared predicate** (`is_partial`) over accuracy-axis
+   availability: PARTIAL until EVERY required accuracy axis (tier/family/darkness/growl/laser)
+   is scorable. Marker-sensitivity availability is deliberately excluded — a marker pilot can
+   never, on its own, complete Stage 1.
 2. Coverage/group manifest — rows by kind; lineages (usable/excluded); usable entries;
    exclusions by reason with tracks; validation warnings.
 3. Grouped LOLO fold inventory — one fold per usable lineage; held-out track, test entry
@@ -136,7 +139,10 @@ fixtures (no real cache/DB/planner):
 - marker-sensitivity flip counting is correct against a synthetic planner seam, the seam
   receives only model inputs, and unresolved tracks never reach the planner;
 - the report is byte-deterministic and the core run is PARTIAL with the marker axis
-  UNAVAILABLE.
+  UNAVAILABLE;
+- **the completion gate holds**: with a resolved marker pilot AVAILABLE but the accuracy axes
+  unavailable, `is_partial` and the report status both stay PARTIAL (regression test — a
+  marker pilot never flips Stage 1 to complete).
 
 **CAN score today:** the validated/grouped/leak-safe corpus manifest, the LOLO fold
 inventory, and (with `--resolve-db`) the marker-sensitivity axis via the real planner —

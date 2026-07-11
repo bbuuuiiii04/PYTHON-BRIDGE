@@ -135,6 +135,40 @@ class AvailabilityTests(unittest.TestCase):
         self.assertTrue({a["axis"]: a for a in m.axis_availability(7)}["marker_sensitivity"]["available"])
 
 
+class PartialGateTests(unittest.TestCase):
+    """A resolved marker pilot must NEVER flip AWR-200 out of PARTIAL while the
+    accuracy axes are unavailable (executive gate fix)."""
+
+    def test_is_partial_true_even_when_marker_available(self):
+        # marker AVAILABLE (7 tracks resolved) but accuracy axes all unavailable
+        self.assertTrue(m.is_partial(m.axis_availability(7)))
+        self.assertTrue(m.is_partial(m.axis_availability(0)))
+        self.assertTrue(m.is_partial(m.axis_availability(None)))
+
+    def test_is_partial_false_only_when_all_accuracy_axes_available(self):
+        avail = m.axis_availability(0)
+        for a in avail:
+            if a["axis"] in m.REQUIRED_ACCURACY_AXES:
+                a["available"] = True   # simulate a future curated corpus
+        self.assertFalse(m.is_partial(avail))
+        # one missing accuracy axis is enough to stay PARTIAL
+        avail[0]["available"] = False
+        self.assertTrue(m.is_partial(avail))
+
+    def test_report_stays_partial_with_marker_available(self):
+        entries = m.normalize(_rows())
+        manifest = m.build_manifest(entries, m.build_lineages(entries))
+        marker = {"markers": 16, "tracks": 2, "skipped": 0,
+                  "pm1": {"family": 25.0, "tier": 6.2, "darkness": 0.0},
+                  "pm2": {"family": 43.8, "tier": 12.5, "darkness": 18.8}}
+        report = m.render_report(
+            head="x", labels_path="p", label_sha="s", manifest=manifest,
+            warnings=[], folds=[], availability=m.axis_availability(2),
+            marker=marker, resolution_summary={"resolved": 2, "not_in_db": 19})
+        self.assertIn("AWR-200 status: PARTIAL", report)
+        self.assertNotIn("baseline-complete", report)
+
+
 class AntiLeakTests(unittest.TestCase):
     def test_forbidden_fields_rejected(self):
         with self.assertRaises(ValueError):

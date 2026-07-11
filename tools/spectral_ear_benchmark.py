@@ -114,6 +114,11 @@ ACCURACY_AXES: tuple[dict[str, str], ...] = (
      "loss": "pins only until label coverage supports rates (charter D); more laser labels wanted"},
 )
 
+# AWR-200 stays PARTIAL until EVERY required accuracy axis is scorable. The marker
+# axis is a supporting robustness metric, NOT a completion gate — a 2-track marker
+# pilot can never complete Stage 1 while the operator's taste axes are unscored.
+REQUIRED_ACCURACY_AXES = tuple(a["axis"] for a in ACCURACY_AXES)
+
 # SOL published marker-sensitivity reference (15 tracks / 113 markers, audio
 # fixed, drop marker perturbed). Reproduced like-for-like only; not to be
 # claimed improved-upon here. (sol_spectral_review_2026_07_09.md:163-166)
@@ -346,6 +351,14 @@ def axis_availability(marker_resolved: Optional[int]) -> list[dict[str, Any]]:
     return axes
 
 
+def is_partial(availability: list[dict[str, Any]]) -> bool:
+    """Single source of truth for AWR-200's PARTIAL/complete status. PARTIAL until
+    every REQUIRED accuracy axis is available. Marker-sensitivity availability is
+    deliberately irrelevant — it can never, on its own, complete Stage 1."""
+    avail = {a["axis"]: a["available"] for a in availability}
+    return not all(avail.get(axis, False) for axis in REQUIRED_ACCURACY_AXES)
+
+
 # ---------------------------------------------------------------------------
 # Anti-leak guard
 # ---------------------------------------------------------------------------
@@ -551,8 +564,7 @@ def render_report(
     resolution_summary: Optional[dict[str, int]],
 ) -> str:
     L: list[str] = []
-    partial = marker is None or not any(a["axis"] == "marker_sensitivity" and a["available"]
-                                        for a in availability)
+    partial = is_partial(availability)
     L.append("# Spectral EAR benchmark — Stage-1 report (AWR-200)")
     L.append("")
     L.append(f"- HEAD: {head}")
@@ -679,7 +691,7 @@ def run(labels_path: str, *, resolve_db: bool, head: str) -> tuple[str, bool]:
         manifest=manifest, warnings=warnings, folds=folds,
         availability=availability, marker=marker, resolution_summary=resolution_summary,
     )
-    partial = marker is None or not marker.get("markers")
+    partial = is_partial(availability)   # marker availability never completes Stage 1
     return report, partial
 
 
