@@ -70,6 +70,11 @@ LEAK_FORBIDDEN_FIELDS = frozenset({
     "content_id", "title_exact", "track", "id",
     "his_words", "his_words_followup", "measured", "classification",
     "notes", "decoded", "missing_dimension", "plan_gap", "expectation",
+    # AWR-205 gold-label intake fields — operator per-drop gold + provenance keys.
+    # Like the locators/verdicts above, none may reach a predictor; gold flows only
+    # into scoring. call_planner's positive allowlist already blocks them; naming
+    # them here also makes assert_no_leak reject a smuggled gold field on its own.
+    "is_genuine_drop", "drop", "family_matches_track", "lineage_key", "marker_beat",
 })
 
 # The ONLY fields any production-planner call may carry. A positive allowlist:
@@ -140,6 +145,28 @@ SOL_MARKER_REFERENCE = {
 
 _WS = re.compile(r"\s+")
 
+# --- AWR-205 gold-label intake (hybrid unit; operator ruling 2026-07-11) ------
+# Positive field allowlists — same discipline as PLANNER_ALLOWED_FIELDS: any key
+# not listed is a HARD error on load (catches typos / unknown fields fail-closed).
+GOLD_ROW_FIELDS = frozenset({
+    "lineage_key", "content_id", "track", "marker_beat", "marker_time",
+    "is_genuine_drop", "drop",
+})
+GOLD_DROP_FIELDS = frozenset({
+    "tier", "family", "family_matches_track", "darkness", "growl",
+    "laser", "confidence", "notes",
+})
+GOLD_DARKNESS_FIELDS = frozenset({"shape", "start_beat", "end_beat", "bars"})
+GOLD_GROWL_FIELDS = frozenset({"start_beat", "end_beat"})
+GOLD_TIER_VALUES = frozenset({1, 2, 3, "unknown"})
+GOLD_LASER_VALUES = frozenset({"yes", "no", "unknown"})
+GOLD_FMT_VALUES = frozenset({True, False, "unknown"})   # family_matches_track
+GOLD_RULING = (
+    "hybrid unit (operator ruling 2026-07-11): every enumerated marker gets an "
+    "is_genuine_drop yes/no; the nested `drop` field-set is filled ONLY on genuine "
+    "drops. null = unlabeled (excluded from scoring). 'unknown' is always valid."
+)
+
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -167,6 +194,16 @@ class Lineage:
     excluded: bool
     reason: str                     # exclusion reason, or "" when usable
     source: str                     # exclusion citation, or "" when usable
+
+
+@dataclass(frozen=True)
+class Marker:
+    """One enumerated drop marker — the unit the gold template/loader keys on."""
+    lineage: str                    # provenance key (matches Resolution.lineage)
+    track: str
+    content_id: str
+    beat: int
+    time: str                       # mm:ss from the beatgrid, or "" if not derivable
 
 
 # ---------------------------------------------------------------------------
@@ -422,9 +459,15 @@ def build_folds(lineages: list[Lineage]) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 def axis_availability(marker_scored: Optional[int],
-                      marker_comparable: Optional[int] = None) -> list[dict[str, Any]]:
-    """Report, per axis, whether a score can be computed TODAY. All accuracy
-    axes are UNAVAILABLE (no structured gold in the labels). Marker sensitivity is
+                      marker_comparable: Optional[int] = None,
+                      *, accuracy_scores: Optional[dict[str, dict[str, Any]]] = None
+                      ) -> list[dict[str, Any]]:
+    """Report, per axis, whether a score can be computed TODAY. Without gold
+    (`accuracy_scores is None`) every accuracy axis is UNAVAILABLE — the labels are
+    free text (unchanged AWR-200 behavior). With gold (AWR-205), an accuracy axis
+    flips AVAILABLE only when BOTH hold: >=1 genuine-drop gold example exists AND a
+    real scorer compared it to an actual per-marker model output; `accuracy_scores`
+    carries that per-axis verdict (see score_accuracy_axes). Marker sensitivity is
     AVAILABLE only when at least one drop marker had a baseline decision
     (`marker_scored`) AND at least one COMPARABLE +-1/+-2 perturbation existed to
     flip against (`marker_comparable` = the sum of the two per-radius comparable
@@ -434,15 +477,38 @@ def axis_availability(marker_scored: Optional[int],
     the axis must read UNAVAILABLE, not a hollow AVAILABLE. `marker_comparable`
     defaults None so the gate fails closed toward UNAVAILABLE. Model-only; needs no
     operator gold."""
+    scores = accuracy_scores or {}
     axes: list[dict[str, Any]] = []
     for a in ACCURACY_AXES:
+        sc = scores.get(a["axis"])
+        if sc is None:
+            axes.append({
+                "axis": a["axis"],
+                "available": False,
+                "gold_examples": 0,
+                "loss_shape": a["loss"],
+                "blocker": f"no structured {a['missing_field']} in labels — operator verdicts are free "
+                           "text; requires a curation pass. Reported UNAVAILABLE, not zero/PASS.",
+            })
+        else:
+            axes.append({
+                "axis": a["axis"],
+                "available": bool(sc["available"]),
+                "gold_examples": int(sc.get("gold_examples", 0)),
+                "loss_shape": a["loss"],
+                "blocker": sc.get("blocker", ""),
+                "score": sc.get("score"),
+            })
+    # AWR-205 yes/no layer axis — only surfaced once gold is loaded. NOT a required
+    # accuracy axis (is_partial ignores it): it can never complete Stage 1.
+    dc = scores.get("drop_classification")
+    if dc is not None:
         axes.append({
-            "axis": a["axis"],
-            "available": False,
-            "gold_examples": 0,
-            "loss_shape": a["loss"],
-            "blocker": f"no structured {a['missing_field']} in labels — operator verdicts are free "
-                       "text; requires a curation pass. Reported UNAVAILABLE, not zero/PASS.",
+            "axis": "drop_classification",
+            "available": bool(dc["available"]),
+            "gold_examples": int(dc.get("gold_examples", 0)),
+            "loss_shape": "genuine-drop (yes/no) vs a planner per-marker genuine-drop/blackout decision",
+            "blocker": dc.get("blocker", ""),
         })
     if marker_scored is None:
         marker = {
@@ -681,6 +747,303 @@ def marker_sensitivity(
 
 
 # ---------------------------------------------------------------------------
+# AWR-205 gold-label intake: enumerate markers, emit template, strict load, score
+# ---------------------------------------------------------------------------
+
+def _mmss(ms: float) -> str:
+    total = int(ms // 1000)
+    return f"{total // 60}:{total % 60:02d}"
+
+
+def enumerate_markers(resolutions: list[Resolution]) -> list[Marker]:
+    """The marker set the marker-sensitivity pass iterates: every drop beat of a
+    RESOLVED lineage (SAME `status == 'resolved' and res.drops` guard — not a
+    parallel enumeration). Reused by the template emitter AND the gold loader so
+    their provenance keys line up exactly. Deterministic: resolution order, then
+    res.drops order (already sorted ints)."""
+    out: list[Marker] = []
+    for res in resolutions:
+        if res.status != "resolved" or not res.drops:
+            continue
+        cid = res.lineage[4:] if res.lineage.startswith("cid:") else ""
+        for beat in res.drops:
+            b = int(beat)
+            t = _mmss(res.grid[b]) if 0 <= b < len(res.grid) else ""
+            out.append(Marker(res.lineage, res.track, cid, b, t))
+    return out
+
+
+def _template_row(mk: Marker) -> dict[str, Any]:
+    """One all-null hybrid row: is_genuine_drop yes/no + the nested drop field-set."""
+    return {
+        "lineage_key": mk.lineage,
+        "content_id": mk.content_id,
+        "track": mk.track,
+        "marker_beat": mk.beat,
+        "marker_time": mk.time or None,
+        "is_genuine_drop": None,
+        "drop": {
+            "tier": None,
+            "family": None,
+            "family_matches_track": None,
+            "darkness": {"shape": None, "start_beat": None, "end_beat": None, "bars": None},
+            "growl": {"start_beat": None, "end_beat": None},
+            "laser": None,
+            "confidence": None,
+            "notes": None,
+        },
+    }
+
+
+def build_gold_template(resolutions: list[Resolution], head: str, label_sha: str) -> dict[str, Any]:
+    """Deterministic, all-null, provenance-keyed hybrid template over the resolved
+    marker set. No wall-clock (determinism). One row per enumerated marker; rows
+    carry title + mm:ss so a chat transcription session can fill them."""
+    markers = enumerate_markers(resolutions)
+    lineages = sorted({mk.lineage for mk in markers})
+    return {
+        "_header": {
+            "head": head,
+            "label_sha": label_sha,
+            "generated_by": "spectral_ear_benchmark --emit-gold-template (deterministic; no wall-clock)",
+            "ruling": GOLD_RULING,
+            "markers": len(markers),
+            "lineages": len(lineages),
+        },
+        "rows": [_template_row(mk) for mk in markers],
+    }
+
+
+def _template_has_labels(path: str) -> bool:
+    """True if an existing OUT.json already carries ANY non-null is_genuine_drop.
+    Missing or empty file -> False (nothing to protect)."""
+    p = Path(path)
+    if not p.is_file() or p.stat().st_size == 0:
+        return False
+    obj = json.loads(p.read_text(encoding="utf-8"))
+    return any(r.get("is_genuine_drop") is not None for r in obj.get("rows", []))
+
+
+def write_gold_template(obj: dict[str, Any], out_path: str) -> None:
+    """Write the template, refusing to clobber a file that already has labels (or
+    a non-empty file we can't recognise as a template). Empty/missing -> write."""
+    p = Path(out_path)
+    if p.is_file() and p.stat().st_size > 0:
+        try:
+            existing = json.loads(p.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            raise ValueError(
+                f"refusing to overwrite {out_path!r}: existing file is not a gold "
+                "template (unparseable JSON) — move it aside first.")
+        if any(r.get("is_genuine_drop") is not None for r in existing.get("rows", [])):
+            raise ValueError(
+                f"refusing to overwrite {out_path!r}: it already contains filled "
+                "is_genuine_drop labels — move it aside first, then re-emit.")
+    p.write_text(json.dumps(obj, indent=2) + "\n", encoding="utf-8")
+
+
+def _is_int(v: Any) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def _is_num(v: Any) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _check_beat_pair(start: Any, end: Any, rid: str, name: str, errors: list[str]) -> None:
+    for v, lbl in ((start, "start_beat"), (end, "end_beat")):
+        if v is not None and not (_is_int(v) and v >= 0):
+            errors.append(f"{rid}: {name}.{lbl} must be a non-negative integer or null (got {v!r})")
+    if _is_int(start) and _is_int(end) and not (start < end):
+        errors.append(f"{rid}: {name} start_beat ({start}) must be < end_beat ({end})")
+
+
+def _validate_genuine_drop(drop: Any, rid: str, errors: list[str]) -> None:
+    """Genuine-drop rows: enum fields valid-or-'unknown' (null is NOT allowed —
+    use 'unknown'); beat fields sane. `unknown` is always valid."""
+    if not isinstance(drop, dict):
+        errors.append(f"{rid}: is_genuine_drop=true requires a `drop` object")
+        return
+    if drop.get("tier") not in GOLD_TIER_VALUES:
+        errors.append(f"{rid}: tier must be 1/2/3/'unknown' on a genuine drop (got {drop.get('tier')!r})")
+    fam = drop.get("family")
+    if not (fam == "unknown" or (isinstance(fam, str) and fam.strip())):
+        errors.append(f"{rid}: family must be a non-empty string (free text or 'unknown') "
+                      f"on a genuine drop (got {fam!r})")
+    if drop.get("family_matches_track") not in GOLD_FMT_VALUES:
+        errors.append(f"{rid}: family_matches_track must be true/false/'unknown' "
+                      f"(got {drop.get('family_matches_track')!r})")
+    if drop.get("laser") not in GOLD_LASER_VALUES:
+        errors.append(f"{rid}: laser must be 'yes'/'no'/'unknown' (got {drop.get('laser')!r})")
+    dark = drop.get("darkness")
+    if isinstance(dark, dict):
+        shape = dark.get("shape")
+        if shape is not None and not isinstance(shape, str):
+            errors.append(f"{rid}: darkness.shape must be a string or null (got {shape!r})")
+        _check_beat_pair(dark.get("start_beat"), dark.get("end_beat"), rid, "darkness", errors)
+        bars = dark.get("bars")
+        if bars is not None and not (_is_num(bars) and bars >= 0):
+            errors.append(f"{rid}: darkness.bars must be a non-negative number or null (got {bars!r})")
+    growl = drop.get("growl")
+    if isinstance(growl, dict):
+        _check_beat_pair(growl.get("start_beat"), growl.get("end_beat"), rid, "growl", errors)
+
+
+def validate_gold(gold_obj: Any, marker_index: dict[tuple[str, int], Marker]) -> dict[str, Any]:
+    """Strict, fail-closed schema validation of a filled gold file against the
+    currently-enumerable marker set. Collects EVERY problem then raises ValueError
+    naming each — no silent skips. Returns {labeled, total, rows, genuine_rows}."""
+    if not isinstance(gold_obj, dict) or not isinstance(gold_obj.get("rows"), list):
+        raise ValueError("gold: top-level object must have a 'rows' list")
+    rows = gold_obj["rows"]
+    errors: list[str] = []
+    labeled = 0
+    genuine_rows: list[dict[str, Any]] = []
+    seen: set[tuple[str, int]] = set()
+    for i, row in enumerate(rows):
+        rid = (f"row[{i}] {row.get('lineage_key')!r}@{row.get('marker_beat')!r}"
+               if isinstance(row, dict) else f"row[{i}]")
+        if not isinstance(row, dict):
+            errors.append(f"{rid}: must be an object")
+            continue
+        extra = set(row) - GOLD_ROW_FIELDS
+        if extra:
+            errors.append(f"{rid}: unknown field(s) {sorted(extra)}")
+        lk, mb = row.get("lineage_key"), row.get("marker_beat")
+        if not (isinstance(lk, str) and lk):
+            errors.append(f"{rid}: lineage_key must be a non-empty string")
+        if not _is_int(mb):
+            errors.append(f"{rid}: marker_beat must be an integer")
+        if isinstance(lk, str) and lk and _is_int(mb):
+            key = (lk, mb)
+            if key not in marker_index:
+                errors.append(f"{rid}: no currently-enumerable marker matches this provenance key")
+            if key in seen:
+                errors.append(f"{rid}: duplicate provenance key {key}")
+            seen.add(key)
+        igd = row.get("is_genuine_drop")
+        if igd not in (None, True, False):
+            errors.append(f"{rid}: is_genuine_drop must be true/false/null (got {igd!r})")
+        drop = row.get("drop")
+        if drop is not None and not isinstance(drop, dict):
+            errors.append(f"{rid}: drop must be an object or null")
+        if isinstance(drop, dict):
+            extra_d = set(drop) - GOLD_DROP_FIELDS
+            if extra_d:
+                errors.append(f"{rid}: drop unknown field(s) {sorted(extra_d)}")
+            dark = drop.get("darkness")
+            if dark is not None and not isinstance(dark, dict):
+                errors.append(f"{rid}: drop.darkness must be an object or null")
+            if isinstance(dark, dict):
+                extra_dk = set(dark) - GOLD_DARKNESS_FIELDS
+                if extra_dk:
+                    errors.append(f"{rid}: darkness unknown field(s) {sorted(extra_dk)}")
+            growl = drop.get("growl")
+            if growl is not None and growl != "none" and not isinstance(growl, dict):
+                errors.append(f"{rid}: growl must be an object, \"none\", or null")
+            if isinstance(growl, dict):
+                extra_g = set(growl) - GOLD_GROWL_FIELDS
+                if extra_g:
+                    errors.append(f"{rid}: growl unknown field(s) {sorted(extra_g)}")
+        if igd is not None:
+            labeled += 1
+        if igd is True:
+            _validate_genuine_drop(drop, rid, errors)
+            genuine_rows.append(row)
+    if errors:
+        raise ValueError(f"gold validation failed ({len(errors)} problem(s)):\n  - "
+                         + "\n  - ".join(errors))
+    return {"labeled": labeled, "total": len(marker_index), "rows": rows, "genuine_rows": genuine_rows}
+
+
+def score_accuracy_axes(gold_result: dict[str, Any], resolutions: list[Resolution],
+                        plan_fn: Callable[..., Any]) -> dict[str, dict[str, Any]]:
+    """Compare genuine-drop gold to REAL per-marker model output. Scores ONLY the
+    axes the planner (DropDecision) exposes cleanly today — tier (int) and family
+    (str) — each via the single call_planner boundary. darkness/growl/laser and the
+    yes/no drop_classification layer have no verified like-for-like model output, so
+    they report UNAVAILABLE with a precise blocker (fail toward UNAVAILABLE). An
+    accuracy axis is AVAILABLE only with >=1 comparable genuine-drop example AND a
+    real model decision at that marker."""
+    res_by_lineage = {r.lineage: r for r in resolutions}
+    plan_cache: dict[str, Any] = {}
+
+    def decision_at(lineage: str, beat: int) -> Optional[tuple[str, int, str, int]]:
+        res = res_by_lineage.get(lineage)
+        if res is None or res.status != "resolved" or not res.drops:
+            return None
+        if lineage not in plan_cache:
+            plan_cache[lineage] = call_planner(plan_fn, {
+                "v4": res.v4, "drops": list(res.drops),
+                "buildups": list(res.buildups), "beatgrid_times_ms": list(res.grid)})
+        return _decision_at(plan_cache[lineage], beat)
+
+    tier_ex: list[tuple[int, int]] = []
+    fam_ex: list[tuple[str, str]] = []
+    dark_n = growl_n = laser_n = 0
+    for row in gold_result["genuine_rows"]:
+        drop = row.get("drop") or {}
+        # informational counts of labeled gold per axis (whether or not scorable)
+        dark = drop.get("darkness") or {}
+        if any(dark.get(k) is not None for k in GOLD_DARKNESS_FIELDS):
+            dark_n += 1
+        g_growl = drop.get("growl")
+        if g_growl == "none" or (isinstance(g_growl, dict)
+                                 and any(g_growl.get(k) is not None for k in GOLD_GROWL_FIELDS)):
+            growl_n += 1
+        if drop.get("laser") in ("yes", "no"):
+            laser_n += 1
+        md = decision_at(row["lineage_key"], int(row["marker_beat"]))
+        if md is None:
+            continue   # no real model output at this marker -> not comparable
+        if drop.get("tier") in (1, 2, 3):
+            tier_ex.append((int(drop["tier"]), int(md[1])))
+        fam = drop.get("family")
+        if isinstance(fam, str) and fam.strip() and fam != "unknown":
+            fam_ex.append((fam.strip().upper(), str(md[0]).strip().upper()))
+
+    scores: dict[str, dict[str, Any]] = {}
+    if tier_ex:
+        exact = sum(1 for g, mo in tier_ex if g == mo)
+        mse = round(sum((g - mo) ** 2 for g, mo in tier_ex) / len(tier_ex), 3)
+        scores["tier"] = {
+            "available": True, "gold_examples": len(tier_ex), "blocker": "",
+            "score": {"examples": len(tier_ex), "exact": exact, "mse_ordinal": mse,
+                      "missed_t3": sum(1 for g, mo in tier_ex if g == 3 and mo != 3),
+                      "false_t3": sum(1 for g, mo in tier_ex if mo == 3 and g != 3)}}
+    else:
+        scores["tier"] = {"available": False, "gold_examples": 0,
+            "blocker": "gold loaded but no genuine-drop tier example is comparable (all null/'unknown', "
+                       "or their markers didn't resolve to a model decision)."}
+    if fam_ex:
+        correct = sum(1 for g, mo in fam_ex if g == mo)
+        scores["family"] = {
+            "available": True, "gold_examples": len(fam_ex), "blocker": "",
+            "score": {"examples": len(fam_ex), "correct": correct,
+                      "accuracy_pct": round(100.0 * correct / len(fam_ex), 1)}}
+    else:
+        scores["family"] = {"available": False, "gold_examples": 0,
+            "blocker": "gold loaded but no genuine-drop family example is comparable (all null/'unknown', "
+                       "or their markers didn't resolve to a model decision)."}
+    # Unexposed axes — fail toward UNAVAILABLE with a verified per-axis blocker.
+    scores["darkness"] = {"available": False, "gold_examples": dark_n,
+        "blocker": "gold present; DropDecision exposes darkness (kind, beats, window) but the bar<->beat "
+                   "unit and shape-vocab / start-end alignment to the operator's gold are unverified — "
+                   "no like-for-like scorer this round (Stage-2)."}
+    scores["growl"] = {"available": False, "gold_examples": growl_n,
+        "blocker": "gold present; DropDecision exposes no per-drop growl span — nothing to score "
+                   "against (Stage-2)."}
+    scores["laser"] = {"available": False, "gold_examples": laser_n,
+        "blocker": "gold present; DropDecision exposes no laser-suitability output — nothing to score "
+                   "against (Stage-2)."}
+    scores["drop_classification"] = {"available": False, "gold_examples": int(gold_result["labeled"]),
+        "blocker": "yes/no gold recorded; the planner exposes no per-marker genuine-drop/blackout "
+                   "classifier (DropDecision carries family/tier/darkness only, no is_genuine bit) — "
+                   "Stage-2."}
+    return scores
+
+
+# ---------------------------------------------------------------------------
 # Manifest + report (deterministic)
 # ---------------------------------------------------------------------------
 
@@ -717,6 +1080,8 @@ def render_report(
     availability: list[dict[str, Any]],
     marker: Optional[dict[str, Any]],
     resolution_summary: Optional[dict[str, int]],
+    gold_sha: Optional[str] = None,
+    gold_coverage: Optional[dict[str, int]] = None,
 ) -> str:
     L: list[str] = []
     partial = is_partial(availability)
@@ -725,6 +1090,11 @@ def render_report(
     L.append(f"- HEAD: {head}")
     L.append(f"- labels: {labels_path}")
     L.append(f"- label sha256[:16]: {label_sha}")
+    if gold_sha:
+        L.append(f"- gold sha256[:16]: {gold_sha}")
+        if gold_coverage:
+            L.append(f"- gold coverage: {gold_coverage['labeled']}/{gold_coverage['total']} markers "
+                     "labeled (is_genuine_drop non-null; null = unlabeled, excluded from scoring)")
     L.append(f"- AWR-200 status: {'PARTIAL' if partial else 'baseline-complete'}")
     L.append("- evidence class: SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED")
     L.append("")
@@ -761,6 +1131,8 @@ def render_report(
         L.append(f"- **{a['axis']}**: {state}"
                  + (f" ({a['gold_examples']} examples)" if a["available"] else ""))
         L.append(f"  - loss: {a['loss_shape']}")
+        if a.get("score"):
+            L.append(f"  - score: {a['score']}")
         if a["blocker"]:
             L.append(f"  - blocker: {a['blocker']}")
     L.append("")
@@ -806,14 +1178,25 @@ def render_report(
         L.append("- UNAVAILABLE this run (pass --resolve-db, or resolution was incomplete — see above).")
     L.append("")
     L.append("## What Stage 1 can and cannot score today")
-    L.append("- CAN: validated/grouped/leak-safe corpus manifest, LOLO fold inventory, and "
-             "(with --resolve-db) the marker-sensitivity baseline via the real planner.")
-    L.append("- CANNOT: any accuracy axis (tier/family/darkness/growl/laser) — the labels carry no "
-             "structured per-drop operator gold; those are blocked on a curation pass (plus OCHO/Latch "
-             "ear/marker decisions). Growl-centroid values are already present, aligned, and "
-             "real-valued in the strict v4 cache — their MUSICAL correctness is a Stage-2 validation "
-             "item, not a backfill gap. The harness reports every accuracy axis UNAVAILABLE, never "
-             "zero or PASS.")
+    scored = [a["axis"] for a in availability
+              if a["axis"] in REQUIRED_ACCURACY_AXES and a["available"]]
+    unscored = [a["axis"] for a in availability
+                if a["axis"] in REQUIRED_ACCURACY_AXES and not a["available"]]
+    can = ("- CAN: validated/grouped/leak-safe corpus manifest, LOLO fold inventory, and "
+           "(with --resolve-db) the marker-sensitivity baseline via the real planner.")
+    if scored:
+        can += (f" With --gold, real per-drop scoring is now AVAILABLE for: {', '.join(scored)} "
+                "(operator gold vs the real planner's per-marker decision).")
+    L.append(can)
+    if unscored:
+        L.append(f"- CANNOT: accuracy axes still without gold+scorer ({', '.join(unscored)}) — either no "
+                 "structured per-drop operator gold, or the planner exposes no like-for-like output yet "
+                 "(darkness bar<->beat / shape mapping, growl span, laser suitability are Stage-2). "
+                 "Growl-centroid values are present/aligned/real-valued in the strict v4 cache — their "
+                 "MUSICAL correctness is a Stage-2 validation item, not a backfill gap. Every unscored "
+                 "axis reads UNAVAILABLE with a named blocker, never zero or PASS.")
+    else:
+        L.append("- All required accuracy axes have gold + a scorer this run (see per-axis section).")
     return "\n".join(L) + "\n"
 
 
@@ -821,8 +1204,24 @@ def render_report(
 # CLI
 # ---------------------------------------------------------------------------
 
-def run(labels_path: str, *, resolve_db: bool, head: str) -> tuple[str, bool]:
-    """Return (report_text, partial). Never writes anything."""
+def _resolve_corpus(labels_path: str) -> tuple[list[Entry], list[Lineage], list[Resolution]]:
+    """Load → normalize → lineages → DB-resolve (READ-ONLY). Shared by the template
+    emitter. Raises on any failure — fail loud, no marker-axis degrade path here."""
+    entries = normalize(load_labels(labels_path))
+    lineages = build_lineages(entries)
+    db_path = str(Path("~/Library/Pioneer/rekordbox/master.db").expanduser())
+    db_index = _load_db_index(db_path)
+    resolutions = resolve_lineages(lineages, db_index)
+    return entries, lineages, resolutions
+
+
+def run(labels_path: str, *, resolve_db: bool, head: str,
+        gold_path: Optional[str] = None) -> tuple[str, bool]:
+    """Return (report_text, partial). Never writes anything (except a caller's
+    --report). `gold_path` (AWR-205) requires resolve_db and fails LOUD on any
+    schema violation — it never degrades to a success-shaped report."""
+    if gold_path and not resolve_db:
+        raise ValueError("--gold requires --resolve-db (gold scoring needs real model outputs)")
     rows = load_labels(labels_path)
     label_sha = hashlib.sha256(Path(labels_path).read_bytes()).hexdigest()[:16]
     entries = normalize(rows)
@@ -837,6 +1236,10 @@ def run(labels_path: str, *, resolve_db: bool, head: str) -> tuple[str, bool]:
     resolution_summary: Optional[dict[str, int]] = None
     marker_scored: Optional[int] = None
     marker_comparable: Optional[int] = None
+    resolutions: list[Resolution] = []
+    accuracy_scores: Optional[dict[str, dict[str, Any]]] = None
+    gold_sha: Optional[str] = None
+    gold_coverage: Optional[dict[str, int]] = None
     if resolve_db:
         db_path = str(Path("~/Library/Pioneer/rekordbox/master.db").expanduser())
         try:
@@ -858,14 +1261,25 @@ def run(labels_path: str, *, resolve_db: bool, head: str) -> tuple[str, bool]:
             warnings.append(f"--resolve-db failed ({type(exc).__name__}: {exc}); marker axis UNAVAILABLE")
             marker_scored = 0
             marker_comparable = 0
+            if gold_path:
+                raise   # gold must fail loud, never degrade to a success-shaped report
+        if gold_path:
+            from rb_ss_bridge_v2.lighting_moments_v2 import build_track_plan
+            gold_bytes = Path(gold_path).read_bytes()
+            gold_sha = hashlib.sha256(gold_bytes).hexdigest()[:16]
+            marker_index = {(mk.lineage, mk.beat): mk for mk in enumerate_markers(resolutions)}
+            gold_result = validate_gold(json.loads(gold_bytes.decode("utf-8")), marker_index)
+            accuracy_scores = score_accuracy_axes(gold_result, resolutions, build_track_plan)
+            gold_coverage = {"labeled": gold_result["labeled"], "total": gold_result["total"]}
 
-    availability = axis_availability(marker_scored, marker_comparable)
+    availability = axis_availability(marker_scored, marker_comparable, accuracy_scores=accuracy_scores)
     report = render_report(
         head=head, labels_path=labels_path, label_sha=label_sha,
         manifest=manifest, warnings=warnings, folds=folds,
         availability=availability, marker=marker, resolution_summary=resolution_summary,
+        gold_sha=gold_sha, gold_coverage=gold_coverage,
     )
-    partial = is_partial(availability)   # marker availability never completes Stage 1
+    partial = is_partial(availability)   # marker/drop_classification never complete Stage 1
     return report, partial
 
 
@@ -880,6 +1294,13 @@ def main(argv: Optional[list[str]] = None) -> int:
                     help="write the report to this path instead of stdout")
     ap.add_argument("--head", default="unknown",
                     help="HEAD sha to stamp into the report (caller-provided; determinism)")
+    ap.add_argument("--emit-gold-template", default="", metavar="OUT.json",
+                    help="AWR-205: emit an empty, provenance-keyed hybrid gold-label template over "
+                         "the resolved marker set (requires --resolve-db; refuses to clobber a filled "
+                         "file). Keep OUT.json under local/ — it is gitignored.")
+    ap.add_argument("--gold", default="",
+                    help="AWR-205: score against a FILLED gold-label file (requires --resolve-db). "
+                         "Strict fail-closed schema validation; gold never reaches the planner.")
     args = ap.parse_args(argv)
 
     labels_path = args.labels
@@ -887,7 +1308,24 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"error: default labels not found at {labels_path}; pass --labels PATH", file=sys.stderr)
         return 2
 
-    report, _partial = run(labels_path, resolve_db=args.resolve_db, head=args.head)
+    if args.emit_gold_template:
+        if not args.resolve_db:
+            print("error: --emit-gold-template requires --resolve-db", file=sys.stderr)
+            return 2
+        label_sha = hashlib.sha256(Path(labels_path).read_bytes()).hexdigest()[:16]
+        _entries, _lineages, resolutions = _resolve_corpus(labels_path)
+        obj = build_gold_template(resolutions, args.head, label_sha)
+        write_gold_template(obj, args.emit_gold_template)   # raises if it would clobber labels
+        print(f"wrote {args.emit_gold_template}: {obj['_header']['markers']} markers over "
+              f"{obj['_header']['lineages']} resolved lineages (all is_genuine_drop null)")
+        return 0
+
+    if args.gold and not args.resolve_db:
+        print("error: --gold requires --resolve-db", file=sys.stderr)
+        return 2
+
+    report, _partial = run(labels_path, resolve_db=args.resolve_db, head=args.head,
+                           gold_path=(args.gold or None))
     if args.report:
         Path(args.report).write_text(report, encoding="utf-8")
         print(f"wrote {args.report}")

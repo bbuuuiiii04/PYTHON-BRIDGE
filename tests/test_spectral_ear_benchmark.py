@@ -499,5 +499,288 @@ class DeterminismTests(unittest.TestCase):
         self.assertIn("identity limitation", report)
 
 
+# --- AWR-205 gold-label intake ---------------------------------------------
+
+def _resolutions():
+    """Synthetic resolved lineages (+ one cache_miss) for template/loader/scoring.
+    grid on cid:111 lets mm:ss derive; cid:222 has an empty grid (time -> None)."""
+    grid = tuple(float(i * 500) for i in range(300))
+    return [
+        m.Resolution(lineage="cid:111", track="Alpha — Artist", status="resolved",
+                     v4=_V4(600), drops=(100, 200), buildups=(), grid=grid),
+        m.Resolution(lineage="cid:222", track="Beta — Artist", status="resolved",
+                     v4=_V4(600), drops=(50,), buildups=(), grid=()),
+        # cache_miss: has a drop but NO v4 — the enumeration guard must skip it.
+        m.Resolution(lineage="cid:333", track="Gamma — Artist", status="cache_miss",
+                     v4=None, drops=(10,), buildups=(), grid=()),
+    ]
+
+
+def _marker_index(res):
+    return {(mk.lineage, mk.beat): mk for mk in m.enumerate_markers(res)}
+
+
+class GoldTemplateTests(unittest.TestCase):
+    def test_one_row_per_resolved_marker_all_null(self):
+        res = _resolutions()
+        obj = m.build_gold_template(res, "HEAD1", "labsha0")
+        # 3 markers (cid:111@100, @200, cid:222@50); cache_miss cid:333 excluded
+        self.assertEqual(obj["_header"]["markers"], 3)
+        self.assertEqual(obj["_header"]["lineages"], 2)
+        self.assertEqual(len(obj["rows"]), 3)
+        self.assertNotIn("cid:333", {r["lineage_key"] for r in obj["rows"]})
+        for r in obj["rows"]:
+            self.assertIsNone(r["is_genuine_drop"])
+            d = r["drop"]
+            self.assertIsNone(d["tier"])
+            self.assertIsNone(d["family"])
+            self.assertIsNone(d["laser"])
+            self.assertEqual(d["darkness"], {"shape": None, "start_beat": None,
+                                             "end_beat": None, "bars": None})
+            self.assertEqual(d["growl"], {"start_beat": None, "end_beat": None})
+
+    def test_header_and_mmss_context(self):
+        obj = m.build_gold_template(_resolutions(), "HEAD1", "labsha0")
+        self.assertEqual(obj["_header"]["head"], "HEAD1")
+        self.assertEqual(obj["_header"]["label_sha"], "labsha0")
+        self.assertIn("hybrid unit", obj["_header"]["ruling"])
+        by_key = {(r["lineage_key"], r["marker_beat"]): r for r in obj["rows"]}
+        self.assertEqual(by_key[("cid:111", 100)]["marker_time"], "0:50")  # grid[100]=50000ms
+        self.assertIsNone(by_key[("cid:222", 50)]["marker_time"])          # empty grid
+        self.assertEqual(by_key[("cid:111", 100)]["content_id"], "111")
+
+    def test_deterministic(self):
+        res = _resolutions()
+        self.assertEqual(m.build_gold_template(res, "H", "s"),
+                         m.build_gold_template(res, "H", "s"))
+
+    def test_overwrite_protection_trips_on_filled_template(self):
+        res = _resolutions()
+        obj = m.build_gold_template(res, "H", "s")
+        tmp = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+        self.addCleanup(lambda: Path(tmp.name).unlink(missing_ok=True))
+        tmp.close()
+        # all-null template: writing is allowed (no labels yet)
+        m.write_gold_template(obj, tmp.name)
+        self.assertFalse(m._template_has_labels(tmp.name))
+        # now the file has a real label -> refuse to clobber
+        filled = m.build_gold_template(res, "H", "s")
+        filled["rows"][0]["is_genuine_drop"] = True
+        Path(tmp.name).write_text(json.dumps(filled), encoding="utf-8")
+        self.assertTrue(m._template_has_labels(tmp.name))
+        with self.assertRaises(ValueError) as ctx:
+            m.write_gold_template(obj, tmp.name)
+        self.assertIn("refusing to overwrite", str(ctx.exception))
+
+
+def _valid_gold(res):
+    """A schema-valid filled gold over _resolutions(): one genuine, one not, one null."""
+    obj = m.build_gold_template(res, "H", "s")
+    by_key = {(r["lineage_key"], r["marker_beat"]): r for r in obj["rows"]}
+    g = by_key[("cid:111", 100)]
+    g["is_genuine_drop"] = True
+    g["drop"].update(tier=2, family="WALL", family_matches_track=True,
+                     laser="yes", confidence="high", notes="clean wall")
+    g["drop"]["darkness"].update(shape="blackout", start_beat=90, end_beat=100, bars=2)
+    g["drop"]["growl"] = "none"
+    by_key[("cid:111", 200)]["is_genuine_drop"] = False   # ruled a non-drop
+    # cid:222@50 stays fully null (unlabeled)
+    return obj
+
+
+class GoldLoaderTests(unittest.TestCase):
+    def test_valid_roundtrip_counts_coverage(self):
+        res = _resolutions()
+        result = m.validate_gold(_valid_gold(res), _marker_index(res))
+        self.assertEqual(result["total"], 3)
+        self.assertEqual(result["labeled"], 2)          # one true + one false
+        self.assertEqual(len(result["genuine_rows"]), 1)
+
+    def test_unknown_row_field_is_hard_error(self):
+        res = _resolutions()
+        obj = _valid_gold(res)
+        obj["rows"][2]["typo_field"] = 1
+        with self.assertRaises(ValueError) as ctx:
+            m.validate_gold(obj, _marker_index(res))
+        self.assertIn("unknown field", str(ctx.exception))
+
+    def test_unknown_drop_field_is_hard_error(self):
+        res = _resolutions()
+        obj = _valid_gold(res)
+        obj["rows"][0]["drop"]["tierr"] = 3
+        with self.assertRaises(ValueError) as ctx:
+            m.validate_gold(obj, _marker_index(res))
+        self.assertIn("drop unknown field", str(ctx.exception))
+
+    def test_unmatched_provenance_names_the_row(self):
+        res = _resolutions()
+        obj = _valid_gold(res)
+        obj["rows"][0]["marker_beat"] = 999   # no cid:111@999 marker exists
+        with self.assertRaises(ValueError) as ctx:
+            m.validate_gold(obj, _marker_index(res))
+        msg = str(ctx.exception)
+        self.assertIn("no currently-enumerable marker", msg)
+        self.assertIn("cid:111", msg)   # the offending row is named by provenance
+
+    def test_null_is_genuine_drop_excluded_but_counted(self):
+        res = _resolutions()
+        obj = m.build_gold_template(res, "H", "s")   # all null
+        result = m.validate_gold(obj, _marker_index(res))
+        self.assertEqual(result["labeled"], 0)       # nothing ruled
+        self.assertEqual(result["total"], 3)         # still counted in coverage
+        self.assertEqual(result["genuine_rows"], [])
+
+    def test_invalid_enum_is_hard_error(self):
+        res = _resolutions()
+        obj = _valid_gold(res)
+        obj["rows"][0]["drop"]["tier"] = 5
+        with self.assertRaises(ValueError) as ctx:
+            m.validate_gold(obj, _marker_index(res))
+        self.assertIn("tier must be", str(ctx.exception))
+
+    def test_invalid_beat_range_is_hard_error(self):
+        res = _resolutions()
+        obj = _valid_gold(res)
+        obj["rows"][0]["drop"]["darkness"].update(start_beat=100, end_beat=90)
+        with self.assertRaises(ValueError) as ctx:
+            m.validate_gold(obj, _marker_index(res))
+        self.assertIn("start_beat", str(ctx.exception))
+
+    def test_bad_is_genuine_drop_value_is_hard_error(self):
+        res = _resolutions()
+        obj = _valid_gold(res)
+        obj["rows"][2]["is_genuine_drop"] = "yes"   # must be true/false/null
+        with self.assertRaises(ValueError) as ctx:
+            m.validate_gold(obj, _marker_index(res))
+        self.assertIn("is_genuine_drop must be", str(ctx.exception))
+
+    def test_unknown_still_valid_on_genuine_drop(self):
+        res = _resolutions()
+        obj = m.build_gold_template(res, "H", "s")
+        by_key = {(r["lineage_key"], r["marker_beat"]): r for r in obj["rows"]}
+        g = by_key[("cid:111", 100)]
+        g["is_genuine_drop"] = True
+        g["drop"].update(tier="unknown", family="unknown", family_matches_track="unknown",
+                         laser="unknown")
+        m.validate_gold(obj, _marker_index(res))   # must not raise
+
+
+# deterministic per-beat model for scoring: cid:111@100 -> WALL/T3, @200 -> HOUSE/T1,
+# cid:222@50 -> COMET/T2. Any unknown beat -> NEUTRAL/T1.
+def _scoring_plan_fn(v4, drops, buildups, *, beatgrid_times_ms=()):
+    table = {100: ("WALL", 3, "blackout", 4), 200: ("HOUSE", 1, "snap", 0),
+             50: ("COMET", 2, "dip", 2)}
+    return _Plan([_Entry(d, _Dec(*table.get(d, ("NEUTRAL", 1, "snap", 0)))) for d in drops])
+
+
+class GoldScoringAvailabilityTests(unittest.TestCase):
+    def _gold_two_examples(self, res):
+        obj = m.build_gold_template(res, "H", "s")
+        by_key = {(r["lineage_key"], r["marker_beat"]): r for r in obj["rows"]}
+        # genuine, model AGREES on tier+family
+        a = by_key[("cid:111", 100)]
+        a["is_genuine_drop"] = True
+        a["drop"].update(tier=3, family="WALL", family_matches_track=True, laser="yes")
+        # genuine, model DISAGREES (gold T2/COMET, model T1/HOUSE)
+        b = by_key[("cid:111", 200)]
+        b["is_genuine_drop"] = True
+        b["drop"].update(tier=2, family="COMET", family_matches_track=False, laser="no")
+        return obj
+
+    def test_tier_family_available_others_unavailable(self):
+        res = _resolutions()
+        gold = m.validate_gold(self._gold_two_examples(res), _marker_index(res))
+        scores = m.score_accuracy_axes(gold, res, _scoring_plan_fn)
+        self.assertTrue(scores["tier"]["available"])
+        self.assertEqual(scores["tier"]["gold_examples"], 2)
+        self.assertEqual(scores["tier"]["score"]["exact"], 1)      # 100 agrees, 200 flips
+        self.assertTrue(scores["family"]["available"])
+        self.assertEqual(scores["family"]["score"]["correct"], 1)  # WALL agrees, COMET!=HOUSE
+        for axis in ("darkness", "growl", "laser", "drop_classification"):
+            self.assertFalse(scores[axis]["available"])
+            self.assertTrue(scores[axis]["blocker"])
+
+    def test_axis_availability_reflects_scores_and_stays_partial(self):
+        res = _resolutions()
+        gold = m.validate_gold(self._gold_two_examples(res), _marker_index(res))
+        scores = m.score_accuracy_axes(gold, res, _scoring_plan_fn)
+        avail = {a["axis"]: a for a in m.axis_availability(7, 5, accuracy_scores=scores)}
+        self.assertTrue(avail["tier"]["available"])
+        self.assertTrue(avail["family"]["available"])
+        self.assertFalse(avail["darkness"]["available"])
+        self.assertIn("drop_classification", avail)
+        self.assertFalse(avail["drop_classification"]["available"])
+        # tier+family available but darkness/growl/laser are not -> still PARTIAL
+        self.assertTrue(m.is_partial(m.axis_availability(7, 5, accuracy_scores=scores)))
+
+    def test_gold_present_but_no_scorable_example_reads_unavailable(self):
+        res = _resolutions()
+        obj = m.build_gold_template(res, "H", "s")
+        by_key = {(r["lineage_key"], r["marker_beat"]): r for r in obj["rows"]}
+        g = by_key[("cid:111", 100)]
+        g["is_genuine_drop"] = True
+        g["drop"].update(tier="unknown", family="unknown", family_matches_track="unknown",
+                         laser="unknown")
+        gold = m.validate_gold(obj, _marker_index(res))
+        scores = m.score_accuracy_axes(gold, res, _scoring_plan_fn)
+        self.assertFalse(scores["tier"]["available"])      # only 'unknown' tier -> 0 examples
+        self.assertIn("no genuine-drop tier example", scores["tier"]["blocker"])
+        self.assertFalse(scores["family"]["available"])
+
+    def test_no_model_decision_at_marker_is_not_comparable(self):
+        res = _resolutions()
+        gold = m.validate_gold(self._gold_two_examples(res), _marker_index(res))
+
+        def empty_plan(v4, drops, buildups, *, beatgrid_times_ms=()):
+            return _Plan([])   # for_drop returns None -> no model output anywhere
+
+        scores = m.score_accuracy_axes(gold, res, empty_plan)
+        self.assertFalse(scores["tier"]["available"])      # nothing comparable
+        self.assertEqual(scores["tier"]["gold_examples"], 0)
+
+    def test_no_gold_leaves_existing_behavior_unchanged(self):
+        # accuracy_scores=None -> the 5 accuracy axes stay UNAVAILABLE with the
+        # free-text-labels blocker, exactly as before AWR-205.
+        axes = {a["axis"]: a for a in m.axis_availability(None)}
+        self.assertNotIn("drop_classification", axes)
+        for name in ("tier", "family", "darkness", "growl", "laser"):
+            self.assertFalse(axes[name]["available"])
+            self.assertIn("curation pass", axes[name]["blocker"])
+
+
+class GoldLeakTests(unittest.TestCase):
+    def test_gold_field_cannot_reach_planner(self):
+        # positive allowlist: a gold field in model inputs is rejected at the boundary
+        with self.assertRaises(ValueError):
+            m.call_planner(lambda *a, **k: "P",
+                           {"v4": object(), "drops": [], "buildups": [],
+                            "beatgrid_times_ms": [], "is_genuine_drop": True})
+
+    def test_assert_no_leak_rejects_smuggled_gold_field(self):
+        with self.assertRaises(ValueError):
+            m.assert_no_leak({"v4": object(), "is_genuine_drop": True})
+        with self.assertRaises(ValueError):
+            m.assert_no_leak({"v4": object(), "drop": {"tier": 3}})
+
+    def test_scorer_only_ever_sends_model_inputs_to_planner(self):
+        res = _resolutions()
+        obj = m.build_gold_template(res, "H", "s")
+        by_key = {(r["lineage_key"], r["marker_beat"]): r for r in obj["rows"]}
+        g = by_key[("cid:111", 100)]
+        g["is_genuine_drop"] = True
+        g["drop"].update(tier=3, family="WALL", family_matches_track=True, laser="yes")
+        gold = m.validate_gold(obj, _marker_index(res))
+        calls = []
+
+        def plan_fn(v4, drops, buildups, *, beatgrid_times_ms=()):
+            calls.append({"v4": v4, "drops": list(drops), "buildups": list(buildups)})
+            return _Plan([_Entry(d, _Dec("WALL", 3, "blackout", 4)) for d in drops])
+
+        m.score_accuracy_axes(gold, res, plan_fn)
+        self.assertTrue(calls)
+        for c in calls:
+            self.assertEqual(set(c) & m.LEAK_FORBIDDEN_FIELDS, set())
+
+
 if __name__ == "__main__":
     unittest.main()
