@@ -292,6 +292,8 @@ def _usb_twin_prefilter(contents: Sequence[object], usb_beatgrid: dict) -> list[
     target_duration_s = times[-1] / 1000.0
     candidates: list[object] = []
     for content in contents:
+        if getattr(content, "rb_local_deleted", 0):
+            continue
         bpm_raw = getattr(content, "BPM", None)
         length = getattr(content, "Length", None)
         analysis_path = str(getattr(content, "AnalysisDataPath", None) or "")
@@ -509,7 +511,7 @@ class FilepathResolver:
         self._lock = threading.Lock()
 
     def resolve_by_anlz(self, deck: int, load_gen: int, anlz_path: str, *, trace_id: str = "") -> None:
-        """Resolve track via ANLZ path DB lookup. Falls back to lsof on failure."""
+        """Resolve by ANLZ; only non-device misses may fall back to lsof."""
         threading.Thread(
             target=self._resolve_anlz_worker,
             args=(deck, load_gen, anlz_path, trace_id),

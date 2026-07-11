@@ -97,8 +97,9 @@ class UsbTwinPureTests(unittest.TestCase):
         exact = _content(ID="exact")
         wrong_bpm = _content(ID="bpm", BPM=12790)
         wrong_duration = _content(ID="duration", Length=210)
+        deleted = _content(ID="deleted", rb_local_deleted=1)
         self.assertEqual(
-            _usb_twin_prefilter([exact, wrong_bpm, wrong_duration], _grid()),
+            _usb_twin_prefilter([exact, wrong_bpm, wrong_duration, deleted], _grid()),
             [exact],
         )
 
