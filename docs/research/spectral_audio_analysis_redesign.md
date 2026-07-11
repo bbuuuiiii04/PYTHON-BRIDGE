@@ -652,8 +652,8 @@ The v4 extractor/cache this report built is the KEEP layer; the SOL review
 AWR-195 refactor program whose blocking first stage is a real ear benchmark. That harness
 now exists — read-only offline tooling, no runtime behavior change:
 
-- `tools/spectral_ear_benchmark.py` + `tests/test_spectral_ear_benchmark.py` (53 tests after
-  the 2026-07-11 AWR-205 gold-intake pass; 32 before: single `call_planner` anti-leak
+- `tools/spectral_ear_benchmark.py` + `tests/test_spectral_ear_benchmark.py` (56 tests after
+  the 2026-07-11 AWR-205 gold-intake pass + its adversarial-review fix; 32 before: single `call_planner` anti-leak
   boundary on every planner call, amendment grouping via the `amends` parent link (with a
   duplicate-id guard against silent primary corruption), an availability gate that now requires
   markers scored AND at least one comparable ±1/±2 perturbation, per-radius comparable

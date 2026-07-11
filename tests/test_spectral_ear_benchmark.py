@@ -654,6 +654,35 @@ class GoldLoaderTests(unittest.TestCase):
             m.validate_gold(obj, _marker_index(res))
         self.assertIn("is_genuine_drop must be", str(ctx.exception))
 
+    def test_bool_tier_is_hard_error(self):
+        # True == 1 in Python, so a bare membership test would accept tier:true as
+        # tier 1 and silently score it. It must be a HARD error (fail closed).
+        res = _resolutions()
+        obj = _valid_gold(res)
+        obj["rows"][0]["drop"]["tier"] = True
+        with self.assertRaises(ValueError) as ctx:
+            m.validate_gold(obj, _marker_index(res))
+        self.assertIn("tier must be", str(ctx.exception))
+
+    def test_int_is_genuine_drop_is_hard_error(self):
+        # 1 == True, so `1 in (None, True, False)` is True; without a type guard a
+        # `1` would be counted as labeled yet dropped from scoring. Must be rejected.
+        res = _resolutions()
+        obj = _valid_gold(res)
+        obj["rows"][2]["is_genuine_drop"] = 1
+        with self.assertRaises(ValueError) as ctx:
+            m.validate_gold(obj, _marker_index(res))
+        self.assertIn("is_genuine_drop must be", str(ctx.exception))
+
+    def test_int_family_matches_track_is_hard_error(self):
+        # same bool/int aliasing on family_matches_track: reject int 1/0.
+        res = _resolutions()
+        obj = _valid_gold(res)
+        obj["rows"][0]["drop"]["family_matches_track"] = 1
+        with self.assertRaises(ValueError) as ctx:
+            m.validate_gold(obj, _marker_index(res))
+        self.assertIn("family_matches_track must be", str(ctx.exception))
+
     def test_unknown_still_valid_on_genuine_drop(self):
         res = _resolutions()
         obj = m.build_gold_template(res, "H", "s")

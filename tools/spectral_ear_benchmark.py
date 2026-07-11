@@ -160,7 +160,6 @@ GOLD_DARKNESS_FIELDS = frozenset({"shape", "start_beat", "end_beat", "bars"})
 GOLD_GROWL_FIELDS = frozenset({"start_beat", "end_beat"})
 GOLD_TIER_VALUES = frozenset({1, 2, 3, "unknown"})
 GOLD_LASER_VALUES = frozenset({"yes", "no", "unknown"})
-GOLD_FMT_VALUES = frozenset({True, False, "unknown"})   # family_matches_track
 GOLD_RULING = (
     "hybrid unit (operator ruling 2026-07-11): every enumerated marker gets an "
     "is_genuine_drop yes/no; the nested `drop` field-set is filled ONLY on genuine "
@@ -864,15 +863,20 @@ def _validate_genuine_drop(drop: Any, rid: str, errors: list[str]) -> None:
     if not isinstance(drop, dict):
         errors.append(f"{rid}: is_genuine_drop=true requires a `drop` object")
         return
-    if drop.get("tier") not in GOLD_TIER_VALUES:
-        errors.append(f"{rid}: tier must be 1/2/3/'unknown' on a genuine drop (got {drop.get('tier')!r})")
+    # bool is a Python int (True == 1, False == 0), so a bare `in GOLD_TIER_VALUES`
+    # membership test would accept `tier: true` as tier 1 — reject bools first so a
+    # JSON boolean is a hard error, not a silently-mislabeled tier.
+    tier = drop.get("tier")
+    if isinstance(tier, bool) or tier not in GOLD_TIER_VALUES:
+        errors.append(f"{rid}: tier must be 1/2/3/'unknown' on a genuine drop (got {tier!r})")
     fam = drop.get("family")
     if not (fam == "unknown" or (isinstance(fam, str) and fam.strip())):
         errors.append(f"{rid}: family must be a non-empty string (free text or 'unknown') "
                       f"on a genuine drop (got {fam!r})")
-    if drop.get("family_matches_track") not in GOLD_FMT_VALUES:
-        errors.append(f"{rid}: family_matches_track must be true/false/'unknown' "
-                      f"(got {drop.get('family_matches_track')!r})")
+    # accept only a real bool or 'unknown' — reject int 1/0 (same bool/int aliasing).
+    fmt = drop.get("family_matches_track")
+    if not (isinstance(fmt, bool) or fmt == "unknown"):
+        errors.append(f"{rid}: family_matches_track must be true/false/'unknown' (got {fmt!r})")
     if drop.get("laser") not in GOLD_LASER_VALUES:
         errors.append(f"{rid}: laser must be 'yes'/'no'/'unknown' (got {drop.get('laser')!r})")
     dark = drop.get("darkness")
@@ -922,7 +926,9 @@ def validate_gold(gold_obj: Any, marker_index: dict[tuple[str, int], Marker]) ->
                 errors.append(f"{rid}: duplicate provenance key {key}")
             seen.add(key)
         igd = row.get("is_genuine_drop")
-        if igd not in (None, True, False):
+        # must be a REAL bool or null — reject int 1/0 (1 == True would otherwise
+        # pass, then get counted as labeled yet silently dropped from scoring).
+        if not (igd is None or isinstance(igd, bool)):
             errors.append(f"{rid}: is_genuine_drop must be true/false/null (got {igd!r})")
         drop = row.get("drop")
         if drop is not None and not isinstance(drop, dict):
@@ -996,7 +1002,7 @@ def score_accuracy_axes(gold_result: dict[str, Any], resolutions: list[Resolutio
         md = decision_at(row["lineage_key"], int(row["marker_beat"]))
         if md is None:
             continue   # no real model output at this marker -> not comparable
-        if drop.get("tier") in (1, 2, 3):
+        if drop.get("tier") in (1, 2, 3) and not isinstance(drop.get("tier"), bool):
             tier_ex.append((int(drop["tier"]), int(md[1])))
         fam = drop.get("family")
         if isinstance(fam, str) and fam.strip() and fam != "unknown":
