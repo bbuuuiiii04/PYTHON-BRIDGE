@@ -45,6 +45,20 @@ validation_scope: >
 - Behavior that must not change: AWR-207 mirror-stick resolution and all local
   resolution, byte-identical behavior (pin with regression tests).
 
+### Task 0 — RED-TEAM-MANDATED identity rule (claude5.REDTEAM finding, binding)
+The red-team corpus proved beatgrid-alone identity is UNSAFE cross-analysis:
+66 different-song grid collisions exist in the real library, and drift beyond
+the tolerance gate (first-beat ≥11 ms or tempo error ≥1e-4 — realistic for a
+re-analyzed foreign stick) produced 121 wrong-song identity flips in
+simulation. Therefore, BINDING RULE: a fingerprint-only match may resolve a
+device load ONLY at mirror-class strictness (near-exact grid agreement — the
+R1 case, where the red-team measured 0/735 wrong). Any match relying on
+looser-than-mirror-class grid agreement REQUIRES the export.pdb tag lever to
+independently agree (Task 1). No tags available + no mirror-class grid = None
+with reason `usb-crossanalysis-unconfirmed`. Pin this rule with tests built
+from the red-team's collision pairs (corpus manifest under local/, see
+claude5.REDTEAM.report.md — reuse its cases as regressions).
+
 ### Task 1 — export.pdb identity lever (grid-independent)
 On a device-export load whose AWR-207 twin match misses or is ambiguous:
 locate the stick root from the ANLZ path (`/Volumes/<STICK>/PIONEER/...`),
