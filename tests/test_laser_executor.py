@@ -1203,9 +1203,10 @@ class LaserSceneExecutorTests(unittest.TestCase):
         self.assertFalse(executor.status()["blackout_pending_for_drop_window"])
 
     def test_blackout_skip_logs_failing_subconditions_at_info(self) -> None:
-        """AWR-206: when the relaxed gate blocks the blackout, the skip is logged
-        at INFO (visible at the bridge's live log level) with the failing
-        sub-conditions -- the old DEBUG line was invisible."""
+        """AWR-206 fix round: when the relaxed gate blocks a requested pre-drop
+        blackout on the reachable idle path, the skip is logged at INFO (visible
+        at the bridge's live log level) with the failing sub-conditions -- the
+        old DEBUG line was invisible."""
         midi = _FakeMidiOutput(dry_run=False)
         blackout_on = LaserMidiMessage(kind="note_on", behavior="note_on", channel=1, note=90, velocity=127)
         ex = LaserSceneExecutor(
@@ -1215,15 +1216,36 @@ class LaserSceneExecutorTests(unittest.TestCase):
         )
         with self.assertLogs("laser_executor", level="INFO") as cm:
             ex.on_decision(
-                _decision("buildup_a", "buildup_to_drop_window", "buildup"),
+                _arm_idle_decision(),
                 _ctx(position_stale=True, autoloop_ready=False, smart_drop_blackout_arm=True),
             )
         self.assertTrue(
-            any("blackout skipped: auto_gate_blocked" in m and "stale=True" in m for m in cm.output),
+            any("blackout skipped: relaxed gate blocked" in m and "stale=True" in m for m in cm.output),
             cm.output,
         )
         self.assertEqual(midi.calls, [])
         self.assertFalse(ex.status()["blackout_pending_for_drop_window"])
+
+    def test_blackout_skip_log_throttled_to_once_per_failing_tuple(self) -> None:
+        """AWR-206 fix round (F3): the arm signal is level-held at 200 Hz, so a
+        sustained relaxed-gate block must log the INFO skip only ONCE per changed
+        failing-condition tuple -- never once per tick."""
+        blackout_on = LaserMidiMessage(kind="note_on", behavior="note_on", channel=1, note=90, velocity=127)
+        ex = LaserSceneExecutor(
+            config=_config(dry_run=False, manual_blackout_on=blackout_on),
+            backend=MidiOutputBackend(_FakeMidiOutput(dry_run=False)),
+            personality=_personality(),
+        )
+        with self.assertLogs("laser_executor", level="INFO") as cm:
+            # 200 ticks, same failing tuple (position_stale) across advancing beats.
+            for i in range(200):
+                ex.on_decision(
+                    _arm_idle_decision(),
+                    _ctx(abs_beat=60.0 + i * 0.05, position_stale=True,
+                         autoloop_ready=False, smart_drop_blackout_arm=True),
+                )
+        skip_lines = [m for m in cm.output if "blackout skipped: relaxed gate blocked" in m]
+        self.assertEqual(len(skip_lines), 1, skip_lines)
 
     def test_blackout_arm_fires_for_phrase_role_mid_window_no_phrase_boundary(self) -> None:
         """Regression: mini-drop case.
