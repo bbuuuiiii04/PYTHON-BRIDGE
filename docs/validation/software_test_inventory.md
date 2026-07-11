@@ -74,6 +74,22 @@ warning/limitation (identity is not guessed — curation work); and the report i
 deterministic with the core run PARTIAL. These prove the harness's honesty guarantees in
 software only; they do not run the real planner, cache, or Rekordbox DB.
 
+AWR-203 adds `tests/test_hardness_v0.py` (27 tests) for the offline intrinsic-hardness shadow
+descriptor `hardness_v0.py` and its read-only evaluator `tools/hardness_ablation.py`. It proves,
+on duck-typed synthetics plus one real `SpectralFeaturesV4` fixture (no cache/DB/ANLZ): the B/A/R/N
+term math and clip01 bounds against the frozen anchors; first-8/following-8 per-term averaging and
+short/end-of-track window clamping (always ≥1 beat, no empty slice); deterministic reducer
+selection with the documented tie-break (constant-series ties pick offset 0; the `_select_offset`
+rank indices for center/median/q75/max); the three-path math and winning-path diagnostics
+(`repeated_wall` uses only the per-track baseline, so it is offset-invariant); the per-term track
+median and the `MIN_STABLE_DROPS` stability flag; the marker-shift range bracketing H; that
+malformed/empty/out-of-range/None-baseline inputs return no result and an unknown reducer raises
+(never a phantom T3); determinism (same inputs → identical frozen result); and the AST-based
+zero-runtime-importer invariant, with a companion test proving the guard catches multiline-paren,
+`importlib.import_module`, and `__import__` forms a line-anchored regex would miss. Read-only
+offline code — `hardness_v0.py` does no I/O and has zero runtime importers; the evaluator opens the
+Rekordbox DB + v4 cache READ-ONLY only. Not run in these tests: the real corpus, cache, or DB.
+
 ## Required documentation update
 
 When adding or changing tests, update:

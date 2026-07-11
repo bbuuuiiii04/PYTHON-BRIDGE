@@ -65,6 +65,14 @@ Coverage expectations:
   comparable denominators for marker sensitivity, same-title/no-content_id identity warnings,
   deterministic output, and marker-sensitivity flip counting against a synthetic planner seam.
   Stdlib-only tests; no real cache/DB/planner.
+- Offline intrinsic-hardness (`hardness_v0.py` + `tools/hardness_ablation.py`, AWR-203) changes
+  need `tests/test_hardness_v0.py` (27 tests): B/A/R/N term math + clipping, first-8/following-8
+  per-term averaging and short/end-of-track boundaries, deterministic reducer selection +
+  tie-breaking, three-path math + winning-path diagnostics, per-term track median +
+  MIN_STABLE_DROPS, marker-shift range, malformed/empty inputs returning no result (never a
+  phantom T3), and the AST-based zero-runtime-importer invariant (only `tools/`+`tests/` may
+  import the offline module). Stdlib-only; duck-typed synthetics + one real `SpectralFeaturesV4`
+  fixture, no cache/DB.
 - Config schema changes need validation tests.
 - LED/Govee rendering changes need deterministic renderer/runner tests where practical.
 - Laser changes need config/executor/director tests.

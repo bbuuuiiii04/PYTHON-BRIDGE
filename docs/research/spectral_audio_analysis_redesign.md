@@ -679,6 +679,46 @@ their *musical* correctness is an open Stage-2 question.
 
 ---
 
+## 10. Intrinsic-hardness shadow descriptor (AWR-203, offline, 2026-07-11)
+
+`hardness_v0.py` + `tools/hardness_ablation.py` are an **offline, non-authoritative** shadow
+axis — the frozen SOL3 "intrinsic hardness" candidate, built to be *benchmarked*, not routed.
+Zero runtime importers (only `tools/`+`tests/` may import it; a static AST test enforces it), no
+I/O, and it never times or triggers a cue. `violence`/`.tier` stay the sole live authority — this
+axis does not replace tier, feed darkness, or drive any output.
+
+- **Formula.** Four landed-sound terms over a first-8 + following-8 landed view (each term
+  averaged across the two halves): persistent body `B=clip01((Q25(full_db)-13.7)/3.8)`, sustained
+  high-band abrasion `A=clip01((Q25(high_db)+5.5)/10.4)`, distorted-growl duty
+  `R=mean clip01((growl_band_db-20)/12)·clip01((growl_flatness-0.10)/0.20)`, mid-high onset density
+  `N=clip01((mean(onset_density_midhigh)-1.7)/1.3)`. A marker ±2 alignment search picks the
+  descriptor window (the Rekordbox marker stays the cue). Per-term-median track baseline `T*` over
+  genuine drops. Three paths `repeated_wall=min(T_B/0.92,T_A/0.80)`,
+  `abrasive_hammer=min(T_B/0.70,L_B/0.75,L_A/0.60)`,
+  `growling_hammer=min(T_N/0.65,L_B/0.80,L_R/0.40,L_N/0.70)`, `H=max(paths)`.
+- **Honesty.** `H≥1.0` is *path-threshold firing*, NOT an independently validated boundary; the
+  candidate is in-sample (anchors + thresholds hand-iterated on the same named pins) and
+  **binary-T3 only** — there is no T1/T2 split and none may be invented from this formula. Q25
+  reuses `spectral_profile.percentile` so it stays bit-identical to the anchor calibration.
+- **Reducers.** `center`/`median`/`q75`/`max` alignment reducers make the selection-bias ablation
+  a call, not a rewrite (deterministic tie-break; the reducer ranks offsets by the composite
+  alignment score).
+- **Evaluator.** `tools/hardness_ablation.py` is read-only: it resolves each track content_id →
+  current filepath → current ANLZ beatgrid → `get_cached_v4`, then (defense-in-depth over the
+  forward key) re-reads the current-key payload and asserts its `audio_filepath` +
+  `beatgrid_fingerprint` match — never enumerating raw cache JSON, never extracting or writing. It
+  emits descriptive evidence only (coverage, reducer prevalence, manufactured-T3 fraction, per-path
+  standalone/unique counts, n_drop strata, micro + track-macro marker flips at ±1/±2,
+  boundary-conditioned flips) and makes **no** taste-accuracy, held-out, or readiness claim; group
+  bootstrap + accuracy scoring are skipped because no structured independent gold exists yet.
+- **Status:** `experimental` / `software-tested` (27 unit tests; 9-lens adversarial review found
+  zero module defects). Offline candidate only — live routing, tier replacement, and the later
+  inert-shadow-logging step (Increment B) each require a separate operator gate. The AWR-200
+  candidate-planner hook was deliberately NOT built: hardness is a binary shadow descriptor, not a
+  production `DropDecision`. SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
+
+---
+
 ## Appendix A — corpus recon (2026-07-05, this session, read-only)
 
 - Rekordbox DB opened exactly as `filepath_resolver.py:281-283` does (pyrekordbox
