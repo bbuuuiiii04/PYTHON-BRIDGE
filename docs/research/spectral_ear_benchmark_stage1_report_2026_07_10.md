@@ -1,11 +1,12 @@
 ---
 doc_status: current
 truth_level: frozen software baseline + coverage/blocker report
-last_verified_commit: 8256402
+last_verified_commit: 1a51431
 last_verified_date: 2026-07-10
 validation_scope: >
-  Frozen Stage-1 EAR-benchmark run (AWR-200) of tools/spectral_ear_benchmark.py over the
-  local AWR-182 label layer at HEAD 82564027 (label sha256[:16] bda63553da99cb9e). Records
+  Frozen Stage-1 EAR-benchmark run (AWR-200) of tools/spectral_ear_benchmark.py at code
+  HEAD 1a51431 over the local AWR-182 label layer (label sha256[:16] bda63553da99cb9e).
+  Records
   usable/excluded counts, cache/beatgrid resolution identity, per-axis metric availability,
   and the marker-sensitivity proof-of-function pilot. Read-only run: no extraction, no
   cache/config/runtime writes, no bridge/hardware contact. SOFTWARE-VALIDATED ONLY /
@@ -22,8 +23,9 @@ support). **AWR-200 is PARTIAL.**
 
 ## Run identity
 
-- Harness HEAD at run: `82564027b52b28a749cdba365455c714108e3f13` (the working-tree run;
-  the committed harness lands under the AWR-200 commit recorded in the registry).
+- Harness HEAD at run: `1a51431004eacec7bc2f54c24e2520c94e657105` (the exact committed code —
+  the completion-gate fix commit; this report is committed immediately after so it cites the
+  precise code it was run against).
 - Labels: `local/labels/operator_track_labels_2026_07_09.jsonl` (gitignored machine layer).
 - Label revision hash: sha256[:16] = `bda63553da99cb9e`, 41 rows.
 - v4 cache identity: resolved live through each track's **current** Rekordbox filepath +
@@ -43,9 +45,9 @@ support). **AWR-200 is PARTIAL.**
   - `unusable_grid`: 1 — Toxic (Britney).
   - `variable_bpm`: 1 — s.o.s.
 - REWIND is **usable** (charter §D includes its post-reanalysis eight-drop result).
-- Grouped leave-one-lineage-out inventory: 20 folds over the content-bearing usable set;
-  Utopia's 10 entries (8 UT-* + 2 amendments) form one lineage and never split. Full
-  inventory in the harness output.
+- Grouped leave-one-lineage-out inventory: 21 folds (one per usable lineage); Utopia's 10
+  entries (8 UT-* + 2 amendments) form one lineage and never split. Full inventory in the
+  harness output.
 
 ## Per-axis metric availability (frozen)
 
@@ -61,8 +63,10 @@ a failed axis").
 | laser | **UNAVAILABLE** | no structured `operator_laser_suitability`; more laser labels wanted (charter D) |
 | marker_sensitivity | **AVAILABLE (pilot only)** | model-only; needs no operator gold — but coverage-limited (below) |
 
-Every UNAVAILABLE axis is reported as such — **never a fabricated zero or PASS**. The loss
-shapes are already encoded for when gold arrives: squared ordered tier error (adjacent=1,
+Every UNAVAILABLE axis is reported as such — **never a fabricated zero or PASS**. AWR-200's
+PARTIAL/complete status is a single shared `is_partial` predicate over these accuracy axes;
+marker-sensitivity availability is deliberately excluded, so the 2-track marker pilot can
+never flip Stage 1 to complete. The loss shapes are already encoded for when gold arrives: squared ordered tier error (adjacent=1,
 T1↔T3=4) + missed-T3/false-T3 counts; darkness detection then raw-beat start/end + exact
 bar-length agreement; family correctness + flapping; growl span overlap/boundary; laser
 pins (charter §C.1/§D).
