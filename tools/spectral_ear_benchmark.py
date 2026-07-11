@@ -117,7 +117,9 @@ ACCURACY_AXES: tuple[dict[str, str], ...] = (
     {"axis": "darkness", "missing_field": "operator_darkness_shape + start/end beat + bar count per drop",
      "loss": "detection FP/miss, raw-beat start/end error, exact bar-length agreement (charter C.1)"},
     {"axis": "growl", "missing_field": "operator_growl_span (start/end beat) per drop",
-     "loss": "span overlap + boundary error; growl centroid also pending library backfill"},
+     "loss": "span overlap + boundary error (growl-centroid values are already present, aligned, "
+             "and real-valued in the strict v4 cache; Stage-2 must still validate they are "
+             "MUSICALLY correct — presence is not correctness)"},
     {"axis": "laser", "missing_field": "operator_laser_suitability (positive/negative) per drop",
      "loss": "pins only until label coverage supports rates (charter D); more laser labels wanted"},
 )
@@ -419,13 +421,19 @@ def build_folds(lineages: list[Lineage]) -> list[dict[str, Any]]:
 # Axis availability audit (the honesty core)
 # ---------------------------------------------------------------------------
 
-def axis_availability(marker_scored: Optional[int]) -> list[dict[str, Any]]:
+def axis_availability(marker_scored: Optional[int],
+                      marker_comparable: Optional[int] = None) -> list[dict[str, Any]]:
     """Report, per axis, whether a score can be computed TODAY. All accuracy
     axes are UNAVAILABLE (no structured gold in the labels). Marker sensitivity is
-    AVAILABLE only when at least one MARKER was actually scored (`marker_scored`
-    is that count, NOT a resolved-track count) — a track can resolve yet produce
-    zero comparable drop decisions, and that must read UNAVAILABLE, not a hollow
-    AVAILABLE. Model-only; needs no operator gold."""
+    AVAILABLE only when at least one drop marker had a baseline decision
+    (`marker_scored`) AND at least one COMPARABLE +-1/+-2 perturbation existed to
+    flip against (`marker_comparable` = the sum of the two per-radius comparable
+    denominators). A track can resolve — and even produce baseline decisions — yet
+    have ZERO comparable perturbations (every offset out of range or colliding with
+    another drop); both flip rates then come back None, so nothing was measured and
+    the axis must read UNAVAILABLE, not a hollow AVAILABLE. `marker_comparable`
+    defaults None so the gate fails closed toward UNAVAILABLE. Model-only; needs no
+    operator gold."""
     axes: list[dict[str, Any]] = []
     for a in ACCURACY_AXES:
         axes.append({
@@ -448,6 +456,14 @@ def axis_availability(marker_scored: Optional[int]) -> list[dict[str, Any]]:
             "loss_shape": "family/tier/darkness flip rate at drop marker +-1 / +-2 (model-only)",
             "blocker": "no marker scored — either no track resolved to a filepath + beatgrid + v4 "
                        "cache hit, or resolved tracks produced no baseline drop decision to perturb.",
+        }
+    elif not marker_comparable:
+        marker = {
+            "axis": "marker_sensitivity", "available": False, "gold_examples": 0,
+            "loss_shape": "family/tier/darkness flip rate at drop marker +-1 / +-2 (model-only)",
+            "blocker": f"{marker_scored} marker(s) had a baseline decision but none had a comparable "
+                       "+-1/+-2 perturbation (every offset fell out of range or collided with another "
+                       "drop); both flip rates are None, so nothing was measured.",
         }
     else:
         marker = {
@@ -781,10 +797,11 @@ def render_report(
                  f"darkness {ref['pm1']['darkness']}%; "
                  f"+-2 family {ref['pm2']['family']}%, tier {ref['pm2']['tier']}%, "
                  f"darkness {ref['pm2']['darkness']}%")
-        L.append("  - NOT like-for-like: this pilot resolved far fewer tracks/markers than SOL's "
-                 "15/113. Do NOT compare the percentages or claim improvement/regression. The "
-                 "aggregation is documented in marker_sensitivity(); this only proves the harness "
-                 "computes the axis through the real planner.")
+        L.append("  - NOT like-for-like: a DIFFERENT track/marker set (and possibly a different "
+                 "roll-up) than SOL's 15-track / 113-marker sample. Do NOT compare the percentages "
+                 "or claim improvement/regression. The aggregation is documented in "
+                 "marker_sensitivity(); this only proves the harness computes the axis through the "
+                 "real planner.")
     else:
         L.append("- UNAVAILABLE this run (pass --resolve-db, or resolution was incomplete — see above).")
     L.append("")
@@ -793,8 +810,10 @@ def render_report(
              "(with --resolve-db) the marker-sensitivity baseline via the real planner.")
     L.append("- CANNOT: any accuracy axis (tier/family/darkness/growl/laser) — the labels carry no "
              "structured per-drop operator gold; those are blocked on a curation pass (plus OCHO/Latch "
-             "marker remaps and the growl-centroid backfill). The harness reports them UNAVAILABLE, "
-             "never zero or PASS.")
+             "ear/marker decisions). Growl-centroid values are already present, aligned, and "
+             "real-valued in the strict v4 cache — their MUSICAL correctness is a Stage-2 validation "
+             "item, not a backfill gap. The harness reports every accuracy axis UNAVAILABLE, never "
+             "zero or PASS.")
     return "\n".join(L) + "\n"
 
 
@@ -817,6 +836,7 @@ def run(labels_path: str, *, resolve_db: bool, head: str) -> tuple[str, bool]:
     marker: Optional[dict[str, Any]] = None
     resolution_summary: Optional[dict[str, int]] = None
     marker_scored: Optional[int] = None
+    marker_comparable: Optional[int] = None
     if resolve_db:
         db_path = str(Path("~/Library/Pioneer/rekordbox/master.db").expanduser())
         try:
@@ -827,15 +847,19 @@ def run(labels_path: str, *, resolve_db: bool, head: str) -> tuple[str, bool]:
             for r in resolutions:
                 resolution_summary[r.status] = resolution_summary.get(r.status, 0) + 1
             marker = marker_sensitivity(resolutions, build_track_plan)
-            # availability keys off markers SCORED, not resolved-track count: a
-            # track can resolve yet score zero markers (finding 3).
+            # availability keys off markers SCORED *and* at least one COMPARABLE
+            # +-1/+-2 perturbation, not resolved-track count: a track can resolve,
+            # even produce baseline decisions, yet have zero comparable perturbations
+            # (both flip rates come back None) — that must read UNAVAILABLE (findings 3/4).
             marker_scored = marker.get("markers", 0)
+            marker_comparable = marker.get("comparable_pm1", 0) + marker.get("comparable_pm2", 0)
         except Exception as exc:  # honest degrade: report the blocker, never fake a score
             resolution_summary = {"error": 0}
             warnings.append(f"--resolve-db failed ({type(exc).__name__}: {exc}); marker axis UNAVAILABLE")
             marker_scored = 0
+            marker_comparable = 0
 
-    availability = axis_availability(marker_scored)
+    availability = axis_availability(marker_scored, marker_comparable)
     report = render_report(
         head=head, labels_path=labels_path, label_sha=label_sha,
         manifest=manifest, warnings=warnings, folds=folds,

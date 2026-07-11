@@ -272,7 +272,15 @@ class AvailabilityTests(unittest.TestCase):
     def test_marker_axis_gated_on_resolution(self):
         self.assertFalse({a["axis"]: a for a in m.axis_availability(None)}["marker_sensitivity"]["available"])
         self.assertFalse({a["axis"]: a for a in m.axis_availability(0)}["marker_sensitivity"]["available"])
-        self.assertTrue({a["axis"]: a for a in m.axis_availability(7)}["marker_sensitivity"]["available"])
+        # markers scored AND at least one comparable perturbation -> AVAILABLE
+        self.assertTrue({a["axis"]: a for a in m.axis_availability(7, 5)}["marker_sensitivity"]["available"])
+        # markers scored but ZERO comparable perturbations at both radii -> UNAVAILABLE
+        # (finding: baseline decisions alone can't score the axis; both flip rates are None).
+        zero = {a["axis"]: a for a in m.axis_availability(7, 0)}["marker_sensitivity"]
+        self.assertFalse(zero["available"])
+        self.assertIn("comparable", zero["blocker"])
+        # default (no comparable count) fails closed toward UNAVAILABLE
+        self.assertFalse({a["axis"]: a for a in m.axis_availability(7)}["marker_sensitivity"]["available"])
 
 
 class PartialGateTests(unittest.TestCase):
@@ -280,8 +288,8 @@ class PartialGateTests(unittest.TestCase):
     accuracy axes are unavailable (executive gate fix)."""
 
     def test_is_partial_true_even_when_marker_available(self):
-        # marker AVAILABLE (7 tracks resolved) but accuracy axes all unavailable
-        self.assertTrue(m.is_partial(m.axis_availability(7)))
+        # marker AVAILABLE (7 markers scored, 5 comparable) but accuracy axes all unavailable
+        self.assertTrue(m.is_partial(m.axis_availability(7, 5)))
         self.assertTrue(m.is_partial(m.axis_availability(0)))
         self.assertTrue(m.is_partial(m.axis_availability(None)))
 
@@ -303,7 +311,7 @@ class PartialGateTests(unittest.TestCase):
                   "pm2": {"family": 43.8, "tier": 12.5, "darkness": 18.8}}
         report = m.render_report(
             head="x", labels_path="p", label_sha="s", manifest=manifest,
-            warnings=[], folds=[], availability=m.axis_availability(2),
+            warnings=[], folds=[], availability=m.axis_availability(2, 2),
             marker=marker, resolution_summary={"resolved": 2, "not_in_db": 19})
         self.assertIn("AWR-200 status: PARTIAL", report)
         self.assertNotIn("baseline-complete", report)
@@ -434,6 +442,29 @@ class MarkerRadiusDenominatorTests(unittest.TestCase):
         self.assertEqual(out["pm1"]["tier"], 33.3)
         self.assertEqual(out["pm2"]["tier"], 25.0)   # 1 / 4 comparable at +-2
         self.assertEqual(out["pm1"]["family"], 0.0)
+
+    def test_baseline_decisions_but_zero_comparable_reads_unavailable(self):
+        # Finding: a marker can HAVE a baseline decision yet have NO comparable
+        # perturbation at either radius (here a lone drop at beat 0 with n_beats=1:
+        # -1/-2 fall below 0 and +1/+2 fall out of range). markers>0 but
+        # comparable_pm1==comparable_pm2==0, so both flip rates are None and nothing
+        # was measured. Availability must read UNAVAILABLE, not a hollow AVAILABLE on
+        # markers>0 alone.
+        def plan_fn(v4, drops, buildups, *, beatgrid_times_ms=()):
+            return _Plan([_Entry(d, _Dec("WALL", 2, "balloon", 0)) for d in drops])
+
+        res = m.Resolution(lineage="cid:1", track="T", status="resolved",
+                           v4=_V4(1), drops=(0,), buildups=(), grid=())
+        out = m.marker_sensitivity([res], plan_fn)
+        self.assertEqual(out["markers"], 1)          # baseline decision exists
+        self.assertEqual(out["comparable_pm1"], 0)   # no comparable +-1 perturbation
+        self.assertEqual(out["comparable_pm2"], 0)   # nor +-2
+        self.assertIsNone(out["pm1"]["tier"])        # both flip rates None
+        self.assertIsNone(out["pm2"]["tier"])
+        comparable = out["comparable_pm1"] + out["comparable_pm2"]
+        axis = {a["axis"]: a for a in m.axis_availability(out["markers"], comparable)}["marker_sensitivity"]
+        self.assertFalse(axis["available"])          # NOT a hollow AVAILABLE
+        self.assertIn("comparable", axis["blocker"])
 
 
 class DeterminismTests(unittest.TestCase):

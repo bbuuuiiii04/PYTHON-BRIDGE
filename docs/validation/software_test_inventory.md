@@ -49,7 +49,7 @@ AWR-197 adds `tests/test_speed_size_law.py`:
 `test_apply_aborts_on_missing_look`. The patch_b `test_tracked_config_validates` also pins the
 approved explicit `loop_beats` literal. These are config/tool software checks only.
 
-AWR-200 adds `tests/test_spectral_ear_benchmark.py` (31 tests) for the Stage-1 EAR benchmark
+AWR-200 adds `tests/test_spectral_ear_benchmark.py` (32 tests) for the Stage-1 EAR benchmark
 harness `tools/spectral_ear_benchmark.py` (read-only offline tooling; no runtime behavior). It
 proves, on small synthetic fixtures with no real cache/DB/planner: meta and amendment rows are
 not primary examples; exclusions are explicit and cited (scripted/unusable_grid/variable_bpm/
@@ -62,8 +62,10 @@ duplicated amendment own-id that would else corrupt a primary's lineage — warn
 of silently splitting/merging; `call_planner` is the single planner boundary (positive
 allowlist + `assert_no_leak`) and rejects any forbidden label/locator field OR unexpected field;
 the accuracy axes (tier/family/darkness/growl/laser) stay UNAVAILABLE — never zero, never PASS —
-and the marker axis is AVAILABLE only when a marker is actually SCORED (a resolved track that
-scores zero markers reads UNAVAILABLE, not a hollow AVAILABLE on track count); marker-
+and the marker axis is AVAILABLE only when a marker is actually SCORED AND at least one
+comparable ±1/±2 perturbation exists (a resolved track that scores zero markers, OR scores
+markers whose every ±1/±2 offset falls out of range or collides so both flip rates come back
+None, reads UNAVAILABLE — not a hollow AVAILABLE on track or baseline-decision count); marker-
 sensitivity flip counting is correct against a synthetic planner seam, the seam receives only
 model inputs, a marker with no comparable perturbation at a radius is dropped from that radius's
 denominator (per-radius `comparable_pm1`/`comparable_pm2` counts), and unresolved tracks never

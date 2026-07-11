@@ -1,18 +1,20 @@
 ---
 doc_status: current
 truth_level: implemented-and-software-tested
-last_verified_commit: f550e50
+last_verified_commit: @@CODECOMMIT@@
 last_verified_date: 2026-07-11
 validation_scope: >
   Stage-1 EAR benchmark harness (AWR-200 / AWR-195 stage 1). Describes the as-built
   tools/spectral_ear_benchmark.py + tests/test_spectral_ear_benchmark.py: a read-only
   harness over the AWR-182 ear-truth labels and the existing v4 cache. Software-tested
-  only (31 unit tests green after the 2026-07-11 trust-repair pass — single call_planner
-  anti-leak boundary, amendment-via-parent grouping with a duplicate-id guard, markers-scored
-  availability gate, per-radius comparable denominators, real fold-disjointness invariant,
-  identity-collision warnings; core run + --resolve-db run exercised against the local 41-row
-  label layer, pilot numbers unchanged). No runtime lighting behavior changes.
-  SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
+  only (32 unit tests green after the 2026-07-11 marker-availability + content_id-coverage
+  pass — single call_planner anti-leak boundary, amendment-via-parent grouping with a
+  duplicate-id guard, availability gate that now requires markers scored AND at least one
+  comparable ±1/±2 perturbation, per-radius comparable denominators, real fold-disjointness
+  invariant, identity-collision warnings; core run + --resolve-db run exercised against the
+  local 41-row label layer, which now carries proven content_id locators for all 21 usable
+  lineages so the marker axis resolves 21/21 / 158 markers). No runtime lighting behavior
+  changes. SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
 ---
 
 # Spectral EAR benchmark — Stage-1 spec (AWR-200)
@@ -72,11 +74,16 @@ EXCLUDED/SCRIPTED but is not in the table above raises a surfaced validation war
 Coverage limits stated plainly:
 
 - **No structured gold** → accuracy axes cannot score (Part D/E).
-- **Marker axis coverage** is capped by the label layer: only Sexy and Utopia carry a
-  Rekordbox `content_id`; the 19 other usable lineages store track names only and cannot be
-  DB-resolved. So the marker axis is currently a **2-track / 16-marker proof-of-function
-  pilot, NOT SOL's 15-track / 113-marker baseline**. Adding content_ids to the B-row labels
-  is a curation task.
+- **Marker axis coverage** now spans the **full usable corpus**: the label layer carries a
+  proven Rekordbox `content_id` for all 21 usable lineages (Sexy/Utopia already had one; the
+  19 B-rows were mechanically enriched from the read-only resolution lane's uniqueness-swept
+  IDs), so the marker axis resolves **21/21 lineages / 158 markers**. It is still **NOT
+  like-for-like with SOL's 15-track / 113-marker sample** — a different track/marker set and
+  possibly a different roll-up; do not compare the percentages. OCHO/Latch also have recorded
+  content_ids but stay excluded `marker_blocked_pending_remap` (a locator does not un-block a
+  marker case). The growl-centroid values these tracks rely on are already present, aligned,
+  and real-valued in the strict v4 cache — no backfill remains; only their *musical*
+  correctness is an open Stage-2 question.
 - **Lineage grouping** uses `content_id` when present, else the normalized track string. It
   collapses same-track entries (all of Utopia's UT-*, REWIND primary+amendment). It does
   NOT merge remix siblings under different content_ids — none exist in this corpus; when
@@ -141,7 +148,7 @@ CLI: `--labels PATH`, `--resolve-db` (opt-in; READ-ONLY master.db + v4 cache),
 
 ## Part E — acceptance tests and what this slice can / cannot score today
 
-`tests/test_spectral_ear_benchmark.py` (31 tests, all green) proves, on small synthetic
+`tests/test_spectral_ear_benchmark.py` (32 tests, all green) proves, on small synthetic
 fixtures (no real cache/DB/planner):
 
 - meta and amendment rows are not primary examples;
@@ -154,8 +161,10 @@ fixtures (no real cache/DB/planner):
   links AND a duplicated amendment own-id (which would else corrupt a primary's lineage) warn
   loudly and leave the amendment ungrouped (never silently merged/split);
 - accuracy axes stay UNAVAILABLE — never zero, never PASS; the marker axis is gated on
-  markers actually SCORED (a resolved track that scores zero markers reads UNAVAILABLE, not
-  a hollow AVAILABLE on track count);
+  markers actually SCORED **and** at least one comparable ±1/±2 perturbation existing (a
+  resolved track that scores zero markers, OR scores markers whose every ±1/±2 offset falls
+  out of range or collides with another drop so both flip rates come back None, reads
+  UNAVAILABLE — not a hollow AVAILABLE on track or baseline-decision count);
 - `call_planner` — the single boundary every base and perturbed planner call routes through —
   rejects any forbidden label/locator field OR unexpected field, and passes clean model inputs;
 - marker-sensitivity flip counting is correct against a synthetic planner seam, the seam
@@ -172,10 +181,14 @@ fixtures (no real cache/DB/planner):
 
 **CAN score today:** the validated/grouped/leak-safe corpus manifest, the LOLO fold
 inventory, and (with `--resolve-db`) the marker-sensitivity axis via the real planner —
-currently a 2-track proof-of-function pilot.
+now across the full 21-lineage usable corpus (21/21 resolved, 158 markers), not a 2-track
+pilot.
 
 **CANNOT score today:** any accuracy axis (tier/family/darkness/growl/laser) — no structured
 per-drop operator gold exists in the labels. Blocked on a curation pass (structured
-operator tier/family/darkness/growl/laser fields + content_ids on the B-rows), plus the
-OCHO/Latch marker remaps and the growl-centroid backfill. Until then AWR-200 stays PARTIAL
-and no Stage-2 round can be accepted on an accuracy number this harness cannot yet produce.
+operator tier/family/darkness/growl/laser fields), plus the OCHO/Latch ear decisions
+(blackout lengths / drop-vs-buildup + tier). Content_ids on the B-rows are DONE, and the
+growl-centroid values are already present/aligned/real-valued in the strict v4 cache — no
+backfill remains, though their *musical* correctness is a separate Stage-2 validation item.
+Until the curation pass and OCHO/Latch decisions land, AWR-200 stays PARTIAL and no Stage-2
+round can be accepted on an accuracy number this harness cannot yet produce.

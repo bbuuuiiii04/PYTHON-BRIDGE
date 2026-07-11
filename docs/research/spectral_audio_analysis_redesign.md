@@ -652,12 +652,13 @@ The v4 extractor/cache this report built is the KEEP layer; the SOL review
 AWR-195 refactor program whose blocking first stage is a real ear benchmark. That harness
 now exists — read-only offline tooling, no runtime behavior change:
 
-- `tools/spectral_ear_benchmark.py` + `tests/test_spectral_ear_benchmark.py` (31 tests after
-  the 2026-07-11 trust-repair pass: single `call_planner` anti-leak boundary on every planner
-  call, amendment grouping via the `amends` parent link (with a duplicate-id guard against
-  silent primary corruption), markers-scored availability gate, per-radius comparable
-  denominators, real fold-disjointness invariant, identity-collision warnings; pilot numbers
-  unchanged).
+- `tools/spectral_ear_benchmark.py` + `tests/test_spectral_ear_benchmark.py` (32 tests after
+  the 2026-07-11 marker-availability + content_id-coverage pass: single `call_planner` anti-leak
+  boundary on every planner call, amendment grouping via the `amends` parent link (with a
+  duplicate-id guard against silent primary corruption), an availability gate that now requires
+  markers scored AND at least one comparable ±1/±2 perturbation, per-radius comparable
+  denominators, real fold-disjointness invariant, identity-collision warnings; the label layer
+  now carries content_id locators for all 21 usable lineages).
 - Spec: `docs/plans/active/spectral_ear_benchmark_spec_2026_07_10.md`.
 - Frozen run: `docs/research/spectral_ear_benchmark_stage1_report_2026_07_10.md`.
 
@@ -670,9 +671,11 @@ rate) — resolving each track through its current library filepath + beatgrid f
 (never iterating raw cache files) and reading the v4 cache read-only. **AWR-200 is PARTIAL:**
 the labels are the operator's free-text verdicts, so every accuracy axis
 (tier/family/darkness/growl/laser) is reported UNAVAILABLE — never a fabricated zero/PASS —
-blocked on a curation pass; and the marker axis currently resolves only Sexy/Utopia (the
-B-row labels carry no content_id), making it a proof-of-function pilot, not SOL's
-15-track/113-marker baseline.
+blocked on a curation pass. The marker axis now resolves the full usable corpus after the
+2026-07-11 content_id enrichment (21/21 usable lineages / 158 markers), still NOT compared
+like-for-like to SOL's 15-track/113-marker sample. The growl-centroid values these tracks
+carry are present, aligned, and real-valued in the strict v4 cache — no backfill remains; only
+their *musical* correctness is an open Stage-2 question.
 
 ---
 

@@ -56,14 +56,15 @@ Coverage expectations:
   classification and `tests/test_check_docs_staleness.py` for advisory staleness
   contract parsing, glob expansion, and implementation-file filtering.
 - Spectral ear-benchmark (offline tooling) changes need `tests/test_spectral_ear_benchmark.py`
-  (AWR-200, 31 tests): row taxonomy, explicit exclusions with reasons, the real fold invariant
+  (AWR-200, 32 tests): row taxonomy, explicit exclusions with reasons, the real fold invariant
   (no entry id / resolved amendment lineage in both train and test), amendment grouping through
   the `amends` parent link with loud missing/cyclic/ambiguous/duplicate-id warnings, the `call_planner`
   boundary rejecting forbidden/unexpected fields, accuracy axes staying UNAVAILABLE (never
-  zero/PASS) with the marker axis gated on markers actually scored, per-radius comparable
-  denominators for marker sensitivity, same-title/no-content_id identity warnings, deterministic
-  output, and marker-sensitivity flip counting against a synthetic planner seam. Stdlib-only
-  tests; no real cache/DB/planner.
+  zero/PASS) with the marker axis gated on markers actually scored AND at least one comparable
+  ±1/±2 perturbation (baseline decisions with both flip rates None read UNAVAILABLE), per-radius
+  comparable denominators for marker sensitivity, same-title/no-content_id identity warnings,
+  deterministic output, and marker-sensitivity flip counting against a synthetic planner seam.
+  Stdlib-only tests; no real cache/DB/planner.
 - Config schema changes need validation tests.
 - LED/Govee rendering changes need deterministic renderer/runner tests where practical.
 - Laser changes need config/executor/director tests.
