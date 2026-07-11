@@ -21,6 +21,7 @@ from ..govee_frame_renderer import (
 _IDENT_RE = re.compile(r"^[a-z0-9_]+$")
 _KINDS = {"slot", "frame"}
 _STATUSES = {"iterating", "accepted", "rejected", "promoted"}
+_TIMING_MODES = {"beat", "time", "mixed", "static", "unknown"}
 
 
 def _now() -> str:
@@ -73,6 +74,7 @@ class LabRegistry:
             entry = copy.deepcopy(item)
             name = str(entry.get("name", ""))
             entry["production_collision"] = name in REALTIME_EFFECT_NAMES or f"lab_{name}" in REALTIME_EFFECT_NAMES
+            entry["beat_synced"] = entry.get("timing_mode") in ("beat", "mixed")
             out.append(entry)
         return out
 
@@ -102,6 +104,7 @@ class LabRegistry:
             "notes": str(payload.get("notes", current.get("notes", ""))),
             "brief": str(payload.get("brief", current.get("brief", ""))),
             "status": str(payload.get("status", current.get("status", "iterating"))),
+            "timing_mode": str(payload.get("timing_mode", current.get("timing_mode", "unknown"))),
             "param_specs": self._validate_param_specs(payload.get("param_specs", current.get("param_specs", {}))),
             "created": created,
             "updated": _now(),
@@ -178,6 +181,8 @@ class LabRegistry:
             raise ValueError("lab fn must be a Python identifier")
         if entry.get("status") not in _STATUSES:
             raise ValueError("lab status must be iterating, accepted, rejected, or promoted")
+        if entry.get("timing_mode") not in _TIMING_MODES:
+            raise ValueError("lab timing_mode must be beat, time, mixed, static, or unknown")
 
 
 def load_lab_effects(path: Path | str) -> dict[str, Any]:

@@ -228,6 +228,28 @@ RENDER_LABELS: dict[str, str] = {
     for name in REALTIME_EFFECT_NAMES
 }
 
+# What the synthetic BPM control can actually change. "mixed" effects also
+# contain a wall-clock/frame-driven layer; they still respond to BPM.
+EFFECT_TIMING_MODES: dict[str, str] = {name: "beat" for name in REALTIME_EFFECT_NAMES}
+for _name in ("solid", "blackout"):
+    EFFECT_TIMING_MODES[_name] = "static"
+for _name in ("drop_burst", "drop_strobe_colorway", "drop_white_aggressive"):
+    EFFECT_TIMING_MODES[_name] = "time"
+for _name in (
+    "sparkle", "twinkle_blue", "rt_twinkle",
+    "buildup_freestyle_nebula", "buildup_ramp_1", "buildup_ramp_2",
+    "buildup_white_zone_strobe", "buildup_white_half_strobe",
+    "drop_chase_blue", "drop_chase_cyan", "drop_chase_red", "drop_chase_green",
+    "drop_chase_cyan_white", "drop_chase_freestyle_nebula",
+    "post_drop_chase_blue", "post_drop_chase_cyan", "post_drop_chase_red",
+    "post_drop_chase_green", "post_drop_chase_cyan_white",
+    "post_drop_freestyle_nebula", "post_drop_center_comet_blue_cyan",
+    "post_drop_white_shatter", "drop_firework_explosion", "drop_firework_explosion_2",
+    "rt_drop_chase", "rt_drop_nebula", "rt_post_drop_chase", "rt_post_drop_nebula",
+    "rt_post_drop_center_comet", "rt_post_drop_firework_remnants",
+):
+    EFFECT_TIMING_MODES[_name] = "mixed"
+
 
 def controls_for(scene_ref: str) -> list[dict[str, Any]]:
     controls: list[dict[str, Any]] = []
@@ -280,6 +302,8 @@ def render_catalog() -> list[dict[str, Any]]:
             "slot_based": name in SLOT_EFFECTS,
             "strobe": name in REALTIME_STROBE_EFFECTS,
             "color_source_capable": name in SLOT_EFFECTS,
+            "timing_mode": EFFECT_TIMING_MODES[name],
+            "beat_synced": EFFECT_TIMING_MODES[name] in ("beat", "mixed"),
         }
         for name in sorted(REALTIME_EFFECT_NAMES, key=lambda item: (group_for[item], RENDER_LABELS[item]))
     ]

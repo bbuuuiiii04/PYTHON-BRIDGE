@@ -18,7 +18,8 @@
       </div>
       <form id="sessionForm" class="session-controls" aria-label="Session controls">
         <span class="panel-label">Session</span>
-        <label>BPM <button type="button" data-step="-1" aria-label="Decrease BPM">−</button><input id="bpmInput" type="number" min="60" max="200" step="1"><button type="button" data-step="1" aria-label="Increase BPM">+</button></label>
+        <label>Beat-sync BPM <button type="button" data-step="-1" aria-label="Decrease BPM">−</button><input id="bpmInput" type="number" min="60" max="200" step="1"><button type="button" data-step="1" aria-label="Increase BPM">+</button></label>
+        <span id="bpmScope" class="dim">Select a draft</span>
         <label>Test Palette <select id="paletteSelect"></select></label>
         <label class="switch">Loop <input id="loopToggle" type="checkbox"><span id="loopLabel">On</span></label>
       </form>
@@ -47,7 +48,7 @@
         </div>
         <label>Brief <textarea id="briefInput" rows="3"></textarea></label>
         <label>Notes <textarea id="notesInput" rows="4"></textarea></label>
-        <div class="lab-meta"><span id="kindText" class="mono"></span><span id="statusText" class="status-pill">iterating</span></div>
+        <div class="lab-meta"><span id="kindText" class="mono"></span><span id="timingText" class="badge"></span><span id="statusText" class="status-pill">iterating</span></div>
         <div id="paramControls" class="param-controls"></div>
         <div id="slotSwatches" class="slot-swatches" aria-label="Test palette slot colors"></div>
         <details class="advanced-panel">

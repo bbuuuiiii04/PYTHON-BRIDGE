@@ -95,12 +95,24 @@ class LedPadLabTests(unittest.TestCase):
     def test_registry_round_trip_and_name_collision(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             registry = LabRegistry(Path(td) / "led_lab")
-            saved = registry.save({"name": "pulse", "kind": "slot", "fn": "pulse", "params": {"level": 1}, "brief": "b", "notes": "n"})
+            saved = registry.save({"name": "pulse", "kind": "slot", "fn": "pulse", "params": {"level": 1}, "brief": "b", "notes": "n", "timing_mode": "beat"})
 
             self.assertEqual(saved["entry"]["name"], "pulse")
             self.assertEqual(registry.get("pulse")["params"], {"level": 1})
+            self.assertTrue(registry.get("pulse")["beat_synced"])
             with self.assertRaisesRegex(ValueError, "collides"):
                 registry.save({"name": "rt_groove_chase", "kind": "slot", "fn": "pulse"})
+
+    def test_registry_defaults_unknown_timing_and_rejects_invalid_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            registry = LabRegistry(Path(td) / "led_lab")
+
+            saved = registry.save({"name": "pulse", "kind": "slot", "fn": "pulse"})
+
+            self.assertEqual(saved["entry"]["timing_mode"], "unknown")
+            self.assertFalse(registry.get("pulse")["beat_synced"])
+            with self.assertRaisesRegex(ValueError, "timing_mode"):
+                registry.save({"name": "bad", "kind": "slot", "fn": "pulse", "timing_mode": "sometimes"})
 
     def _write_colliding_entry(self, lab_dir: Path, name: str) -> None:
         # Simulates the live-bricked state: the entry was written when the name

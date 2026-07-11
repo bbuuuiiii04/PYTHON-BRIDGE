@@ -16,6 +16,7 @@ from rb_ss_bridge_v2.govee_frame_renderer import (  # noqa: E402
 from rb_ss_bridge_v2.govee_realtime_runner import _COLOR_SIG_KEYS  # noqa: E402
 from rb_ss_bridge_v2.led_pad_controls import (  # noqa: E402
     CONTROL_META,
+    EFFECT_TIMING_MODES,
     PARAM_DEFAULT_OVERRIDES,
     controls_for,
     effective_lab_specs,
@@ -45,6 +46,18 @@ class LedPadControlsTests(unittest.TestCase):
         for name in REALTIME_EFFECT_NAMES:
             self.assertEqual(catalog[name]["slot_based"], name in SLOT_EFFECTS)
             self.assertEqual(catalog[name]["strobe"], name in REALTIME_STROBE_EFFECTS)
+
+    def test_timing_metadata_is_exhaustive_and_bpm_honest(self) -> None:
+        catalog = {item["name"]: item for item in render_catalog()}
+
+        self.assertEqual(set(EFFECT_TIMING_MODES), set(REALTIME_EFFECT_NAMES))
+        self.assertEqual({item["timing_mode"] for item in catalog.values()}, {"beat", "time", "mixed", "static"})
+        for item in catalog.values():
+            self.assertEqual(item["beat_synced"], item["timing_mode"] in ("beat", "mixed"))
+        self.assertEqual(catalog["beat_chase"]["timing_mode"], "beat")
+        self.assertEqual(catalog["drop_white_aggressive"]["timing_mode"], "time")
+        self.assertEqual(catalog["drop_firework_explosion_2"]["timing_mode"], "mixed")
+        self.assertEqual(catalog["solid"]["timing_mode"], "static")
 
     def test_color_sig_metadata_matches_runner_signature_keys(self) -> None:
         flagged = {key for key, meta in CONTROL_META.items() if meta["color_sig"]}

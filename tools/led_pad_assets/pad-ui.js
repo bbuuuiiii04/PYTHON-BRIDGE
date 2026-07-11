@@ -22,6 +22,10 @@
     state.toastTimer = setTimeout(() => { $("toast").hidden = true; }, 4000);
   }
   function human(name) { return String(name).replace(/^rt_/, "").replaceAll("_", " ").replace("post drop", "post-drop").replace(/\b\w/g, c => c.toUpperCase()); }
+  function timingBadge(render) {
+    const label = ({beat:"♫ beat sync", mixed:"♫ beat + time", time:"◷ time driven", static:"static"})[(render || {}).timing_mode];
+    return label ? `<span class="badge">${label}</span>` : "";
+  }
   function lookBank(name) {
     for (const [bank, names] of Object.entries(state.banks || {})) if ((names || []).includes(name)) return bank;
     return "other";
@@ -99,7 +103,7 @@
       <div class="card-title"><span>${esc(name)}</span>${dirty ? "<span class='dirty-dot' title='Unsaved changes'>●</span>" : ""}</div>
       <div class="card-sub">${esc(label)} · ${render && render.slot_based ? "<span class='gradient-dot'></span>show-colored" : "<span class='fixed-dot'></span>fixed colors"}</div>
       <div class="card-ref">${esc(look.scene_ref || look.action || "")}</div>
-      <div class="badge-row"><span class="badge">${cue} beats</span>${render && render.strobe ? "<span class='badge strobe'>⚡ strobe</span>" : ""}${!realtime ? "<span class='badge'>☁ cloud</span>" : ""}${playing ? "<span class='live-chip'>LIVE</span>" : ""}</div>
+      <div class="badge-row"><span class="badge">${cue} beats</span>${timingBadge(render)}${render && render.strobe ? "<span class='badge strobe'>⚡ strobe</span>" : ""}${!realtime ? "<span class='badge'>☁ cloud</span>" : ""}${playing ? "<span class='live-chip'>LIVE</span>" : ""}</div>
       <footer class="card-footer">
         <button type="button" class="primary" data-action="play" data-name="${esc(name)}" ${!realtime ? "disabled title='Cloud scene - not previewable in the pad'" : ""}>▶ Play</button>
         <div class="icon-actions">

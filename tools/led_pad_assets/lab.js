@@ -14,6 +14,8 @@
   function clearError() { $("errorBanner").hidden = true; $("errorBanner").textContent = ""; }
   function labScene(name) { return `lab_${name}`; }
   function cue() { return Number(($("cueCustom") || {}).value || (state.current || {}).cue_beats || 16); }
+  function timingLabel(mode) { return ({beat:"♫ beat sync", mixed:"♫ beat + time", time:"◷ time driven", static:"static", unknown:"timing unknown"})[mode] || "timing unknown"; }
+  function timingBadge(entry) { return `<span class="badge">${timingLabel(entry.timing_mode)}</span>`; }
 
   async function refresh() {
     clearError();
@@ -43,7 +45,7 @@
     const visible = state.entries.filter(e => state.showRejected || !archived(e));
     $("draftList").innerHTML = visible.length ? visible.map(e => `
       <button type="button" class="lab-row ${state.current && state.current.name === e.name ? "active" : ""}" data-name="${esc(e.name)}">
-        <span>${esc(e.name)}${e.production_collision && e.status !== "promoted" ? ` <span class="prod-chip">in production</span>` : ""}</span>
+        <span>${esc(e.name)}${e.production_collision && e.status !== "promoted" ? ` <span class="prod-chip">in production</span>` : ""} ${timingBadge(e)}</span>
         <span class="status-pill ${esc(e.status)}">${esc(e.status)}</span>
         <span class="dim">${esc((e.updated || "").slice(0, 10))}</span>
       </button>`).join("") : `<div class="empty"><span class="panel-label">No drafts</span><span>Create one with New.</span></div>`;
@@ -69,13 +71,25 @@
     $("briefInput").value = e.brief || "";
     $("notesInput").value = e.notes || "";
     $("kindText").textContent = `${e.kind} · ${e.fn}`;
+    $("timingText").textContent = timingLabel(e.timing_mode);
     $("statusText").textContent = e.status;
     $("statusText").className = `status-pill ${e.status}`;
     $("paramsInput").value = JSON.stringify(e.params || {}, null, 2);
     renderParamControls();
     renderCue();
     renderLive();
+    renderBpmScope();
     setDirty();
+  }
+
+  function renderBpmScope() {
+    const mode = (state.current || {}).timing_mode || "unknown";
+    const enabled = mode === "beat" || mode === "mixed";
+    $("bpmInput").disabled = !enabled;
+    document.querySelectorAll("[data-step]").forEach(btn => { btn.disabled = !enabled; });
+    $("bpmScope").textContent = enabled
+      ? (mode === "mixed" ? "Changes the beat-synced layer only" : "Changes this draft")
+      : (mode === "time" ? "This draft follows seconds; BPM has no effect" : mode === "static" ? "This draft does not animate" : "Timing metadata missing; BPM disabled");
   }
 
   // Dirty chip (pad-ui.js setDirty pattern): editor params vs saved entry params.
