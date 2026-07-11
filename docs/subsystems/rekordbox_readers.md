@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: fc0f12f
+last_verified_commit: 59364bc
 last_verified_date: 2026-07-10
-validation_scope: software-only plus Rekordbox 7.2.11 passive mixer RE evidence routing; AWR-157 deck-2 chain freshness gating software-tested; AWR-160 phantom track-load stability gate software-tested; AWR-207/AWR-209 USB local-twin and foreign-import resolution software-tested; AWR reader cross-version safety (direct-read BPM cap + emit clamp + symbol-derived offline version-extension tool) software-tested 2026-07-10; hardware-output unvalidated
+validation_scope: software-only plus Rekordbox 7.2.11 passive mixer RE evidence routing; AWR-157 deck-2 chain freshness gating software-tested; AWR-160 phantom track-load stability gate software-tested; AWR-207/AWR-209/AWR-211 USB local-twin, foreign-import, and portable-sidecar resolution software-tested; AWR reader cross-version safety (direct-read BPM cap + emit clamp + symbol-derived offline version-extension tool) software-tested 2026-07-10; hardware-output unvalidated
 ---
 
 # Rekordbox Readers
@@ -147,6 +147,16 @@ Runtime flow:
   duplicate local matches log `usb-pdb-ambiguous` with candidate IDs; missing
   or unreadable local analysis logs `imported-not-analyzed` and tells the
   operator to finish analysis in Rekordbox. Every conflict returns no identity.
+- AWR-211 portable sidecar resolution runs only after the local library cannot
+  answer. It lazily discovers schema-v1
+  `*/RBSS BRIDGE USB/lighting_sidecar/index.json` across mounted volumes and
+  caches the first valid root for the session. Exact full-grid fingerprints
+  may resolve mirror copies; cross-analysis requires the loading stick's PDB
+  tags plus BPM/duration agreement. The payload points `local_anlz_path` into
+  the sidecar, carries SSID/laser tags, and passes a validated sidecar v4 object
+  directly to the ANLZ worker before any local-cache lookup. Missing DB logs
+  `no local library — sidecar-only mode` once. Unknown schemas, ambiguous
+  identities, escaped paths, missing declared files, and corrupt v4 fail closed.
 
 Config:
 - `config.py`
@@ -181,6 +191,10 @@ Tests:
   duplicate rejection, actionable analysis misses, payload parity, and the
   no-lsof miss. `tests/test_smart_transitions.py` pins local-path behavior
   unchanged plus the payload-selected local ANLZ handoff.
+- `tests/test_filepath_resolver_sidecar.py` proves AWR-211 schema/path guards,
+  multi-mount discovery, session caching, collision/tag rules, duplicate
+  rejection, payload parity (including SSID/laser tags/v4), local-hit priority,
+  local-miss chaining, no-DB logging, and sidecar-v4 preference.
 - if no direct hardware/process test exists, mark live behavior unvalidated in repo evidence
 
 Change contract:

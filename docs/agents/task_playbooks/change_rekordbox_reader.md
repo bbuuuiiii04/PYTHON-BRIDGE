@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: fc0f12f
+last_verified_commit: 59364bc
 last_verified_date: 2026-07-09
 validation_scope: software-only
 ---
@@ -87,6 +87,11 @@ Implementation notes:
   plus independent BPM/duration agreement. Missing PDB tags, conflicts,
   duplicates, or missing local analysis must return no identity with the
   documented `usb-*` / `imported-not-analyzed` reason; never guess.
+- (AWR-211) Local DB resolution is always first. Sidecar fallback accepts only
+  schema version 1, confines every declared path under the discovered sidecar
+  root, and applies the same exact-grid/tag-corroborated identity rule. Keep
+  sidecar v4 read-only and payload-provided; it must precede local cache/extract
+  without being copied into the cache. Unknown/corrupt/ambiguous data abstains.
 
 Required tests:
 - Run the targeted tests listed in the subsystem card.

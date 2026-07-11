@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: fc0f12f
+last_verified_commit: 59364bc
 last_verified_date: 2026-07-09
 validation_scope: software-validated only plus Rekordbox 7.2.11 passive mixer RE evidence routing; AWR-157 blank-role hold + reader freshness software-tested; AWR-160 phantom track-load stability gate software-tested; AWR-161 LED round 3 software-tested; hardware-unvalidated in repo evidence
 ---
@@ -39,7 +39,7 @@ they add no new hardware or compatibility support claim.
 | --- | --- | --- | --- |
 | Local Rekordbox Collection | local-setup-operational | existing UUID resolver + regression tests | Existing behavior is unchanged. |
 | USB device tree on the operator's laptop (AWR-207/AWR-209) | implemented; software-tested; staged | resolver/PDB suites + StateManager handoff pins + mounted-stick read-only parser spot | Untagged mirror matches require an exact full-grid fingerprint. Cross-analysis imports require one exact-normalized export.pdb title/artist/duration match plus BPM/duration agreement; missing tags, conflicts, duplicates, and missing local analysis stay unresolved. Local UUID behavior and the no-lsof device-miss rule are unchanged. Room-visible behavior activates only after restart and remains unvalidated. |
-| USB device tree on a foreign laptop without the local collection | planned / unsupported today | AWR-208 charter only | No sidecar or portable fallback is implemented by AWR-207. |
+| USB device tree on a foreign laptop without the local collection (AWR-211) | implemented; software-tested; staged | 11 sidecar-source tests + 131-test focused resolver/StateManager round + real MINK sidecar-only desk resolve | Requires a valid schema-v1 lighting sidecar on a mounted stick. Local DB remains first; sidecar is fallback. Real foreign-laptop and two-USB behavior remain operator/hardware gates, and Rekordbox version/permission support is unchanged. |
 
 ## Lighting outputs
 
