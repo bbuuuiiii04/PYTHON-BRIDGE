@@ -103,6 +103,19 @@ class DepthTests(unittest.TestCase):
         for k in _ALL:
             self.assertLess(b.depth_vs_track[k], 0.0, k)
 
+    def test_depth_uses_approach_floor_not_typical(self):
+        # a non-flat approach (one deep beat) so approach p10 << p50 — pins that
+        # depth reads the approach FLOOR (p10), not its typical level (p50).
+        n, drop = 48, 40
+        v = mk_v4(n=n)                     # sub_db default 20.0
+        v.series["sub_db"][39] = -15.0    # one deep beat inside approach [32,40)
+        r = A.approach_features(v, drop, approach_len=8)
+        appr = r.approach.series["sub_db"]
+        trk = r.track.series["sub_db"]
+        self.assertNotEqual(appr.p10, appr.p50)
+        self.assertEqual(r.depth_vs_track["sub_db"], round(appr.p10 - trk.p50, 4))
+        self.assertNotEqual(r.depth_vs_track["sub_db"], round(appr.p50 - trk.p50, 4))
+
     def test_section_relative_depth(self):
         n, drop = 64, 56
         v = mk_v4(n=n)
@@ -268,6 +281,12 @@ class FailSafeTests(unittest.TestCase):
             A.approach_features(mk_v4(), 32, approach_len=8, offset_radius=-1)
         with self.assertRaises(ValueError):
             A.approach_features(mk_v4(), 32, approach_len=8, section_start=0, section_len=8)
+        with self.assertRaises(ValueError):
+            A.approach_features(mk_v4(), 32, approach_len=8, landed_len=0)
+        with self.assertRaises(ValueError):
+            A.approach_features(mk_v4(), 32, approach_len=8, landed_len=-3)
+        with self.assertRaises(ValueError):
+            A.approach_features(mk_v4(), 32, approach_len=8, section_len=0)
 
 
 class DeterminismTests(unittest.TestCase):
@@ -287,26 +306,34 @@ class NoRuntimeImporterTests(unittest.TestCase):
         target = "approach_features_v0"
         skip_dirs = {"tests", "tools", ".git", "graphify-out", "local",
                      ".venv", "venv", "node_modules", "build", "dist", "__pycache__"}
-        offenders = []
+        offenders = set()
         for path in repo_root.rglob("*.py"):
             rel = path.relative_to(repo_root)
             if set(rel.parts) & skip_dirs:
                 continue
             if rel.name == "approach_features_v0.py":
                 continue
+            text = path.read_text(encoding="utf-8", errors="ignore")
             try:
-                tree = ast.parse(path.read_text(encoding="utf-8"))
-            except (SyntaxError, UnicodeDecodeError):
-                continue
-            for node in ast.walk(tree):
-                if isinstance(node, ast.Import):
-                    if any(a.name.split(".")[-1] == target for a in node.names):
-                        offenders.append(str(rel))
-                elif isinstance(node, ast.ImportFrom):
-                    mod = (node.module or "").split(".")[-1]
-                    if mod == target or any(a.name == target for a in node.names):
-                        offenders.append(str(rel))
-        self.assertEqual(offenders, [], f"runtime importers of {target}: {offenders}")
+                tree = ast.parse(text)
+            except (SyntaxError, ValueError):
+                tree = None
+            if tree is not None:
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Import):
+                        if any(a.name.split(".")[-1] == target for a in node.names):
+                            offenders.add(str(rel))
+                    elif isinstance(node, ast.ImportFrom):
+                        mod = (node.module or "").split(".")[-1]
+                        if mod == target or any(a.name == target for a in node.names):
+                            offenders.add(str(rel))
+            # catch-all for dynamic imports the AST walk cannot see
+            # (importlib.import_module, __import__, string loaders) AND any bare
+            # runtime reference to the offline module — a raw-text mention in
+            # non-test/tool code is itself a smell. tests/ + tools/ excluded above.
+            if target in text:
+                offenders.add(str(rel))
+        self.assertEqual(sorted(offenders), [], f"runtime importers of {target}: {sorted(offenders)}")
 
 
 if __name__ == "__main__":
