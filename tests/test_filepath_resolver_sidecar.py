@@ -41,9 +41,11 @@ def _write_index(mount: Path, *, schema: int = 1) -> Path:
 class SidecarReaderTests(unittest.TestCase):
     def setUp(self) -> None:
         resolver._SIDECAR_CACHE = None
+        resolver._SIDECAR_ONLY_LOGGED = False
 
     def tearDown(self) -> None:
         resolver._SIDECAR_CACHE = None
+        resolver._SIDECAR_ONLY_LOGGED = False
 
     def test_schema_one_loads_and_unknown_schema_fails_closed(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -85,6 +87,9 @@ class SidecarReaderTests(unittest.TestCase):
 
 
 class SidecarResolutionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        resolver._SIDECAR_ONLY_LOGGED = False
+
     def test_cross_analysis_collision_needs_tags(self) -> None:
         base = [i * 500.0 for i in range(401)]
         foreign = [value + 11.0 for value in base]
@@ -184,6 +189,27 @@ class SidecarResolutionTests(unittest.TestCase):
 
         self.assertIs(result, expected)
         sidecar_lookup.assert_called_once()
+
+    def test_no_db_enters_sidecar_only_mode_and_logs_once(self) -> None:
+        expected = {"content_id": "42"}
+        path = "/Volumes/GUEST/PIONEER/USBANLZ/P001/00000001/ANLZ0000.DAT"
+        with patch("pyrekordbox.db6.Rekordbox6Database", side_effect=FileNotFoundError), \
+             patch.object(resolver, "_extract_beatgrid_from_anlz", return_value={
+                 "beatgrid_times_ms": [0.0, 500.0],
+                 "beatgrid_bpms": [120.0, 120.0],
+                 "beatgrid_source": "test",
+             }), \
+             patch.object(resolver, "_sidecar_lookup", return_value=expected), \
+             self.assertLogs("filepath_resolver", level="INFO") as logs:
+            first = resolver._db_lookup_by_anlz(path)
+            second = resolver._db_lookup_by_anlz(path)
+
+        self.assertIs(first, expected)
+        self.assertIs(second, expected)
+        self.assertEqual(
+            sum("no local library — sidecar-only mode" in line for line in logs.output),
+            1,
+        )
 
     def test_runtime_prefers_payload_v4_over_local_cache(self) -> None:
         sentinel_v4 = object()

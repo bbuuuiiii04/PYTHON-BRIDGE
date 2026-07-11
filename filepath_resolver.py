@@ -52,6 +52,7 @@ _SS_PRELOAD_CACHE: dict[str, str] = {}
 _SS_SCRIPTED_ID_CACHE: set[str] = set()
 _SIDECAR_SCHEMA_VERSION = 1
 _SIDECAR_CACHE: Optional[tuple[Path, tuple[dict, ...]]] = None
+_SIDECAR_ONLY_LOGGED = False
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -667,6 +668,17 @@ def _sidecar_lookup(anlz_path: str, usb_beatgrid: dict) -> Optional[dict]:
     return payload
 
 
+def _note_sidecar_only_mode(exc: Exception) -> None:
+    global _SIDECAR_ONLY_LOGGED
+    if _SIDECAR_ONLY_LOGGED:
+        return
+    _SIDECAR_ONLY_LOGGED = True
+    log.info(
+        "[FRES] no local library — sidecar-only mode  err=%s",
+        type(exc).__name__,
+    )
+
+
 def _unique_usb_twin(
     usb_times_ms: Sequence[float],
     candidate_grids: Sequence[tuple[object, dict]],
@@ -866,6 +878,8 @@ def _db_lookup_by_anlz(anlz_path: str) -> Optional[dict]:
         log.debug("_db_lookup_by_anlz: UUID %s not found in DB", anlz_uuid)
     except Exception as exc:
         log.debug("_db_lookup_by_anlz: %s", exc)
+        if device_export:
+            _note_sidecar_only_mode(exc)
     finally:
         if db is not None:
             try:
