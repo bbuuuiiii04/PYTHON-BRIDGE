@@ -51,6 +51,43 @@ environments:
 3. Staleness: fingerprint mismatch (re-analyzed/re-gridded track) = honest
    miss + a build-tool warning listing stale tracks; never guess.
 
+## ⚠ BINDING FINAL OUTCOME (operator mandate 2026-07-11, verbatim; the
+## executive seat is FULLY responsible for delivering both)
+> "Playing tracks from USB that is a mirror of my collection: LIGHTING MUST
+> FULLY WORK. Playing tracks from FOREIGN USB after exporting their collection
+> to my rekordbox to do phrase analysis: MUST ALSO WORK. You need to consider
+> ALL edge cases."
+
+**R1 (mirror USB)** = AWR-207 (built; under ultracode review).
+**R2 (foreign USB + operator import/analyze workflow)**: the operator imports
+the guest stick's tracks into HIS Rekordbox and analyzes them — his Rekordbox
+then owns local copies WITH fresh PSSI. The bridge must twin-match the guest
+stick's loads to those imported local copies. Mechanically this is AWR-207's
+matcher pointed at cross-analysis twins; the deltas that MUST be engineered
+and reviewed (AWR-207 extension round):
+- [confirmed risk] Cross-analysis beatgrid variance: the guest stick carries
+  THEIR grid (possibly hand-edited); the local import carries HIS fresh grid.
+  Grid-fingerprint confirmation must tolerate benign variance without
+  admitting false matches — and needs a grid-independent second lever:
+- [design] `export.pdb` identity lever: every export stick carries its own
+  track DB (title/artist/duration/paths). Parse it read-only and match
+  title+artist+duration against the imported local contents. Strong, grid-free,
+  and also fixes R1 sticks whose grids he edits after export.
+- [design] Duplicate/near-duplicate handling: guest tracks he also owns, or
+  same-BPM edits — deterministic pick or honest-unresolved; never a guess.
+- [design] Unanalyzed imports: imported but not-yet-analyzed tracks miss with
+  a visible log reason ("imported-not-analyzed") so the operator knows to
+  finish analysis, not debug the bridge.
+- [design] Both Rekordbox import styles (audio copied to disk vs referenced on
+  the mounted stick) must resolve; v4 extraction needs the audio path readable
+  (stick is mounted while playing — state the assumption).
+- [operator workflow doc] The import→analyze ritual becomes a documented
+  pre-show checklist step with a verification command (e.g. the resolver's
+  miss-reasons surfaced via runtime status) so R2 is checkable BEFORE guests
+  arrive.
+E2 (foreign laptop, sidecar) and the degraded no-import tiers below remain the
+fallback ladder when the R2 workflow wasn't done.
+
 ## E3 — SOMEONE ELSE'S USB on his laptop (operator question 2026-07-11)
 A guest stick carries tracks that were NEVER in his collection: no local twin,
 no sidecar, and no PSSI on their stick either. Honest capability ladder, to be
