@@ -61,8 +61,49 @@ Plain conversational language; explain meaning before labels; no status
 blocks; no walls of text; no re-asking settled decisions; batch questions;
 chat is his only surface.
 
+## Session agenda (operator ruling 2026-07-11: ALL-COMPREHENSIVE — work in this
+order; each part saves its state before the next starts, so an early stop
+loses nothing)
+
+**Part 1 — The gold sheet (core, do first).** The Mechanics flow above: all 21
+tracks / 158 rows, hybrid unit. This is the highest-value artifact; everything
+in the refactor gates on it.
+
+**Part 2 — OCHO + Latch ear decisions.** Free-text notes as described above
+(blackout lengths, drop-vs-buildup + tier). Unblocks their marker-remap round.
+
+**Part 3 — SOL4 creative catalog review + ranking.** Read
+`docs/research/sol_panel_creative_catalog_2026_07_10.md` (35 cue concepts).
+Walk him through it in plain language, a few at a time; capture his ranking,
+kills, and reactions (his words). RECORD ONLY — nothing gets prototyped,
+wired, or implemented in this session; rankings feed the banked build sequence
+(prototype → renderer → wiring, each behind its own gate). While labeling
+Part 1, note any track/drop he connects to a catalog concept — those pairings
+are creative gold.
+
+**Part 4 — Laser depth.** The per-drop laser yes/no/unknown in Part 1 is the
+structured layer. Additionally capture (notes): which drops he'd trust lasers
+on UNSUPERVISED vs only-with-eyes-on, and any hardware-vocabulary references
+(the you-and-me session catalog) he brings up. Laser concepts from the SOL4
+catalog additionally need these positive AND negative examples before any
+wiring — record negatives ("never lasers here") as diligently as positives.
+
+**Part 5 — If energy remains.** The AWR-182 corpus close section has 10
+pre-measured B5 case cards ready (`docs/research/operator_track_labels_2026_07_09.md`,
+close section) + open items B4-7/B4-8. Offer, don't push.
+
+Growl note for Parts 1–4: growl start/end spans are a first-class field, and
+his free words about growl character (dark/gritty/melodic-overlay) go in the
+notes — the growl-centroid values in the v4 cache are awaiting exactly this
+musical validation (Stage-2).
+
+If the session hits a usage limit: park with state (save files + a one-line
+"where we are" into the session notes), tell him, stop. Never idle-lose his
+labels.
+
 ## Done =
 All 158 rows carry a non-null yes/no (or he ends the session early — partial
-is fine, coverage is counted); `--gold` validation green; a short session
-summary (what got labeled, anything he flagged, the OCHO/Latch notes). The
+is fine, coverage is counted); `--gold` validation green; agenda parts 2–4
+notes saved beside the gold file; a short session summary (what got labeled,
+his catalog rankings, anything he flagged, the OCHO/Latch notes). The
 executive seat reviews the final product from there.
