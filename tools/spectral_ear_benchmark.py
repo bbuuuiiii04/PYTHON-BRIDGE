@@ -22,8 +22,9 @@ otherwise it too is reported UNAVAILABLE with the exact blocker.
 Anti-leak: label fields that locate or describe an example (content id, title,
 track name, label id, his_words, measured snapshot, classification) may be used
 to LOCATE an example and as ground truth, but must NEVER enter a predictor. The
-production planner is only ever called with v4 features + beat indices. See
-`assert_no_leak`.
+production planner is only ever called with v4 features + beat indices, and every
+call routes through the single `call_planner` boundary (positive allowlist +
+`assert_no_leak`) so no locator/gold field can reach the model.
 
 Safety: no extraction, no cache/config/runtime writes, no bridge/process
 contact. `--resolve-db` opens the Rekordbox master.db READ-ONLY (the same read
@@ -42,7 +43,7 @@ import hashlib
 import json
 import re
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -70,6 +71,13 @@ LEAK_FORBIDDEN_FIELDS = frozenset({
     "his_words", "his_words_followup", "measured", "classification",
     "notes", "decoded", "missing_dimension", "plan_gap", "expectation",
 })
+
+# The ONLY fields any production-planner call may carry. A positive allowlist:
+# combined with LEAK_FORBIDDEN_FIELDS it makes the guard two-sided — a locator /
+# gold field can't sneak in, and an unknown/typo'd field is rejected too. Every
+# planner call routes through call_planner(), so this is the real invocation
+# boundary, not a one-off check on a hand-built dict.
+PLANNER_ALLOWED_FIELDS = frozenset({"v4", "drops", "buildups", "beatgrid_times_ms"})
 
 # Explicit, cited exclusions keyed by the label's own `id` (charter §D + the
 # AWR-182 label doc). Exclusions are operator/charter rulings, not something to
@@ -193,7 +201,10 @@ def _lineage_key(content_id: str, track: str) -> str:
 
 
 def normalize(rows: list[dict[str, Any]]) -> list[Entry]:
-    """Classify every row as primary / amendment / meta. Content is untouched."""
+    """Classify every row as primary / amendment / meta. Content is untouched.
+    An amendment's grouping lineage is resolved through its `amends` parent chain
+    (see _resolve_amendment_lineages) so an amendment that carries no content_id
+    or a different track string still leaves WITH its parent, never on its own."""
     entries: list[Entry] = []
     for i, r in enumerate(rows):
         label_id = str(r.get("id") or "")
@@ -215,7 +226,59 @@ def normalize(rows: list[dict[str, Any]]) -> list[Entry]:
             amends=amends,
             raw=r,
         ))
+    resolved, _warns = _resolve_amendment_lineages(entries)
+    if resolved:
+        entries = [replace(e, lineage=resolved[e.label_id]) if e.label_id in resolved else e
+                   for e in entries]
     return entries
+
+
+def _resolve_amendment_lineages(entries: list[Entry]) -> tuple[dict[str, str], list[str]]:
+    """For each amendment, walk its `amends` parent chain to the primary ancestor
+    and return {amendment_id: ancestor_lineage}. Broken links are NOT silently
+    split: missing / cyclic / ambiguous (id shared by >1 row) / non-primary
+    ancestors each produce a loud warning and the amendment is left ungrouped on
+    its own lineage. amendment_warnings() surfaces the warnings in the report."""
+    by_id: dict[str, list[Entry]] = {}
+    for e in entries:
+        by_id.setdefault(e.label_id, []).append(e)
+    resolved: dict[str, str] = {}
+    warnings: list[str] = []
+    for e in entries:
+        if e.kind != "amendment":
+            continue
+        seen = {e.label_id}
+        cur = e
+        problem = ""
+        while cur.amends:
+            pid = cur.amends
+            if pid in seen:
+                problem = f"cyclic amends link at {pid!r}"
+                break
+            seen.add(pid)
+            parents = by_id.get(pid, [])
+            if not parents:
+                problem = f"amends unknown id {pid!r}"
+                break
+            if len(parents) > 1:
+                problem = f"amends ambiguous id {pid!r} ({len(parents)} rows share it)"
+                break
+            cur = parents[0]
+        if problem:
+            warnings.append(f"{e.label_id}: {problem} — left UNGROUPED (never silently merged/split)")
+            continue
+        if cur.kind != "primary":
+            warnings.append(f"{e.label_id}: amends chain resolves to non-primary row "
+                            f"{cur.label_id!r} (kind={cur.kind}) — left UNGROUPED")
+            continue
+        resolved[e.label_id] = cur.lineage
+    return resolved, warnings
+
+
+def amendment_warnings(entries: list[Entry]) -> list[str]:
+    """Report broken amendment parent links (missing/cyclic/ambiguous/non-primary)
+    for the manifest. Deterministic; never silent."""
+    return _resolve_amendment_lineages(entries)[1]
 
 
 # ---------------------------------------------------------------------------
@@ -286,19 +349,51 @@ def build_lineages(entries: list[Entry]) -> list[Lineage]:
     return lineages
 
 
+def identity_warnings(lineages: list[Lineage]) -> list[str]:
+    """Deterministic identity-collision surface. Rows without a Rekordbox
+    content_id are grouped by normalized title ONLY; that cannot tell apart two
+    different tracks that share a title, nor merge one track spelled two ways. We
+    do NOT guess identity here — we FLAG the ambiguity so a curation pass
+    (content_ids / a curated lineage map) can resolve it. This keeps the known
+    same-title collision limitation loud instead of silent."""
+    warnings: list[str] = []
+    by_title: dict[str, set[str]] = {}
+    for ln in lineages:
+        by_title.setdefault(_norm_track(ln.track), set()).add(ln.key)
+    for title, keys in sorted(by_title.items()):
+        if len(keys) > 1:
+            warnings.append(
+                f"identity ambiguity: normalized title {title!r} spans {len(keys)} lineages "
+                f"({', '.join(sorted(keys))}) — no curated content_id map decides these; folds "
+                "may mis-group. Curation work, NOT auto-resolved here.")
+    no_cid = sum(1 for ln in lineages if not ln.content_id and not ln.excluded)
+    if no_cid:
+        warnings.append(
+            f"identity limitation: {no_cid} usable lineages are grouped by normalized title only "
+            "(no Rekordbox content_id). Same-title different-track collisions cannot be detected; "
+            "a curated content_id lineage map is curation work, out of scope for this harness.")
+    return warnings
+
+
 # ---------------------------------------------------------------------------
 # Folds (grouped leave-one-lineage-out)
 # ---------------------------------------------------------------------------
 
 def build_folds(lineages: list[Lineage]) -> list[dict[str, Any]]:
     """One LOLO fold per USABLE lineage: hold that lineage out, train on the
-    rest. Asserts a lineage never appears in both train and test."""
+    rest. The real invariant proved here: the held-out lineage's ENTRY IDS (which
+    already include its resolved amendments — see normalize) never appear in any
+    train lineage. The old `held.key not in train_keys` check was tautological
+    (train is built by excluding held.key); this entry-id disjointness catches a
+    genuine grouping bug where an entry lands in two lineages."""
     usable = [ln for ln in lineages if not ln.excluded]
     folds: list[dict[str, Any]] = []
     for held in usable:
         train = [ln for ln in usable if ln.key != held.key]
-        train_keys = {ln.key for ln in train}
-        assert held.key not in train_keys, f"lineage {held.key} leaked into its own train split"
+        test_ids = set(held.entry_ids)
+        train_ids = {eid for ln in train for eid in ln.entry_ids}
+        overlap = test_ids & train_ids
+        assert not overlap, f"lineage {held.key} shares entries {sorted(overlap)} with its train split"
         folds.append({
             "fold": len(folds),
             "held_out_lineage": held.key,
@@ -314,11 +409,13 @@ def build_folds(lineages: list[Lineage]) -> list[dict[str, Any]]:
 # Axis availability audit (the honesty core)
 # ---------------------------------------------------------------------------
 
-def axis_availability(marker_resolved: Optional[int]) -> list[dict[str, Any]]:
+def axis_availability(marker_scored: Optional[int]) -> list[dict[str, Any]]:
     """Report, per axis, whether a score can be computed TODAY. All accuracy
-    axes are UNAVAILABLE (no structured gold in the labels). Marker sensitivity
-    is AVAILABLE only when tracks resolved (marker_resolved is a count) — model-
-    only, needs no operator gold."""
+    axes are UNAVAILABLE (no structured gold in the labels). Marker sensitivity is
+    AVAILABLE only when at least one MARKER was actually scored (`marker_scored`
+    is that count, NOT a resolved-track count) — a track can resolve yet produce
+    zero comparable drop decisions, and that must read UNAVAILABLE, not a hollow
+    AVAILABLE. Model-only; needs no operator gold."""
     axes: list[dict[str, Any]] = []
     for a in ACCURACY_AXES:
         axes.append({
@@ -329,21 +426,22 @@ def axis_availability(marker_resolved: Optional[int]) -> list[dict[str, Any]]:
             "blocker": f"no structured {a['missing_field']} in labels — operator verdicts are free "
                        "text; requires a curation pass. Reported UNAVAILABLE, not zero/PASS.",
         })
-    if marker_resolved is None:
+    if marker_scored is None:
         marker = {
             "axis": "marker_sensitivity", "available": False, "gold_examples": 0,
             "loss_shape": "family/tier/darkness flip rate at drop marker +-1 / +-2 (model-only)",
             "blocker": "not run — pass --resolve-db to resolve tracks and compute it.",
         }
-    elif marker_resolved <= 0:
+    elif marker_scored <= 0:
         marker = {
             "axis": "marker_sensitivity", "available": False, "gold_examples": 0,
             "loss_shape": "family/tier/darkness flip rate at drop marker +-1 / +-2 (model-only)",
-            "blocker": "no usable track resolved to a current filepath + beatgrid + v4 cache hit.",
+            "blocker": "no marker scored — either no track resolved to a filepath + beatgrid + v4 "
+                       "cache hit, or resolved tracks produced no baseline drop decision to perturb.",
         }
     else:
         marker = {
-            "axis": "marker_sensitivity", "available": True, "gold_examples": marker_resolved,
+            "axis": "marker_sensitivity", "available": True, "gold_examples": marker_scored,
             "loss_shape": "family/tier/darkness flip rate at drop marker +-1 / +-2 (model-only)",
             "blocker": "",
         }
@@ -365,10 +463,26 @@ def is_partial(availability: list[dict[str, Any]]) -> bool:
 
 def assert_no_leak(model_inputs: dict[str, Any]) -> None:
     """Raise if any label-identifying/ground-truth field reached the predictor.
-    Called before every production-planner invocation."""
+    Called inside call_planner() on every production-planner invocation."""
     bad = sorted(set(model_inputs) & LEAK_FORBIDDEN_FIELDS)
     if bad:
         raise ValueError(f"anti-leak violation: forbidden label fields reached the model: {bad}")
+
+
+def call_planner(plan_fn: Callable[..., Any], model_inputs: dict[str, Any]) -> Any:
+    """The single boundary EVERY production-planner call routes through. Enforces
+    a positive allowlist (only v4 + beat indices) AND the forbidden-field guard,
+    then unpacks and calls the planner. No planner call may bypass this — that is
+    what keeps a label locator/gold field out of the model. Base and every
+    perturbed call go through here, so the guard is not a one-off on a hand-built
+    dict; it fires on each real invocation."""
+    unexpected = sorted(set(model_inputs) - PLANNER_ALLOWED_FIELDS)
+    if unexpected:
+        raise ValueError(
+            f"anti-leak violation: non-model field(s) reached the planner: {unexpected}")
+    assert_no_leak(model_inputs)
+    return plan_fn(model_inputs["v4"], model_inputs["drops"], model_inputs["buildups"],
+                   beatgrid_times_ms=model_inputs["beatgrid_times_ms"])
 
 
 # ---------------------------------------------------------------------------
@@ -473,20 +587,27 @@ def marker_sensitivity(
 
     Aggregation (documented, may differ from SOL's exact roll-up): a marker is
     "+-k sensitive" on an axis if the axis output differs from baseline at
-    offset -k OR +k. Markers with no comparable perturbed entry are skipped and
-    counted under `skipped`.
+    offset -k OR +k. A marker with NO comparable perturbed entry at radius k
+    (both offsets fall out of range or collide with another drop, or the planner
+    returns no comparable decision) cannot flip there, so it is REMOVED from that
+    radius's denominator — `comparable_pm1`/`comparable_pm2` report those honest
+    per-radius denominators. Markers with no baseline decision are counted under
+    `skipped` and score nothing. Every planner call goes through call_planner().
     """
     axes = ("family", "tier", "darkness")
-    counts = {"markers": 0, "skipped": 0,
-              "pm1": {a: 0 for a in axes}, "pm2": {a: 0 for a in axes}}
+    counts: dict[str, Any] = {"markers": 0, "skipped": 0, "comparable": {1: 0, 2: 0},
+                              "pm1": {a: 0 for a in axes}, "pm2": {a: 0 for a in axes}}
+
+    def _plan(res: Resolution, marks: Any) -> Any:
+        return call_planner(plan_fn, {
+            "v4": res.v4, "drops": list(marks),
+            "buildups": list(res.buildups), "beatgrid_times_ms": list(res.grid)})
+
     for res in resolutions:
         if res.status != "resolved" or not res.drops:
             continue
-        base_inputs = {"v4": res.v4, "drops": list(res.drops), "buildups": list(res.buildups),
-                       "grid": list(res.grid)}
-        assert_no_leak(base_inputs)  # the planner never sees a label field
         n = int(getattr(res.v4, "n_beats", 0)) or (max(res.drops) + 4)
-        base_plan = plan_fn(res.v4, res.drops, res.buildups, beatgrid_times_ms=res.grid)
+        base_plan = _plan(res, res.drops)
         others = set(res.drops)
         for m in res.drops:
             base = _decision_at(base_plan, m)
@@ -494,34 +615,42 @@ def marker_sensitivity(
                 counts["skipped"] += 1
                 continue
             counts["markers"] += 1
-            flips = {f"pm{k}": {a: False for a in axes} for k in (1, 2)}
             for k in (1, 2):
+                comparable = False
+                flipped = {a: False for a in axes}
                 for off in (-k, k):
                     mp = m + off
                     if mp < 0 or mp >= n or mp in (others - {m}):
                         continue
                     pert = sorted((others - {m}) | {mp})
-                    pert_plan = plan_fn(res.v4, pert, res.buildups, beatgrid_times_ms=res.grid)
-                    pd = _decision_at(pert_plan, mp)
+                    pd = _decision_at(_plan(res, pert), mp)
                     if pd is None:
                         continue
+                    comparable = True
                     if pd[0] != base[0]:
-                        flips[f"pm{k}"]["family"] = True
+                        flipped["family"] = True
                     if pd[1] != base[1]:
-                        flips[f"pm{k}"]["tier"] = True
+                        flipped["tier"] = True
                     if (pd[2], pd[3]) != (base[2], base[3]):
-                        flips[f"pm{k}"]["darkness"] = True
-            for k in (1, 2):
+                        flipped["darkness"] = True
+                if not comparable:
+                    # no comparable perturbation at this radius: this marker can
+                    # never flip here, so it stays OUT of the radius denominator.
+                    continue
+                counts["comparable"][k] += 1
                 for a in axes:
-                    if flips[f"pm{k}"][a]:
+                    if flipped[a]:
                         counts[f"pm{k}"][a] += 1
-    result: dict[str, Any] = {"markers": counts["markers"], "skipped": counts["skipped"],
-                              "tracks": sum(1 for r in resolutions if r.status == "resolved" and r.drops)}
-    for k in ("pm1", "pm2"):
-        result[k] = {}
-        for a in axes:
-            pct = (100.0 * counts[k][a] / counts["markers"]) if counts["markers"] else None
-            result[k][a] = None if pct is None else round(pct, 1)
+    result: dict[str, Any] = {
+        "markers": counts["markers"], "skipped": counts["skipped"],
+        "tracks": sum(1 for r in resolutions if r.status == "resolved" and r.drops),
+        "comparable_pm1": counts["comparable"][1], "comparable_pm2": counts["comparable"][2],
+    }
+    for k in (1, 2):
+        key = f"pm{k}"
+        denom = counts["comparable"][k]
+        result[key] = {a: (round(100.0 * counts[key][a] / denom, 1) if denom else None)
+                       for a in axes}
     return result
 
 
@@ -623,12 +752,19 @@ def render_report(
                      "content_ids to the B-row labels is a curation task — until then the marker "
                      "axis is a proof-of-function pilot, NOT the corpus baseline.")
     if marker is not None and marker.get("markers"):
+        c1 = marker.get("comparable_pm1", marker["markers"])
+        c2 = marker.get("comparable_pm2", marker["markers"])
         L.append(f"- measured over {marker['tracks']} resolved tracks / "
-                 f"{marker['markers']} markers ({marker['skipped']} skipped):")
-        L.append(f"  - +-1 beat flips — family {marker['pm1']['family']}%, "
-                 f"tier {marker['pm1']['tier']}%, darkness {marker['pm1']['darkness']}%")
-        L.append(f"  - +-2 beat flips — family {marker['pm2']['family']}%, "
-                 f"tier {marker['pm2']['tier']}%, darkness {marker['pm2']['darkness']}%")
+                 f"{marker['markers']} scored markers ({marker['skipped']} skipped — no baseline "
+                 "decision to perturb):")
+        L.append(f"  - +-1 beat flips over {c1} markers comparable at +-1 "
+                 f"({marker['markers'] - c1} not comparable, excluded from this denominator) — "
+                 f"family {marker['pm1']['family']}%, tier {marker['pm1']['tier']}%, "
+                 f"darkness {marker['pm1']['darkness']}%")
+        L.append(f"  - +-2 beat flips over {c2} markers comparable at +-2 "
+                 f"({marker['markers'] - c2} not comparable, excluded from this denominator) — "
+                 f"family {marker['pm2']['family']}%, tier {marker['pm2']['tier']}%, "
+                 f"darkness {marker['pm2']['darkness']}%")
         ref = SOL_MARKER_REFERENCE
         L.append(f"  - SOL published reference (DIFFERENT sample — {ref['method']}):")
         L.append(f"    +-1 family {ref['pm1']['family']}%, tier {ref['pm1']['tier']}%, "
@@ -661,14 +797,16 @@ def run(labels_path: str, *, resolve_db: bool, head: str) -> tuple[str, bool]:
     rows = load_labels(labels_path)
     label_sha = hashlib.sha256(Path(labels_path).read_bytes()).hexdigest()[:16]
     entries = normalize(rows)
-    warnings = validate_exclusions(entries)
     lineages = build_lineages(entries)
+    warnings = (validate_exclusions(entries)
+                + amendment_warnings(entries)
+                + identity_warnings(lineages))
     manifest = build_manifest(entries, lineages)
     folds = build_folds(lineages)
 
     marker: Optional[dict[str, Any]] = None
     resolution_summary: Optional[dict[str, int]] = None
-    marker_resolved: Optional[int] = None
+    marker_scored: Optional[int] = None
     if resolve_db:
         db_path = str(Path("~/Library/Pioneer/rekordbox/master.db").expanduser())
         try:
@@ -679,13 +817,15 @@ def run(labels_path: str, *, resolve_db: bool, head: str) -> tuple[str, bool]:
             for r in resolutions:
                 resolution_summary[r.status] = resolution_summary.get(r.status, 0) + 1
             marker = marker_sensitivity(resolutions, build_track_plan)
-            marker_resolved = marker.get("tracks", 0)
+            # availability keys off markers SCORED, not resolved-track count: a
+            # track can resolve yet score zero markers (finding 3).
+            marker_scored = marker.get("markers", 0)
         except Exception as exc:  # honest degrade: report the blocker, never fake a score
             resolution_summary = {"error": 0}
             warnings.append(f"--resolve-db failed ({type(exc).__name__}: {exc}); marker axis UNAVAILABLE")
-            marker_resolved = 0
+            marker_scored = 0
 
-    availability = axis_availability(marker_resolved)
+    availability = axis_availability(marker_scored)
     report = render_report(
         head=head, labels_path=labels_path, label_sha=label_sha,
         manifest=manifest, warnings=warnings, folds=folds,
