@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 67b7d66
+last_verified_commit: 0abbbff
 last_verified_date: 2026-07-10
-validation_scope: software-only plus Rekordbox 7.2.11 passive mixer RE evidence routing; AWR-157 deck-2 chain freshness gating software-tested; AWR-160 phantom track-load stability gate software-tested; AWR reader cross-version safety (direct-read BPM cap + emit clamp + symbol-derived offline version-extension tool) software-tested 2026-07-10; hardware-output unvalidated
+validation_scope: software-only plus Rekordbox 7.2.11 passive mixer RE evidence routing; AWR-157 deck-2 chain freshness gating software-tested; AWR-160 phantom track-load stability gate software-tested; AWR-207 USB-export local-twin resolution software-tested; AWR reader cross-version safety (direct-read BPM cap + emit clamp + symbol-derived offline version-extension tool) software-tested 2026-07-10; hardware-output unvalidated
 ---
 
 # Rekordbox Readers
@@ -29,6 +29,9 @@ Purpose:
   runtime consumer of the mixer RE evidence and drives the LED filter-sweep
   overlay in `led_govee`. It is fully isolated from mixer authority (see the
   isolation rule below) and inert on every other RB version by construction.
+- Resolve USB-device-tree loads to their unique local-library twin on the
+  operator's laptop (AWR-207), including the local ANLZ/PSSI source needed for
+  phrase parsing. Foreign-laptop portability is the separate AWR-208 program.
 
 Authoritative code:
 - `rb_memory.py`
@@ -38,6 +41,7 @@ Authoritative code:
 - `probe_live_bpm.py`
 - `probe_deck2.py`
 - `probe_cfx_filter.py` (AWR-173 passive CFX desk-calibration probe)
+- `filepath_resolver.py` (AWR-207 local-twin identity/data-source resolver)
 
 Key symbols:
 - `RBMemoryReader`
@@ -126,6 +130,15 @@ Runtime flow:
   normal logs without turning DEBUG on. Unload/track-change recognition for
   an already-confirmed track is unchanged and immediate — the gate delays
   recognition of a new candidate, it never suppresses a stable state.
+- AWR-207 USB-export resolution (`filepath_resolver.py`): local UUID lookup is
+  unchanged. A device-export miss filters local DB rows by BPM (±0.05) and
+  duration (±2 s), reads ANLZ only for that candidate set, and accepts exactly
+  one beatgrid match (count ±1; first beat and 17 sampled timestamps within
+  10 ms; existing exact fingerprint fast path). The payload carries local
+  identity plus optional `local_anlz_path`; StateManager prefers that field for
+  the resolved-time phrase/spectral worker. Zero/multiple matches stay
+  unresolved, and a device miss skips lsof. All I/O remains in the resolver
+  daemon thread; the push loop is unchanged.
 
 Config:
 - `config.py`
@@ -154,6 +167,10 @@ Tests:
   symmetrically; a stable load never re-emits on later unchanged ticks.
   Pure seams via the existing fake mach-read backend — no mach, no live
   process.
+- `tests/test_filepath_resolver_usb_twin.py` proves AWR-207 device detection,
+  prefiltering, exact/mismatched/zero/ambiguous grids, payload parity, and the
+  no-lsof miss. `tests/test_smart_transitions.py` pins local-path behavior
+  unchanged plus the payload-selected local ANLZ handoff.
 - if no direct hardware/process test exists, mark live behavior unvalidated in repo evidence
 
 Change contract:
