@@ -128,20 +128,40 @@ def _run_streamdeck() -> int:
     return 0
 
 
+def _pad_config_path(filename: str, env_key: str) -> str:
+    """The config file a pad must edit: an explicit operator env override, else the
+    installed App Support copy the bridge actually runs on, else the repo default.
+
+    A frozen guest keeps its live config in App Support (install.command /
+    install_controller land it there), NOT in the bundle — which ships only
+    *.example.json. Without this the pad would open a blank/default config AND a
+    Save would write into sys._MEIPASS inside the code-signed .app, mutating the
+    signed bundle (invalidating the signature and its TCC grants). We pass an
+    explicit --config so the pad reads and writes the SAME file as the bridge."""
+    override = os.environ.get(env_key)
+    if override:
+        return override
+    installed = GOVEE_ENV_PATH.parent / filename
+    if installed.exists():
+        return str(installed)
+    return str(_REPO_ROOT / "config" / filename)
+
+
 def _run_laser_pad() -> int:
-    """Run the Laser Pad web server (default port 8765). The menubar spawns this
-    so 'Laser Pad…' opens a live server instead of a dead loopback URL. Pass an
-    empty argv so the pad's argparse never sees the bundle's own --run-laser-pad."""
+    """Run the Laser Pad web server (default port 8765), pointed at the same live
+    config the bridge runs on (App Support on a guest), never the bundle default."""
     from rb_ss_bridge_v2.tools.laser_pad_web import main as laser_pad_main
 
-    return int(laser_pad_main([]) or 0)
+    config = _pad_config_path("laser_director.json", "RBSS_LASER_CONFIG")
+    return int(laser_pad_main(["--config", config]) or 0)
 
 
 def _run_led_pad() -> int:
     """Run the LED Pad web server (default port 8766); see _run_laser_pad."""
     from rb_ss_bridge_v2.tools.led_pad_web import main as led_pad_main
 
-    return int(led_pad_main([]) or 0)
+    config = _pad_config_path("led_look_director.json", "RBSS_LED_CONFIG")
+    return int(led_pad_main(["--config", config]) or 0)
 
 
 def _run_menubar() -> int:
