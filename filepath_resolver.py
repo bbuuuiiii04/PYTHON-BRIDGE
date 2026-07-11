@@ -603,8 +603,17 @@ def _db_lookup_by_anlz(anlz_path: str) -> Optional[dict]:
                 log.info("[FRES] usb-crossanalysis-unconfirmed  reason=no-pdb-tags")
                 return None
             pdb_candidates = _usb_pdb_candidates(contents, device_track)
-            if len(pdb_candidates) != 1:
-                log.info("[FRES] usb-pdb-miss  candidates=%d", len(pdb_candidates))
+            if not pdb_candidates:
+                log.info("[FRES] usb-pdb-miss  candidates=0")
+                return None
+            if len(pdb_candidates) > 1:
+                candidate_ids = ",".join(
+                    str(getattr(candidate, "ID", "")) for candidate in pdb_candidates
+                )
+                log.info(
+                    "[FRES] usb-pdb-ambiguous  candidate_ids=%s",
+                    candidate_ids,
+                )
                 return None
             content = pdb_candidates[0]
             if not _relaxed_usb_twin_match(content, beatgrid):

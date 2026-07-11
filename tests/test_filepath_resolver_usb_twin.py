@@ -254,6 +254,28 @@ class UsbTwinResolverTests(unittest.TestCase):
         self.assertIn("imported-not-analyzed", joined)
         self.assertIn("finish analysis in Rekordbox", joined)
 
+    def test_duplicate_local_tag_matches_list_ids_and_abstain(self) -> None:
+        db = _FakeDB([_content(ID="123"), _content(ID="456")])
+        device_track = {
+            "track_id": 77,
+            "title": "Twin Track",
+            "artist": "Twin Artist",
+            "duration_s": 200,
+            "bpm": 128.0,
+        }
+        with patch("pyrekordbox.db6.Rekordbox6Database", return_value=db), \
+             patch("rb_ss_bridge_v2.filepath_resolver._extract_beatgrid_from_anlz",
+                   return_value=_grid()), \
+             patch("rb_ss_bridge_v2.filepath_resolver._read_device_pdb_track",
+                   return_value=device_track), \
+             self.assertLogs("filepath_resolver", level="INFO") as logs:
+            result = _db_lookup_by_anlz(_USB_PATH)
+
+        self.assertIsNone(result)
+        joined = "\n".join(logs.output)
+        self.assertIn("usb-pdb-ambiguous", joined)
+        self.assertIn("candidate_ids=123,456", joined)
+
 
 if __name__ == "__main__":
     unittest.main()
