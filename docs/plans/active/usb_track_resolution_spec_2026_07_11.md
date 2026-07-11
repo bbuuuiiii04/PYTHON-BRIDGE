@@ -80,6 +80,31 @@ Performance: prefilter first, read only prefiltered candidates' ANLZ files
 (a handful, in the resolver thread). No whole-library ANLZ sweep per load; an
 in-process per-session memo of confirmed usb-path→content_id matches is fine.
 
+### Task 1b — carry the local twin's ANLZ path in the resolved payload
+**[operator-confirmed root fact 2026-07-11]: Rekordbox does NOT export phrase
+data (PSSI) to USB-export ANLZ files.** Identity alone is therefore NOT enough:
+the runtime phrase parse reads the DECK's raw ANLZ path at both scheduling
+sites — `_start_anlz_worker(anlz_path, ...)` at TRACK_LOADED
+(`state_manager.py:2259`, raw path from the ANLZ_PATH event) and at
+FILEPATH_RESOLVED (`state_manager.py:2567`, popping `_loaded_anlz_path` which
+stores the same raw path at :2257). A USB path there means NO phrase forever.
+So the twin-match payload (Task 1) must also include the local twin's ANLZ
+path (`local_anlz_path`), derived from the matched content's
+`AnalysisDataPath` exactly as local resolution implies (reuse
+`_candidate_anlz_paths` :148 semantics for DAT/EXT siblings).
+
+### Task 1c — `state_manager.py`: prefer the resolved local ANLZ path
+At the FILEPATH_RESOLVED worker site (~:2548-2572): when the resolved payload
+carries a non-empty `local_anlz_path`, schedule `_start_anlz_worker` with it
+instead of the raw deck path. Beat math stays consistent because the
+fingerprint match already proved the grids agree; the local file is a strict
+superset (phrase present). Local loads are unaffected (their payload either
+omits the field or carries the same path they already use — pick the shape
+that changes zero behavior for local tracks and pin it with a test). The
+TRACK_LOADED-time early worker (:2259) may still run against the raw path —
+its result is superseded by the resolved-time run exactly as today's
+load_gen/consumer guards already arbitrate; do not redesign that arbitration.
+
 ### Task 2 — stop the lsof mis-match for USB loads
 When Task 1 returns None for a device-export path, the worker must NOT fall
 back to lsof blindly: tonight lsof matched an unrelated open click-sound file.
