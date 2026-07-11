@@ -614,13 +614,21 @@ def _db_lookup_by_anlz(anlz_path: str) -> Optional[dict]:
                 )
                 return None
             analysis_path = str(getattr(content, "AnalysisDataPath", "") or "")
-            if not analysis_path:
-                log.info("[FRES] usb-pdb-miss  reason=no-local-analysis")
+            local_anlz_path = _local_anlz_path(analysis_path) if analysis_path else ""
+            if not local_anlz_path or not os.path.isfile(local_anlz_path):
+                log.info(
+                    "[FRES] imported-not-analyzed  content_id=%s"
+                    "  action=finish analysis in Rekordbox",
+                    getattr(content, "ID", ""),
+                )
                 return None
-            local_anlz_path = _local_anlz_path(analysis_path)
             local_grid = _extract_beatgrid_from_anlz(local_anlz_path)
             if len(local_grid.get("beatgrid_times_ms", ())) < 2:
-                log.info("[FRES] usb-pdb-miss  reason=unreadable-local-analysis")
+                log.info(
+                    "[FRES] imported-not-analyzed  content_id=%s"
+                    "  action=finish analysis in Rekordbox",
+                    getattr(content, "ID", ""),
+                )
                 return None
             log.info(
                 "[FRES] usb-pdb-match  content_id=%s  track_id=%s",
