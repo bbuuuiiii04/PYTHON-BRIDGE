@@ -19,9 +19,11 @@ import os
 import queue
 import re
 import statistics
+import struct
 import subprocess
 import threading
 import time
+import unicodedata
 import warnings
 from pathlib import Path
 from typing import Optional, Sequence
@@ -293,6 +295,161 @@ def _local_anlz_path(analysis_data_path: str) -> str:
     return str(_RB_SHARE_ROOT / analysis_data_path.lstrip("/"))
 
 
+def _device_sql_string(data: bytes, offset: int) -> str:
+    kind = data[offset]
+    if kind == 0x40:
+        length = struct.unpack_from("<H", data, offset + 1)[0]
+        if length < 4:
+            raise ValueError("invalid DeviceSQL ASCII string length")
+        return data[offset + 4:offset + length].decode("ascii")
+    if kind == 0x90:
+        length = struct.unpack_from("<H", data, offset + 1)[0]
+        if length < 4:
+            raise ValueError("invalid DeviceSQL UTF-16 string length")
+        return data[offset + 4:offset + length].decode("utf-16le")
+    length = kind >> 1
+    if length < 1:
+        return ""
+    return data[offset + 1:offset + length].decode("ascii")
+
+
+def _device_pdb_rows(
+    data: bytes,
+    page_size: int,
+    first_page: int,
+    last_page: int,
+    table_type: int,
+):  # type: ignore[no-untyped-def]
+    page_index = first_page
+    visited: set[int] = set()
+    while page_index not in visited:
+        visited.add(page_index)
+        page_start = page_index * page_size
+        if page_start + page_size > len(data):
+            raise ValueError("DeviceSQL page outside file")
+        if struct.unpack_from("<I", data, page_start + 8)[0] != table_type:
+            return
+        packed = int.from_bytes(data[page_start + 24:page_start + 27], "little")
+        num_offsets = packed & 0x1FFF
+        groups = (num_offsets + 15) // 16
+        if groups and page_size - ((groups - 1) * 0x24) - 36 < 40:
+            raise ValueError("DeviceSQL row index overlaps page header")
+        if not data[page_start + 27] & 0x40:
+            for group in range(groups):
+                base = page_size - group * 0x24
+                present = struct.unpack_from("<H", data, page_start + base - 4)[0]
+                for row_in_group in range(16):
+                    row_index = group * 16 + row_in_group
+                    if row_index >= num_offsets:
+                        break
+                    if not present & (1 << row_in_group):
+                        continue
+                    row_offset = struct.unpack_from(
+                        "<H", data, page_start + base - (6 + 2 * row_in_group)
+                    )[0]
+                    if row_offset >= page_size - 40:
+                        raise ValueError("DeviceSQL row outside page heap")
+                    yield page_start + 40 + row_offset
+        if page_index == last_page:
+            return
+        page_index = struct.unpack_from("<I", data, page_start + 12)[0]
+
+
+def _parse_device_pdb_track(data: bytes, anlz_path: str) -> Optional[dict]:
+    """Read only the export.pdb track/artist fields needed for USB identity."""
+    page_size, num_tables = struct.unpack_from("<II", data, 4)
+    if page_size < 128 or 28 + num_tables * 16 > page_size:
+        raise ValueError("invalid DeviceSQL header")
+    tables = {
+        table_type: (first_page, last_page)
+        for table_type, _empty, first_page, last_page in struct.iter_unpack(
+            "<IIII", data[28:28 + num_tables * 16]
+        )
+    }
+    if 0 not in tables or 2 not in tables:
+        return None
+
+    artists: dict[int, str] = {}
+    for row in _device_pdb_rows(data, page_size, *tables[2], 2):
+        subtype = struct.unpack_from("<H", data, row)[0]
+        name_offset = (
+            struct.unpack_from("<H", data, row + 10)[0]
+            if subtype & 0x04 else data[row + 9]
+        )
+        artists[struct.unpack_from("<I", data, row + 4)[0]] = _device_sql_string(
+            data, row + name_offset
+        )
+
+    normalized_path = anlz_path.replace("\\", "/")
+    marker = normalized_path.casefold().find("/pioneer/usbanlz/")
+    if marker < 0:
+        return None
+    wanted = normalized_path[marker:].casefold()
+    matches: list[dict] = []
+    for row in _device_pdb_rows(data, page_size, *tables[0], 0):
+        offsets = struct.unpack_from("<21H", data, row + 94)
+        analysis_path = _device_sql_string(data, row + offsets[14])
+        if analysis_path.replace("\\", "/").casefold() != wanted:
+            continue
+        artist_id = struct.unpack_from("<I", data, row + 68)[0]
+        matches.append({
+            "track_id": struct.unpack_from("<I", data, row + 72)[0],
+            "title": _device_sql_string(data, row + offsets[17]),
+            "artist": artists.get(artist_id, ""),
+            "duration_s": struct.unpack_from("<H", data, row + 84)[0],
+            "bpm": struct.unpack_from("<I", data, row + 56)[0] / 100.0,
+        })
+    return matches[0] if len(matches) == 1 else None
+
+
+def _read_device_pdb_track(anlz_path: str) -> Optional[dict]:
+    match = re.match(r"^(/Volumes/[^/]+)/PIONEER/", anlz_path.replace("\\", "/"), re.I)
+    if not match:
+        return None
+    pdb_path = Path(match.group(1)) / "PIONEER" / "rekordbox" / "export.pdb"
+    return _parse_device_pdb_track(pdb_path.read_bytes(), anlz_path)
+
+
+def _normalize_usb_tag(value: object) -> str:
+    return " ".join(unicodedata.normalize("NFKC", str(value or "")).casefold().split())
+
+
+def _content_artist(content: object) -> str:
+    artist = getattr(content, "Artist", None)
+    return str(getattr(artist, "Name", None) or artist or "")
+
+
+def _usb_pdb_candidates(contents: Sequence[object], track: dict) -> list[object]:
+    title = _normalize_usb_tag(track.get("title"))
+    artist = _normalize_usb_tag(track.get("artist"))
+    duration = float(track.get("duration_s") or 0)
+    if not title or duration <= 0:
+        return []
+    return [
+        content for content in contents
+        if not getattr(content, "rb_local_deleted", 0)
+        and _normalize_usb_tag(getattr(content, "Title", "")) == title
+        and _normalize_usb_tag(_content_artist(content)) == artist
+        and getattr(content, "Length", None) is not None
+        and abs(float(getattr(content, "Length")) - duration) <= _USB_TWIN_DURATION_TOLERANCE_S
+    ]
+
+
+def _relaxed_usb_twin_match(content: object, usb_beatgrid: dict) -> bool:
+    times = [float(value) for value in usb_beatgrid.get("beatgrid_times_ms", ())]
+    bpms = [float(value) for value in usb_beatgrid.get("beatgrid_bpms", ())]
+    if len(times) < 2 or not bpms or times[-1] <= 0:
+        return False
+    bpm_raw = getattr(content, "BPM", None)
+    length = getattr(content, "Length", None)
+    if not bpm_raw or length is None:
+        return False
+    return (
+        abs(float(bpm_raw) / 100.0 - statistics.median(bpms)) <= _USB_TWIN_BPM_TOLERANCE
+        and abs(float(length) - times[-1] / 1000.0) <= _USB_TWIN_DURATION_TOLERANCE_S
+    )
+
+
 def _unique_usb_twin(
     usb_times_ms: Sequence[float],
     candidate_grids: Sequence[tuple[object, dict]],
@@ -434,7 +591,44 @@ def _db_lookup_by_anlz(anlz_path: str) -> Optional[dict]:
                 "[FRES] %s  candidates=%d  fingerprint_matches=%d",
                 reason, len(candidates), match_count,
             )
-            return None
+            try:
+                device_track = _read_device_pdb_track(anlz_path)
+            except (OSError, UnicodeError, ValueError, struct.error) as exc:
+                log.info(
+                    "[FRES] usb-crossanalysis-unconfirmed  err=%s",
+                    type(exc).__name__,
+                )
+                return None
+            if device_track is None:
+                log.info("[FRES] usb-crossanalysis-unconfirmed  reason=no-pdb-tags")
+                return None
+            pdb_candidates = _usb_pdb_candidates(contents, device_track)
+            if len(pdb_candidates) != 1:
+                log.info("[FRES] usb-pdb-miss  candidates=%d", len(pdb_candidates))
+                return None
+            content = pdb_candidates[0]
+            if not _relaxed_usb_twin_match(content, beatgrid):
+                log.info(
+                    "[FRES] usb-pdb-conflict  content_id=%s",
+                    getattr(content, "ID", ""),
+                )
+                return None
+            analysis_path = str(getattr(content, "AnalysisDataPath", "") or "")
+            if not analysis_path:
+                log.info("[FRES] usb-pdb-miss  reason=no-local-analysis")
+                return None
+            local_anlz_path = _local_anlz_path(analysis_path)
+            local_grid = _extract_beatgrid_from_anlz(local_anlz_path)
+            if len(local_grid.get("beatgrid_times_ms", ())) < 2:
+                log.info("[FRES] usb-pdb-miss  reason=unreadable-local-analysis")
+                return None
+            log.info(
+                "[FRES] usb-pdb-match  content_id=%s  track_id=%s",
+                getattr(content, "ID", ""), device_track["track_id"],
+            )
+            return _payload_for_content(
+                db, content, local_grid, local_anlz_path=local_anlz_path,
+            )
         log.debug("_db_lookup_by_anlz: UUID %s not found in DB", anlz_uuid)
     except Exception as exc:
         log.debug("_db_lookup_by_anlz: %s", exc)

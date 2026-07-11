@@ -45,6 +45,8 @@ class _FakeDB:
 def _content(**overrides):
     values = {
         "ID": "123",
+        "Title": "Twin Track",
+        "Artist": SimpleNamespace(Name="Twin Artist"),
         "FolderPath": "/music/twin.wav",
         "AnalysisDataPath": _LOCAL_REL,
         "BPM": 12800,
@@ -165,6 +167,68 @@ class UsbTwinResolverTests(unittest.TestCase):
              patch.object(resolver, "resolve_async") as fallback:
             resolver._resolve_anlz_worker(2, 9, _LOCAL_PATH, "trace")
         fallback.assert_called_once_with(2, 9, trace_id="trace")
+
+    def test_cross_analysis_uses_exact_pdb_tags_plus_relaxed_grid(self) -> None:
+        content = _content()
+        db = _FakeDB([content])
+        usb_grid = _grid([value + 11.0 for value in _GRID])
+        local_grid = _grid()
+        device_track = {
+            "track_id": 77,
+            "title": "  TWIN track ",
+            "artist": "Twin Artist",
+            "duration_s": 200,
+            "bpm": 128.0,
+        }
+
+        with patch("pyrekordbox.db6.Rekordbox6Database", return_value=db), \
+             patch("rb_ss_bridge_v2.filepath_resolver._extract_beatgrid_from_anlz",
+                   side_effect=lambda path: usb_grid if path == _USB_PATH else local_grid), \
+             patch("rb_ss_bridge_v2.filepath_resolver._read_device_pdb_track",
+                   return_value=device_track), \
+             patch("rb_ss_bridge_v2.filepath_resolver._read_soundswitch_id",
+                   return_value="{SSID}"), \
+             patch("rb_ss_bridge_v2.filepath_resolver._hotcue_marker", return_value="LASER"):
+            result = _db_lookup_by_anlz(_USB_PATH)
+
+        self.assertEqual(result["content_id"], "123")
+        self.assertEqual(result["local_anlz_path"], _local_anlz_path(_LOCAL_REL))
+        self.assertEqual(result["soundswitch_id"], "{SSID}")
+
+    def test_pdb_tags_cannot_override_bpm_conflict(self) -> None:
+        content = _content(BPM=12000)
+        db = _FakeDB([content])
+        device_track = {
+            "track_id": 77,
+            "title": "Twin Track",
+            "artist": "Twin Artist",
+            "duration_s": 200,
+            "bpm": 128.0,
+        }
+        with patch("pyrekordbox.db6.Rekordbox6Database", return_value=db), \
+             patch("rb_ss_bridge_v2.filepath_resolver._extract_beatgrid_from_anlz",
+                   return_value=_grid()), \
+             patch("rb_ss_bridge_v2.filepath_resolver._read_device_pdb_track",
+                   return_value=device_track), \
+             self.assertLogs("filepath_resolver", level="INFO") as logs:
+            result = _db_lookup_by_anlz(_USB_PATH)
+
+        self.assertIsNone(result)
+        self.assertTrue(any("usb-pdb-conflict" in line for line in logs.output))
+
+    def test_missing_pdb_tags_fail_cross_analysis_closed(self) -> None:
+        db = _FakeDB([_content()])
+        local_shifted = _grid([value + 11.0 for value in _GRID])
+        with patch("pyrekordbox.db6.Rekordbox6Database", return_value=db), \
+             patch("rb_ss_bridge_v2.filepath_resolver._extract_beatgrid_from_anlz",
+                   side_effect=lambda path: _grid() if path == _USB_PATH else local_shifted), \
+             patch("rb_ss_bridge_v2.filepath_resolver._read_device_pdb_track",
+                   return_value=None), \
+             self.assertLogs("filepath_resolver", level="INFO") as logs:
+            result = _db_lookup_by_anlz(_USB_PATH)
+
+        self.assertIsNone(result)
+        self.assertTrue(any("usb-crossanalysis-unconfirmed" in line for line in logs.output))
 
 
 if __name__ == "__main__":
