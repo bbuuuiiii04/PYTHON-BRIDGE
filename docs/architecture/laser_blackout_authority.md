@@ -124,3 +124,27 @@ static ducks dark for the window and restores on release (Rule 9 is base
 suppression; this is a real blackout owner, so mask precedence applies —
 `tests/test_state_manager_pack_driver.py::...pre_chorus_then_restores`). Software
 seams: `tests/test_laser_tier_prechorus.py`.
+
+**AWR-206 — relaxed arm gate for the smart-drop pre-window blackout**
+(software-tested / hardware-unvalidated; STAGED — activates at the operator's
+next bridge restart). This changes only WHEN the 4-beat smart-drop pre-drop
+blackout *arms*; it changes none of the survival/release rules above. Scene MIDI
+still fires only behind the strict `_passes_automatic_gates` (which requires
+`autoloop_ready`). The blackout note now arms on a relaxed gate
+`_passes_blackout_gates` = the strict gate MINUS `autoloop_ready` (still requires
+`playing`, `active_track_loaded`, not `position_stale`, `lighting_mode ==
+"autoloop"`, `scripted_id == 0`, and a mapped scene). Reason: at the pre-drop
+instant during real mixing the SoundSwitch autoloop is normally mid-re-arm (the
+clear-1-beat-before-reload re-anchor), so `autoloop_ready` was False and the
+strict gate silently ate the blackout — the note itself never needed a
+render-ready autoloop, only a genuinely live deck. Both arm signals
+(`smart_drop_blackout_arm`, `smart_phrasing_blackout_arm`) take the same relaxed
+path. The pre-window latch (`_blackout_pending_for_drop_window`) and every
+release path (drop crossing, `_release_all_masks`, `clear_pending_blackout`,
+lifecycle resets, shutdown zeroing) are untouched, so a blackout armed under
+churn releases exactly as before (fail-open beats fail-dark). Skip reasons in the
+auto-gate-blocked branch now log at INFO (were DEBUG, invisible at the live log
+level). Software seams: `tests/test_laser_executor.py`
+(`test_blackout_arms_under_autoloop_churn_*`, `..._when_scene_unmapped`,
+`test_drop_crossing_resolves_pending_blackout_when_auto_gate_blocked`,
+`test_blackout_skip_logs_failing_subconditions_at_info`).
