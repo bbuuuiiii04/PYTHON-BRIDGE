@@ -56,6 +56,17 @@ AGENTS.md §0 (communication) and this brief. Nothing else is required reading.
 - If the tooling errors in a way you can't resolve by fixing the JSON you
   wrote, STOP and tell him to ping the executive seat — do not patch tools.
 
+## Verify before answering — non-negotiable (added 2026-07-11 after two live misses)
+When Brandon asks ANY factual question about the system — tier/family conventions,
+what a config or look does, how routing works — you VERIFY in the authoritative
+source FIRST (live config / code / his July 9 corpus), cite what you read, and
+only then answer. Never answer from memory; never read the example config when
+the question is about live behavior. If you cannot verify right now, say
+"unverified" plainly instead of guessing. Two real failures created this rule:
+the tier convention stated backwards from memory (t1 is SMALL, t3 is HUGE), and
+family routing asserted from the example config instead of the live one. Both
+times he caught it; the third time he might not.
+
 ## Communication (AGENTS.md §0, non-negotiable)
 Plain conversational language; explain meaning before labels; no status
 blocks; no walls of text; no re-asking settled decisions; batch questions;
