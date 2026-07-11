@@ -43,6 +43,35 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(usb_launcher.main(["--run-led-pad"]), 0)
         run.assert_called_once_with()
 
+    def test_pad_config_prefers_override_then_appsupport_then_repo(self) -> None:
+        import tempfile
+
+        # 1) explicit operator env override wins outright.
+        with mock.patch.dict(os.environ, {"RBSS_LASER_CONFIG": "/x/o.json"}, clear=False):
+            self.assertEqual(
+                usb_launcher._pad_config_path("laser_director.json", "RBSS_LASER_CONFIG"),
+                "/x/o.json",
+            )
+        # 2) no override -> the installed App Support copy the bridge runs on.
+        with tempfile.TemporaryDirectory() as d:
+            support = Path(d)
+            cfg = support / "laser_director.json"
+            cfg.write_text("{}", encoding="utf-8")
+            with mock.patch.object(usb_launcher, "GOVEE_ENV_PATH", support / "govee.env"), \
+                 mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("RBSS_LASER_CONFIG", None)
+                self.assertEqual(
+                    usb_launcher._pad_config_path("laser_director.json", "RBSS_LASER_CONFIG"),
+                    str(cfg),
+                )
+        # 3) no override, no installed copy -> repo/bundle default (NOT a blank).
+        with tempfile.TemporaryDirectory() as d:
+            with mock.patch.object(usb_launcher, "GOVEE_ENV_PATH", Path(d) / "govee.env"), \
+                 mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("RBSS_LASER_CONFIG", None)
+                got = usb_launcher._pad_config_path("laser_director.json", "RBSS_LASER_CONFIG")
+                self.assertTrue(got.endswith("config/laser_director.json"), got)
+
     def test_run_frame_engine_passes_fd(self) -> None:
         with mock.patch.object(usb_launcher, "_run_frame_engine", return_value=0) as run:
             self.assertEqual(usb_launcher.main(["--run-frame-engine", "--fd", "7"]), 0)

@@ -110,22 +110,30 @@ if [ -n "$PREBUILT_APP" ]; then
     APP="$PREBUILT_APP"
 else
     cd "$REPO_ROOT"
-    if [ ! -x "$VENV/bin/pyinstaller" ]; then
-        BUILD_PY="$(find_build_python)" || fail "no python.org universal2 Python (target <13) found. Install the 'macOS 64-bit universal2 installer' for Python 3.11+ from python.org, or set RBSS_BUILD_PYTHON=/path/to/python3. A Homebrew Python builds a bundle that crashes on macOS < 15 (DEFECT-1)."
+    # Reuse the venv ONLY if it has the WHOLE rig (a real import), not merely
+    # pyinstaller — pyinstaller installs BEFORE the deps, so a prior run that died
+    # on the deps leaves pyinstaller present but numpy/scipy/librosa absent; a
+    # presence-only guard would reuse that and ship a bundle that crashes on the
+    # guest at import.
+    if ! "$VENV/bin/python" -c 'import PyInstaller, numpy, scipy, librosa' >/dev/null 2>&1; then
+        BUILD_PY="$(find_build_python)" || fail "no python.org universal2 Python (target <13) found. Install the 'macOS 64-bit universal2 installer' for Python 3.12/3.13 from python.org, or set RBSS_BUILD_PYTHON=/path/to/python3. A Homebrew Python builds a bundle that crashes on macOS < 15 (DEFECT-1)."
         echo "make_stick: build interpreter → $BUILD_PY (universal2, target $MACOSX_DEPLOYMENT_TARGET)"
-        # No --system-site-packages: that flag pulled Homebrew's arm64/target-15
-        # packages back in. Install the rig fresh (universal2 wheels) into the
-        # clean venv. analysis+spectral cover numpy/scipy/librosa the frozen
-        # bridge previously got only via --system-site-packages.
-        "$BUILD_PY" -m venv "$VENV"
-        "$VENV/bin/python" -m pip install --upgrade pip
-        "$VENV/bin/python" -m pip install pyinstaller
-        # Spectral analysis is REQUIRED — never ship a bundle without it. The full
-        # rig (analysis+spectral = numpy/scipy/librosa->numba/llvmlite) installs
-        # fine on a stable python.org build; only the very newest Python may lack a
-        # numba wheel. Fail LOUD pointing at the fix rather than dropping the feature.
-        "$VENV/bin/python" -m pip install ".[bundle,analysis,spectral]" \
-            || fail "spectral deps failed to install on $("$VENV/bin/python" -V 2>&1) — numba/llvmlite likely have no wheel for this Python yet. Install a python.org 3.12 or 3.13 universal2 build (both have them), set RBSS_BUILD_PYTHON=/Library/Frameworks/Python.framework/Versions/3.13/bin/python3, and rerun. Spectral is required; the bundle is NOT shipped without it."
+        # Rebuild from scratch: never carry a stale/partial venv (wrong interpreter,
+        # or missing deps). No --system-site-packages (that pulled Homebrew's
+        # arm64/target-15 packages back in). Spectral is REQUIRED — the full rig
+        # installs on a stable python.org build; only the very newest Python may
+        # lack a numba wheel. ANY step failing REMOVES the venv so the next run — or
+        # an RBSS_BUILD_PYTHON=3.13 retry — starts clean instead of reusing it.
+        rm -rf "$VENV"
+        {
+            "$BUILD_PY" -m venv "$VENV" &&
+            "$VENV/bin/python" -m pip install --upgrade pip &&
+            "$VENV/bin/python" -m pip install pyinstaller &&
+            "$VENV/bin/python" -m pip install ".[bundle,analysis,spectral]"
+        } || {
+            rm -rf "$VENV"
+            fail "build venv setup failed on $("$BUILD_PY" -V 2>&1). If it was the spectral deps, numba/llvmlite likely have no wheel for this Python yet — install a python.org 3.12 or 3.13 universal2 build (both have them), set RBSS_BUILD_PYTHON=/Library/Frameworks/Python.framework/Versions/3.13/bin/python3, and rerun. Spectral is required; the bundle is NOT shipped without it."
+        }
     fi
     "$VENV/bin/pyinstaller" packaging/rbss_launcher.spec \
         --noconfirm --distpath dist --workpath build

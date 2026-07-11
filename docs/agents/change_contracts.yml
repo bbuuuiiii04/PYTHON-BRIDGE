@@ -307,6 +307,7 @@ contracts:
       - launch_profile*.py
       - launch_agent_plist.py
       - install_controller.py
+      - rekordbox_patch.py
       - replay_event_source.py
       - packaging/**
       - scripts/ss_bridge_watcher.sh
@@ -321,6 +322,7 @@ contracts:
       - python3 -m unittest tests.test_launch_agent_plist
       - python3 -m unittest tests.test_make_stick
       - python3 -m unittest tests.test_install_controller
+      - python3 -m unittest tests.test_rekordbox_patch
       - python3 -m unittest discover tests
       - python3 tools/check_docs_metadata.py
       - python3 tools/check_agent_contracts.py
