@@ -935,7 +935,14 @@ def _start_spectral_cache_eviction_if_enabled() -> threading.Thread | None:
 def main() -> None:
     if not _acquire_single_instance_lock():
         log.error("another rb_ss_bridge_v2 process is already running; exiting")
-        return
+        # Distinct nonzero exit + stderr so a menubar that spawned this as a
+        # watched child surfaces "a bridge is already running" instead of reading
+        # the flock refusal as a clean exit (rc 0) and showing nothing.
+        sys.stderr.write(
+            "rb_ss_bridge_v2: another bridge already holds the single-instance "
+            "lock; this one is exiting.\n"
+        )
+        raise SystemExit(3)
 
     # Pin the live palette feedback path now, long before any StateManager /
     # LedPaletteControl is constructed below. This is the ONLY place that

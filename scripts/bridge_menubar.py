@@ -5,6 +5,7 @@ import fcntl
 import hashlib
 import json
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -41,6 +42,10 @@ WATCHER = str(REPO_ROOT / "scripts" / "ss_bridge_watcher.sh")
 # source-run regex can match, and a source path is username-specific. flock keys
 # on the file, so one guard covers both the frozen bundle and any source clone.
 MENUBAR_LOCK_PATH = "/tmp/rb_ss_bridge_v2_menubar.lock"
+# Where __main__._acquire_single_instance_lock writes the running bridge's pid.
+# Lets a reopened frozen menubar re-adopt a bridge it has no Popen handle for
+# (pgrep can't match a frozen bridge's argv).
+BRIDGE_LOCK_PATH = "/tmp/rb_ss_bridge_v2.lock"
 BRIDGE_PATTERN = r"^[^[:space:]]*(python3|Python)[^[:space:]]*([[:space:]]+-u)?[[:space:]]+-m[[:space:]]+rb_ss_bridge_v2$"
 WATCHER_PATTERN = "^(/bin/bash|bash)[[:space:]]+" + WATCHER.replace(".", r"\.") + "$"
 MONITOR_PATTERN = r"RBSS_BRIDGE_MONITOR|^tail -n 100 -F /tmp/bridge\.log$"
@@ -263,6 +268,38 @@ def watcher_running() -> bool:
 def bridge_pids() -> list[str]:
     result = subprocess.run(["pgrep", "-f", BRIDGE_PATTERN], capture_output=True, text=True)
     return [pid for pid in result.stdout.strip().splitlines() if pid]
+
+
+def _running_bridge_pid(path: str = BRIDGE_LOCK_PATH) -> int | None:
+    """The pid of a live bridge holding the single-instance lock, or None.
+
+    Reads the pid __main__ wrote into the lockfile, then proves it is (a) alive
+    (os.kill 0) and (b) actually a bridge (its argv names the package + a run
+    mode) — so a reopened frozen menubar can re-adopt a bridge it has no Popen
+    handle for, and never SIGTERMs a recycled/foreign pid. A stale lockfile whose
+    pid is dead or reused returns None. The flock remains the single source of
+    truth for 'exactly one bridge'; this only READS who holds it."""
+    try:
+        with open(path, "r", encoding="utf-8") as fp:
+            pid = int(fp.readline().strip())
+    except (OSError, ValueError):
+        return None
+    if pid <= 0:
+        return None
+    try:
+        os.kill(pid, 0)  # liveness probe only; signal 0 never touches the process
+    except OSError:
+        return None
+    try:
+        out = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "command="],
+            capture_output=True, text=True, timeout=5,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if "rb_ss_bridge_v2" in out and ("--run-bridge" in out or "-m rb_ss_bridge_v2" in out):
+        return pid
+    return None
 
 
 def bridge_status() -> str:
@@ -1141,10 +1178,14 @@ class BridgeMenuBar(NSObject):
         # A frozen bridge child (argv '.../rb_ss_bridge_v2 --run-bridge') can't
         # match BRIDGE_PATTERN, so pgrep never sees it — the owned handle is the
         # only liveness signal. Without this a live frozen bridge reads 'Off',
-        # identical to a dead one.
+        # identical to a dead one. And after a menubar quit/relaunch we no longer
+        # own the handle, so also re-adopt a bridge still holding the lock — else
+        # it is invisible AND uncontrollable (the Enttec/OS2L port stays held).
         if status == "off" and getattr(sys, "frozen", False):
             proc = getattr(self, "_frozen_bridge_proc", None)
             if proc is not None and proc.poll() is None:
+                status = "on"
+            elif _running_bridge_pid() is not None:
                 status = "on"
         if status != self._status:
             self._set_icon(status)
@@ -1542,10 +1583,23 @@ class BridgeMenuBar(NSObject):
         # M2 finalizes the frozen lifecycle (see the runbook).
         if self._stop_frozen_bridge_child():
             return
+        # No owned child, but a bridge from a PREVIOUS menubar may still hold the
+        # lock (pgrep can't see a frozen one). Re-adopt and STOP it by its lockfile
+        # pid — validated to be a live bridge, so we never SIGTERM a recycled pid —
+        # so the operator is never stuck with a live, uncontrollable bridge holding
+        # the Enttec/OS2L port. SIGTERM lets it shut down cleanly and release the
+        # flock; the next refresh reflects it, and one bridge is never left running.
+        adopted = _running_bridge_pid()
+        if adopted is not None:
+            try:
+                os.kill(adopted, signal.SIGTERM)
+            except OSError:
+                pass
+            return
         # Not running: spawn one child bridge. If another bridge (source-run or
         # bundled) already holds the flock, the child logs the refusal and exits
-        # -- coexistence is a runbook warning (quit the dev watcher first). The
-        # watcher surfaces an early crash (its stderr) instead of a silent 'Off'.
+        # nonzero -- the watcher surfaces "a bridge is already running" (a race we
+        # otherwise couldn't see), not a silent 'Off'.
         self._frozen_bridge_proc = self._spawn_watched(
             [sys.executable, "--run-bridge"], label="frozen_bridge_start",
         )

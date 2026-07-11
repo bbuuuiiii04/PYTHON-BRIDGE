@@ -1110,6 +1110,28 @@ class FrozenDefectHelperTests(BridgeMenubarTests):
                 [bridge_menubar.sys.executable, "--run-led-pad"],
             )
 
+    def test_running_bridge_pid_readopts_only_a_live_bridge(self) -> None:
+        import os as _os
+        import tempfile
+        from unittest.mock import Mock
+        bridge_menubar = self._import_module()
+        with tempfile.TemporaryDirectory() as d:
+            lock = str(Path(d) / "bridge.lock")
+            # absent lockfile -> None (nothing to adopt)
+            self.assertIsNone(bridge_menubar._running_bridge_pid(lock))
+            # our own (live) pid, adopted ONLY when ps shows a bridge argv
+            Path(lock).write_text(f"{_os.getpid()}\n", encoding="utf-8")
+            with patch.object(bridge_menubar.subprocess, "run",
+                              return_value=Mock(stdout="/x/rb_ss_bridge_v2 --run-bridge")):
+                self.assertEqual(bridge_menubar._running_bridge_pid(lock), _os.getpid())
+            # live pid but NOT a bridge command -> reject (never SIGTERM a foreign pid)
+            with patch.object(bridge_menubar.subprocess, "run",
+                              return_value=Mock(stdout="/usr/bin/some_other_app")):
+                self.assertIsNone(bridge_menubar._running_bridge_pid(lock))
+            # dead/unknown pid -> None (os.kill probe fails)
+            Path(lock).write_text("999999\n", encoding="utf-8")
+            self.assertIsNone(bridge_menubar._running_bridge_pid(lock))
+
     def test_format_child_failure_names_code_and_tail(self) -> None:
         bridge_menubar = self._import_module()
         msg = bridge_menubar._format_child_failure(
