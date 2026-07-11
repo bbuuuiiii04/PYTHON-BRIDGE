@@ -7,12 +7,12 @@ validation_scope: >
   Stage-1 EAR benchmark harness (AWR-200 / AWR-195 stage 1). Describes the as-built
   tools/spectral_ear_benchmark.py + tests/test_spectral_ear_benchmark.py: a read-only
   harness over the AWR-182 ear-truth labels and the existing v4 cache. Software-tested
-  only (30 unit tests green after the 2026-07-11 trust-repair pass — single call_planner
-  anti-leak boundary, amendment-via-parent grouping, markers-scored availability gate,
-  per-radius comparable denominators, real fold-disjointness invariant, identity-collision
-  warnings; core run + --resolve-db run exercised against the local 41-row label layer,
-  pilot numbers unchanged). No runtime lighting behavior changes. SOFTWARE-VALIDATED ONLY /
-  HARDWARE-UNVALIDATED.
+  only (31 unit tests green after the 2026-07-11 trust-repair pass — single call_planner
+  anti-leak boundary, amendment-via-parent grouping with a duplicate-id guard, markers-scored
+  availability gate, per-radius comparable denominators, real fold-disjointness invariant,
+  identity-collision warnings; core run + --resolve-db run exercised against the local 41-row
+  label layer, pilot numbers unchanged). No runtime lighting behavior changes.
+  SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
 ---
 
 # Spectral EAR benchmark — Stage-1 spec (AWR-200)
@@ -126,9 +126,11 @@ CLI: `--labels PATH`, `--resolve-db` (opt-in; READ-ONLY master.db + v4 cache),
 - **Grouping.** One lineage per track (content_id, else normalized track). A track and its
   amendments/edits leave together: an amendment's lineage is resolved through its `amends`
   parent chain to the primary ancestor, so an amendment with no content_id or a different
-  track string still rides with its parent. Missing/cyclic/ambiguous/non-primary parent links
-  are never silently split — they raise a loud validation warning and the amendment is left
-  ungrouped. Same-title/no-content_id identity collisions cannot be resolved without curation;
+  track string still rides with its parent. Missing/cyclic/ambiguous/non-primary parent links —
+  and a duplicated amendment own-id (which would otherwise let the by-id rewrite corrupt a
+  primary's lineage) — are never silently split: they raise a loud validation warning and the
+  amendment is left ungrouped. Same-title/no-content_id identity collisions cannot be resolved
+  without curation;
   the harness surfaces a deterministic identity warning/limitation rather than guessing.
 - **Folds.** Grouped leave-one-lineage-out. `build_folds` asserts the real invariant — the
   held-out lineage's entry ids (already including its resolved amendment lineage) never appear
@@ -139,7 +141,7 @@ CLI: `--labels PATH`, `--resolve-db` (opt-in; READ-ONLY master.db + v4 cache),
 
 ## Part E — acceptance tests and what this slice can / cannot score today
 
-`tests/test_spectral_ear_benchmark.py` (30 tests, all green) proves, on small synthetic
+`tests/test_spectral_ear_benchmark.py` (31 tests, all green) proves, on small synthetic
 fixtures (no real cache/DB/planner):
 
 - meta and amendment rows are not primary examples;
@@ -149,7 +151,8 @@ fixtures (no real cache/DB/planner):
   train and test of any fold — including the hard case of an amendment carrying no
   content_id and a different track string, which still rides with its parent;
 - amendment grouping follows the `amends` parent link; missing / cyclic / ambiguous parent
-  links warn loudly and leave the amendment ungrouped (never silently merged/split);
+  links AND a duplicated amendment own-id (which would else corrupt a primary's lineage) warn
+  loudly and leave the amendment ungrouped (never silently merged/split);
 - accuracy axes stay UNAVAILABLE — never zero, never PASS; the marker axis is gated on
   markers actually SCORED (a resolved track that scores zero markers reads UNAVAILABLE, not
   a hollow AVAILABLE on track count);

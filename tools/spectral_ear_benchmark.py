@@ -236,9 +236,10 @@ def normalize(rows: list[dict[str, Any]]) -> list[Entry]:
 def _resolve_amendment_lineages(entries: list[Entry]) -> tuple[dict[str, str], list[str]]:
     """For each amendment, walk its `amends` parent chain to the primary ancestor
     and return {amendment_id: ancestor_lineage}. Broken links are NOT silently
-    split: missing / cyclic / ambiguous (id shared by >1 row) / non-primary
-    ancestors each produce a loud warning and the amendment is left ungrouped on
-    its own lineage. amendment_warnings() surfaces the warnings in the report."""
+    split: a duplicated amendment own-id, or a missing / cyclic / ambiguous (parent
+    id shared by >1 row) / non-primary ancestor, each produce a loud warning and the
+    amendment is left ungrouped on its own lineage. amendment_warnings() surfaces
+    the warnings in the report."""
     by_id: dict[str, list[Entry]] = {}
     for e in entries:
         by_id.setdefault(e.label_id, []).append(e)
@@ -246,6 +247,15 @@ def _resolve_amendment_lineages(entries: list[Entry]) -> tuple[dict[str, str], l
     warnings: list[str] = []
     for e in entries:
         if e.kind != "amendment":
+            continue
+        # An amendment whose OWN id is shared by >1 row would make the by-label_id
+        # rewrite in normalize() rewrite every collided row (including a primary),
+        # silently mis-grouping. Keep it OUT of `resolved` and warn — so `resolved`
+        # only ever holds ids that occur exactly once, and the rewrite can never
+        # target the wrong row.
+        if len(by_id.get(e.label_id, ())) > 1:
+            warnings.append(f"{e.label_id}: amendment id shared by {len(by_id[e.label_id])} rows "
+                            "— left UNGROUPED (never silently merged/split)")
             continue
         seen = {e.label_id}
         cur = e

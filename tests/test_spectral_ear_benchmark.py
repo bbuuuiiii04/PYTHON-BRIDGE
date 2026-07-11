@@ -192,6 +192,24 @@ class AmendmentLineageTests(unittest.TestCase):
         warns = m.amendment_warnings(m.normalize(rows))
         self.assertTrue(any("ambiguous" in w and "DUP" in w for w in warns))
 
+    def test_duplicate_amendment_own_id_warns_and_does_not_corrupt_primary(self):
+        # The amendment's OWN id 'X' collides with a PRIMARY's id. Without the
+        # own-id guard, normalize()'s by-label_id rewrite would drag Alpha's
+        # primary into Gamma's lineage (the finding-2 latent hole caught in the
+        # adversarial review). It must warn and leave the primary untouched.
+        rows = [
+            {"track": "Alpha — Artist", "content_id": "900", "id": "X"},   # primary
+            {"track": "Gamma — Artist", "content_id": "902", "id": "P2"},  # primary
+            {"track": "note", "id": "X", "amends": "P2"},                  # amendment; id collides
+        ]
+        entries = m.normalize(rows)
+        warns = m.amendment_warnings(entries)
+        self.assertTrue(any("shared by 2 rows" in w for w in warns))
+        alpha = next(e for e in entries if e.label_id == "X" and e.kind == "primary")
+        self.assertEqual(alpha.lineage, "cid:900")     # primary NOT silently mis-grouped
+        amend = next(e for e in entries if e.label_id == "X" and e.kind == "amendment")
+        self.assertNotEqual(amend.lineage, "cid:902")  # amendment NOT silently merged into Gamma
+
 
 class IdentityWarningTests(unittest.TestCase):
     """Finding 6: same-title / no-content_id rows can collide. The harness does

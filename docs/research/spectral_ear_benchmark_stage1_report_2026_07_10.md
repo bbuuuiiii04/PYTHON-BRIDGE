@@ -122,5 +122,5 @@ beat does not yet exist because the labels cannot yet express it.
 ```bash
 python3 tools/spectral_ear_benchmark.py --head "$(git rev-parse HEAD)"                 # core, stdout
 python3 tools/spectral_ear_benchmark.py --head "$(git rev-parse HEAD)" --resolve-db    # + marker pilot
-python3 -m unittest tests.test_spectral_ear_benchmark                                  # 30 tests
+python3 -m unittest tests.test_spectral_ear_benchmark                                  # 31 tests
 ```

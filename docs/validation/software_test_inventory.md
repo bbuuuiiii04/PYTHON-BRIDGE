@@ -49,7 +49,7 @@ AWR-197 adds `tests/test_speed_size_law.py`:
 `test_apply_aborts_on_missing_look`. The patch_b `test_tracked_config_validates` also pins the
 approved explicit `loop_beats` literal. These are config/tool software checks only.
 
-AWR-200 adds `tests/test_spectral_ear_benchmark.py` (30 tests) for the Stage-1 EAR benchmark
+AWR-200 adds `tests/test_spectral_ear_benchmark.py` (31 tests) for the Stage-1 EAR benchmark
 harness `tools/spectral_ear_benchmark.py` (read-only offline tooling; no runtime behavior). It
 proves, on small synthetic fixtures with no real cache/DB/planner: meta and amendment rows are
 not primary examples; exclusions are explicit and cited (scripted/unusable_grid/variable_bpm/
