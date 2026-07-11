@@ -18,6 +18,7 @@ import math
 import os
 import queue
 import re
+import json
 import statistics
 import struct
 import subprocess
@@ -49,6 +50,8 @@ _USB_TWIN_DURATION_TOLERANCE_S = 2.0
 _RB_SHARE_ROOT = Path("~/Library/Pioneer/rekordbox/share").expanduser()
 _SS_PRELOAD_CACHE: dict[str, str] = {}
 _SS_SCRIPTED_ID_CACHE: set[str] = set()
+_SIDECAR_SCHEMA_VERSION = 1
+_SIDECAR_CACHE: Optional[tuple[Path, tuple[dict, ...]]] = None
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -448,6 +451,83 @@ def _relaxed_usb_twin_match(content: object, usb_beatgrid: dict) -> bool:
         abs(float(bpm_raw) / 100.0 - statistics.median(bpms)) <= _USB_TWIN_BPM_TOLERANCE
         and abs(float(length) - times[-1] / 1000.0) <= _USB_TWIN_DURATION_TOLERANCE_S
     )
+
+
+def _sidecar_path(root: Path, relpath: str) -> Optional[Path]:
+    try:
+        resolved_root = root.resolve()
+        candidate = (root / relpath).resolve()
+        candidate.relative_to(resolved_root)
+    except (OSError, ValueError):
+        return None
+    return candidate
+
+
+def _load_sidecar_index(index_path: Path) -> Optional[tuple[Path, tuple[dict, ...]]]:
+    try:
+        payload = json.loads(index_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if payload.get("schema_version") != _SIDECAR_SCHEMA_VERSION:
+        log.info(
+            "[FRES] sidecar-schema-unsupported  path=%s  schema=%r",
+            index_path, payload.get("schema_version"),
+        )
+        return None
+    tracks = payload.get("tracks")
+    if not isinstance(tracks, list) or payload.get("track_count") != len(tracks):
+        return None
+    root = index_path.parent
+    validated: list[dict] = []
+    for record in tracks:
+        if not isinstance(record, dict):
+            return None
+        anlz_relpaths = record.get("anlz_relpaths")
+        v4_relpath = record.get("v4_relpath")
+        laser_tag_beats = record.get("laser_tag_beats")
+        required_strings = (
+            "content_id", "title", "artist", "beatgrid_fingerprint",
+            "soundswitch_id", "source_filepath",
+        )
+        if (
+            any(not isinstance(record.get(key), str) for key in required_strings)
+            or not re.fullmatch(r"[0-9a-f]{16}", record["beatgrid_fingerprint"])
+            or not isinstance(record.get("duration_s"), (int, float))
+            or not isinstance(record.get("bpm"), (int, float))
+            or not isinstance(anlz_relpaths, list)
+            or not anlz_relpaths
+            or any(not isinstance(path, str) or _sidecar_path(root, path) is None
+                   for path in anlz_relpaths)
+            or (v4_relpath is not None and
+                (not isinstance(v4_relpath, str) or _sidecar_path(root, v4_relpath) is None))
+            or not isinstance(laser_tag_beats, list)
+            or any(not isinstance(beat, (int, float)) or not math.isfinite(float(beat))
+                   for beat in laser_tag_beats)
+        ):
+            return None
+        validated.append(record)
+    return root, tuple(validated)
+
+
+def _discover_sidecar_index(mounts: Sequence[Path]) -> Optional[tuple[Path, tuple[dict, ...]]]:
+    global _SIDECAR_CACHE
+    if _SIDECAR_CACHE is not None:
+        return _SIDECAR_CACHE
+    for mount in sorted(mounts, key=lambda path: str(path).casefold()):
+        index_path = mount / "RBSS BRIDGE USB" / "lighting_sidecar" / "index.json"
+        loaded = _load_sidecar_index(index_path)
+        if loaded is not None:
+            _SIDECAR_CACHE = loaded
+            return loaded
+    return None
+
+
+def _mounted_sidecar_index() -> Optional[tuple[Path, tuple[dict, ...]]]:
+    try:
+        mounts = tuple(Path("/Volumes").iterdir())
+    except OSError:
+        return None
+    return _discover_sidecar_index(mounts)
 
 
 def _unique_usb_twin(
