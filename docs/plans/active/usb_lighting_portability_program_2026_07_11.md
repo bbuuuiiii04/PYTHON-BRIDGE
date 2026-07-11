@@ -134,6 +134,33 @@ path (works today, manual).
 - Relationship to the pending foreign-Mac frozen-app gates (that branch's 9
   fixes are operator-unvalidated — E2 cannot be validated before them).
 
+## Review doctrine (operator-mandated 2026-07-11: "rigorous review loops and
+## adversarial reviews" — binding on EVERY round of this program)
+1. **Nobody certifies their own work, ever.** Builder reports evidence;
+   an INDEPENDENT adversarial review (ultracode multi-agent when Claude quota
+   allows; cross-model-family when both pools exist — the AWR-206 FAIL was
+   caught precisely by a cross-family reviewer) attacks it; the executive
+   re-derives the load-bearing claims at its own desk; the operator's live
+   pass is the only final gate.
+2. **Reachability proof required per round**: every new code path must be
+   proven to execute through the REAL production chain (event → resolver →
+   payload → consumer), not injected seams. This is the AWR-206 lesson,
+   now a standing check.
+3. **FAIL or PASS-with-required-fixes triggers a fix round + FULL re-review
+   by the same independent channel** — never a builder self-attestation that
+   fixes landed (AWR-206 precedent: fix round was re-reviewed end-to-end).
+4. **Red-team corpus for the matcher**: before R1/R2 are declared done, an
+   adversarial test corpus built from the operator's REAL library hard cases —
+   same-BPM edits, remixes, grid-shifted twins, scripted tracks, duplicate
+   imports — must be thrown at the resolver with zero false matches tolerated
+   (false match is severity-critical; abstention is acceptable).
+5. **Review artifacts are committed docs** (docs/research/), verdict-first,
+   claims labeled confirmed/assumed/unknown, findings with file:line — so any
+   seat can re-audit any round cold.
+6. **Latency/live-mixing review per round**: async resolution timing, scripted
+   entry latency, push-loop isolation — reviewed explicitly, since lighting
+   that arrives late is a live failure even when logically correct.
+
 ## Stages and review loops (operator-mandated; no stage starts before the
 ## previous stage's gate passes)
 - **D1 Design review**: an independent strongest-tier seat attacks this
