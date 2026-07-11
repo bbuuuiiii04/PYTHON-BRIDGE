@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 67b7d66
+last_verified_commit: 0abbbff
 last_verified_date: 2026-07-09
 validation_scope: software-only
 ---
@@ -74,6 +74,13 @@ Implementation notes:
   If you touch this, re-verify the isolation pin
   (`tests/test_rb_state_reader.py`, `CfxTickTests.test_isolation_broken_cfx_keeps_mixer_valid`)
   and the CFX/mixer parser-independence cases in `tests/test_rb_offsets.py`.
+- (AWR-207) USB-export resolution is fail-closed and payload-driven. Local UUID
+  loads keep their existing path. Device-path misses may resolve only to one
+  BPM/duration + beatgrid-confirmed local twin; zero/ambiguous matches stay
+  unresolved and never fall through to lsof. The optional FILEPATH_RESOLVED
+  `local_anlz_path` is the data-source seam StateManager consumes for the
+  resolved-time phrase/spectral worker; do not make StateManager depend on the
+  local DB as the only producer. AWR-208 sidecars are separate design work.
 
 Required tests:
 - Run the targeted tests listed in the subsystem card.

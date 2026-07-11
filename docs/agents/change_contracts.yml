@@ -240,9 +240,11 @@ contracts:
       - docs/architecture/doc_index.md
       - docs/status/active_work_registry.md
     tests:
+      - python3 -m unittest tests.test_filepath_resolver_usb_twin tests.test_filepath_resolver_beatgrid tests.test_filepath_resolver_hotcue_tags tests.test_smart_transitions
       - python3 -m unittest discover tests
       - python3 tools/check_docs_metadata.py
       - python3 tools/check_agent_contracts.py
+      - python3 tools/check_docs_drift.py
       - python3 tools/check_docs_drift.py
     docs_update:
       - docs/guides/led_pad.md

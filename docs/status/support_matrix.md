@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: fc17cc1
+last_verified_commit: 0abbbff
 last_verified_date: 2026-07-09
 validation_scope: software-validated only plus Rekordbox 7.2.11 passive mixer RE evidence routing; AWR-157 blank-role hold + reader freshness software-tested; AWR-160 phantom track-load stability gate software-tested; AWR-161 LED round 3 software-tested; hardware-unvalidated in repo evidence
 ---
@@ -32,6 +32,14 @@ they add no new hardware or compatibility support claim.
 | Other macOS versions | unknown | no compatibility matrix evidence | Must be tested. |
 | Windows | unsupported/unknown | current memory reader is macOS Mach-based | Would require separate reader strategy. |
 | Linux | unsupported/unknown | current memory reader is macOS Mach-based | Not current scope. |
+
+## Track sources
+
+| Source | Status | Evidence | Notes |
+| --- | --- | --- | --- |
+| Local Rekordbox Collection | local-setup-operational | existing UUID resolver + regression tests | Existing behavior is unchanged. |
+| USB device tree on the operator's laptop (AWR-207) | implemented; software-tested; staged | resolver suites + StateManager handoff pins | Requires exactly one local BPM/duration + beatgrid twin; zero/ambiguous matches remain unresolved and skip lsof. Activates at the next restart; live USB validation is pending. |
+| USB device tree on a foreign laptop without the local collection | planned / unsupported today | AWR-208 charter only | No sidecar or portable fallback is implemented by AWR-207. |
 
 ## Lighting outputs
 
