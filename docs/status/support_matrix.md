@@ -38,7 +38,7 @@ they add no new hardware or compatibility support claim.
 | Source | Status | Evidence | Notes |
 | --- | --- | --- | --- |
 | Local Rekordbox Collection | local-setup-operational | existing UUID resolver + regression tests | Existing behavior is unchanged. |
-| USB device tree on the operator's laptop (AWR-207) | implemented; software-tested; staged | resolver suites + StateManager handoff pins | Requires exactly one local BPM/duration + beatgrid twin; zero/ambiguous matches remain unresolved and skip lsof. Activates at the next restart; live USB validation is pending. |
+| USB device tree on the operator's laptop (AWR-207) | implemented; software-tested; staged | resolver suites + StateManager handoff pins + mounted-stick read-only spot match | Requires exactly one local BPM/duration + beatgrid twin; zero/ambiguous matches remain unresolved and skip lsof. The real `000086A0` USB path resolved to content `39964930`; room-visible behavior activates at the next restart and remains unvalidated. |
 | USB device tree on a foreign laptop without the local collection | planned / unsupported today | AWR-208 charter only | No sidecar or portable fallback is implemented by AWR-207. |
 
 ## Lighting outputs
