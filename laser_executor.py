@@ -142,7 +142,18 @@ class LaserSceneExecutor:
             if is_drop_crossing:
                 self._resolve_pending_blackout(reason="drop_crossing_auto_gate_blocked")
             if should_arm_blackout:
-                log.debug("[LX] blackout skipped: auto_gate_blocked (playing=%s, track_loaded=%s, stale=%s, mode=%s, scripted=%s, autoloop_ready=%s)", ctx.playing, ctx.active_track_loaded, ctx.position_stale, ctx.lighting_mode, ctx.scripted_id, ctx.autoloop_ready)
+                # AWR-206: the scene MIDI stays blocked by the strict gate, but the
+                # pre-drop blackout note only needs a live deck (the relaxed gate),
+                # so arm it here even while the autoloop is mid-re-arm.
+                scene_mapped = decision.scene in self._config.scenes
+                if self._passes_blackout_gates(ctx) and scene_mapped:
+                    self.trigger_blackout_on(ctx)
+                else:
+                    log.info(
+                        "[LX] blackout skipped: auto_gate_blocked (playing=%s, track_loaded=%s, stale=%s, mode=%s, scripted=%s, scene_mapped=%s)",
+                        ctx.playing, ctx.active_track_loaded, ctx.position_stale,
+                        ctx.lighting_mode, ctx.scripted_id, scene_mapped,
+                    )
             return None
 
         # Blackout arming is independent of scene selection and scene policy
@@ -591,6 +602,20 @@ class LaserSceneExecutor:
             and ctx.lighting_mode == "autoloop"
             and ctx.scripted_id == 0
             and ctx.autoloop_ready
+        )
+
+    def _passes_blackout_gates(self, ctx: LaserContext) -> bool:
+        # AWR-206: strict automatic gate MINUS autoloop_ready. A blackout MIDI
+        # note only needs a genuinely live deck, not a render-ready autoloop --
+        # the autoloop is normally mid-re-arm at the pre-drop instant while
+        # actively mixing, which closed the strict gate and silently ate the
+        # 4-beat pre-drop blackout.
+        return (
+            ctx.playing
+            and ctx.active_track_loaded
+            and not ctx.position_stale
+            and ctx.lighting_mode == "autoloop"
+            and ctx.scripted_id == 0
         )
 
     def _record_gate(self, reason: str) -> None:
