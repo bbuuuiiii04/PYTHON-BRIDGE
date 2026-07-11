@@ -49,6 +49,10 @@ support). **AWR-200 is PARTIAL.**
   - `scripted`: 1 — BLACKPINK - JUMP.
   - `unusable_grid`: 1 — Toxic (Britney).
   - `variable_bpm`: 1 — s.o.s.
+- Validation warning surfaced (not silent): identity limitation — 19 usable lineages are
+  grouped by normalized title only (no Rekordbox content_id), so same-title different-track
+  collisions cannot be detected here; a curated content_id lineage map is curation work. No
+  amendment parent-link warnings fired (all 3 amendments resolve cleanly to their parent).
 - REWIND is **usable** (charter §D includes its post-reanalysis eight-drop result).
 - Grouped leave-one-lineage-out inventory: 21 folds (one per usable lineage); Utopia's 10
   entries (8 UT-* + 2 amendments) form one lineage and never split. Full inventory in the
@@ -85,9 +89,12 @@ Model-only metric: hold audio fixed, perturb each drop marker ±1/±2 beats, re-
 - **Coverage limit:** only Sexy and Utopia carry a Rekordbox `content_id` in the label
   layer; the 19 other usable lineages store track names only and cannot be DB-resolved.
   Adding content_ids to the B-row labels is a curation task.
-- Measured over 2 resolved tracks / 16 markers (0 skipped):
-  - ±1 beat flips — family 25.0%, tier 6.2%, darkness 0.0%.
-  - ±2 beat flips — family 43.8%, tier 12.5%, darkness 18.8%.
+- Measured over 2 resolved tracks / 16 scored markers (0 skipped — no baseline decision to
+  perturb):
+  - ±1 beat flips over 16 markers comparable at ±1 (0 not comparable) — family 25.0%,
+    tier 6.2%, darkness 0.0%.
+  - ±2 beat flips over 16 markers comparable at ±2 (0 not comparable) — family 43.8%,
+    tier 12.5%, darkness 18.8%.
 - SOL published reference (**different sample** — 15 tracks / 113 markers): ±1 family 6.2%,
   tier 32.7%, darkness 23.0%; ±2 family 23.9%, tier 46.0%, darkness 62.8%.
 - **NOT like-for-like.** This pilot resolved far fewer tracks/markers than SOL's 15/113. Do
@@ -115,5 +122,5 @@ beat does not yet exist because the labels cannot yet express it.
 ```bash
 python3 tools/spectral_ear_benchmark.py --head "$(git rev-parse HEAD)"                 # core, stdout
 python3 tools/spectral_ear_benchmark.py --head "$(git rev-parse HEAD)" --resolve-db    # + marker pilot
-python3 -m unittest tests.test_spectral_ear_benchmark                                  # 15 tests
+python3 -m unittest tests.test_spectral_ear_benchmark                                  # 30 tests
 ```
