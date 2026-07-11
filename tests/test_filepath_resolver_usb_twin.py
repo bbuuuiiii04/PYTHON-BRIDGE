@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import queue
+import struct
 import sys
 import unittest
 from pathlib import Path
@@ -15,7 +16,9 @@ from rb_ss_bridge_v2.filepath_resolver import (  # noqa: E402
     _db_lookup_by_anlz,
     _is_device_export_anlz_path,
     _local_anlz_path,
+    _parse_device_pdb_track,
     _unique_usb_twin,
+    _usb_pdb_candidates,
     _usb_twin_prefilter,
 )
 
@@ -63,6 +66,56 @@ def _grid(times=None):
         "beatgrid_bpms": [128.0] * len(times),
         "beatgrid_source": "test",
     }
+
+
+def _device_string(value: str) -> bytes:
+    encoded = value.encode("ascii")
+    return bytes([((len(encoded) + 1) << 1) | 1]) + encoded
+
+
+def _synthetic_pdb() -> bytes:
+    page_size = 4096
+    data = bytearray(page_size * 3)
+    struct.pack_into("<II", data, 4, page_size, 2)
+    struct.pack_into("<IIII", data, 28, 0, 0, 1, 1)
+    struct.pack_into("<IIII", data, 44, 2, 0, 2, 2)
+
+    def put_page(index: int, table_type: int, row: bytes) -> None:
+        start = index * page_size
+        struct.pack_into("<II", data, start + 4, index, table_type)
+        data[start + 24:start + 27] = (1).to_bytes(3, "little")
+        data[start + 40:start + 40 + len(row)] = row
+        struct.pack_into("<H", data, start + page_size - 4, 1)
+        struct.pack_into("<H", data, start + page_size - 6, 0)
+
+    artist = bytearray(64)
+    struct.pack_into("<HI", artist, 0, 0x60, 0)
+    struct.pack_into("<I", artist, 4, 9)
+    artist[8] = 3
+    artist[9] = 12
+    artist_name = _device_string("Twin Artist")
+    artist[12:12 + len(artist_name)] = artist_name
+
+    track = bytearray(512)
+    struct.pack_into("<I", track, 56, 12800)
+    struct.pack_into("<I", track, 68, 9)
+    struct.pack_into("<I", track, 72, 77)
+    struct.pack_into("<H", track, 84, 200)
+    cursor = 136
+    offsets = []
+    for index in range(21):
+        value = {
+            14: "/PIONEER/USBANLZ/P018/000086A0/ANLZ0000.DAT",
+            17: "Twin Track",
+        }.get(index, "")
+        encoded = _device_string(value)
+        offsets.append(cursor)
+        track[cursor:cursor + len(encoded)] = encoded
+        cursor += len(encoded)
+    struct.pack_into("<21H", track, 94, *offsets)
+    put_page(1, 0, track[:cursor])
+    put_page(2, 2, artist)
+    return bytes(data)
 
 
 class UsbTwinPureTests(unittest.TestCase):
@@ -121,6 +174,29 @@ class UsbTwinPureTests(unittest.TestCase):
             [exact],
         )
 
+    def test_device_pdb_parser_reads_loaded_track_and_artist(self) -> None:
+        self.assertEqual(
+            _parse_device_pdb_track(_synthetic_pdb(), _USB_PATH),
+            {
+                "track_id": 77,
+                "title": "Twin Track",
+                "artist": "Twin Artist",
+                "duration_s": 200,
+                "bpm": 128.0,
+            },
+        )
+
+    def test_pdb_tags_accept_copied_and_referenced_import_paths(self) -> None:
+        track = {
+            "title": "Twin Track",
+            "artist": "Twin Artist",
+            "duration_s": 200,
+        }
+        for folder_path in ("/Users/dj/Music/twin.wav", "/Volumes/GUEST/twin.wav"):
+            with self.subTest(folder_path=folder_path):
+                content = _content(FolderPath=folder_path)
+                self.assertEqual(_usb_pdb_candidates([content], track), [content])
+
 
 class UsbTwinResolverTests(unittest.TestCase):
     def _lookup(self, anlz_path: str):
@@ -145,6 +221,11 @@ class UsbTwinResolverTests(unittest.TestCase):
         local_anlz_path = usb.pop("local_anlz_path")
         self.assertEqual(usb, local)
         self.assertEqual(local_anlz_path, _local_anlz_path(_LOCAL_REL))
+
+    def test_mirror_match_never_reads_export_pdb(self) -> None:
+        with patch("rb_ss_bridge_v2.filepath_resolver._read_device_pdb_track") as read_pdb:
+            self.assertIsNotNone(self._lookup(_USB_PATH))
+        read_pdb.assert_not_called()
 
     def test_unresolved_usb_skips_lsof_even_with_wrong_open_click_file(self) -> None:
         resolver = FilepathResolver(queue.Queue(), Mock())
@@ -208,7 +289,10 @@ class UsbTwinResolverTests(unittest.TestCase):
         }
         with patch("pyrekordbox.db6.Rekordbox6Database", return_value=db), \
              patch("rb_ss_bridge_v2.filepath_resolver._extract_beatgrid_from_anlz",
-                   return_value=_grid()), \
+                   side_effect=lambda path: (
+                       _grid([value + 11.0 for value in _GRID])
+                       if path == _USB_PATH else _grid()
+                   )), \
              patch("rb_ss_bridge_v2.filepath_resolver._read_device_pdb_track",
                    return_value=device_track), \
              self.assertLogs("filepath_resolver", level="INFO") as logs:
@@ -253,6 +337,30 @@ class UsbTwinResolverTests(unittest.TestCase):
         joined = "\n".join(logs.output)
         self.assertIn("imported-not-analyzed", joined)
         self.assertIn("finish analysis in Rekordbox", joined)
+
+    def test_unreadable_local_analysis_uses_same_actionable_reason(self) -> None:
+        db = _FakeDB([_content()])
+        device_track = {
+            "track_id": 77,
+            "title": "Twin Track",
+            "artist": "Twin Artist",
+            "duration_s": 200,
+            "bpm": 128.0,
+        }
+        with patch("pyrekordbox.db6.Rekordbox6Database", return_value=db), \
+             patch("rb_ss_bridge_v2.filepath_resolver._extract_beatgrid_from_anlz",
+                   side_effect=lambda path: (
+                       _grid([value + 11.0 for value in _GRID])
+                       if path == _USB_PATH else _grid()
+                   )), \
+             patch("rb_ss_bridge_v2.filepath_resolver._read_device_pdb_track",
+                   return_value=device_track), \
+             patch("rb_ss_bridge_v2.filepath_resolver.os.path.isfile", return_value=False), \
+             self.assertLogs("filepath_resolver", level="INFO") as logs:
+            result = _db_lookup_by_anlz(_USB_PATH)
+
+        self.assertIsNone(result)
+        self.assertTrue(any("imported-not-analyzed" in line for line in logs.output))
 
     def test_duplicate_local_tag_matches_list_ids_and_abstain(self) -> None:
         db = _FakeDB([_content(ID="123"), _content(ID="456")])
