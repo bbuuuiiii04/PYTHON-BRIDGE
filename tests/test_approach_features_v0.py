@@ -241,6 +241,39 @@ class FailSafeTests(unittest.TestCase):
         self.assertIsNone(r.approach.series["full_db"].slope)
         self.assertEqual(r.approach.reason, "insufficient beats for trend")
 
+    def test_sufficient_requires_finite_data_not_just_beats(self):
+        # A window can span >= 2 beat positions yet be all-hole: no series can
+        # yield an OLS trend, so `sufficient` must be False with an honest reason
+        # DISTINCT from the too-few-beats case. One finite sample is still not
+        # enough (a slope needs two); two finite samples in a single series is.
+        n, drop = 48, 32                                    # approach [24,32) = 8 beats
+        # (a) every series entirely NaN: 8 beat positions, 0 finite -> not sufficient
+        v_none = mk_v4(n=n, **{k: [float("nan")] * n for k in _ALL})
+        r_none = A.approach_features(v_none, drop, approach_len=8)
+        self.assertTrue(r_none.approach.available)          # window intersects track
+        self.assertFalse(r_none.approach.sufficient)        # but no trend computable
+        self.assertEqual(r_none.approach.reason, "insufficient finite data for trend")
+        # (b) exactly one finite sample across every series: still no slope
+        v_one = mk_v4(n=n, **{k: [float("nan")] * n for k in _ALL})
+        v_one.series["full_db"][30] = 12.0                  # one finite beat in [24,32)
+        r_one = A.approach_features(v_one, drop, approach_len=8)
+        self.assertEqual(r_one.approach.series["full_db"].n_finite, 1)
+        self.assertFalse(r_one.approach.sufficient)
+        self.assertEqual(r_one.approach.reason, "insufficient finite data for trend")
+        # (c) two finite samples in ONE series -> an OLS trend is computable
+        v_two = mk_v4(n=n, **{k: [float("nan")] * n for k in _ALL})
+        v_two.series["full_db"][28] = 4.0
+        v_two.series["full_db"][30] = 8.0                   # two finite beats in [24,32)
+        r_two = A.approach_features(v_two, drop, approach_len=8)
+        self.assertEqual(r_two.approach.series["full_db"].n_finite, 2)
+        self.assertTrue(r_two.approach.sufficient)
+        self.assertEqual(r_two.approach.reason, "")
+        self.assertIsNotNone(r_two.approach.series["full_db"].slope)  # trend really computed
+        # the too-few-beats path keeps its own distinct reason (regression guard)
+        r_short = A.approach_features(mk_v4(n=n), drop, approach_len=1)
+        self.assertFalse(r_short.approach.sufficient)
+        self.assertEqual(r_short.approach.reason, "insufficient beats for trend")
+
     def test_missing_series_is_present_false_no_guess(self):
         v = mk_v4(n=48)
         v.series.pop("sustain_mid_db")

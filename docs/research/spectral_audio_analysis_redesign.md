@@ -751,8 +751,11 @@ may import it; a static AST+text test enforces it), no I/O, and it never times o
   only its end moves; `descriptor_range(bundles, series, stat)` gives the (min,max) across offsets.
   The Rekordbox marker stays authoritative — the module never re-times a cue.
 - **Fail-safe / honest.** Missing series → `present=False`, all stats `None`. Non-finite (NaN/±inf)
-  filtered before any `sorted()`/percentile; an all-hole half → `None`, never `0`. Short window →
-  `sufficient=False`, `slope=None`, reason string. Out-of-range → clamped, `n_requested` vs
+  filtered before any `sorted()`/percentile; an all-hole half → `None`, never `0`. `sufficient` is
+  true only when the window has ≥2 in-range beats AND some series has ≥2 finite samples (so at least
+  one OLS trend is actually computable) — a short window OR an all-hole/single-finite window →
+  `sufficient=False`, `slope=None`, with a reason distinguishing too-few-beats from
+  no-finite-data. Out-of-range → clamped, `n_requested` vs
   `n_available` reported honestly. Empty track → `available=False` with a reason, **no exception**.
   Top-level `available` additionally requires at least one finite approach descriptor, so a window
   that intersects the track but is entirely missing/non-finite reads `available=False` with an honest
@@ -761,11 +764,14 @@ may import it; a static AST+text test enforces it), no I/O, and it never times o
   **Missing/short/non-finite data can never fabricate a darkness event.**
   Reuses `spectral_profile.percentile` (no new dependency); deterministic (repeated calls compare
   equal, pinned by a test).
-- **Status:** `experimental` / `software-tested` (26 unit tests; the AWR-204 independent ULTRACODE
+- **Status:** `experimental` / `software-tested` (27 unit tests; the AWR-204 independent ULTRACODE
   review found zero per-series defects, but a later edge-fix lane (2026-07-11) corrected a hollow
   top-level flag it did not examine — `ApproachFeatures.available` now requires at least one finite
   approach descriptor (all-missing/all-non-finite → `available=False` with an honest reason;
-  per-series partial availability unchanged)). Offline raw layer only — **no
+  per-series partial availability unchanged) — and a follow-up sufficient-fix lane (2026-07-11)
+  closed the same-class hollow in the per-window flag: `WindowStats.sufficient` now needs ≥2 finite
+  samples in some series, not just ≥2 beat slots, so an all-hole window reads `sufficient=False`
+  with a reason distinct from the too-few-beats case). Offline raw layer only — **no
   classifier, no tool, no live wiring, no hardware validation.** The taste calls (class boundaries,
   darkness lengths, the uncertain fall-back, marker-radius policy, rules-vs-model promotion) are
   deliberately left open for the operator. `tools/approach_feature_report.py` was NOT built (the raw

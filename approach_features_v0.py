@@ -163,7 +163,8 @@ class WindowStats:
     n_requested: int       # req_end - req_start (>= 0)
     n_available: int       # end - start (in-range beats)
     available: bool        # at least one in-range beat
-    sufficient: bool       # enough beats for a trend (>= _MIN_BEATS_FOR_TREND)
+    sufficient: bool       # trend computable: >= _MIN_BEATS_FOR_TREND in-range beats
+                           # AND some series with that many FINITE samples (not slots)
     reason: str            # "" when available, else why not
     series: Mapping[str, SeriesStats]
 
@@ -286,18 +287,26 @@ def _window_stats(
     n_avail = end - start
     n_requested = max(0, int(req_end) - int(req_start))
     available = n_avail >= 1
-    sufficient = n_avail >= _MIN_BEATS_FOR_TREND
+    series = {
+        k: _summarize_series(series_map.get(k), start, end) for k in APPROACH_SERIES
+    }
+    # "Sufficient" means a trend is actually computable, not merely that beat slots
+    # exist: it needs >= _MIN_BEATS_FOR_TREND in-range beat positions AND at least
+    # one series with that many FINITE samples — an all-hole window spans beats but
+    # yields no slope/delta/percentile. Both are required; either alone is hollow.
+    enough_beats = n_avail >= _MIN_BEATS_FOR_TREND
+    enough_finite = any(ss.n_finite >= _MIN_BEATS_FOR_TREND for ss in series.values())
+    sufficient = enough_beats and enough_finite
     if n_requested <= 0:
         reason = "empty window (end <= start)"
     elif n_avail == 0:
         reason = "window out of track range"
-    elif not sufficient:
+    elif not enough_beats:
         reason = "insufficient beats for trend"
+    elif not enough_finite:
+        reason = "insufficient finite data for trend"
     else:
         reason = ""
-    series = {
-        k: _summarize_series(series_map.get(k), start, end) for k in APPROACH_SERIES
-    }
     return WindowStats(
         req_start=int(req_start), req_end=int(req_end), start=start, end=end,
         n_requested=n_requested, n_available=n_avail,

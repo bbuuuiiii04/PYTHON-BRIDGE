@@ -92,7 +92,7 @@ zero-runtime-importer invariant, with a companion test proving the guard catches
 offline code — `hardness_v0.py` does no I/O and has zero runtime importers; the evaluator opens the
 Rekordbox DB + v4 cache READ-ONLY only. Not run in these tests: the real corpus, cache, or DB.
 
-AWR-204 adds `tests/test_approach_features_v0.py` (26 tests) for the offline raw approach-descriptor
+AWR-204 adds `tests/test_approach_features_v0.py` (27 tests) for the offline raw approach-descriptor
 layer `approach_features_v0.py`. On duck-typed `SpectralFeaturesV4` synthetics (no cache/DB/ANLZ) it
 proves: rising/falling/held approach trajectories read out in `slope` + half-split `delta` sign; a
 ringing melodic layer over a cut sub is summarized independently (no min-masking); depth reads the
@@ -104,7 +104,9 @@ empty drops → an explicit zero reference); the track-referenced void run curve
 (a length window slides, an explicit-start window moves only its end, offset 0 equals the primary
 window, `descriptor_range` collapses to a point on a flat track); and the fail-safe honesty —
 boundary clamps reporting requested vs available, a short window insufficient with no slope, a
-missing series `present=False` with all-None stats, non-finite filtered and counted, top-level
+window with enough beats but no finite data (all-non-finite, or a single finite sample) insufficient
+with a reason distinct from the too-few-beats case (finite coverage gates `sufficient`, not just
+beat count), a missing series `present=False` with all-None stats, non-finite filtered and counted, top-level
 availability requiring at least one finite approach descriptor (all-missing/all-non-finite →
 `available=False` with an honest reason, per-series partial availability retained), an empty track
 unavailable (not an exception), inconsistent caller inputs raising `ValueError`, byte-identical
