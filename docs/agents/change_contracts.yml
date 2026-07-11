@@ -466,6 +466,7 @@ contracts:
 
   rekordbox_readers:
     code_globs:
+      - filepath_resolver.py
       - rb_memory.py
       - rb_state_reader.py
       - live_bpm.py
@@ -473,6 +474,7 @@ contracts:
       - mtc_reader.py
       - docs/data/offsets-macos.yaml
     key_symbols:
+      - FilepathResolver
       - RBStateReader
       - RBMemoryReader
       - LiveBPMService
