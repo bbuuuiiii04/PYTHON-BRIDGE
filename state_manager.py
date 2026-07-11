@@ -119,7 +119,7 @@ from .osl_output import OS2LOutput
 from .rb_memory import PositionCache
 from .scripted_tracks import SCRIPTED_TRACKS, lookup as st_lookup
 from . import bridge_log
-from .filepath_resolver import has_soundswitch_scripted_id
+from .filepath_resolver import has_soundswitch_scripted_id, _is_device_export_anlz_path
 from .personality_resolver import PersonalityResolver, PlaylistCache
 from .session_recorder import SessionRecorder
 from .session_phase_trace import AutoloopPhaseTracer, build_autoloop_phase_row
@@ -2255,7 +2255,13 @@ class StateManager(LEDDispatchPolicyMixin):
             self._resolver.resolve_by_anlz(deck, d.load_gen, anlz_path, trace_id=trace_id)
             if self._smart_rearm_experiment or self._v2_identity_enabled:
                 self._loaded_anlz_path[deck] = (anlz_path, d.load_gen)
-            if self._smart_rearm_experiment:
+            # AWR-207 R2: a device-export (USB) ANLZ carries no PSSI, so this
+            # early worker would only publish empty phrase markers — and, arriving
+            # after the resolved-time worker's real markers, could clobber them
+            # (arbitration lets source="anlz" always overwrite). The resolved-time
+            # worker (started at FILEPATH_RESOLVED with local_anlz_path) is the sole
+            # phrase source for USB loads. Local loads are unchanged.
+            if self._smart_rearm_experiment and not _is_device_export_anlz_path(anlz_path):
                 self._start_anlz_worker(
                     anlz_path,
                     deck,

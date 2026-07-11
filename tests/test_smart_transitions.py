@@ -470,6 +470,10 @@ class SmartRearmFlagTests(unittest.TestCase):
         ])
 
     def test_usb_twin_local_anlz_replaces_raw_path_after_filepath_resolved(self) -> None:
+        # AWR-207 R2: for a device-export (USB) load the early TRACK_LOADED-time
+        # worker is skipped (its raw-USB read carries no PSSI and would clobber
+        # the real markers). The resolved-time worker on the local twin's ANLZ is
+        # the ONLY _start_anlz_worker call.
         sm = _manager({
             "RBSS_SMART_REARM_EXPERIMENT": "1",
             "RBSS_SPECTRAL_ENABLE": "1",
@@ -486,8 +490,36 @@ class SmartRearmFlagTests(unittest.TestCase):
             sm._on_track_loaded(1, "track", BridgeEvent(Ev.TRACK_LOADED, 1))
             sm._on_filepath_resolved(1, payload)
 
+        start_worker.assert_called_once_with(
+            local_path,
+            1,
+            1,
+            audio_filepath="/music/track.wav",
+            spectral_enabled=True,
+            wide_window=True,
+            f2_enabled=True,
+        )
+
+    def test_local_load_still_runs_both_early_and_resolved_anlz_workers(self) -> None:
+        # AWR-207 R2 regression: a local (UUID) ANLZ path is NOT a device export,
+        # so the early TRACK_LOADED-time worker still fires exactly as before, and
+        # the resolved-time worker runs on the same local path (payload carries no
+        # local_anlz_path override).
+        sm = _manager({
+            "RBSS_SMART_REARM_EXPERIMENT": "1",
+            "RBSS_SPECTRAL_ENABLE": "1",
+        })
+        resolver = Mock()
+        sm.attach_resolver(resolver)
+        local_path = "/local/share/PIONEER/USBANLZ/967/938c2a63-a637-4000-8000-000000000001/ANLZ0000.DAT"
+        sm._pending_anlz_path[1] = local_path
+
+        with patch.object(sm, "_start_anlz_worker") as start_worker:
+            sm._on_track_loaded(1, "track", BridgeEvent(Ev.TRACK_LOADED, 1))
+            sm._on_filepath_resolved(1, _filepath_payload())
+
         start_worker.assert_has_calls([
-            call(raw_path, 1, 1, wide_window=True),
+            call(local_path, 1, 1, wide_window=True),
             call(
                 local_path,
                 1,
@@ -498,6 +530,7 @@ class SmartRearmFlagTests(unittest.TestCase):
                 f2_enabled=True,
             ),
         ])
+        self.assertEqual(start_worker.call_count, 2)
 
     def test_drop_wide_window_env_zero_disables_wide_window_for_anlz_workers(self) -> None:
         sm = _manager({
