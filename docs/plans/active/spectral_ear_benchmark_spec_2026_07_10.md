@@ -1,14 +1,17 @@
 ---
 doc_status: current
 truth_level: implemented-and-software-tested
-last_verified_commit: 8256402
-last_verified_date: 2026-07-10
+last_verified_commit: 808391f
+last_verified_date: 2026-07-11
 validation_scope: >
   Stage-1 EAR benchmark harness (AWR-200 / AWR-195 stage 1). Describes the as-built
   tools/spectral_ear_benchmark.py + tests/test_spectral_ear_benchmark.py: a read-only
   harness over the AWR-182 ear-truth labels and the existing v4 cache. Software-tested
-  only (15 unit tests green; core run + --resolve-db run exercised against the local
-  41-row label layer). No runtime lighting behavior changes. SOFTWARE-VALIDATED ONLY /
+  only (30 unit tests green after the 2026-07-11 trust-repair pass — single call_planner
+  anti-leak boundary, amendment-via-parent grouping, markers-scored availability gate,
+  per-radius comparable denominators, real fold-disjointness invariant, identity-collision
+  warnings; core run + --resolve-db run exercised against the local 41-row label layer,
+  pilot numbers unchanged). No runtime lighting behavior changes. SOFTWARE-VALIDATED ONLY /
   HARDWARE-UNVALIDATED.
 ---
 
@@ -113,33 +116,53 @@ CLI: `--labels PATH`, `--resolve-db` (opt-in; READ-ONLY master.db + v4 cache),
 - **Anti-leak.** Label fields that locate or describe an example
   (`content_id`/`title_exact`/`track`/`id`/`his_words`/`measured`/`classification`/notes)
   may be used to LOCATE an example and as ground truth, but must NEVER enter a predictor.
-  `LEAK_FORBIDDEN_FIELDS` + `assert_no_leak()` enforce this; the production planner is only
-  ever called with v4 features + beat indices. IDs never enter a formula. No benchmark-owned
-  copy of any runtime formula/constant exists — the harness *imports and calls*
+  Every production-planner call routes through the single `call_planner()` boundary, which
+  enforces a positive allowlist (`PLANNER_ALLOWED_FIELDS` = v4 + beat indices only) AND the
+  `LEAK_FORBIDDEN_FIELDS`/`assert_no_leak()` guard, then unpacks and calls — so the base and
+  every perturbed call are guarded at the real invocation point, not by a one-off check on a
+  hand-built dict. IDs never enter a formula. No benchmark-owned copy of any runtime
+  formula/constant exists — the harness *imports and calls*
   `lighting_moments_v2.build_track_plan` for the only metric it computes.
 - **Grouping.** One lineage per track (content_id, else normalized track). A track and its
-  amendments/edits leave together.
-- **Folds.** Grouped leave-one-lineage-out. `build_folds` asserts a lineage never appears in
-  both train and test. AWR-182 is development/regression data, not a blind holdout — the
-  harness makes no unseen-holdout claim. Stage-2 acceptance additionally requires the new
-  20-group blind batch (charter §D), which this harness does not fabricate.
+  amendments/edits leave together: an amendment's lineage is resolved through its `amends`
+  parent chain to the primary ancestor, so an amendment with no content_id or a different
+  track string still rides with its parent. Missing/cyclic/ambiguous/non-primary parent links
+  are never silently split — they raise a loud validation warning and the amendment is left
+  ungrouped. Same-title/no-content_id identity collisions cannot be resolved without curation;
+  the harness surfaces a deterministic identity warning/limitation rather than guessing.
+- **Folds.** Grouped leave-one-lineage-out. `build_folds` asserts the real invariant — the
+  held-out lineage's entry ids (already including its resolved amendment lineage) never appear
+  in any train lineage — replacing the earlier tautological `held.key not in train_keys` check.
+  AWR-182 is development/regression data, not a blind holdout — the harness makes no
+  unseen-holdout claim. Stage-2 acceptance additionally requires the new 20-group blind batch
+  (charter §D), which this harness does not fabricate.
 
 ## Part E — acceptance tests and what this slice can / cannot score today
 
-`tests/test_spectral_ear_benchmark.py` (15 tests, all green) proves, on small synthetic
+`tests/test_spectral_ear_benchmark.py` (30 tests, all green) proves, on small synthetic
 fixtures (no real cache/DB/planner):
 
 - meta and amendment rows are not primary examples;
 - exclusions are explicit and each carries a cited reason; the manifest counts them;
   an undeclared EXCLUDED row is flagged;
-- grouped lineages never split across a LOLO fold (multi-entry lineage moves together);
+- the real fold invariant: no entry id and no resolved amendment lineage appears in both
+  train and test of any fold — including the hard case of an amendment carrying no
+  content_id and a different track string, which still rides with its parent;
+- amendment grouping follows the `amends` parent link; missing / cyclic / ambiguous parent
+  links warn loudly and leave the amendment ungrouped (never silently merged/split);
 - accuracy axes stay UNAVAILABLE — never zero, never PASS; the marker axis is gated on
-  resolution (unavailable at 0 resolved, available at >0);
-- `assert_no_leak` rejects forbidden fields and passes clean model inputs;
+  markers actually SCORED (a resolved track that scores zero markers reads UNAVAILABLE, not
+  a hollow AVAILABLE on track count);
+- `call_planner` — the single boundary every base and perturbed planner call routes through —
+  rejects any forbidden label/locator field OR unexpected field, and passes clean model inputs;
 - marker-sensitivity flip counting is correct against a synthetic planner seam, the seam
-  receives only model inputs, and unresolved tracks never reach the planner;
+  receives only model inputs, a marker with no comparable perturbation at a radius is dropped
+  from that radius's denominator (per-radius `comparable_pm1`/`comparable_pm2`), and unresolved
+  tracks never reach the planner;
+- same-title/no-content_id identity collisions surface a deterministic warning/limitation
+  (identity is flagged for curation, never guessed);
 - the report is byte-deterministic and the core run is PARTIAL with the marker axis
-  UNAVAILABLE;
+  UNAVAILABLE and the identity limitation surfaced;
 - **the completion gate holds**: with a resolved marker pilot AVAILABLE but the accuracy axes
   unavailable, `is_partial` and the report status both stay PARTIAL (regression test — a
   marker pilot never flips Stage 1 to complete).
