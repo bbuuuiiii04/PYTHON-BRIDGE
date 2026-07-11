@@ -472,6 +472,7 @@ contracts:
       - live_bpm.py
       - rb_offsets.py
       - mtc_reader.py
+      - state_manager.py
       - docs/data/offsets-macos.yaml
     key_symbols:
       - FilepathResolver
@@ -479,6 +480,7 @@ contracts:
       - RBMemoryReader
       - LiveBPMService
       - PositionCache
+      - StateManager
       - CfxDeckReading
       - CfxFilterSnapshot
     inspect:
