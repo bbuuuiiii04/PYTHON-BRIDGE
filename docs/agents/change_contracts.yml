@@ -750,6 +750,26 @@ contracts:
       - every future schema version gets its own cache subdirectory; eviction never crosses versions
       - calibration statistics and validation claims use BY GENRE playlist tracks only
 
+  lighting_sidecar:
+    code_globs:
+      - tools/lighting_sidecar_export.py
+    inspect:
+      - docs/plans/active/lighting_sidecar_exporter_spec_2026_07_11.md
+      - docs/plans/active/usb_lighting_portability_program_2026_07_11.md
+    tests:
+      - python3 -m unittest tests.test_lighting_sidecar_export
+      - python3 tools/check_agent_contracts.py
+    docs_update:
+      - docs/plans/active/lighting_sidecar_exporter_spec_2026_07_11.md
+    consumers:
+      - "The runtime CONSUMER is AWR-211 (separate spec): it reads lighting_sidecar/index.json + the copied ANLZ/v4 on a foreign laptop and overlays them read-only behind the AWR-207 payload seam. This contract covers the EXPORTER only."
+    forbidden_assumptions:
+      - "AWR-210 exporter is an OFFLINE tool with ZERO runtime importers (nothing in the runtime imports it) and edits NO runtime module; it reuses the resolver/cache helpers by import so beatgrid fingerprints and tags match what the runtime resolver computes by construction (no parallel reimplementation to drift)."
+      - "every source is READ-ONLY (master.db, the local ANLZ share, the v4 spectral cache, audio files); the tool writes ONLY inside <dest>/lighting_sidecar/ via the safe_dest guard, and never touches the running bridge or any mounted stick outside the named --dest."
+      - "no config/*.json, govee.env, local IP, or device secret ever lands in the sidecar — it carries analysis data only (ANLZ copies + per-track v4 blobs + index.json)."
+      - "laser_tag_beats / soundswitch_id / v4 reflect the CURRENT resolver+cache state at export time; an untagged cue library yields empty laser_tag_beats exactly as the live resolver does today — faithful, not a miss."
+      - "a track skipped for no_analysis or no_beatgrid is an EXPECTED healthy-library skip (exit 0); any other skip reason (anlz_missing, exception:*) is a real inconsistency and forces a nonzero exit."
+
   tests:
     code_globs:
       - tests/**
