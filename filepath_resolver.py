@@ -44,10 +44,6 @@ _MIN_BEATGRID_INTERVAL_MS = 150.0
 _MAX_BEATGRID_INTERVAL_MS = 3000.0
 _USB_TWIN_BPM_TOLERANCE = 0.05
 _USB_TWIN_DURATION_TOLERANCE_S = 2.0
-_USB_TWIN_BEAT_COUNT_TOLERANCE = 1
-_USB_TWIN_FIRST_BEAT_TOLERANCE_MS = 10.0
-_USB_TWIN_SAMPLE_TOLERANCE_MS = 10.0
-_USB_TWIN_SAMPLE_POINTS = 17
 _RB_SHARE_ROOT = Path("~/Library/Pioneer/rekordbox/share").expanduser()
 _SS_PRELOAD_CACHE: dict[str, str] = {}
 _SS_SCRIPTED_ID_CACHE: set[str] = set()
@@ -247,7 +243,7 @@ def _is_device_export_anlz_path(anlz_path: str, captured_id: str = "") -> bool:
 
 
 def _beatgrids_match(usb_times_ms: Sequence[float], local_times_ms: Sequence[float]) -> bool:
-    """Pure, fail-closed USB/local beatgrid identity check."""
+    """Mirror-class identity: the complete grids must be byte-for-byte equivalent."""
     try:
         usb = tuple(float(value) for value in usb_times_ms)
         local = tuple(float(value) for value in local_times_ms)
@@ -257,23 +253,7 @@ def _beatgrids_match(usb_times_ms: Sequence[float], local_times_ms: Sequence[flo
         return False
     if not all(math.isfinite(value) for value in (*usb, *local)):
         return False
-    if abs(len(usb) - len(local)) > _USB_TWIN_BEAT_COUNT_TOLERANCE:
-        return False
-    if abs(usb[0] - local[0]) > _USB_TWIN_FIRST_BEAT_TOLERANCE_MS:
-        return False
-    if len(usb) == len(local) and _beatgrid_fingerprint(usb) == _beatgrid_fingerprint(local):
-        return True
-
-    overlap = min(len(usb), len(local))
-    sample_count = min(_USB_TWIN_SAMPLE_POINTS, overlap)
-    indexes = {
-        round(i * (overlap - 1) / (sample_count - 1))
-        for i in range(sample_count)
-    }
-    return all(
-        abs(usb[index] - local[index]) <= _USB_TWIN_SAMPLE_TOLERANCE_MS
-        for index in indexes
-    )
+    return len(usb) == len(local) and _beatgrid_fingerprint(usb) == _beatgrid_fingerprint(local)
 
 
 def _usb_twin_prefilter(contents: Sequence[object], usb_beatgrid: dict) -> list[object]:

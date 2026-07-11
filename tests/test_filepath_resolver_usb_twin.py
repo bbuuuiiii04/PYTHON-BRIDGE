@@ -93,6 +93,22 @@ class UsbTwinPureTests(unittest.TestCase):
         self.assertIsNone(twin)
         self.assertEqual(count, 2)
 
+    def test_cross_analysis_collision_cannot_flip_identity_without_tags(self) -> None:
+        # Red-team collision class: Limitless (Extended Mix) / Rude Boy
+        # (Cazes Edit), both 126 BPM and 429 beats.  The old 10 ms window
+        # selected the wrong song after an 11 ms cross-analysis shift.
+        true_song, wrong_song = object(), object()
+        foreign = [value + 11.0 for value in _GRID]
+        collider = [value + 15.0 for value in _GRID]
+
+        twin, count = _unique_usb_twin(
+            foreign,
+            [(true_song, _grid(_GRID)), (wrong_song, _grid(collider))],
+        )
+
+        self.assertIsNone(twin)
+        self.assertEqual(count, 0)
+
     def test_bpm_duration_prefilter_runs_before_grid_reads(self) -> None:
         exact = _content(ID="exact")
         wrong_bpm = _content(ID="bpm", BPM=12790)
