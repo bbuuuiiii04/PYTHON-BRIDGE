@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: frozen software baseline + coverage/blocker report
-last_verified_commit: 808391f
+last_verified_commit: f550e50
 last_verified_date: 2026-07-11
 validation_scope: >
   Frozen Stage-1 EAR-benchmark run (AWR-200) of tools/spectral_ear_benchmark.py at code
@@ -23,14 +23,14 @@ support). **AWR-200 is PARTIAL.**
 
 ## Run identity
 
-- Harness HEAD at run: `808391fe749d2f9ebeff286e9dff44834a3c9eab` (the exact committed code
+- Harness HEAD at run: `f550e50d27e8a9b9f58a3d9efbc4e24a402406bf` (the exact committed code
   after the 2026-07-11 trust-repair pass — single `call_planner` anti-leak boundary,
-  amendment-via-parent grouping, markers-scored availability gate, per-radius comparable
-  denominators, real fold-disjointness invariant, identity-collision warnings). This report is
-  committed immediately after so it cites the precise code it was run against. The pilot numbers
-  below are unchanged from the earlier `1a51431` run (all 16 markers were comparable at both
-  radii), so the frozen baseline value is preserved; only the code identity and honesty wording
-  moved.
+  amendment-via-parent grouping with a duplicate-id guard, markers-scored availability gate,
+  per-radius comparable denominators, real fold-disjointness invariant, identity-collision
+  warnings). This report is committed immediately after so it cites the precise code it was run
+  against. The pilot numbers below are unchanged from the earlier `1a51431` run (all 16 markers
+  were comparable at both radii), so the frozen baseline value is preserved; only the code
+  identity and honesty wording moved.
 - Labels: `local/labels/operator_track_labels_2026_07_09.jsonl` (gitignored machine layer).
 - Label revision hash: sha256[:16] = `bda63553da99cb9e`, 41 rows.
 - v4 cache identity: resolved live through each track's **current** Rekordbox filepath +

@@ -57,8 +57,9 @@ marker_blocked), the manifest counts them, and an undeclared EXCLUDED row is fla
 leave-one-lineage-out folds never split a lineage — the real fold invariant (no entry id and no
 resolved amendment lineage in both train and test, including the hard case of an amendment with
 no content_id and a different track string) replaces the old tautological assertion; amendment
-grouping follows the `amends` parent link, and missing/cyclic/ambiguous parent links warn
-loudly instead of silently splitting; `call_planner` is the single planner boundary (positive
+grouping follows the `amends` parent link, and missing/cyclic/ambiguous parent links — plus a
+duplicated amendment own-id that would else corrupt a primary's lineage — warn loudly instead
+of silently splitting/merging; `call_planner` is the single planner boundary (positive
 allowlist + `assert_no_leak`) and rejects any forbidden label/locator field OR unexpected field;
 the accuracy axes (tier/family/darkness/growl/laser) stay UNAVAILABLE — never zero, never PASS —
 and the marker axis is AVAILABLE only when a marker is actually SCORED (a resolved track that
