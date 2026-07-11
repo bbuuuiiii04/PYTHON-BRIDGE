@@ -256,6 +256,9 @@ class RunnerSeamTests(unittest.TestCase):
              mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
              mock.patch.object(rp, "read_entitlements", return_value={}), \
              mock.patch.object(rp, "has_get_task_allow", return_value=True), \
+             mock.patch.object(rp, "_snapshot_app", return_value=Path("/tmp/rbss_bk/rekordbox.app")), \
+             mock.patch.object(rp, "_restore_app", return_value=True), \
+             mock.patch.object(rp, "_cleanup_backup"), \
              mock.patch.object(rp.subprocess, "run", return_value=_proc(0)):  # verify only
             r = apply_patch(APP, dry_run=False, runner=fake_runner)
         self.assertTrue(r.ok)
