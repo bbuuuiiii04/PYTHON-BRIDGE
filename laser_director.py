@@ -440,6 +440,11 @@ class LaserDirector:
             )
 
         # Priority 7: autoloop must be fully ready before automatic scenes.
+        # AWR-206: the automatic SCENE still waits for a render-ready autoloop,
+        # but the pre-drop blackout NOTE does not. Carry the blackout arm intent
+        # across this early return with blackout_arm=True (no scene, no advanced
+        # policy state) so the executor can arm the manual blackout on its
+        # relaxed gate while the autoloop is mid-re-arm at the pre-drop instant.
         if not ctx.autoloop_ready:
             self._last_phrase_number = None
             self._reset_smart_observation_state()
@@ -449,6 +454,7 @@ class LaserDirector:
                 priority=7,
                 source="policy",
                 role="idle",
+                blackout_arm=True,
             )
 
         abs_beat = max(ctx.abs_beat, 0.0)

@@ -10,6 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from rb_ss_bridge_v2.laser_config import LaserConfig  # noqa: E402
+from rb_ss_bridge_v2.laser_director import LaserDirector  # noqa: E402
 from rb_ss_bridge_v2.laser_executor import LaserSceneExecutor  # noqa: E402
 from rb_ss_bridge_v2.laser_output_backend import (  # noqa: E402
     MidiOutputBackend,
@@ -136,6 +137,11 @@ def _smart_phrasing_state(*, transition_mask_should_clear: bool) -> SmartPhrasin
 
 def _decision(scene: str, reason: str, role: str) -> LaserSceneDecision:
     return LaserSceneDecision(scene=scene, reason=reason, priority=10, source="policy", role=role)
+
+
+def _sp(**overrides) -> SmartPhrasingState:
+    """Minimal SmartPhrasingState (all fields default); override what a test needs."""
+    return SmartPhrasingState(reason="test", **overrides)
 
 
 def _personality(*, allow_high_impact: bool = True, rotating_banks: bool = False) -> LaserPersonality:
@@ -1081,6 +1087,85 @@ class LaserSceneExecutorTests(unittest.TestCase):
         )
         self.assertEqual([call[0].note for call in midi.calls], [90, 90])
         self.assertFalse(ex.status()["blackout_pending_for_drop_window"])
+
+    def test_integrated_director_executor_arms_blackout_under_autoloop_churn(self) -> None:
+        """AWR-206 FIX-ROUND regression (F2): the REAL LaserDirector.tick ->
+        LaserSceneExecutor.on_decision chain must arm the 4-beat pre-drop
+        blackout while the SoundSwitch autoloop is mid-re-arm
+        (autoloop_ready=False) -- the normal pre-drop state during real mixing.
+
+        At pre-fix HEAD this FAILS: the director returns role='idle',
+        reason='autoloop_not_ready' at priority 7, and the executor's
+        idle/no-scene guard returns before any blackout can arm, so no blackout
+        note is ever sent (the round-1 relaxed branch lives one layer below this
+        early return and is unreachable).
+
+        Asserts: blackout-on fires exactly once across repeated churn ticks; NO
+        scene MIDI while the strict gate is closed; blackout releases at the
+        real drop crossing.
+        """
+        midi = _FakeMidiOutput(dry_run=False)
+        blackout_on = LaserMidiMessage(kind="note_on", behavior="note_on", channel=1, note=90, velocity=127)
+        blackout_off = LaserMidiMessage(kind="note_off", behavior="note_off", channel=1, note=90, velocity=0)
+        director = LaserDirector(
+            enabled=True,
+            dry_run=False,
+            default_scene="phrase_a",
+            phrase_scene="phrase_a",
+            buildup_scene="buildup_a",
+            drop_scene="drop_a",
+            buildup_lookahead_beats=32,
+        )
+        executor = LaserSceneExecutor(
+            config=_config(dry_run=False, manual_blackout_on=blackout_on, manual_blackout_off=blackout_off),
+            backend=MidiOutputBackend(midi),
+            personality=_personality(),
+        )
+        now = 1000.0
+
+        # Pre-drop window: autoloop churning (autoloop_ready=False), arm latched
+        # level-held across ticks. The director returns idle every tick.
+        for beat in (60.0, 60.5, 61.0, 61.5):
+            ctx = _ctx(abs_beat=beat, autoloop_ready=False, smart_drop_blackout_arm=True)
+            decision = director.tick(ctx, now=now)
+            executor.on_tick(ctx)
+            executor.on_decision(decision, ctx)
+            self.assertEqual(decision.role, "idle")
+            self.assertEqual(decision.reason, "autoloop_not_ready")
+
+        churn_notes = [call[0].note for call in midi.calls]
+        # THE FIX: exactly one blackout-on (90) and NO scene MIDI while the
+        # strict scene gate is closed.
+        self.assertEqual(churn_notes, [90], f"expected one blackout-on, got {churn_notes}")
+        self.assertTrue(executor.status()["blackout_pending_for_drop_window"])
+
+        # Autoloop recovers one tick before the crossing so the director has a
+        # previous smart beat to detect the crossing against (its "first smart
+        # tick never fires a crossing" guard). This recovery decision is a
+        # phrase/default, not a blackout event, so it is not fed to the executor.
+        director.tick(
+            _ctx(abs_beat=63.5, autoloop_ready=True, smart_drop_blackout_arm=True),
+            now=now,
+        )
+
+        # Real drop crossing: the director emits a drop_crossing decision, the
+        # executor fires the drop scene and resolves the pending blackout.
+        crossing_ctx = _ctx(
+            abs_beat=64.1,
+            autoloop_ready=True,
+            smart_drop_blackout_arm=False,
+            smart_phrasing=_sp(smart_drop_crossing=True, active_drop_beat=64.0),
+        )
+        crossing_decision = director.tick(crossing_ctx, now=now)
+        executor.on_tick(crossing_ctx)
+        executor.on_decision(crossing_decision, crossing_ctx)
+        self.assertEqual(crossing_decision.reason, "drop_crossing")
+
+        on_calls = [c for c in midi.calls if c[0].note == 90 and c[0].behavior == "note_on"]
+        off_calls = [c for c in midi.calls if c[0].note == 90 and c[0].behavior == "note_off"]
+        self.assertEqual(len(on_calls), 1, midi.calls)
+        self.assertEqual(len(off_calls), 1, midi.calls)
+        self.assertFalse(executor.status()["blackout_pending_for_drop_window"])
 
     def test_blackout_skip_logs_failing_subconditions_at_info(self) -> None:
         """AWR-206: when the relaxed gate blocks the blackout, the skip is logged

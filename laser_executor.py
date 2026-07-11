@@ -61,6 +61,11 @@ class LaserSceneExecutor:
         self._role_active_scene = {role: "" for role in _AUTO_ROLES}
         self._role_last_trigger_beat = {role: -1.0 for role in _AUTO_ROLES}
         self._blackout_pending_for_drop_window = False
+        # AWR-206: last blackout-skip log key. The arm signal is level-held at
+        # 200 Hz while the drop is armed, so the INFO skip line is throttled to
+        # once per changed failing-condition tuple (mirrors the director's
+        # _last_buildup_gate_log_key throttle).
+        self._last_blackout_skip_log_key: Optional[tuple[object, ...]] = None
         # Named blackout-mask holders (breakdown, master_switch). The physical
         # MIDI note is shared with the Smart Drop blackout; note_off is only
         # sent when BOTH the drop-window latch and this set are clear.
@@ -125,35 +130,45 @@ class LaserSceneExecutor:
                 self._last_role = role
             self._last_reason = decision.reason
 
+        # AWR-206: the arm intent reaches here either from an automatic role
+        # (scene MIDI would fire on the same tick) OR from the director's
+        # autoloop-not-ready idle decision (decision.blackout_arm) -- the normal
+        # pre-drop state during real mixing, where the director declines to pick
+        # a scene because the autoloop is mid-re-arm. Both must be able to arm
+        # the pre-drop blackout note.
         should_arm_blackout = bool(
             (ctx.smart_drop_blackout_arm or ctx.smart_phrasing_blackout_arm)
-            and role in _AUTO_ROLES
+            and (role in _AUTO_ROLES or decision.blackout_arm)
         )
 
         if role == "idle" or not decision.scene:
             if is_drop_crossing:
                 self._resolve_pending_blackout(reason="drop_crossing_idle")
             if should_arm_blackout:
-                log.debug("[LX] blackout skipped: decision has no scene (role=%s, scene=%s)", role, decision.scene)
+                # AWR-206: the automatic scene stays absent (the director picked
+                # none), but the manual blackout note only needs a genuinely live
+                # deck. Arm on the relaxed gate; the fixed manual_blackout_on
+                # command needs no scene mapping. Skips log at INFO, throttled.
+                if self._passes_blackout_gates(ctx):
+                    self.trigger_blackout_on(ctx)
+                else:
+                    self._log_blackout_skip(ctx)
             return None
 
         if role in _AUTO_ROLES and not self._passes_automatic_gates(ctx):
+            # Unreachable for arm in production: the director only emits an
+            # automatic role when every strict gate (including autoloop_ready)
+            # passes, so this branch never carries a live arm signal. Keep the
+            # gate accounting and the drop-crossing release; the reachable
+            # pre-drop arm path is the idle branch above (AWR-206 fix round).
             self._record_gate("auto_gate_blocked")
             if is_drop_crossing:
                 self._resolve_pending_blackout(reason="drop_crossing_auto_gate_blocked")
             if should_arm_blackout:
-                # AWR-206: the scene MIDI stays blocked by the strict gate, but the
-                # pre-drop blackout note only needs a live deck (the relaxed gate),
-                # so arm it here even while the autoloop is mid-re-arm.
-                scene_mapped = decision.scene in self._config.scenes
-                if self._passes_blackout_gates(ctx) and scene_mapped:
-                    self.trigger_blackout_on(ctx)
-                else:
-                    log.info(
-                        "[LX] blackout skipped: auto_gate_blocked (playing=%s, track_loaded=%s, stale=%s, mode=%s, scripted=%s, scene_mapped=%s)",
-                        ctx.playing, ctx.active_track_loaded, ctx.position_stale,
-                        ctx.lighting_mode, ctx.scripted_id, scene_mapped,
-                    )
+                log.debug(
+                    "[LX] blackout skipped: auto_gate_blocked (role=%s, scene=%s)",
+                    role, decision.scene,
+                )
             return None
 
         # Blackout arming is independent of scene selection and scene policy
@@ -329,6 +344,7 @@ class LaserSceneExecutor:
                 log.debug("[LX] blackout_on skipped: already pending for drop window")
                 return
             self._blackout_pending_for_drop_window = True
+            self._last_blackout_skip_log_key = None  # new window -> re-log any later skip
         msg = self._config.manual_blackout_on
         if msg is None:
             log.debug("[LX] blackout_on skipped: manual_blackout_on not configured")
@@ -345,6 +361,7 @@ class LaserSceneExecutor:
             pending = self._blackout_pending_for_drop_window
             if pending:
                 self._blackout_pending_for_drop_window = False
+                self._last_blackout_skip_log_key = None  # window closed -> re-log any later skip
             owners_remain = bool(self._mask_owners)
         if not pending or owners_remain:
             return
@@ -623,6 +640,32 @@ class LaserSceneExecutor:
             self._gated_count += 1
             self._last_error = reason
         log.debug("[LX] gate-block  reason=%s", reason)
+
+    def _log_blackout_skip(self, ctx: LaserContext) -> None:
+        """INFO skip line for a relaxed-gate-blocked pre-drop blackout arm.
+
+        AWR-206: the arm signal is level-held on every 200 Hz push tick while the
+        drop stays armed, so this is throttled to once per changed failing-
+        condition tuple (same shape as the director's _log_buildup_gate). The key
+        is reset at each window boundary (arm / resolve) so a later window with
+        the same failing tuple logs again.
+        """
+        key = (
+            bool(ctx.playing),
+            bool(ctx.active_track_loaded),
+            bool(ctx.position_stale),
+            str(ctx.lighting_mode),
+            int(ctx.scripted_id),
+        )
+        if key == self._last_blackout_skip_log_key:
+            return
+        self._last_blackout_skip_log_key = key
+        log.info(
+            "[LX] blackout skipped: relaxed gate blocked "
+            "(playing=%s, track_loaded=%s, stale=%s, mode=%s, scripted=%s)",
+            ctx.playing, ctx.active_track_loaded, ctx.position_stale,
+            ctx.lighting_mode, ctx.scripted_id,
+        )
 
     def _is_role_cooldown_blocked(
         self,

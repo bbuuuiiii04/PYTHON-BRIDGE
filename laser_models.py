@@ -158,12 +158,18 @@ class LaserSceneDecision:
     ``role``     — stable policy role used by scene-bank/executor logic.
     ``priority`` — numeric priority level (lower = higher priority).
     ``source``   — originating policy branch ("emergency", "manual", "policy").
+    ``blackout_arm`` — AWR-206: True only on the director's autoloop-not-ready
+                   idle decision. It carries pre-drop blackout arm intent across
+                   the director's readiness early return WITHOUT selecting a
+                   scene, so the executor can arm the manual blackout note on its
+                   relaxed gate while the scene MIDI stays strict-gated shut.
     """
     scene: str
     reason: str
     priority: int
     source: str
     role: str = "idle"
+    blackout_arm: bool = False
 
 
 @dataclass(frozen=True)
