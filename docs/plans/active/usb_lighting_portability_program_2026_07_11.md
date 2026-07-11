@@ -51,6 +51,29 @@ environments:
 3. Staleness: fingerprint mismatch (re-analyzed/re-gridded track) = honest
    miss + a build-tool warning listing stale tracks; never guess.
 
+## E3 — SOMEONE ELSE'S USB on his laptop (operator question 2026-07-11)
+A guest stick carries tracks that were NEVER in his collection: no local twin,
+no sidecar, and no PSSI on their stick either. Honest capability ladder, to be
+settled/ranked in D1 (levers verified in current code, quality unproven):
+- [confirmed lever] Their stick's ANLZ DOES carry beatgrid + waveform data —
+  readable today (`[ANLZ][DIRECT]` reads any mounted stick's files).
+- [confirmed lever] The runtime already extracts v4 spectral features AT LOAD
+  for uncached tracks (`state_manager.py:~2553`, `extract_spectral_features_v4`
+  behind `_V4_AT_LOAD_MAX_S`) — the guest AUDIO file on their stick is
+  readable, so spectral lighting can work on HIS laptop (extraction cost/cap
+  is a D1 question).
+- [confirmed lever] `anlz_reader` has a waveform-derived phrase fallback
+  (`_extract_waveform_phrases` :285) — phrase-CLASS estimation without PSSI;
+  fidelity vs real PSSI is unmeasured [unknown].
+So E3 target = a DEGRADED-BUT-HONEST tier: beatgrid-true, spectral-live,
+waveform-phrase-estimated; his hand-curated layers (scripted tracks, laser
+tags, gold-tuned behavior) are impossible by definition for unknown tracks.
+Pre-show import of guest tracks into the collection remains the full-quality
+path (works today, manual).
+- **E4 — guest stick on a foreign laptop** (worst case): no extraction on
+  foreign machines (non-goal) → beat/BPM-tier lighting only. State it, don't
+  oversell it.
+
 ## Design questions D1 MUST settle (honest unknowns)
 - Sidecar payload size: full v4 per track vs the derived fields the runtime
   needs; per-track cost × library size vs stick capacity.
