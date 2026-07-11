@@ -112,6 +112,9 @@ class ApplyPatchRunTests(unittest.TestCase):
              mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
              mock.patch.object(rp, "read_entitlements", return_value={}), \
              mock.patch.object(rp, "has_get_task_allow", return_value=after_has_gta), \
+             mock.patch.object(rp, "_snapshot_app", return_value=Path("/tmp/rbss_bk/rekordbox.app")), \
+             mock.patch.object(rp, "_restore_app", return_value=True), \
+             mock.patch.object(rp, "_cleanup_backup"), \
              mock.patch.object(rp.subprocess, "run", side_effect=run_side_effect):
             return apply_patch(APP, dry_run=False)
 
@@ -120,29 +123,76 @@ class ApplyPatchRunTests(unittest.TestCase):
         self.assertTrue(r.ok)
         self.assertEqual(r.action, "patched")
 
-    def test_codesign_failure_reports_step(self) -> None:
+    def test_codesign_failure_restores_and_stays_launchable(self) -> None:
         r = self._apply([_proc(1, stderr="not permitted")], after_has_gta=False)
         self.assertFalse(r.ok)
         self.assertEqual(r.action, "failed")
-        self.assertIn("admin", r.message.lower())      # permission hint surfaced
-        self.assertIn("reinstall", r.message.lower())  # recovery named even on codesign-step failure
+        self.assertIn("admin", r.message.lower())         # permission hint surfaced
+        self.assertIn("launchable", r.message.lower())    # restored, NOT told to reinstall
+        self.assertNotIn("reinstall", r.message.lower())
 
-    def test_verify_failure_tells_user_to_reinstall(self) -> None:
+    def test_verify_failure_restores_and_stays_launchable(self) -> None:
         r = self._apply([_proc(0), _proc(1, stderr="invalid signature")], after_has_gta=True)
         self.assertFalse(r.ok)
-        self.assertIn("reinstall", r.message.lower())
+        self.assertIn("launchable", r.message.lower())
+        self.assertNotIn("reinstall", r.message.lower())
 
     def test_verify_subprocess_error_is_failed_not_crash(self) -> None:
         # codesign ok (via runner), but the verify subprocess.run RAISES -> caught,
-        # reported with recovery, never left claiming "patched".
+        # backup restored, never left claiming "patched".
         with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
              mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
              mock.patch.object(rp, "read_entitlements", return_value={}), \
+             mock.patch.object(rp, "_snapshot_app", return_value=Path("/tmp/rbss_bk/rekordbox.app")), \
+             mock.patch.object(rp, "_restore_app", return_value=True), \
+             mock.patch.object(rp, "_cleanup_backup"), \
              mock.patch.object(rp.subprocess, "run", side_effect=OSError("boom")):
             r = apply_patch(APP, dry_run=False, runner=lambda argv: (0, ""))
         self.assertFalse(r.ok)
         self.assertEqual(r.action, "failed")
-        self.assertIn("reinstall", r.message.lower())
+        self.assertIn("launchable", r.message.lower())
+
+    def test_refuses_when_no_disk_for_backup(self) -> None:
+        # No safe backup -> refuse; NEVER re-sign (would risk an unrecoverable brick).
+        with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
+             mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
+             mock.patch.object(rp, "read_entitlements", return_value={}), \
+             mock.patch.object(rp, "_snapshot_app", return_value=None), \
+             mock.patch.object(rp.subprocess, "run", side_effect=AssertionError("re-signed with no backup")):
+            r = apply_patch(APP, dry_run=False, runner=lambda argv: (0, ""))
+        self.assertFalse(r.ok)
+        self.assertEqual(r.action, "refused")
+        self.assertIn("disk", r.message.lower())
+
+    def test_restores_on_codesign_failure(self) -> None:
+        with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
+             mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
+             mock.patch.object(rp, "read_entitlements", return_value={}), \
+             mock.patch.object(rp, "_snapshot_app", return_value=Path("/tmp/bk/rekordbox.app")), \
+             mock.patch.object(rp, "_restore_app", return_value=True) as restore, \
+             mock.patch.object(rp, "_cleanup_backup"):
+            r = apply_patch(APP, dry_run=False, runner=lambda argv: (1, "codesign: boom"))
+        self.assertFalse(r.ok)
+        self.assertEqual(r.action, "failed")
+        restore.assert_called_once()                      # the backup WAS restored
+        self.assertNotIn("reinstall", r.message.lower())
+
+    def test_restore_failure_keeps_backup_and_says_where(self) -> None:
+        with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
+             mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
+             mock.patch.object(rp, "read_entitlements", return_value={}), \
+             mock.patch.object(rp, "_snapshot_app", return_value=Path("/tmp/bk/rekordbox.app")), \
+             mock.patch.object(rp, "_restore_app", return_value=False):
+            r = apply_patch(APP, dry_run=False, runner=lambda argv: (1, "boom"))
+        self.assertFalse(r.ok)
+        self.assertIn("backed up at", r.message.lower())      # tells operator WHERE
+        self.assertIn("no reinstall needed", r.message.lower())  # explicit: not a reinstall
+
+    def test_enough_disk_for_backup_boundary(self) -> None:
+        gb = 1024 ** 3
+        self.assertTrue(rp.enough_disk_for_backup(2 * gb, 3 * gb))    # ~1GB spare over margin
+        self.assertFalse(rp.enough_disk_for_backup(2 * gb, 2 * gb))   # no room for the margin
+        self.assertFalse(rp.enough_disk_for_backup(2 * gb, 1 * gb))   # not even the copy
 
     def test_entitlement_did_not_take(self) -> None:
         r = self._apply([_proc(0), _proc(0)], after_has_gta=False)  # verify ok but gta absent

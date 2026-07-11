@@ -65,6 +65,19 @@ push loop.
 - `BridgeEvent`s are immutable once enqueued.
 - `PositionSnapshot`s are written by `RBMemoryReader` through `PositionCache`.
 
+## Single-instance lock
+
+- Exactly one bridge process runs at a time, enforced by an exclusive `flock` on
+  `/tmp/rb_ss_bridge_v2.lock` in `__main__._acquire_single_instance_lock`; the push
+  loop never starts until the lock is held. The holder WRITES its pid into that
+  file after acquiring the lock, and a process that cannot acquire it exits
+  nonzero (`SystemExit(3)`) after writing to stderr. The frozen menubar relies on
+  both: after a menubar restart it re-adopts a running bridge it has no `Popen`
+  handle for by reading the lockfile pid (validated alive AND a real bridge before
+  any signal), and a flock-refused spawn is surfaced instead of read as a clean
+  exit. The menubar's OWN single-instance guard is a separate `flock` on
+  `/tmp/rb_ss_bridge_v2_menubar.lock`.
+
 ## SmartPhrasing / Laser Ownership
 
 - `SmartPhrasingEngine` is a pure musical phrasing engine. It emits

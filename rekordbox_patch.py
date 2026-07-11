@@ -37,6 +37,7 @@ import json
 import os
 import plistlib
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -142,6 +143,13 @@ def codesign_argv(app: Path, entitlements_path: Path) -> list[str]:
     ]
 
 
+def enough_disk_for_backup(app_size: int, free: int, margin: int = 500 * 1024 * 1024) -> bool:
+    """True if there is room to copy the whole bundle plus a safety margin. Pure —
+    the test seam for the pre-re-sign disk guard (refuse rather than risk bricking
+    Rekordbox with no restore path)."""
+    return free >= app_size + margin
+
+
 # ── On-machine inspection (read-only) ────────────────────────────────────────
 
 def find_rekordbox(app_paths: tuple[Path, ...] | None = None) -> Path | None:
@@ -206,6 +214,73 @@ def _default_runner(argv: list[str]) -> tuple[int, str]:
         return p.returncode, p.stderr or ""
     except (OSError, subprocess.SubprocessError) as exc:
         return 1, f"codesign did not run: {exc}"
+
+
+# ── Backup / restore (never leave Rekordbox unlaunchable) ────────────────────
+# codesign --force strips the old seal before writing the new one, so a mid-write
+# failure (timeout, disk-full, force-quit) can leave Rekordbox unlaunchable. We
+# snapshot the bundle BEFORE the re-sign (no admin needed — reading /Applications
+# and writing a user temp dir), then restore it on ANY failure, so the operator
+# is never told to reinstall (which on a guest means re-licensing Rekordbox).
+
+def _dir_size(path: Path) -> int:
+    total = 0
+    for p in path.rglob("*"):
+        try:
+            total += p.lstat().st_size
+        except OSError:
+            pass
+    return total
+
+
+def _snapshot_app(app: Path) -> Path | None:
+    """Copy the bundle to a user temp backup after a free-disk guard. Returns the
+    backup path, or None if there is not enough disk or the copy failed — the
+    caller then REFUSES (never re-sign without a restore path)."""
+    try:
+        app_size = _dir_size(app)
+        free = shutil.disk_usage(app.parent).free
+    except OSError:
+        return None
+    if not enough_disk_for_backup(app_size, free):
+        return None
+    try:
+        backup_dir = Path(tempfile.mkdtemp(prefix="rbss_rekordbox_backup_"))
+        backup = backup_dir / app.name
+        # ditto preserves the bundle's signature/metadata exactly (the point of
+        # the backup); as the user, no admin prompt.
+        subprocess.run(["ditto", str(app), str(backup)], check=True, timeout=1200,
+                       capture_output=True)
+    except (OSError, subprocess.SubprocessError):
+        shutil.rmtree(backup_dir, ignore_errors=True)
+        return None
+    return backup
+
+
+def _restore_app(app: Path, backup: Path, runner) -> bool:
+    """Restore the backup over the (possibly damaged) bundle, as root via the same
+    runner the re-sign used (one command; codesign --force only rewrites existing
+    signature files, so `ditto backup app` overwrites them back in place). True on
+    success."""
+    rc, _ = (runner or _default_runner)(["ditto", str(backup), str(app)])
+    return rc == 0
+
+
+def _cleanup_backup(backup: Path) -> None:
+    shutil.rmtree(backup.parent, ignore_errors=True)
+
+
+def _fail_restored(app: Path, backup: Path, runner, reason: str, argv: list[str]) -> "PatchResult":
+    """A failure result that first restores Rekordbox from the backup, so the
+    message says 'still launchable' (never 'reinstall'); if the restore itself
+    fails, it keeps the backup and says where it is."""
+    if _restore_app(app, backup, runner):
+        _cleanup_backup(backup)
+        tail = " Rekordbox was restored from a pre-signing backup and is still launchable."
+    else:
+        tail = (f" Automatic restore failed — your original Rekordbox is backed up at "
+                f"{backup.parent}; copy it back over {app} to recover (no reinstall needed).")
+    return PatchResult(False, "failed", reason + tail, command=argv)
 
 
 def run_via_admin(argv: list[str]) -> tuple[int, str]:
@@ -279,41 +354,42 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
             return PatchResult(False, "refused",
                                "Another Rekordbox patch is already in progress — wait for it to finish.")
 
+        # Snapshot BEFORE any --force write, so any failure below is recoverable.
+        # No snapshot -> refuse (never re-sign without a restore path).
+        backup = _snapshot_app(app)
+        if backup is None:
+            return PatchResult(False, "refused",
+                               "Not enough free disk to safely back up Rekordbox (~2.4 GB) before "
+                               "re-signing — refusing rather than risk leaving it unlaunchable. "
+                               "Free up space and try again.")
+
         rc, err = (runner or _default_runner)(argv)
         if rc != 0:
             hint = ""
             if "not permitted" in err.lower() or "permission denied" in err.lower():
                 hint = " (needs admin — run with sudo, or use --admin / the menubar which prompt for your password)"
-            # --force strips the old seal before writing the new one, so a mid-write
-            # failure can leave the signature damaged — always name the recovery.
-            return PatchResult(False, "failed",
-                               f"codesign failed{hint}: {err.strip()} — if Rekordbox now won't "
-                               "launch, reinstall it to restore its signature.", command=argv)
+            return _fail_restored(app, backup, runner, f"codesign failed{hint}: {err.strip()}.", argv)
 
         # Verify the re-sign is structurally valid AND the entitlement took. (This
         # cannot prove Rekordbox LAUNCHES / that task_for_pid works — the operator
-        # confirms that by relaunching Rekordbox.)
+        # confirms that by relaunching Rekordbox.) Any failure restores the backup.
         try:
             verify = subprocess.run(["codesign", "--verify", "--strict", str(app)],
                                     capture_output=True, text=True, timeout=180,
                                     env=sanitized_system_env(os.environ))
         except (OSError, subprocess.SubprocessError) as exc:
-            return PatchResult(False, "failed",
-                               f"could not verify the re-sign ({exc}) — relaunch Rekordbox; "
-                               "if it won't launch, reinstall it.", command=argv)
+            return _fail_restored(app, backup, runner, f"could not verify the re-sign ({exc}).", argv)
         if verify.returncode != 0:
-            return PatchResult(False, "failed",
-                               "Re-sign did not verify — Rekordbox signature may be broken. "
-                               "Reinstall Rekordbox to restore it. Details: " + verify.stderr.strip(),
-                               command=argv)
+            return _fail_restored(app, backup, runner,
+                                  "the re-sign did not verify: " + verify.stderr.strip() + ".", argv)
         if not has_get_task_allow(app):
-            return PatchResult(False, "failed",
-                               "Re-sign succeeded but get-task-allow is still absent — no change took effect.",
-                               command=argv)
+            return _fail_restored(app, backup, runner,
+                                  "the re-sign succeeded but get-task-allow is still absent — no change took effect.",
+                                  argv)
+        _cleanup_backup(backup)
         return PatchResult(True, "patched",
                            "Rekordbox patched. RELAUNCH Rekordbox and confirm it opens; then start the "
-                           "bridge and it will read it. If Rekordbox won't open, reinstall it.",
-                           command=argv)
+                           "bridge and it will read it.", command=argv)
     finally:
         lock_fh.close()  # releases the flock
 
