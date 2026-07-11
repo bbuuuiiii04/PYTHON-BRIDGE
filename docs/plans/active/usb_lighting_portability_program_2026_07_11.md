@@ -59,6 +59,14 @@ environments:
 > ALL edge cases."
 
 **R1 (mirror USB)** = AWR-207 (built; under ultracode review).
+**R1-S (operator addition 2026-07-11): SCRIPTED TRACKS MUST ALSO WORK from
+USB** — the resolved twin payload must carry the local SSID so scripted
+detection/arming engages exactly as a local load, the async-resolution latency
+must not let a scripted track audibly start in autoloop mode before flipping,
+and ambiguous/unresolved USB loads must not leave stale scripted state. Added
+as mandatory surface 7 of the AWR-207 ultracode review; any gap is a required
+fix, not a future item. (R2 corollary: a guest track he scripts after import
+becomes his scripted content and must behave identically.)
 **R2 (foreign USB + operator import/analyze workflow)**: the operator imports
 the guest stick's tracks into HIS Rekordbox and analyzes them — his Rekordbox
 then owns local copies WITH fresh PSSI. The bridge must twin-match the guest
