@@ -163,6 +163,32 @@ exclusive flock (`/tmp/rb_ss_bridge_v2.lock`); a second bridge of ANY form refus
 to start. If the dev watcher is running, a bundled launch is correctly refused, but
 the watcher will log adopt/start churn. One bridge at a time.
 
+## Before a show: using somebody else's Rekordbox USB on this Mac
+
+Do this in Rekordbox before starting the bridge:
+
+1. Import the guest tracks into this Mac's Rekordbox collection.
+2. Select those imported tracks and finish Rekordbox analysis. Do not stop at
+   the copy/import step.
+3. Leave the guest USB mounted while playing it. Its read-only
+   `PIONEER/rekordbox/export.pdb` supplies the title/artist/duration identity;
+   the local analysis supplies phrases and the local lighting identity.
+4. Watch the bridge log on the first guest-track load. `usb-pdb-match` means
+   both identity checks agreed. The bridge never writes to the guest USB.
+
+If it stays unresolved, the log tells you why:
+
+- `usb-crossanalysis-unconfirmed`: the stick tags could not be read; keep the
+  track unresolved rather than risk the wrong song.
+- `usb-pdb-miss`: the stick's exact title/artist/duration did not find a local
+  import; import the track, then try again.
+- `usb-pdb-ambiguous`: two or more local copies have the same identifying
+  tags; remove/retag the duplicate instead of asking the bridge to guess.
+- `usb-pdb-conflict`: the tags matched but BPM/duration did not; verify that
+  the imported local file is the same recording/version.
+- `imported-not-analyzed`: the local copy exists but its ANLZ is absent or
+  unreadable; finish analysis in Rekordbox.
+
 ## Native install (M2 — the one-action flow, AWR-186)
 
 On the guest Mac: plug the stick → double-click `RBSS Bridge.dmg` → launch the

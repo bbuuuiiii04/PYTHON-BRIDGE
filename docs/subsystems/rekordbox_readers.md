@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 0abbbff
+last_verified_commit: fc0f12f
 last_verified_date: 2026-07-10
-validation_scope: software-only plus Rekordbox 7.2.11 passive mixer RE evidence routing; AWR-157 deck-2 chain freshness gating software-tested; AWR-160 phantom track-load stability gate software-tested; AWR-207 USB-export local-twin resolution software-tested; AWR reader cross-version safety (direct-read BPM cap + emit clamp + symbol-derived offline version-extension tool) software-tested 2026-07-10; hardware-output unvalidated
+validation_scope: software-only plus Rekordbox 7.2.11 passive mixer RE evidence routing; AWR-157 deck-2 chain freshness gating software-tested; AWR-160 phantom track-load stability gate software-tested; AWR-207/AWR-209 USB local-twin and foreign-import resolution software-tested; AWR reader cross-version safety (direct-read BPM cap + emit clamp + symbol-derived offline version-extension tool) software-tested 2026-07-10; hardware-output unvalidated
 ---
 
 # Rekordbox Readers
@@ -130,15 +130,23 @@ Runtime flow:
   normal logs without turning DEBUG on. Unload/track-change recognition for
   an already-confirmed track is unchanged and immediate — the gate delays
   recognition of a new candidate, it never suppresses a stable state.
-- AWR-207 USB-export resolution (`filepath_resolver.py`): local UUID lookup is
-  unchanged. A device-export miss filters local DB rows by BPM (±0.05) and
-  duration (±2 s), reads ANLZ only for that candidate set, and accepts exactly
-  one beatgrid match (count ±1; first beat and 17 sampled timestamps within
-  10 ms; existing exact fingerprint fast path). The payload carries local
+- AWR-207/AWR-209 USB-export resolution (`filepath_resolver.py`): local UUID
+  lookup is unchanged. A device-export miss filters local DB rows by BPM
+  (±0.05) and duration (±2 s), reads ANLZ only for that candidate set, and
+  accepts an untagged mirror twin only when the complete beatgrid fingerprint
+  is exact. The payload carries local
   identity plus optional `local_anlz_path`; StateManager prefers that field for
   the resolved-time phrase/spectral worker. Zero/multiple matches stay
   unresolved, and a device miss skips lsof. All I/O remains in the resolver
   daemon thread; the push loop is unchanged.
+- AWR-209 foreign-stick imports use the mounted stick's read-only
+  `PIONEER/rekordbox/export.pdb` only after the exact mirror match abstains.
+  Exact-normalized title + artist + duration (±2 s) must select one local row,
+  then the USB grid's BPM + duration must agree. Missing tags log
+  `usb-crossanalysis-unconfirmed`; no local tag match logs `usb-pdb-miss`;
+  duplicate local matches log `usb-pdb-ambiguous` with candidate IDs; missing
+  or unreadable local analysis logs `imported-not-analyzed` and tells the
+  operator to finish analysis in Rekordbox. Every conflict returns no identity.
 
 Config:
 - `config.py`
@@ -167,8 +175,10 @@ Tests:
   symmetrically; a stable load never re-emits on later unchanged ticks.
   Pure seams via the existing fake mach-read backend — no mach, no live
   process.
-- `tests/test_filepath_resolver_usb_twin.py` proves AWR-207 device detection,
-  prefiltering, exact/mismatched/zero/ambiguous grids, payload parity, and the
+- `tests/test_filepath_resolver_usb_twin.py` proves AWR-207/AWR-209 device
+  detection, exact mirror identity, red-team collision abstention, minimal PDB
+  parsing, copied/referenced imports, cross-analysis matching, conflict and
+  duplicate rejection, actionable analysis misses, payload parity, and the
   no-lsof miss. `tests/test_smart_transitions.py` pins local-path behavior
   unchanged plus the payload-selected local ANLZ handoff.
 - if no direct hardware/process test exists, mark live behavior unvalidated in repo evidence

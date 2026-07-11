@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 0abbbff
+last_verified_commit: fc0f12f
 last_verified_date: 2026-07-09
 validation_scope: software-only
 ---
@@ -81,6 +81,12 @@ Implementation notes:
   `local_anlz_path` is the data-source seam StateManager consumes for the
   resolved-time phrase/spectral worker; do not make StateManager depend on the
   local DB as the only producer. AWR-208 sidecars are separate design work.
+- (AWR-209) An untagged device load may use only an exact complete-grid
+  fingerprint. Cross-analysis drift requires the mounted export's read-only
+  `export.pdb` title + artist + duration to select exactly one local import,
+  plus independent BPM/duration agreement. Missing PDB tags, conflicts,
+  duplicates, or missing local analysis must return no identity with the
+  documented `usb-*` / `imported-not-analyzed` reason; never guess.
 
 Required tests:
 - Run the targeted tests listed in the subsystem card.
