@@ -6,7 +6,7 @@ math + winning-path diagnostics, track median + MIN_STABLE_DROPS, marker-shift
 range, malformed/empty -> no result (never a phantom T3), and the static
 zero-runtime-importer invariant.
 """
-import re
+import ast
 import sys
 import unittest
 from pathlib import Path
@@ -187,22 +187,25 @@ class SelectorTests(unittest.TestCase):
 
 class ReducerOrderingTests(unittest.TestCase):
     def test_reducers_are_ordered_and_deterministic(self):
-        # full_db rises with beat index -> later windows score higher, so the
-        # alignment score strictly increases with the center offset.
+        # Reducers rank the 5 offsets by the COMPOSITE align score
+        # (0.40B+0.25A+0.20R+0.15N) -- max=top rank, q75=index 3, median=index 2,
+        # center=offset 0. The ordered quantity is that composite, NOT any single
+        # term (on multi-term data L_B need not track it). full_db rises with beat
+        # index so the composite strictly increases with the center offset here.
         full = [10.0 + 0.5 * i for i in range(32)]
         v4 = _ns({"full_db": full}, n_beats=32)
         drops = list(range(6, 26, 4))  # 5 genuine drops for a stable baseline
-        vals = {}
+        score = {}
         offsets = {}
         for reducer in ("center", "median", "q75", "max"):
             base = track_baseline(v4, drops, reducer=reducer)
             res = hardness_result(v4, 8, base, reducer=reducer)
-            vals[reducer] = res.local_terms[0]
+            score[reducer] = hardness_v0._align_score(res.local_terms)  # the ranked quantity
             offsets[reducer] = res.winning_offset
-        self.assertGreaterEqual(vals["max"], vals["q75"])
-        self.assertGreaterEqual(vals["q75"], vals["median"])
-        self.assertGreaterEqual(vals["median"], vals["center"])
-        self.assertGreater(vals["max"], vals["center"])  # the knob does something
+        self.assertGreaterEqual(score["max"], score["q75"])
+        self.assertGreaterEqual(score["q75"], score["median"])
+        self.assertGreaterEqual(score["median"], score["center"])
+        self.assertGreater(score["max"], score["center"])  # the knob does something
         self.assertEqual(offsets["center"], 0)
         self.assertEqual(offsets["max"], 2)
         self.assertEqual(offsets["q75"], 1)
@@ -330,10 +333,39 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(a, b)
 
 
+def _imports_hardness_v0(text: str) -> bool:
+    """AST-robust: catches single-line, multiline-paren, aliased, dotted, and
+    importlib.import_module / __import__ string forms. Falls back to a substring
+    scan (conservative -> over-flags, never under-flags) on unparseable files.
+    """
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return "hardness_v0" in text
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            if node.module and "hardness_v0" in node.module:
+                return True
+            if any("hardness_v0" in a.name for a in node.names):
+                return True
+        elif isinstance(node, ast.Import):
+            if any("hardness_v0" in a.name for a in node.names):
+                return True
+        elif isinstance(node, ast.Call):
+            func = node.func
+            fname = func.id if isinstance(func, ast.Name) else (
+                func.attr if isinstance(func, ast.Attribute) else None)
+            if fname in ("import_module", "__import__"):
+                for arg in node.args:
+                    if isinstance(arg, ast.Constant) and isinstance(arg.value, str) \
+                            and "hardness_v0" in arg.value:
+                        return True
+    return False
+
+
 class ZeroRuntimeImporterTests(unittest.TestCase):
     """The machine-checkable shadow boundary: only tools/ and tests/ may import it."""
 
-    IMPORT_RE = re.compile(r"^[ \t]*(?:from|import)\s+[^\n]*\bhardness_v0\b", re.M)
     SKIP_DIRS = {".git", "graphify-out", "__pycache__", "node_modules", "build", "dist"}
 
     def test_no_runtime_module_imports_hardness_v0(self):
@@ -348,10 +380,23 @@ class ZeroRuntimeImporterTests(unittest.TestCase):
                 text = path.read_text(encoding="utf-8")
             except OSError:
                 continue
-            if self.IMPORT_RE.search(text):
+            if _imports_hardness_v0(text):
                 importers.append(rel)
         offenders = [r for r in importers if not (r.startswith("tools/") or r.startswith("tests/"))]
         self.assertEqual(offenders, [], f"hardness_v0 imported by non-tools/tests modules: {offenders}")
+
+    def test_guard_detects_all_import_forms(self):
+        # the guard must catch the forms the old regex missed
+        for src in (
+            "from rb_ss_bridge_v2 import hardness_v0",
+            "from rb_ss_bridge_v2.hardness_v0 import hardness_result",
+            "import rb_ss_bridge_v2.hardness_v0",
+            "from rb_ss_bridge_v2 import (\n    spectral_cache,\n    hardness_v0,\n)",
+            "importlib.import_module('rb_ss_bridge_v2.hardness_v0')",
+            "__import__('rb_ss_bridge_v2.hardness_v0')",
+        ):
+            self.assertTrue(_imports_hardness_v0(src), src)
+        self.assertFalse(_imports_hardness_v0("from rb_ss_bridge_v2 import spectral_cache"))
 
 
 if __name__ == "__main__":
