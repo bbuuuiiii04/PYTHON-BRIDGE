@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: implemented-and-software-tested
-last_verified_commit: @@CODECOMMIT@@
+last_verified_commit: 311f407
 last_verified_date: 2026-07-11
 validation_scope: >
   Stage-1 EAR benchmark harness (AWR-200 / AWR-195 stage 1). Describes the as-built

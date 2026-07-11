@@ -1,11 +1,11 @@
 ---
 doc_status: current
 truth_level: frozen software baseline + coverage/blocker report
-last_verified_commit: @@CODECOMMIT@@
+last_verified_commit: 311f407
 last_verified_date: 2026-07-11
 validation_scope: >
   Frozen Stage-1 EAR-benchmark run (AWR-200) of tools/spectral_ear_benchmark.py at code
-  HEAD @@CODECOMMIT@@ over the local AWR-182 label layer (label sha256[:16] a584dcb1e0293b24,
+  HEAD 311f407 over the local AWR-182 label layer (label sha256[:16] a584dcb1e0293b24,
   41 rows) after the 2026-07-11 marker-availability + content_id-coverage pass. Records
   usable/excluded counts, cache/beatgrid resolution identity, per-axis metric availability,
   and the marker-sensitivity axis now measured across the FULL 21-lineage usable corpus
@@ -22,11 +22,13 @@ support). **AWR-200 is PARTIAL.**
 
 ## Run identity
 
-- Harness HEAD at run: `@@CODECOMMIT@@` — the committed code after the 2026-07-11
+- Harness HEAD at run: `311f407` — the committed code after the 2026-07-11
   marker-availability + content_id-coverage pass (marker-sensitivity availability now
   requires at least one COMPARABLE ±1/±2 perturbation, not just a scored marker; the
-  frozen report/spec/registry blocker wording corrected). This report is committed
-  immediately after so it cites the precise code it was run against.
+  frozen report/spec/registry blocker wording corrected). The tool + tests + these docs
+  landed together in `311f407` via the working-tree auto-sync; a follow-up commit only
+  corrected this stamp from a placeholder to the real hash. This report cites the exact
+  committed tool it was run against.
 - Labels: `local/labels/operator_track_labels_2026_07_09.jsonl` (gitignored machine layer).
 - Label revision hash: sha256[:16] = `a584dcb1e0293b24`, 41 rows. (This layer was
   mechanically enriched with proven Rekordbox `content_id` locators for the 19 usable B-row
