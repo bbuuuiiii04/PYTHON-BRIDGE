@@ -1,13 +1,14 @@
 ---
 doc_status: current
 truth_level: executive gate record (independent SOL 4.6 re-verification)
-last_verified_commit: 3e83b08
+last_verified_commit: 00daa95
 last_verified_date: 2026-07-11
 validation_scope: >
   Fresh executive re-gate after SOL2 findings 2-5, the LED Pad merge fix,
-  AWR-197/AWR-199, the AWR-200 Stage-1 benchmark, and the completed USB/frozen-app
-  packaging rounds landed on main. Claims below were checked against current code,
-  focused tests, two full-suite working-directory conventions, and the built app.
+  AWR-197/AWR-199, the repaired AWR-200 Stage-1 benchmark, the AWR-203/AWR-204
+  offline spectral layers, and the completed USB/frozen-app packaging rounds landed
+  on main. Claims below were checked against current code, focused tests, two
+  full-suite working-directory conventions, and the built app.
   Evidence class remains SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
 ---
 
@@ -25,12 +26,12 @@ and intrinsic-hardness refactor.
 
 ## Full-suite reconciliation by exact failing name
 
-Current HEAD is `3e83b08`; local `main` and `origin/main` are identical.
+The tested code HEAD is `00daa95`; local `main` and `origin/main` were identical.
 
-- Repo-root convention: 4,250 tests; 8 failures, 6 skipped, 1 expected failure.
+- Repo-root convention: 4,319 tests; 8 failures, 6 skipped, 1 expected failure.
   All eight are a strict subset of `/tmp/fable_discover_post_solfix.log`'s nine-red
   baseline. The old `test_tracked_config_validates` baseline red is now green.
-- Parent-directory convention: 4,250 tests; 9 failures, 6 skipped, 1 expected
+- Parent-directory convention: 4,319 tests; 9 failures, 6 skipped, 1 expected
   failure. Its ninth failure is
   `test_loader_ships_calibrated_fixed_band_and_menu_ch9`, the known
   working-directory artifact; the file is present and that test is green from the
@@ -43,7 +44,10 @@ Current HEAD is `3e83b08`; local `main` and `origin/main` are identical.
   `test_ddj_slots_8_16_17_24_exact_ch1_ch19`, and
   `test_autoloop_capture_rows_identify_passes_and_blockers`.
 - No USB, launcher, installer, Enttec, Rekordbox, menubar, SOL2, pad-merge, or
-  spectral benchmark test entered either failure set.
+  spectral test entered either sequential failure set. An earlier parallel pair of
+  full-suite runs made one Rekordbox cancellation test contend on its intentional
+  cross-process lock; that test passed alone, and the clean sequential repo-root
+  run above is the gate of record.
 
 ## Fresh round verdicts
 
@@ -59,7 +63,9 @@ Current HEAD is `3e83b08`; local `main` and `origin/main` are identical.
 | AWR-202 LED Pad read/modify/merge | **PASS** | `tests.test_led_pad_service`: 37/37 green. Content edits preserve live placement; explicit moves win; history restore preserves live-only blocks/looks. The current :8766 server started after the fix and therefore already serves the merged code. |
 | AWR-186 cross-platform USB + Enttec | **PASS, software only** | Positive Enttec identity replaces generic FTDI/`usbserial` acceptance; pack declaration errors fail closed. Final combined launcher/packaging gate: 374 focused tests green, three hard doc checks green, shell syntax clean. |
 | Frozen app / guest-Mac packaging | **PASS, software only** | The built app's 14-dependency self-check exits zero; binary is arm64; deep/strict code-sign verification passes; `LSMinimumSystemVersion=11.0`; version `0.0.1`. Real `task_for_pid`, Gatekeeper, Local Network permission, target Rekordbox build, Enttec output, and end-to-end lighting remain untested on the guest Mac. |
-| AWR-200 spectral EAR benchmark | **PARTIAL** | Harness and 18 tests are on main. Corpus/fold inventory is runnable and the marker pilot is measured, but tier/family/darkness/growl/laser accuracy axes have no structured operator gold and remain honestly UNAVAILABLE. The executive review found benchmark trust defects that must be repaired before Stage 2 relies on it. |
+| AWR-200 spectral EAR benchmark | **PARTIAL, trust repairs PASS** | 32/32 direct tests green. The anti-leak boundary, amendment lineage grouping, fold invariant, marker availability, comparable denominators, duplicate IDs, and identity warnings were repaired. The current read-only run resolves 21/21 usable lineages and scores 158 markers: +/-1 family 11.4%, tier 22.8%, darkness 24.7%; +/-2 family 23.4%, tier 39.2%, darkness 51.3%. These are sensitivity measurements, not accuracy. Tier/family/darkness/growl/laser accuracy axes still lack structured per-drop operator gold and remain honestly UNAVAILABLE, so Stage 1 remains PARTIAL. |
+| AWR-203 intrinsic-hardness shadow | **EXPERIMENTAL / SOFTWARE-TESTED / OFFLINE ONLY** | 28/28 direct tests green. The frozen SOL3 B/A/R/N three-path candidate and read-only ablation tool have zero runtime importers. A small descriptive run scored 36/40 tracks and 206 drops with zero identity rejects; `H >= 1.0` is only candidate path firing, not a validated tier boundary, and no T1/T2 split exists. It does not replace the live `violence`/`.tier` authority. |
+| AWR-204 raw approach descriptors | **EXPERIMENTAL / SOFTWARE-TESTED / OFFLINE ONLY** | 27/27 direct tests green. The pure four-view descriptor layer reports trajectories, relative depths, void-run curves, separate landed windows, and +/-2 marker sensitivity while abstaining honestly on missing/non-finite/insufficient data. It has zero runtime importers and decides no class, threshold, or darkness length. **SOL2 finding 1 remains open:** no approach classifier, reporting tool, or live wiring exists. |
 
 ## Live config incident — approval required
 
