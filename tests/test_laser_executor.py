@@ -144,6 +144,17 @@ def _sp(**overrides) -> SmartPhrasingState:
     return SmartPhrasingState(reason="test", **overrides)
 
 
+def _arm_idle_decision() -> LaserSceneDecision:
+    """The director's reachable pre-drop blackout-arm decision (AWR-206): an
+    idle decision with no scene and blackout_arm=True, exactly as returned at
+    the priority-7 autoloop_not_ready early return while the autoloop is
+    mid-re-arm during real mixing."""
+    return LaserSceneDecision(
+        scene="", reason="autoloop_not_ready", priority=7,
+        source="policy", role="idle", blackout_arm=True,
+    )
+
+
 def _personality(*, allow_high_impact: bool = True, rotating_banks: bool = False) -> LaserPersonality:
     phrase_bank = ("phrase_a", "phrase_b") if rotating_banks else ("phrase_a",)
     buildup_bank = ("buildup_a", "buildup_b") if rotating_banks else ("buildup_a",)
@@ -979,24 +990,21 @@ class LaserSceneExecutorTests(unittest.TestCase):
         self.assertEqual(status["last_error"], "high_impact_blocked")
         self.assertEqual(status["gated_count"], 1)
 
-    def test_blackout_arm_does_not_fire_when_auto_gates_fail(self) -> None:
+    def test_relaxed_gate_blocks_arm_on_each_failing_subcondition(self) -> None:
+        """AWR-206 fix round: on the reachable idle+blackout_arm seam, the
+        blackout only arms when the relaxed gate (_passes_blackout_gates) passes.
+        Each sub-condition individually False must block the arm and fail closed.
+        autoloop_ready is deliberately absent -- that is the whole point of the
+        relaxed gate (autoloop mid-re-arm still arms; see the churn tests)."""
         blackout_on = LaserMidiMessage(
-            kind="note_on",
-            behavior="note_on",
-            channel=1,
-            note=127,
-            velocity=127,
+            kind="note_on", behavior="note_on", channel=1, note=127, velocity=127,
         )
-        # AWR-206: autoloop_ready=False is deliberately NOT here -- the pre-drop
-        # blackout now arms on the relaxed gate while the autoloop is mid-re-arm
-        # (covered by test_blackout_arms_under_autoloop_churn_*). These cases each
-        # fail a relaxed-gate sub-condition, so they still must NOT arm.
         cases = (
-            _ctx(playing=False, smart_drop_blackout_arm=True),
-            _ctx(active_track_loaded=False, smart_drop_blackout_arm=True),
-            _ctx(position_stale=True, smart_drop_blackout_arm=True),
-            _ctx(lighting_mode="static", smart_drop_blackout_arm=True),
-            _ctx(scripted_id=7, smart_drop_blackout_arm=True),
+            _ctx(playing=False, autoloop_ready=False, smart_drop_blackout_arm=True),
+            _ctx(active_track_loaded=False, autoloop_ready=False, smart_drop_blackout_arm=True),
+            _ctx(position_stale=True, autoloop_ready=False, smart_drop_blackout_arm=True),
+            _ctx(lighting_mode="static", autoloop_ready=False, smart_drop_blackout_arm=True),
+            _ctx(scripted_id=7, autoloop_ready=False, smart_drop_blackout_arm=True),
         )
         for case_ctx in cases:
             midi = _FakeMidiOutput(dry_run=False)
@@ -1005,15 +1013,16 @@ class LaserSceneExecutorTests(unittest.TestCase):
                 backend=MidiOutputBackend(midi),
                 personality=_personality(),
             )
-            ex.on_decision(_decision("buildup_a", "buildup_to_drop_window", "buildup"), case_ctx)
-            self.assertEqual(midi.calls, [])
+            ex.on_decision(_arm_idle_decision(), case_ctx)
+            self.assertEqual(midi.calls, [], case_ctx)
             self.assertFalse(ex.status()["blackout_pending_for_drop_window"])
 
     def test_blackout_arms_under_autoloop_churn_smart_drop(self) -> None:
-        """AWR-206: autoloop_ready=False (autoloop mid-re-arm at the pre-drop
-        instant) must NOT block the pre-drop blackout note. The buildup scene
-        MIDI still stays blocked by the strict gate, and the auto-gate block is
-        still counted."""
+        """AWR-206 fix round: the reachable pre-drop arm path. The director's
+        autoloop_not_ready idle decision (blackout_arm=True) arms the blackout
+        note on the relaxed gate while the autoloop is mid-re-arm. No scene MIDI
+        fires (the director selected none), and no gate block is recorded (the
+        executor is not blocking a scene -- the director declined to pick one)."""
         midi = _FakeMidiOutput(dry_run=False)
         blackout_on = LaserMidiMessage(kind="note_on", behavior="note_on", channel=1, note=90, velocity=127)
         ex = LaserSceneExecutor(
@@ -1022,18 +1031,17 @@ class LaserSceneExecutorTests(unittest.TestCase):
             personality=_personality(),
         )
         ex.on_decision(
-            _decision("buildup_a", "buildup_to_drop_window", "buildup"),
+            _arm_idle_decision(),
             _ctx(autoloop_ready=False, smart_drop_blackout_arm=True),
         )
-        # Blackout note (90) fired; buildup scene (note 39) did NOT.
+        # Only the blackout note (90) fired; no scene MIDI at all.
         self.assertEqual([call[0].note for call in midi.calls], [90])
         self.assertTrue(ex.status()["blackout_pending_for_drop_window"])
-        self.assertEqual(ex.status()["last_error"], "auto_gate_blocked")
-        self.assertEqual(ex.status()["gated_count"], 1)
+        self.assertEqual(ex.status()["gated_count"], 0)
 
     def test_blackout_arms_under_autoloop_churn_smart_phrasing(self) -> None:
-        """AWR-206: the smart-phrasing arm signal takes the same relaxed path as
-        the smart-drop arm signal."""
+        """AWR-206 fix round: the smart-phrasing arm signal takes the same
+        reachable idle+blackout_arm path as the smart-drop arm signal."""
         midi = _FakeMidiOutput(dry_run=False)
         blackout_on = LaserMidiMessage(kind="note_on", behavior="note_on", channel=1, note=90, velocity=127)
         ex = LaserSceneExecutor(
@@ -1042,15 +1050,16 @@ class LaserSceneExecutorTests(unittest.TestCase):
             personality=_personality(),
         )
         ex.on_decision(
-            _decision("buildup_a", "buildup_to_drop_window", "buildup"),
+            _arm_idle_decision(),
             _ctx(autoloop_ready=False, smart_phrasing_blackout_arm=True),
         )
         self.assertEqual([call[0].note for call in midi.calls], [90])
         self.assertTrue(ex.status()["blackout_pending_for_drop_window"])
 
-    def test_blackout_does_not_arm_under_churn_when_scene_unmapped(self) -> None:
-        """AWR-206: even on the relaxed gate, an unmapped scene name must fail
-        closed (no arm), same as the strict-gate path."""
+    def test_blackout_arm_idempotent_across_idle_churn_ticks(self) -> None:
+        """AWR-206 fix round: the arm signal is level-held at 200 Hz across the
+        pre-drop window. Repeated idle+blackout_arm ticks must send the blackout
+        note exactly once (the pending latch is the idempotency guard)."""
         midi = _FakeMidiOutput(dry_run=False)
         blackout_on = LaserMidiMessage(kind="note_on", behavior="note_on", channel=1, note=90, velocity=127)
         ex = LaserSceneExecutor(
@@ -1058,16 +1067,18 @@ class LaserSceneExecutorTests(unittest.TestCase):
             backend=MidiOutputBackend(midi),
             personality=_personality(),
         )
-        ex.on_decision(
-            _decision("no_such_scene", "buildup_to_drop_window", "buildup"),
-            _ctx(autoloop_ready=False, smart_drop_blackout_arm=True),
-        )
-        self.assertEqual(midi.calls, [])
-        self.assertFalse(ex.status()["blackout_pending_for_drop_window"])
+        for beat in (60.0, 60.25, 60.5, 60.75, 61.0):
+            ex.on_decision(
+                _arm_idle_decision(),
+                _ctx(abs_beat=beat, autoloop_ready=False, smart_drop_blackout_arm=True),
+            )
+        self.assertEqual([call[0].note for call in midi.calls], [90])
+        self.assertTrue(ex.status()["blackout_pending_for_drop_window"])
 
-    def test_drop_crossing_resolves_pending_blackout_when_auto_gate_blocked(self) -> None:
-        """AWR-206: a blackout armed under churn must still release at the drop
-        even if the auto gate is still blocked at the crossing tick."""
+    def test_drop_crossing_decision_resolves_blackout_armed_under_churn(self) -> None:
+        """AWR-206 fix round: a blackout armed on the idle path releases when the
+        director later emits a drop_crossing decision (autoloop recovered enough
+        to detect the crossing)."""
         midi = _FakeMidiOutput(dry_run=False)
         blackout_on = LaserMidiMessage(kind="note_on", behavior="note_on", channel=1, note=90, velocity=127)
         blackout_off = LaserMidiMessage(kind="note_off", behavior="note_off", channel=1, note=90, velocity=0)
@@ -1077,15 +1088,39 @@ class LaserSceneExecutorTests(unittest.TestCase):
             personality=_personality(),
         )
         ex.on_decision(
-            _decision("buildup_a", "buildup_to_drop_window", "buildup"),
+            _arm_idle_decision(),
             _ctx(autoloop_ready=False, smart_drop_blackout_arm=True),
         )
         self.assertTrue(ex.status()["blackout_pending_for_drop_window"])
         ex.on_decision(
             _decision("drop_a", "drop_crossing", "drop"),
-            _ctx(autoloop_ready=False, abs_beat=192.0),
+            _ctx(autoloop_ready=True, abs_beat=192.0),
         )
-        self.assertEqual([call[0].note for call in midi.calls], [90, 90])
+        off_calls = [c for c in midi.calls if c[0].note == 90 and c[0].behavior == "note_off"]
+        self.assertEqual(len(off_calls), 1, midi.calls)
+        self.assertFalse(ex.status()["blackout_pending_for_drop_window"])
+
+    def test_state_manager_safety_net_resolves_blackout_armed_under_churn(self) -> None:
+        """AWR-206 fix round: when the autoloop is STILL not ready at the drop
+        crossing, the director never emits drop_crossing -- StateManager's
+        no-drop-decision safety net calls clear_pending_blackout (state_manager.py
+        :4882-4893). That must release a blackout armed on the idle path."""
+        midi = _FakeMidiOutput(dry_run=False)
+        blackout_on = LaserMidiMessage(kind="note_on", behavior="note_on", channel=1, note=90, velocity=127)
+        blackout_off = LaserMidiMessage(kind="note_off", behavior="note_off", channel=1, note=90, velocity=0)
+        ex = LaserSceneExecutor(
+            config=_config(dry_run=False, manual_blackout_on=blackout_on, manual_blackout_off=blackout_off),
+            backend=MidiOutputBackend(midi),
+            personality=_personality(),
+        )
+        ex.on_decision(
+            _arm_idle_decision(),
+            _ctx(autoloop_ready=False, smart_drop_blackout_arm=True),
+        )
+        self.assertTrue(ex.status()["blackout_pending_for_drop_window"])
+        ex.clear_pending_blackout(reason="smart_drop_crossing_without_drop_decision")
+        off_calls = [c for c in midi.calls if c[0].note == 90 and c[0].behavior == "note_off"]
+        self.assertEqual(len(off_calls), 1, midi.calls)
         self.assertFalse(ex.status()["blackout_pending_for_drop_window"])
 
     def test_integrated_director_executor_arms_blackout_under_autoloop_churn(self) -> None:
