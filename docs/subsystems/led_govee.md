@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 3733cf5
-last_verified_date: 2026-07-09
+last_verified_commit: a8d92c0
+last_verified_date: 2026-07-11
 validation_scope: software-only; LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (lab_update/lab_switch/lab_preview), QR same-network access, pad editor unset-param-defaults, Stream Deck palette control Package 2 plus AWR-121 gesture v2, drop presentation policy Package 3, LED idle/pause ambient fix, LED pad queued-color restore, AWR-156 LED round 2 (strobe-gate rebuild + accepted-look promotion), AWR-157 darkness-fix round (blank-role hold guard), AWR-161 LED round 3 (remaining Hz-gate migration, rainbow pair + contrast-gated firework explosion promotion, center-burst pixel fix), and AWR-187 firework redesign (strobing multi-hue explosion + quick dim + aggressive embers, drop_firework_explosion_2) software-tested, hardware-unvalidated
 ---
 
@@ -866,6 +866,11 @@ Authoritative code:
 - `tools/led_pad_web.py` local LED Pad web service
 - `tools/led_pad_lab.py` Template Lab draft registry and pad-only renderer overlay
 - `tools/led_pad_assets/` vanilla LED Pad UI assets
+- AWR-214.TLAB timing truth: `led_pad_controls.EFFECT_TIMING_MODES` makes `/api/renders` exhaustive for
+  beat/time/mixed/static effects; lab registry entries persist the same `timing_mode` and decorate
+  `beat_synced`. Both pad pages badge the timing, and Template Lab disables Beat-sync BPM for
+  time/static/unknown drafts. The AWR-194 wave-1 software sweep was 25 render-working, 0 static,
+  0 render-error (19 beat, 1 mixed, 5 time); no draft function changed. Hardware-unvalidated.
 - `tools/calibrate_identity_v2.py` read-only local spectral-cache calibration summary for v2 identity anchors
 - `scripts/led_pad.py` LED Pad launcher
 - `streamdeck/streamdeck_midi.py` Stream Deck palette/control renderer and MIDI sender

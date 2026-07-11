@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: software-tested
-last_verified_commit: ff2c098
-last_verified_date: 2026-07-10
+last_verified_commit: a8d92c0
+last_verified_date: 2026-07-11
 validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (live-apply + variant switch + preview), Round 2 (param_specs sliders/toggles, slot swatches, JSON demoted to Advanced), Round 3 (rejected-drafts filter, draft delete), QR same-network access, the iOS/iPad touch pass, the editor unset-param-defaults fix, the AWR-193 pad/lab overhaul (accept snapshot, decoupled preview, archive flow, fn fallback, effective bounds, color pickers + regime badges, reconnect, freshness watchdog + live fingerprint + no-cache), and the AWR-202 commit read-modify-merge with the gate fix that tracks look CONTENT (`touched`) separately from role-bank PLACEMENT (`moved`) so a params-only edit keeps the look's LIVE bank while an explicit pad move still applies; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
@@ -182,6 +182,23 @@ as auto rather than an invented number. Software-tested only; no runtime/API/sav
 Template Lab is a second route in the same LED Pad server. It loads draft render code only in the
 pad process from `config/led_lab/effects_lab.py` and tracks draft metadata in
 `config/led_lab/drafts.json`. The bridge never imports lab code.
+
+### Beat-sync truth and BPM scope (AWR-214.TLAB)
+
+`/api/renders` now labels every production effect with `timing_mode` (`beat`, `time`, `mixed`, or
+`static`) and `beat_synced`. LED Pad look cards show the matching badge. Template Lab entries carry
+the same timing fields in `/api/lab/list`; its draft list and detail panel show **beat sync**,
+**beat + time**, **time driven**, **static**, or **timing unknown**. The Template Lab control is now
+labeled **Beat-sync BPM**. It is enabled only for `beat` and `mixed` drafts; mixed means BPM changes
+the beat-driven layer while a wall-clock layer keeps its seconds-based rate. Time/static/unknown
+drafts disable the control and say why.
+
+The AWR-194 wave-1 sweep rendered every draft for 16 seconds at 20 fps through `LabRenderer`:
+25/25 rendered without an exception, 25/25 changed across the sampled cue, and none were
+static-but-rendering. Timing inventory: 19 beat-driven; `remnant_ember_drift` mixed; and five
+time-driven (`sparkle_ember_soft`, `wall_duo_flip`, `wall_white_punch`, `wall_split_strobe`,
+`starfield_drift`). No wave-1 draft function was changed because the software sweep found no
+render failure to repair. This is software evidence only, not a room-visible or hardware result.
 
 Lab names must be lowercase identifiers; a NEW draft cannot take a production realtime render
 name, but an existing entry whose name later became a production effect stays fully saveable
