@@ -33,6 +33,16 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(usb_launcher.main(["--run-streamdeck"]), 0)
         run.assert_called_once_with()
 
+    def test_run_laser_pad_dispatch(self) -> None:
+        with mock.patch.object(usb_launcher, "_run_laser_pad", return_value=0) as run:
+            self.assertEqual(usb_launcher.main(["--run-laser-pad"]), 0)
+        run.assert_called_once_with()
+
+    def test_run_led_pad_dispatch(self) -> None:
+        with mock.patch.object(usb_launcher, "_run_led_pad", return_value=0) as run:
+            self.assertEqual(usb_launcher.main(["--run-led-pad"]), 0)
+        run.assert_called_once_with()
+
     def test_run_frame_engine_passes_fd(self) -> None:
         with mock.patch.object(usb_launcher, "_run_frame_engine", return_value=0) as run:
             self.assertEqual(usb_launcher.main(["--run-frame-engine", "--fd", "7"]), 0)

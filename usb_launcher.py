@@ -7,6 +7,8 @@ bundle needs no host Python and no shell:
   (no args)            → the PyObjC menubar app
   --run-bridge         → the full bridge, in-process, with the shared launch profile
   --run-streamdeck     → the Stream Deck MIDI controller
+  --run-laser-pad      → the Laser Pad web server (port 8765)
+  --run-led-pad        → the LED Pad web server (port 8766)
   --run-frame-engine --fd N → the headless Govee frame-engine child (the frozen
                               re-exec-self target; MUST stay clear of AppKit)
 
@@ -126,6 +128,22 @@ def _run_streamdeck() -> int:
     return 0
 
 
+def _run_laser_pad() -> int:
+    """Run the Laser Pad web server (default port 8765). The menubar spawns this
+    so 'Laser Pad…' opens a live server instead of a dead loopback URL. Pass an
+    empty argv so the pad's argparse never sees the bundle's own --run-laser-pad."""
+    from rb_ss_bridge_v2.tools.laser_pad_web import main as laser_pad_main
+
+    return int(laser_pad_main([]) or 0)
+
+
+def _run_led_pad() -> int:
+    """Run the LED Pad web server (default port 8766); see _run_laser_pad."""
+    from rb_ss_bridge_v2.tools.led_pad_web import main as led_pad_main
+
+    return int(led_pad_main([]) or 0)
+
+
 def _run_menubar() -> int:
     """Run the PyObjC menubar app (imported lazily so headless modes never load Cocoa)."""
     from rb_ss_bridge_v2.scripts.bridge_menubar import main as menubar_main
@@ -175,6 +193,10 @@ def main(argv: list[str] | None = None) -> int:
         return _run_bridge()
     if mode == "--run-streamdeck":
         return _run_streamdeck()
+    if mode == "--run-laser-pad":
+        return _run_laser_pad()
+    if mode == "--run-led-pad":
+        return _run_led_pad()
     if mode == "--replay-session":
         if len(args) < 2 or not args[1]:
             sys.stderr.write("usb_launcher: --replay-session needs a session file path\n")

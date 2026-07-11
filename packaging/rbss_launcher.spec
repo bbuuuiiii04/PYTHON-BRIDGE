@@ -42,6 +42,22 @@ datas = [
     for path in glob.glob(os.path.join(REPO_ROOT, "config", "*.example.json"))
 ]
 datas += collect_data_files("pyrekordbox")
+# Menubar status icons — bridge_menubar resolves ICON_DIR under sys._MEIPASS at
+# this exact rb_ss_bridge_v2/scripts/icons layout, so a guest Mac shows an icon
+# (not the /Users/bbui path that only exists on the maintainer's machine).
+datas += [
+    (path, "rb_ss_bridge_v2/scripts/icons")
+    for path in glob.glob(os.path.join(REPO_ROOT, "scripts", "icons", "*.png"))
+]
+# Pad web UIs — the --run-laser-pad/--run-led-pad servers resolve their asset dir
+# via __file__, which PyInstaller maps under _MEIPASS at the mirrored path, so
+# the frozen pads serve their HTML/JS instead of a blank page. (Dirs are flat.)
+for _pad in ("laser_pad_assets", "led_pad_assets"):
+    datas += [
+        (path, "rb_ss_bridge_v2/tools/%s" % _pad)
+        for path in glob.glob(os.path.join(REPO_ROOT, "tools", _pad, "*"))
+        if os.path.isfile(path)
+    ]
 
 a = Analysis(
     [os.path.join(REPO_ROOT, "usb_launcher.py")],

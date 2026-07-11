@@ -273,5 +273,28 @@ class CliConsentTests(unittest.TestCase):
         self.assertFalse(ap.call_args.kwargs["dry_run"])
 
 
+class SanitizedSystemEnvTests(unittest.TestCase):
+    """DEFECT-3: system-tool subprocesses must not inherit PyInstaller's bundle
+    DYLD_* pollution; restore each var from its *_ORIG (or drop it)."""
+
+    def test_restores_orig_and_strips_bookkeeping(self) -> None:
+        env = {
+            "PATH": "/usr/bin",
+            "DYLD_LIBRARY_PATH": "/bundle/Frameworks",   # bundle value
+            "DYLD_LIBRARY_PATH_ORIG": "/orig/lib",        # pre-launch value
+            "DYLD_FRAMEWORK_PATH": "/bundle/fw",          # no _ORIG -> drop entirely
+        }
+        out = rp.sanitized_system_env(env)
+        self.assertEqual(out["DYLD_LIBRARY_PATH"], "/orig/lib")  # restored
+        self.assertNotIn("DYLD_LIBRARY_PATH_ORIG", out)          # bookkeeping gone
+        self.assertNotIn("DYLD_FRAMEWORK_PATH", out)             # no orig -> removed
+        self.assertEqual(out["PATH"], "/usr/bin")                # untouched
+        self.assertIn("DYLD_FRAMEWORK_PATH", env)                # input not mutated
+
+    def test_clean_env_passthrough(self) -> None:
+        env = {"PATH": "/usr/bin", "HOME": "/Users/x"}
+        self.assertEqual(rp.sanitized_system_env(env), env)
+
+
 if __name__ == "__main__":
     unittest.main()

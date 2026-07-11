@@ -63,6 +63,36 @@ ADDED_ENTITLEMENTS: dict[str, bool] = {
 
 # ── Pure, testable seams ─────────────────────────────────────────────────────
 
+# The library-path vars PyInstaller's bootloader rewrites at launch, pointing them
+# into the bundle and saving the pre-launch value as ``<VAR>_ORIG``.
+_PYINSTALLER_LIBVARS = (
+    "DYLD_LIBRARY_PATH", "DYLD_FRAMEWORK_PATH", "DYLD_INSERT_LIBRARIES",
+    "LD_LIBRARY_PATH", "LIBPATH", "SHLIB_PATH",
+)
+
+
+def sanitized_system_env(mapping) -> dict:
+    """A copy of ``mapping`` with PyInstaller's bundle library-path pollution
+    undone, for spawning macOS system tools (osascript/codesign/pgrep) or a
+    non-bundled child from the frozen app.
+
+    The bootloader points DYLD_LIBRARY_PATH (etc.) at the bundle's Frameworks and
+    stashes the original as ``<VAR>_ORIG``. A child must see the ORIGINAL value
+    (or none), never the bundle's, so restore each var from its ``_ORIG`` — or
+    drop it when there was none — and strip the ``_ORIG`` bookkeeping keys. SIP
+    tools ignore DYLD_* already, so this is defense-in-depth; it is also correct
+    for any non-SIP helper those tools spawn. Pure — the unit-test seam."""
+    env = dict(mapping)
+    for var in _PYINSTALLER_LIBVARS:
+        orig = f"{var}_ORIG"
+        if orig in env:
+            env[var] = env[orig]
+        else:
+            env.pop(var, None)
+        env.pop(orig, None)
+    return env
+
+
 def parse_entitlements_output(data: bytes) -> dict:
     """Extract the entitlements dict from ``codesign -d --entitlements`` output.
 
@@ -133,7 +163,7 @@ def read_entitlements(app: Path) -> dict:
     try:
         proc = subprocess.run(
             ["codesign", "-d", "--entitlements", ":-", "--xml", str(app)],
-            capture_output=True, timeout=30,
+            capture_output=True, timeout=30, env=sanitized_system_env(os.environ),
         )
     except (OSError, subprocess.SubprocessError):
         return {}
@@ -147,7 +177,8 @@ def has_get_task_allow(app: Path) -> bool:
 def is_rekordbox_running() -> bool:
     try:
         return subprocess.run(
-            ["pgrep", "-x", "rekordbox"], capture_output=True, timeout=10
+            ["pgrep", "-x", "rekordbox"], capture_output=True, timeout=10,
+            env=sanitized_system_env(os.environ),
         ).returncode == 0
     except (OSError, subprocess.SubprocessError):
         return False  # can't tell -> treat as not running; apply_patch re-guards
@@ -170,7 +201,8 @@ class PatchResult:
 def _default_runner(argv: list[str]) -> tuple[int, str]:
     try:
         # 600s: a --deep re-sign of the ~2.4 GB universal Rekordbox bundle.
-        p = subprocess.run(argv, capture_output=True, text=True, timeout=600)
+        p = subprocess.run(argv, capture_output=True, text=True, timeout=600,
+                           env=sanitized_system_env(os.environ))
         return p.returncode, p.stderr or ""
     except (OSError, subprocess.SubprocessError) as exc:
         return 1, f"codesign did not run: {exc}"
@@ -194,6 +226,7 @@ def run_via_admin(argv: list[str]) -> tuple[int, str]:
             ["osascript", "-e",
              f'do shell script "/bin/sh {shlex.quote(sh_path)}" with administrator privileges'],
             capture_output=True, text=True, timeout=600,
+            env=sanitized_system_env(os.environ),
         )
         return osa.returncode, osa.stderr or ""
     except (OSError, subprocess.SubprocessError) as exc:
@@ -262,7 +295,8 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
         # confirms that by relaunching Rekordbox.)
         try:
             verify = subprocess.run(["codesign", "--verify", "--strict", str(app)],
-                                    capture_output=True, text=True, timeout=180)
+                                    capture_output=True, text=True, timeout=180,
+                                    env=sanitized_system_env(os.environ))
         except (OSError, subprocess.SubprocessError) as exc:
             return PatchResult(False, "failed",
                                f"could not verify the re-sign ({exc}) — relaunch Rekordbox; "
@@ -287,7 +321,8 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
 # ── macOS GUI flow (menubar / frozen-app dispatch) ───────────────────────────
 
 def _osascript(script: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=600)
+    return subprocess.run(["osascript", "-e", script], capture_output=True, text=True,
+                          timeout=600, env=sanitized_system_env(os.environ))
 
 
 def _gui_notify(message: str) -> None:

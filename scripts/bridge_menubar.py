@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
+import socket
 import subprocess
 import sys
 import tempfile
@@ -34,15 +36,21 @@ from Foundation import NSAttributedString, NSMutableAttributedString, NSObject, 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WATCHER = str(REPO_ROOT / "scripts" / "ss_bridge_watcher.sh")
-MENUBAR_PATTERN = r"^[^[:space:]]*(python3|Python)[^[:space:]]*[[:space:]]+/Users/bbui/rb_ss_bridge_v2/scripts/bridge_menubar\.py$"
+# Single-instance guard is an exclusive flock on this file (see main()), NOT a
+# pgrep on argv: the frozen bundle's argv is the .app binary path, which no
+# source-run regex can match, and a source path is username-specific. flock keys
+# on the file, so one guard covers both the frozen bundle and any source clone.
+MENUBAR_LOCK_PATH = "/tmp/rb_ss_bridge_v2_menubar.lock"
 BRIDGE_PATTERN = r"^[^[:space:]]*(python3|Python)[^[:space:]]*([[:space:]]+-u)?[[:space:]]+-m[[:space:]]+rb_ss_bridge_v2$"
 WATCHER_PATTERN = "^(/bin/bash|bash)[[:space:]]+" + WATCHER.replace(".", r"\.") + "$"
 MONITOR_PATTERN = r"RBSS_BRIDGE_MONITOR|^tail -n 100 -F /tmp/bridge\.log$"
 MANUAL_LAUNCHCTL_LABEL = "rbss_bridge_manual"
 STATUS_PATH = "/tmp/rb_ss_bridge_v2_status.json"
 COMMANDS_PATH = "/tmp/rb_ss_bridge_v2_commands.jsonl"
-LASER_PAD_URL = "http://127.0.0.1:8765"
-LED_PAD_URL = "http://127.0.0.1:8766"
+LASER_PAD_PORT = 8765
+LED_PAD_PORT = 8766
+LASER_PAD_URL = f"http://127.0.0.1:{LASER_PAD_PORT}"
+LED_PAD_URL = f"http://127.0.0.1:{LED_PAD_PORT}"
 RECORDING_PATH_TEMPLATE = "/tmp/rbss-session-{stamp}.jsonl"
 EXPORT_PROCESS_TIMEOUT_SECONDS = 120.0
 EXPORT_RELOAD_TIMEOUT_SECONDS = 8.0
@@ -53,7 +61,13 @@ CANONICAL_PACK_DIR = REPO_ROOT / "local" / "soundswitch" / "rbss_canonical_pack"
 DETECT_MAX_AGE_SECONDS = 30.0
 _SIDECAR_SUFFIX = ".source.json"
 
-ICON_DIR = Path("/Users/bbui")
+# Menubar status icons ship WITH the app so a guest Mac (or any non-maintainer
+# clone) has them. Frozen: PyInstaller unpacks spec datas under sys._MEIPASS at
+# the same rb_ss_bridge_v2/scripts/icons layout. Source: next to this file.
+if getattr(sys, "frozen", False):
+    ICON_DIR = Path(sys._MEIPASS) / "rb_ss_bridge_v2" / "scripts" / "icons"
+else:
+    ICON_DIR = Path(__file__).resolve().parent / "icons"
 ICONS = {
     "off": str(ICON_DIR / "bridge_icon_off.png"),
     "initializing": str(ICON_DIR / "bridge_icon_initializing.png"),
@@ -210,10 +224,35 @@ def _cp():   return NSColor.systemPurpleColor()                                 
 def _cl():   return NSColor.colorWithSRGBRed_green_blue_alpha_(0.38, 0.68, 1.0, 1.0)   # light blue autoloop
 
 
-def already_running() -> bool:
-    result = subprocess.run(["pgrep", "-f", MENUBAR_PATTERN], capture_output=True, text=True)
-    pids = [p for p in result.stdout.strip().split("\n") if p and int(p) != os.getpid()]
-    return len(pids) > 0
+_MENUBAR_LOCK_FD = None
+
+
+def acquire_menubar_lock(path: str = MENUBAR_LOCK_PATH) -> bool:
+    """Return False when another menubar already holds the exclusive lock.
+
+    Mirrors __main__._acquire_single_instance_lock exactly: an flock on a fixed
+    file, keyed on the file rather than argv, so ONE guard fires for the frozen
+    bundle (whose argv is the .app binary) and any source clone alike. The fd is
+    stashed in a module global so the lock is held for the whole process and only
+    released when the menubar exits.
+    """
+    global _MENUBAR_LOCK_FD
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o644)
+    except OSError:
+        # Can't create the lockfile (unwritable /tmp, or a pre-existing one owned
+        # by another macOS user). Fail OPEN — never block the menubar from starting
+        # over a lock-file quirk; a rare double menubar beats no menubar.
+        return True
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(fd)
+        return False
+    os.ftruncate(fd, 0)
+    os.write(fd, f"{os.getpid()}\n".encode("ascii"))
+    _MENUBAR_LOCK_FD = fd
+    return True
 
 
 def watcher_running() -> bool:
@@ -386,6 +425,14 @@ def export_button_text(in_progress: bool, up_to_date: bool) -> str:
     return "Export"
 
 
+def export_button_enabled(in_progress: bool, up_to_date: bool, frozen: bool) -> bool:
+    """Export is a maintainer authoring step: it needs the SoundSwitch source
+    project on disk and the `-m` export tool, neither of which a frozen guest
+    bundle has (a frozen click would only hit usb_launcher's unknown-mode exit).
+    So the button is actionable only on a source run that has real changes."""
+    return not in_progress and not up_to_date and not frozen
+
+
 def _artnet_exam_active(status: dict) -> bool:
     # DualTriggerBackend (artnet_truth_check startup only) is the sole source of
     # "midi_link" in the executor's midi status; it's wired once at bridge boot
@@ -549,6 +596,84 @@ def open_terminal_command(command: str, title: str = "RBSS_TERMINAL") -> None:
 
 def open_browser_url(url: str) -> None:
     subprocess.run(["open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def _system_env() -> dict:
+    """os.environ with PyInstaller's bundle DYLD_* pollution undone, for spawning
+    children/system tools. Reuses the one sanitizer in rekordbox_patch; falls back
+    to a plain copy if that import isn't resolvable (bare-import contexts)."""
+    try:
+        from rb_ss_bridge_v2.rekordbox_patch import sanitized_system_env
+        return sanitized_system_env(os.environ)
+    except Exception:
+        return dict(os.environ)
+
+
+def _port_open(port: int, host: str = "127.0.0.1", timeout: float = 0.25) -> bool:
+    """True if something is already listening on host:port (the pad server)."""
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def laser_pad_argv() -> list[str]:
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "--run-laser-pad"]
+    return [sys.executable, str(REPO_ROOT / "scripts" / "laser_pad.py")]
+
+
+def led_pad_argv() -> list[str]:
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "--run-led-pad"]
+    return [sys.executable, str(REPO_ROOT / "scripts" / "led_pad.py")]
+
+
+def open_pad(url: str, port: int, argv: list[str]) -> None:
+    """Bring the pad server up if it isn't already, then open it in the browser.
+
+    The pad web servers are standalone processes nothing else starts, so on a
+    guest Mac (or a fresh launch) 'open <url>' would land on connection-refused.
+    Spawn one (detached, its own port is the doubles guard) and wait briefly for
+    the port before opening, so the browser sees a live server."""
+    up = _port_open(port)
+    if not up:
+        subprocess.Popen(argv, start_new_session=True, env=_system_env())
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline:
+            if _port_open(port):
+                up = True
+                break
+            time.sleep(0.1)
+    if not up:
+        # Never open a dead loopback URL — say so instead of a silent no-op.
+        _notify("The pad didn't start — try again in a moment, or check the logs.")
+        return
+    open_browser_url(url)
+
+
+def _format_child_failure(label: str, returncode: int, stderr_tail: str) -> str:
+    """Plain-language dialog text when a spawned child dies at startup (pure seam
+    for the frozen bridge / rekordbox-patch spawns, which otherwise fail silent)."""
+    what = {
+        "frozen_bridge_start": "The bridge couldn't start",
+        "patch_rekordbox": "Enabling Rekordbox reads didn't start",
+    }.get(label, "A helper process didn't start")
+    tail = (stderr_tail or "").strip()
+    if len(tail) > 600:
+        tail = "…" + tail[-600:]
+    detail = f"It exited with code {returncode}."
+    if tail:
+        detail += f"\n\n{tail}"
+    return f"{what}. {detail}"
+
+
+def _child_error_log_dir() -> Path:
+    """Where spawned children's stderr is captured (same tree as bridge logs)."""
+    runtime = os.environ.get("RBSS_RUNTIME_DIR")
+    base = Path(runtime) / "logs" if runtime else Path.home() / "Library" / "Logs" / "rb_ss_bridge"
+    return base
 
 
 def default_recording_path() -> str:
@@ -1013,6 +1138,14 @@ class BridgeMenuBar(NSObject):
         self._snapshot = read_status()
         pids = bridge_pids()
         status = _bridge_status_from_pids(pids)
+        # A frozen bridge child (argv '.../rb_ss_bridge_v2 --run-bridge') can't
+        # match BRIDGE_PATTERN, so pgrep never sees it — the owned handle is the
+        # only liveness signal. Without this a live frozen bridge reads 'Off',
+        # identical to a dead one.
+        if status == "off" and getattr(sys, "frozen", False):
+            proc = getattr(self, "_frozen_bridge_proc", None)
+            if proc is not None and proc.poll() is None:
+                status = "on"
         if status != self._status:
             self._set_icon(status)
             self._status = status
@@ -1090,10 +1223,18 @@ class BridgeMenuBar(NSObject):
         self._adapt_timer(status)
 
     def _render_export_state(self):
+        frozen = bool(getattr(sys, "frozen", False))
+        self.export_item.setEnabled_(
+            export_button_enabled(self._export_in_progress, self._export_up_to_date, frozen))
+        if frozen:
+            # Authoring-only: the guest bundle has no SoundSwitch source project
+            # and can't run the -m export tool, so make that plain, not a dead
+            # lit button that fails on click.
+            self.export_item.setTitle_("Export — on the mixing Mac only")
+            self.export_status_item.setTitle_("Lighting pack ships pre-exported on the stick")
+            return
         self.export_item.setTitle_(
             export_button_text(self._export_in_progress, self._export_up_to_date))
-        self.export_item.setEnabled_(
-            not self._export_in_progress and not self._export_up_to_date)
         self.export_status_item.setTitle_(
             pack_export_status_line(
                 self._snapshot.get("soundswitch_pack", {}),
@@ -1136,6 +1277,8 @@ class BridgeMenuBar(NSObject):
         self._pack_auto_retried_enabled = None
 
     def _maybe_detect_export_state(self):
+        if getattr(sys, "frozen", False):
+            return  # Export is disabled on frozen/guest runs — nothing to detect.
         if self._export_in_progress or self._detect_in_progress:
             return
         sig = _source_stat_signature(CANONICAL_SOURCE_PROJECT)
@@ -1168,6 +1311,8 @@ class BridgeMenuBar(NSObject):
         self._render_export_state()
 
     def exportFromSS_(self, _sender):
+        if getattr(sys, "frozen", False):
+            return  # authoring-only; the item is disabled on frozen runs.
         if self._export_in_progress:
             return
         self._export_in_progress = True
@@ -1287,7 +1432,15 @@ class BridgeMenuBar(NSObject):
         if button is None:
             return
         button.setTitle_("RBSS")
-        image = NSImage.alloc().initByReferencingFile_(ICONS[status])
+        icon_path = ICONS[status]
+        # initByReferencingFile_ returns a NON-nil empty image for a missing path,
+        # so guard on existence — else a guest Mac shows a blank icon instead of
+        # the "RBSS" text fallback.
+        image = (
+            NSImage.alloc().initByReferencingFile_(icon_path)
+            if os.path.exists(icon_path)
+            else None
+        )
         if image is not None:
             image.setTemplate_(True)
             image.setSize_(NSMakeSize(16, 16))
@@ -1295,6 +1448,76 @@ class BridgeMenuBar(NSObject):
             button.setImagePosition_(NSImageLeft)
         else:
             button.setImage_(None)
+
+    def _spawn_watched(self, argv, *, label, early_window=4.0):
+        """Spawn a detached child, capturing its stderr to a log; if it exits
+        nonzero within early_window seconds, surface the stderr tail in a dialog.
+
+        These frozen re-exec children (--run-bridge, --patch-rekordbox) were
+        fire-and-forget with no stderr and no exit check, so any early crash was
+        completely invisible ('does nothing'). Watching runs on a daemon thread —
+        it never touches the bridge's 200 Hz loop (separate process) or the
+        AppKit main thread except the final marshalled alert. Returns the Popen."""
+        err_path = None
+        err_fh = subprocess.DEVNULL
+        try:
+            log_dir = _child_error_log_dir()
+            log_dir.mkdir(parents=True, exist_ok=True)
+            err_path = log_dir / f"{label}.err.log"
+            # Truncate per spawn ("wb"): _watch_child reads this file's tail to
+            # decide whether THIS start crashed. Appending would let a previous
+            # crash's traceback trigger a false alert on a later clean start.
+            err_fh = open(err_path, "wb")
+        except OSError:
+            err_path, err_fh = None, subprocess.DEVNULL
+        proc = subprocess.Popen(
+            argv,
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=err_fh,
+            env=_system_env(),
+        )
+        if hasattr(err_fh, "close"):
+            err_fh.close()  # the child has its own dup; drop the parent's handle
+        threading.Thread(
+            target=self._watch_child,
+            args=(proc, err_path, label, early_window),
+            daemon=True,
+        ).start()
+        return proc
+
+    def _watch_child(self, proc, err_path, label, early_window):
+        try:
+            returncode = proc.wait(timeout=early_window)
+        except subprocess.TimeoutExpired:
+            return  # still alive past the window -> it started; its own UI owns it
+        if returncode <= 0:
+            # 0 = clean exit; negative = killed by a signal — our own stop
+            # (_stop_frozen_bridge_child sends SIGTERM -> -15) or an OS kill.
+            # Neither is a startup crash, so never pop a "couldn't start" dialog.
+            return
+        tail = ""
+        if err_path is not None:
+            try:
+                tail = Path(err_path).read_text(encoding="utf-8", errors="replace")[-2000:]
+            except OSError:
+                tail = ""
+        # Only a CRASH writes a traceback to stderr. A nonzero exit with no stderr
+        # is a handled outcome the child already reported via its OWN dialog (e.g.
+        # the operator cancelled the Rekordbox-patch prompt) — alerting there would
+        # be a false "didn't start". Surface only genuine early crashes.
+        if not tail.strip():
+            return
+        self.performSelectorOnMainThread_withObject_waitUntilDone_(
+            "showChildFailure:", _format_child_failure(label, returncode, tail), False,
+        )
+
+    def showChildFailure_(self, message):
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_("RBSS Bridge")
+        alert.setInformativeText_(str(message))
+        alert.addButtonWithTitle_("OK")
+        alert.runModal()
 
     def _stop_frozen_bridge_child(self) -> bool:
         """Stop the owned bridge child by handle (never pkill/pattern — the
@@ -1321,10 +1544,10 @@ class BridgeMenuBar(NSObject):
             return
         # Not running: spawn one child bridge. If another bridge (source-run or
         # bundled) already holds the flock, the child logs the refusal and exits
-        # -- coexistence is a runbook warning (quit the dev watcher first).
-        self._frozen_bridge_proc = subprocess.Popen(
-            [sys.executable, "--run-bridge"],
-            start_new_session=True,
+        # -- coexistence is a runbook warning (quit the dev watcher first). The
+        # watcher surfaces an early crash (its stderr) instead of a silent 'Off'.
+        self._frozen_bridge_proc = self._spawn_watched(
+            [sys.executable, "--run-bridge"], label="frozen_bridge_start",
         )
 
     def toggleBridge_(self, _sender):
@@ -1564,14 +1787,22 @@ class BridgeMenuBar(NSObject):
             argv = [sys.executable, "--patch-rekordbox"]
         else:
             argv = [sys.executable, str(REPO_ROOT / "usb_launcher.py"), "--patch-rekordbox"]
-        subprocess.Popen(argv, start_new_session=True)
+        self._spawn_watched(argv, label="patch_rekordbox")
         _notify("Enabling Rekordbox reads… follow the prompts (you'll be asked for your admin password).")
 
     def mapLasers_(self, _sender):
-        open_browser_url(LASER_PAD_URL)
+        # Off the AppKit main thread: open_pad may spawn the server and wait up to
+        # 3s for its port, which would otherwise freeze the menu on first launch.
+        threading.Thread(
+            target=open_pad, args=(LASER_PAD_URL, LASER_PAD_PORT, laser_pad_argv()),
+            daemon=True,
+        ).start()
 
     def openLedPad_(self, _sender):
-        open_browser_url(LED_PAD_URL)
+        threading.Thread(
+            target=open_pad, args=(LED_PAD_URL, LED_PAD_PORT, led_pad_argv()),
+            daemon=True,
+        ).start()
 
     def toggleLedEngineV2_(self, _sender):
         append_command(led_engine_v2_command(read_status()))
@@ -1603,7 +1834,7 @@ class BridgeMenuBar(NSObject):
 
 
 def main() -> None:
-    if already_running():
+    if not acquire_menubar_lock():
         return
     app = NSApplication.sharedApplication()
     app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)

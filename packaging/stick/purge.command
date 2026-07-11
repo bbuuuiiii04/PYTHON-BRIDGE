@@ -1,16 +1,16 @@
 #!/bin/bash
-# RBSS Bridge — confirmed uninstall (AWR-122 Saturday interim; the native menubar
-# PURGE with confirmation is M2 scope and replaces this).
-#
-# Removes EXACTLY the paths install.command recorded in its manifest — never a
-# blanket delete. Every manifest path must sit under ~/Applications or the
-# RBSS Bridge Application Support folder, must not contain "..", or it is skipped.
-# Requires typing PURGE at the prompt.
+# RBSS Bridge — confirmed uninstall (the shell fallback for when the app won't
+# launch; the native menubar PURGE is the primary path). Kept at PARITY with
+# install_controller.perform_purge: remove the manifest paths (the app under
+# ~/Applications, allowlist-checked, no ".."), then clear the WHOLE App Support
+# dir (runtime state + configs + Govee key + cache) and the logs — so no residue
+# survives, whichever installer created it. Requires typing PURGE at the prompt.
 set -euo pipefail
 
 SUPPORT="$HOME/Library/Application Support/RBSS Bridge"
 MANIFEST="$SUPPORT/install_manifest.txt"
 APPS_ROOT="$HOME/Applications"
+LOGS="$HOME/Library/Logs/rb_ss_bridge"
 
 if [ ! -f "$MANIFEST" ]; then
     echo "purge: no install manifest at '$MANIFEST' — nothing install.command installed here. Refusing."
@@ -37,11 +37,12 @@ while IFS= read -r path; do
     removed=$((removed + 1))
 done < "$MANIFEST"
 
-rm -f "$MANIFEST"
-# Prune now-empty dirs the install created; rmdir refuses non-empty ones by design.
-find "$SUPPORT/spectral_cache" -type d -empty -delete 2>/dev/null || true
-rmdir "$SUPPORT" 2>/dev/null || true
+# Full parity with perform_purge: after the manifest paths (the app), clear the
+# ENTIRE App Support dir (runtime state/, configs, Govee key, cache, the manifest
+# itself) and the logs — catching residue no manifest lists. Both are hardcoded,
+# bounded constants under $HOME, so this rm -rf is as safe as perform_purge's.
+rm -rf "$SUPPORT"
+rm -rf "$LOGS"
 
-echo "purge: removed $removed installed item(s)."
-echo "Remaining (not created by the installer): permission entries in System Settings"
-echo "(macOS keeps those) and any logs under ~/Library/Logs/rb_ss_bridge from runs."
+echo "purge: removed $removed manifest item(s), then cleared App Support + logs."
+echo "Remaining: permission entries in System Settings (macOS keeps those; inert)."

@@ -42,7 +42,13 @@ SUPPORT="$HOME/Library/Application Support/RBSS Bridge"
 CONFIG_DIR="${RBSS_MAKE_STICK_CONFIG_DIR:-$REPO_ROOT/config}"
 PREBUILT_APP="${RBSS_MAKE_STICK_APP:-}"
 STAGE_ONLY="${RBSS_MAKE_STICK_STAGE_ONLY:-}"
-VENV="$REPO_ROOT/.build-venv-314"
+# universal2 build venv (python.org, LOW deployment target). NOT Homebrew: its
+# arm64 macOS-15 libpython hard-binds macOS-13 symbols (_mkfifoat), which crash
+# on older Macs (DEFECT-1). See find_build_python below + the runbook.
+VENV="$REPO_ROOT/.build-venv-u2"
+# The oldest macOS the produced .app targets. python.org's universal2 build floors
+# at 10.13; 11.0 is a safe practical floor and clears the reported macOS 12 crash.
+export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-11.0}"
 
 HOME_PARITY_FILES=(
     "$SUPPORT/govee.env"
@@ -53,6 +59,30 @@ HOME_PARITY_FILES=(
 )
 
 fail() { echo "make_stick: $1" >&2; exit 1; }
+
+# ── build interpreter: python.org universal2, low deployment target ──────────
+# Homebrew's Python targets macOS 15 and is arm64-only, so a bundle built with it
+# crashes on macOS 12 (Symbol not found: _mkfifoat) and can't run on Intel at all.
+# Require a python.org framework build (universal2, target < 13). Override with
+# RBSS_BUILD_PYTHON=/path/to/python3.
+find_build_python() {
+    local candidates=() py v archs
+    [ -n "${RBSS_BUILD_PYTHON:-}" ] && candidates+=("$RBSS_BUILD_PYTHON")
+    for v in 3.14 3.13 3.12 3.11; do
+        candidates+=("/Library/Frameworks/Python.framework/Versions/$v/bin/python3")
+    done
+    for py in "${candidates[@]}"; do
+        [ -x "$py" ] || continue
+        # deployment target must be < 13 (else macOS-13 symbols get hard-bound)…
+        "$py" -c 'import sys,sysconfig; t=sysconfig.get_config_var("MACOSX_DEPLOYMENT_TARGET") or "0"; sys.exit(0 if int(str(t).split(".")[0])<13 else 1)' 2>/dev/null || continue
+        # …and it must be universal2 (both slices) or the app stays arm64-only.
+        archs="$(lipo -archs "$py" 2>/dev/null || true)"
+        case "$archs" in
+            *x86_64*arm64*|*arm64*x86_64*) echo "$py"; return 0 ;;
+        esac
+    done
+    return 1
+}
 
 # ── target checks first: refuse before spending minutes on a build ──────────
 STICK="${1:-}"
@@ -78,14 +108,33 @@ if [ -n "$PREBUILT_APP" ]; then
 else
     cd "$REPO_ROOT"
     if [ ! -x "$VENV/bin/pyinstaller" ]; then
-        echo "make_stick: build venv missing — creating it (runbook commands)…"
-        python3 -m venv --system-site-packages "$VENV"
+        BUILD_PY="$(find_build_python)" || fail "no python.org universal2 Python (target <13) found. Install the 'macOS 64-bit universal2 installer' for Python 3.11+ from python.org, or set RBSS_BUILD_PYTHON=/path/to/python3. A Homebrew Python builds a bundle that crashes on macOS < 15 (DEFECT-1)."
+        echo "make_stick: build interpreter → $BUILD_PY (universal2, target $MACOSX_DEPLOYMENT_TARGET)"
+        # No --system-site-packages: that flag pulled Homebrew's arm64/target-15
+        # packages back in. Install the rig fresh (universal2 wheels) into the
+        # clean venv. analysis+spectral cover numpy/scipy/librosa the frozen
+        # bridge previously got only via --system-site-packages.
+        "$BUILD_PY" -m venv "$VENV"
+        "$VENV/bin/python" -m pip install --upgrade pip
         "$VENV/bin/python" -m pip install pyinstaller
+        # Full rig first (analysis+spectral = numpy/scipy/librosa->numba/llvmlite).
+        # If a heavy universal2 wheel is missing on this interpreter (common on the
+        # NEWEST Python, e.g. no 3.14 llvmlite universal2 wheel), fall back to the
+        # core rig so the build still produces a WORKING bundle — without spectral
+        # analysis — rather than failing outright. Warn loudly; runbook covers it.
+        if ! "$VENV/bin/python" -m pip install ".[bundle,analysis,spectral]"; then
+            echo "make_stick: WARNING — analysis/spectral deps failed to install (likely no universal2 wheel for numba/llvmlite on this Python). Falling back to the core rig; the bundle will run WITHOUT spectral analysis. Install an older python.org 3.x (or set RBSS_BUILD_PYTHON) if you need it." >&2
+            "$VENV/bin/python" -m pip install ".[bundle]" \
+                || fail "core dependency install failed — see the runbook DEFECT-1 notes."
+        fi
     fi
     "$VENV/bin/pyinstaller" packaging/rbss_launcher.spec \
         --noconfirm --distpath dist --workpath build
     rm -rf build                                   # delete the intermediate (disk)
     bash packaging/sign.sh "dist/RBSS Bridge.app"
+    # Strip any quarantine so a foreign Mac's Gatekeeper doesn't second-guess the
+    # ad-hoc signature (a plain USB/DMG copy adds none, but be explicit).
+    xattr -cr "$REPO_ROOT/dist/RBSS Bridge.app" 2>/dev/null || true
     APP="$REPO_ROOT/dist/RBSS Bridge.app"
 fi
 

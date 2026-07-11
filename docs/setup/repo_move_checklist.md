@@ -55,11 +55,10 @@ Terminal, Python, and launchd before any live use.
      `STREAMDECK_SCRIPT` from its own location.
    - Do not edit or depend on `~/ss_bridge_watcher.sh`; the menubar launches the
      repo copy.
-3. Update `scripts/bridge_menubar.py`:
-   - `MENUBAR_PATTERN`
-   - `ICON_DIR`
-
-   This is a code change. Route it through the `bridge_menubar` contract.
+3. `scripts/bridge_menubar.py` — nothing to edit on a move. The single-instance
+   guard is now a path-independent `/tmp` flock (`acquire_menubar_lock`, no
+   `MENUBAR_PATTERN`), and `ICON_DIR` resolves relative to this file / the frozen
+   bundle. Both used to be hardcoded to `/Users/bbui` and needed a move-time edit.
 
 4. Regenerate and reinstall the three plist files from the repo `launchagents/`
    copies.

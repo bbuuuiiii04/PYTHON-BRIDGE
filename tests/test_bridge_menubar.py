@@ -28,31 +28,39 @@ class BridgeMenubarTests(unittest.TestCase):
                 self.skipTest(f"PyObjC unavailable: {exc.name}")
             raise
 
-    def test_map_lasers_opens_pad_url(self) -> None:
-        scripts_dir = Path(__file__).resolve().parents[1] / "scripts"
+    def test_open_pad_opens_directly_when_already_up(self) -> None:
         bridge_menubar = self._import_module()
-
-        handler = bridge_menubar.BridgeMenuBar.mapLasers_
-        with patch.object(bridge_menubar, "open_browser_url") as open_browser:
-            handler.callable(None, None)
-
+        with patch.object(bridge_menubar, "_port_open", return_value=True), \
+             patch.object(bridge_menubar.subprocess, "Popen") as popen, \
+             patch.object(bridge_menubar, "open_browser_url") as open_browser:
+            bridge_menubar.open_pad(bridge_menubar.LASER_PAD_URL, 8765, ["x"])
+        popen.assert_not_called()  # already listening -> don't stack a 2nd server
         open_browser.assert_called_once_with(bridge_menubar.LASER_PAD_URL)
-        self.assertEqual(bridge_menubar.LASER_PAD_URL, "http://127.0.0.1:8765")
+
+    def test_open_pad_spawns_when_down_then_opens(self) -> None:
+        bridge_menubar = self._import_module()
+        argv = bridge_menubar.laser_pad_argv()
+        # down at the first probe, then up (so the wait loop exits immediately)
+        with patch.object(bridge_menubar, "_port_open", side_effect=[False, True]), \
+             patch.object(bridge_menubar.subprocess, "Popen") as popen, \
+             patch.object(bridge_menubar, "open_browser_url") as open_browser:
+            bridge_menubar.open_pad(bridge_menubar.LASER_PAD_URL, 8765, argv)
+        popen.assert_called_once()
+        self.assertEqual(popen.call_args.args[0], argv)
+        open_browser.assert_called_once_with(bridge_menubar.LASER_PAD_URL)
+
+    def test_pad_handlers_dispatch_off_main_thread(self) -> None:
+        # open_pad may block up to 3s spawning the server, so the AppKit handlers
+        # must background it (menu stays responsive) — pin that they thread it.
+        scripts_dir = Path(__file__).resolve().parents[1] / "scripts"
         source = (scripts_dir / "bridge_menubar.py").read_text(encoding="utf-8")
         self.assertIn("Laser Pad…", source)
-
-    def test_led_pad_menu_opens_browser(self) -> None:
-        scripts_dir = Path(__file__).resolve().parents[1] / "scripts"
-        bridge_menubar = self._import_module()
-
-        handler = bridge_menubar.BridgeMenuBar.openLedPad_
-        with patch.object(bridge_menubar, "open_browser_url") as open_browser:
-            handler.callable(None, None)
-
-        open_browser.assert_called_once_with(bridge_menubar.LED_PAD_URL)
-        self.assertEqual(bridge_menubar.LED_PAD_URL, "http://127.0.0.1:8766")
-        source = (scripts_dir / "bridge_menubar.py").read_text(encoding="utf-8")
         self.assertIn("LED Pad…", source)
+        for handler in ("def mapLasers_", "def openLedPad_"):
+            start = source.index(handler)
+            body = source[start:start + 400]
+            self.assertIn("threading.Thread", body, f"{handler} must not block the menu")
+            self.assertIn("open_pad", body)
 
     def test_watcher_path_uses_repo_copy(self) -> None:
         bridge_menubar = self._import_module()
@@ -1049,6 +1057,71 @@ class BridgeMenubarTests(unittest.TestCase):
             10,
         )
         self.assertEqual(len(bridge_menubar.compact_status_lines({"schema": 1})), 10)
+
+
+class FrozenDefectHelperTests(BridgeMenubarTests):
+    """Pure seams added for the frozen-app defect fixes (DEFECT 2/4/5/6)."""
+
+    def test_acquire_menubar_lock_blocks_second_holder(self) -> None:
+        import fcntl
+        import os as _os
+        import tempfile as _tf
+        bridge_menubar = self._import_module()
+        lock_path = str(Path(_tf.gettempdir()) / "rbss_menubar_locktest.lock")
+        holder = open(lock_path, "w")
+        fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            # Another process holds it -> the guard refuses (frozen or source).
+            self.assertFalse(bridge_menubar.acquire_menubar_lock(lock_path))
+        finally:
+            fcntl.flock(holder, fcntl.LOCK_UN)
+            holder.close()
+        # Released -> now acquirable; clean up the module-global fd we opened.
+        self.assertTrue(bridge_menubar.acquire_menubar_lock(lock_path))
+        if bridge_menubar._MENUBAR_LOCK_FD is not None:
+            _os.close(bridge_menubar._MENUBAR_LOCK_FD)
+            bridge_menubar._MENUBAR_LOCK_FD = None
+
+    def test_export_button_enabled_rules(self) -> None:
+        bridge_menubar = self._import_module()
+        f = bridge_menubar.export_button_enabled
+        self.assertTrue(f(False, False, False))   # source + real changes -> actionable
+        self.assertFalse(f(True, False, False))   # export already running
+        self.assertFalse(f(False, True, False))   # already up to date
+        self.assertFalse(f(False, False, True))   # frozen guest -> never actionable
+
+    def test_pad_argv_source_and_frozen(self) -> None:
+        bridge_menubar = self._import_module()
+        self.assertEqual(
+            bridge_menubar.laser_pad_argv()[-1],
+            str(bridge_menubar.REPO_ROOT / "scripts" / "laser_pad.py"),
+        )
+        self.assertEqual(
+            bridge_menubar.led_pad_argv()[-1],
+            str(bridge_menubar.REPO_ROOT / "scripts" / "led_pad.py"),
+        )
+        with patch.object(bridge_menubar.sys, "frozen", True, create=True):
+            self.assertEqual(
+                bridge_menubar.laser_pad_argv(),
+                [bridge_menubar.sys.executable, "--run-laser-pad"],
+            )
+            self.assertEqual(
+                bridge_menubar.led_pad_argv(),
+                [bridge_menubar.sys.executable, "--run-led-pad"],
+            )
+
+    def test_format_child_failure_names_code_and_tail(self) -> None:
+        bridge_menubar = self._import_module()
+        msg = bridge_menubar._format_child_failure(
+            "frozen_bridge_start", 3, "Traceback:\nImportError: boom",
+        )
+        self.assertIn("bridge couldn't start", msg.lower())
+        self.assertIn("code 3", msg)
+        self.assertIn("ImportError: boom", msg)
+        # unknown label -> a generic-but-honest message, still with the code
+        generic = bridge_menubar._format_child_failure("weird", 1, "")
+        self.assertIn("helper process", generic.lower())
+        self.assertIn("code 1", generic)
 
 
 class NativeInstallGateTests(BridgeMenubarTests):

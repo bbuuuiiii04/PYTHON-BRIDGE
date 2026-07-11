@@ -22,17 +22,47 @@ builds and its pieces dispatch; it does NOT install anything and does NOT prove
 the bundled bridge lights the room identically to a source run — that is the
 operator parity run at the end.
 
-## Build environment (Task 0 — decided)
+## Build environment (Task 0 — REVISED after the foreign-Mac failure)
 
-- **Interpreter:** Python 3.14.6 (Homebrew, the current runtime). No python.org
-  fallback needed — PyInstaller supports it.
-- **PyInstaller:** 6.21.0, installed in a disposable, gitignored, system-site-packages
-  venv so the bridge's deps are visible without reinstalling them:
+**Do NOT build with Homebrew Python.** Homebrew's Python 3.14 is arm64-only and
+was compiled targeting macOS 15, so its `libpython` hard-binds macOS-13 symbols
+(`_mkfifoat`). A bundle built with it aborts at launch on any Mac older than the
+build target — the original bundle died on macOS 12 with `Symbol not found:
+_mkfifoat` before any bridge code ran — and can't run on Intel at all. Setting
+`MACOSX_DEPLOYMENT_TARGET` at PyInstaller time does NOT help: it cannot relink a
+prebuilt `libpython`. Only a low-target interpreter fixes it.
+
+- **Interpreter:** the **python.org universal2** build of Python 3.11+ (install
+  the "macOS 64-bit universal2 installer" `.pkg`). It targets macOS 10.13 and
+  ships both arm64 + x86_64 slices, fixing the crash AND Intel support at once.
+  `make_stick.sh` auto-selects it from
+  `/Library/Frameworks/Python.framework/Versions/*/bin/python3` (target < 13,
+  universal2); override with `RBSS_BUILD_PYTHON=/path/to/python3`. It refuses to
+  build with a Homebrew/target-15 interpreter.
+- **Minimum macOS supported by the fixed build:** ~**macOS 11 (Big Sur)** in
+  practice (`MACOSX_DEPLOYMENT_TARGET=11.0`); the `libpython` floor is 10.13, but
+  the real floor is the highest `minos` among the bundled wheels/dylibs. This
+  comfortably clears the reported macOS 12 target.
+- **Deps:** NO `--system-site-packages` (that pulled Homebrew's arm64/target-15
+  wheels back in). `make_stick.sh` installs the rig fresh into a clean venv:
   ```bash
-  python3 -m venv --system-site-packages .build-venv-314
-  ./.build-venv-314/bin/python -m pip install pyinstaller
+  <python.org python3> -m venv .build-venv-u2
+  ./.build-venv-u2/bin/python -m pip install pyinstaller
+  ./.build-venv-u2/bin/python -m pip install ".[bundle,analysis,spectral]"
   ```
-- Test suite passes on this interpreter at the M1 baseline (known 5 pre-existing reds).
+  Caveat: for a fully universal2 app every C-extension wheel must have a
+  universal2 build; `librosa`→`numba`/`llvmlite` are the usual holdouts and the
+  NEWEST Python often has none yet. If the `analysis,spectral` install fails,
+  `make_stick.sh` warns and falls back to `.[bundle]` (the core rig) so the build
+  still produces a WORKING bundle — but **without spectral analysis**. If you need
+  spectral, install an older python.org 3.x (e.g. 3.12) whose numba/llvmlite
+  universal2 wheels exist and point `RBSS_BUILD_PYTHON` at it. If a wheel is
+  arm64-only the app still runs on the build arch (the mkfifoat fix stands);
+  Intel support is best-effort until universal2 wheels exist.
+- **Gatekeeper/quarantine:** ad-hoc signing satisfies Apple-silicon's
+  must-be-signed rule, and a plain USB/DMG copy applies no `com.apple.quarantine`,
+  so the app launches without a notarization step. `make_stick.sh` runs
+  `xattr -cr` on the built app as belt-and-suspenders.
 
 ## Build → ship: `make_stick.sh` (M2 — THE build path)
 
