@@ -31,6 +31,10 @@ bundle = [
     "Pillow>=10",
     "python-rtmidi>=1.5",
     "pyserial>=3.5",
+    # filepath_resolver._read_soundswitch_id reads the SoundSwitch track id from
+    # file tags; without it a frozen guest silently loses scripted/autoloop
+    # selection (the maintainer's Homebrew python has it, a fresh venv does not).
+    "mutagen>=1.45",
 ]
 
 [tool.setuptools]

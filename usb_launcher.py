@@ -108,6 +108,11 @@ def _run_bridge() -> int:
     pack_dir = support_dir / "soundswitch_pack"
     if pack_dir.is_dir() and not os.environ.get("RBSS_SS_PACK_PATH"):
         os.environ["RBSS_SS_PACK_PATH"] = str(pack_dir)
+    # numba (librosa's JIT, on the spectral path) needs a WRITABLE cache dir; the
+    # frozen bundle is read-only/code-signed, so point it at App Support — else
+    # numba re-JITs every start or tries to write into the signed .app. setdefault
+    # honors an operator override.
+    os.environ.setdefault("NUMBA_CACHE_DIR", str(support_dir / "numba_cache"))
     # Force the 19 launch flags (parity with the watcher, which hardcodes them),
     # honoring an operator RBSS_LASER_CONFIG override for the config path.
     laser_cfg = (
@@ -142,6 +147,14 @@ def _pad_config_path(filename: str, env_key: str) -> str:
     if override:
         return override
     installed = GOVEE_ENV_PATH.parent / filename
+    # Frozen: _REPO_ROOT is sys._MEIPASS INSIDE the read-only, code-signed bundle,
+    # which ships only *.example.json. NEVER return that path — the pad would seed a
+    # default config and its Save would write into the signed .app (mutating the
+    # signature; wiped on reinstall). Always use the WRITABLE App Support path the
+    # bridge also resolves; load_or_create_config creates it there if absent, so pad
+    # and bridge agree on one file.
+    if getattr(sys, "frozen", False):
+        return str(installed)
     if installed.exists():
         return str(installed)
     return str(_REPO_ROOT / "config" / filename)

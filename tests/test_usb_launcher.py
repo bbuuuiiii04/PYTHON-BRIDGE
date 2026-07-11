@@ -64,13 +64,24 @@ class DispatchTests(unittest.TestCase):
                     usb_launcher._pad_config_path("laser_director.json", "RBSS_LASER_CONFIG"),
                     str(cfg),
                 )
-        # 3) no override, no installed copy -> repo/bundle default (NOT a blank).
+        # 3) SOURCE run, no override, no installed copy -> repo default (writable).
         with tempfile.TemporaryDirectory() as d:
             with mock.patch.object(usb_launcher, "GOVEE_ENV_PATH", Path(d) / "govee.env"), \
                  mock.patch.dict(os.environ, {}, clear=False):
                 os.environ.pop("RBSS_LASER_CONFIG", None)
                 got = usb_launcher._pad_config_path("laser_director.json", "RBSS_LASER_CONFIG")
                 self.assertTrue(got.endswith("config/laser_director.json"), got)
+        # 4) FROZEN, no override, no installed copy -> the WRITABLE App Support path,
+        #    NEVER the read-only bundle (a pad Save must never mutate the signed .app).
+        with tempfile.TemporaryDirectory() as d:
+            support = Path(d)
+            with mock.patch.object(usb_launcher, "GOVEE_ENV_PATH", support / "govee.env"), \
+                 mock.patch.object(usb_launcher.sys, "frozen", True, create=True), \
+                 mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("RBSS_LASER_CONFIG", None)
+                got = usb_launcher._pad_config_path("laser_director.json", "RBSS_LASER_CONFIG")
+                self.assertEqual(got, str(support / "laser_director.json"))
+                self.assertNotIn("config/laser_director.json", got)  # not the bundle
 
     def test_run_frame_engine_passes_fd(self) -> None:
         with mock.patch.object(usb_launcher, "_run_frame_engine", return_value=0) as run:

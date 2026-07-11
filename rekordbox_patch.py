@@ -150,6 +150,15 @@ def enough_disk_for_backup(app_size: int, free: int, margin: int = 500 * 1024 * 
     return free >= app_size + margin
 
 
+def is_user_cancel(stderr: str) -> bool:
+    """True when an osascript admin escalation was cancelled by the operator
+    (rc -128 / 'User canceled'). Rekordbox was never touched — the trampoline never
+    ran codesign — so this is a CLEAN abort, not a codesign failure that needs a
+    restore (which would pop a spurious second admin prompt). Pure test seam."""
+    s = (stderr or "").lower()
+    return "user canceled" in s or "user cancelled" in s or "(-128)" in s
+
+
 # ── On-machine inspection (read-only) ────────────────────────────────────────
 
 def find_rekordbox(app_paths: tuple[Path, ...] | None = None) -> Path | None:
@@ -365,6 +374,13 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
 
         rc, err = (runner or _default_runner)(argv)
         if rc != 0:
+            if is_user_cancel(err):
+                # Operator dismissed the admin prompt: codesign never ran, Rekordbox
+                # is untouched. Clean abort — do NOT restore (that would pop a second
+                # admin prompt and falsely claim a recovery).
+                _cleanup_backup(backup)
+                return PatchResult(False, "refused",
+                                   "Cancelled — Rekordbox was not modified.", command=argv)
             hint = ""
             if "not permitted" in err.lower() or "permission denied" in err.lower():
                 hint = " (needs admin — run with sudo, or use --admin / the menubar which prompt for your password)"

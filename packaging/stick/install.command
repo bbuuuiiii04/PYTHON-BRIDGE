@@ -44,11 +44,13 @@ fi
 
 echo "Installing RBSS Bridge (app + pre-warmed analysis if present)…"
 MOUNT="$(hdiutil attach -nobrowse -readonly "$DMG" | awk -F$'\t' '/\/Volumes\//{print $NF; exit}')"
+# Arm the detach trap BEFORE the mount check, so a mounted-but-no-app early exit
+# still detaches (an empty $MOUNT is harmless — hdiutil detach "" is swallowed).
+trap 'hdiutil detach "$MOUNT" -quiet >/dev/null 2>&1 || true' EXIT
 if [ -z "$MOUNT" ] || [ ! -d "$MOUNT/RBSS Bridge.app" ]; then
     echo "install: could not mount the DMG or it carries no RBSS Bridge.app."
     exit 1
 fi
-trap 'hdiutil detach "$MOUNT" -quiet >/dev/null 2>&1 || true' EXIT
 
 mkdir -p "$HOME/Applications" "$SUPPORT"
 rm -rf "$APP_DEST"
@@ -65,6 +67,9 @@ if [ -d "$PAYLOAD_ROOT/home" ]; then
     for src in "$PAYLOAD_ROOT/home"/*; do
         [ -f "$src" ] || continue
         dest="$SUPPORT/$(basename "$src")"
+        # Don't overwrite an operator's tuned config on reinstall (parity with
+        # install_controller.perform_install).
+        if [ -e "$dest" ]; then echo "kept existing $(basename "$dest")"; continue; fi
         cp "$src" "$dest"
         printf '%s\n' "$dest" >> "$MANIFEST"
         homed=$((homed + 1))

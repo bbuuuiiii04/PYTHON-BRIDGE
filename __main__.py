@@ -515,7 +515,14 @@ def _build_led_startup_wiring(
         )
         govee_sender = None
         if not cfg.dry_run:
-            govee_sender = GoveeRuntimeSender(cfg)
+            # A cloud device-resolve failure must degrade cloud sends to disabled,
+            # NOT take down the whole LED subsystem (incl. the LAN realtime strip
+            # built below). send_command=None is already the disabled-cloud path.
+            try:
+                govee_sender = GoveeRuntimeSender(cfg)
+            except Exception as exc:
+                log.warning("[MAIN] govee-cloud-sender-degraded err=%s", exc)
+                govee_sender = None
         cloud_adapter = GoveeSceneAdapter(
             cfg,
             send_command=govee_sender.send if govee_sender is not None else None,

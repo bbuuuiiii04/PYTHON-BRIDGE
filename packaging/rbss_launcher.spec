@@ -34,6 +34,9 @@ hiddenimports += [
     "serial.tools.list_ports",
     "PIL", "PIL.Image", "PIL.ImageDraw", "PIL.ImageFont",
     "pythonosc",
+    # filepath_resolver imports these inside try/except (SoundSwitch track id);
+    # PyInstaller can miss function-local guarded imports, so pin them.
+    "mutagen", "mutagen.id3",
 ]
 
 # Bundle only example configs (live configs + govee.env are gitignored secrets).
@@ -106,5 +109,11 @@ app = BUNDLE(
             "RBSS Bridge finds SoundSwitch and Govee lights on your local network.",
         "CFBundleName": "RBSS Bridge",
         "CFBundleDisplayName": "RBSS Bridge",
+        # The bundled python.org interpreter floors at macOS 11; declare it so an
+        # older-macOS guest gets Finder's clean "requires macOS 11.0 or later"
+        # instead of a raw dyld crash. Real version (not 0.0.0) so upgrades compare.
+        "LSMinimumSystemVersion": "11.0",
+        "CFBundleShortVersionString": "0.0.1",
+        "CFBundleVersion": "0.0.1",
     },
 )

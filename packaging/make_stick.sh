@@ -42,12 +42,15 @@ SUPPORT="$HOME/Library/Application Support/RBSS Bridge"
 CONFIG_DIR="${RBSS_MAKE_STICK_CONFIG_DIR:-$REPO_ROOT/config}"
 PREBUILT_APP="${RBSS_MAKE_STICK_APP:-}"
 STAGE_ONLY="${RBSS_MAKE_STICK_STAGE_ONLY:-}"
-# universal2 build venv (python.org, LOW deployment target). NOT Homebrew: its
-# arm64 macOS-15 libpython hard-binds macOS-13 symbols (_mkfifoat), which crash
-# on older Macs (DEFECT-1). See find_build_python below + the runbook.
+# Build venv from a python.org, LOW-deployment-target Python (NOT Homebrew, whose
+# arm64 macOS-15 libpython hard-binds macOS-13 symbols like _mkfifoat and crashes
+# on older Macs — DEFECT-1). python.org ships a universal2 interpreter, but the
+# PRODUCED APP IS arm64 / Apple-Silicon-ONLY (pip pulls arm64 wheels on Apple
+# Silicon; the spec sets no target_arch) — the only supported ship target. A
+# post-build lipo assertion (below) fails closed if the built arch drifts from it.
 VENV="$REPO_ROOT/.build-venv-u2"
-# The oldest macOS the produced .app targets. python.org's universal2 build floors
-# at 10.13; 11.0 is a safe practical floor and clears the reported macOS 12 crash.
+# The oldest macOS the produced .app targets (11.0 is a safe floor clearing the
+# reported macOS 12 crash); the interpreter's low target, not universal2, is the fix.
 export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-11.0}"
 
 HOME_PARITY_FILES=(
@@ -60,10 +63,11 @@ HOME_PARITY_FILES=(
 
 fail() { echo "make_stick: $1" >&2; exit 1; }
 
-# ── build interpreter: python.org universal2, low deployment target ──────────
-# Homebrew's Python targets macOS 15 and is arm64-only, so a bundle built with it
-# crashes on macOS 12 (Symbol not found: _mkfifoat) and can't run on Intel at all.
-# Require a python.org framework build (universal2, target < 13). Override with
+# ── build interpreter: python.org, low deployment target ─────────────────────
+# Homebrew's Python targets macOS 15, so a bundle built with it crashes on older
+# macOS (Symbol not found: _mkfifoat). Require a python.org FRAMEWORK build with a
+# low deployment target; python.org ships it universal2, which is a reliable marker
+# for that build (the produced app is still arm64 — see the header). Override with
 # RBSS_BUILD_PYTHON=/path/to/python3.
 find_build_python() {
     local candidates=() py v archs
@@ -78,7 +82,8 @@ find_build_python() {
         [ -x "$py" ] || continue
         # deployment target must be < 13 (else macOS-13 symbols get hard-bound)…
         "$py" -c 'import sys,sysconfig; t=sysconfig.get_config_var("MACOSX_DEPLOYMENT_TARGET") or "0"; sys.exit(0 if int(str(t).split(".")[0])<13 else 1)' 2>/dev/null || continue
-        # …and it must be universal2 (both slices) or the app stays arm64-only.
+        # …and it must be a universal2 framework build (both slices) — python.org's
+        # reliable low-target marker; distinguishes it from Homebrew's arm64 build.
         archs="$(lipo -archs "$py" 2>/dev/null || true)"
         case "$archs" in
             *x86_64*arm64*|*arm64*x86_64*) echo "$py"; return 0 ;;
@@ -142,6 +147,14 @@ else
     # Strip any quarantine so a foreign Mac's Gatekeeper doesn't second-guess the
     # ad-hoc signature (a plain USB/DMG copy adds none, but be explicit).
     xattr -cr "$REPO_ROOT/dist/RBSS Bridge.app" 2>/dev/null || true
+    # Fail CLOSED if the built binary's arch drifts from the declared target
+    # (arm64 / Apple Silicon). This ship is Apple-Silicon-only; a binary with no
+    # arm64 slice would not run on the target and must never leave the build.
+    BUILT_ARCHS="$(lipo -archs "$REPO_ROOT/dist/RBSS Bridge.app/Contents/MacOS/rb_ss_bridge_v2" 2>/dev/null || echo "")"
+    case " $BUILT_ARCHS " in
+        *" arm64 "*) echo "make_stick: built arch = [$BUILT_ARCHS] — arm64 present, Apple-Silicon target OK." ;;
+        *) fail "built binary arch '[$BUILT_ARCHS]' has no arm64 slice — this ship is Apple-Silicon-only; refusing to ship a bundle that won't run on the target." ;;
+    esac
     APP="$REPO_ROOT/dist/RBSS Bridge.app"
 fi
 

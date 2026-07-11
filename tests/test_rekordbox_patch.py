@@ -194,6 +194,29 @@ class ApplyPatchRunTests(unittest.TestCase):
         self.assertFalse(rp.enough_disk_for_backup(2 * gb, 2 * gb))   # no room for the margin
         self.assertFalse(rp.enough_disk_for_backup(2 * gb, 1 * gb))   # not even the copy
 
+    def test_user_cancel_is_clean_abort_no_restore(self) -> None:
+        # Operator dismisses the admin prompt -> nonzero + "User canceled" -> refused,
+        # NO restore attempted (codesign never ran; Rekordbox untouched; no 2nd prompt).
+        restore_calls = []
+        with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
+             mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
+             mock.patch.object(rp, "read_entitlements", return_value={}), \
+             mock.patch.object(rp, "_snapshot_app", return_value=Path("/tmp/bk/rekordbox.app")), \
+             mock.patch.object(rp, "_restore_app", side_effect=lambda *a: restore_calls.append(a) or True), \
+             mock.patch.object(rp, "_cleanup_backup"):
+            r = apply_patch(APP, dry_run=False,
+                            runner=lambda argv: (1, "0:101: execution error: User canceled. (-128)"))
+        self.assertFalse(r.ok)
+        self.assertEqual(r.action, "refused")
+        self.assertIn("cancel", r.message.lower())
+        self.assertEqual(restore_calls, [])  # never restored -> no spurious 2nd admin prompt
+
+    def test_is_user_cancel(self) -> None:
+        self.assertTrue(rp.is_user_cancel("execution error: User canceled. (-128)"))
+        self.assertTrue(rp.is_user_cancel("boom (-128)"))
+        self.assertFalse(rp.is_user_cancel("codesign: not permitted"))
+        self.assertFalse(rp.is_user_cancel(""))
+
     def test_entitlement_did_not_take(self) -> None:
         r = self._apply([_proc(0), _proc(0)], after_has_gta=False)  # verify ok but gta absent
         self.assertFalse(r.ok)

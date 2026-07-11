@@ -99,11 +99,25 @@ def perform_install(
         result.failed_step = f"create target folders ({type(exc).__name__})"
         return result
 
+    # Disk pre-flight: refuse rather than leave a half-copied, unlaunchable app on a
+    # low-disk guest. Reuses the same predicate the Rekordbox backup uses.
+    from rb_ss_bridge_v2.rekordbox_patch import enough_disk_for_backup
+    try:
+        app_size = sum(p.lstat().st_size for p in bundle.rglob("*") if not p.is_symlink())
+        free = shutil.disk_usage(apps_dir).free
+    except OSError as exc:
+        result.failed_step = f"check free disk ({type(exc).__name__})"
+        return result
+    if not enough_disk_for_backup(app_size, free):
+        result.failed_step = "insufficient free disk to copy the app"
+        return result
     try:
         if app_dest.exists():
             shutil.rmtree(app_dest)
         shutil.copytree(bundle, app_dest, symlinks=True)
     except OSError as exc:
+        # Roll back a partial copy so the guest is never left with a broken app.
+        shutil.rmtree(app_dest, ignore_errors=True)
         result.failed_step = f"copy app to {app_dest} ({type(exc).__name__})"
         return result
     try:
@@ -136,6 +150,14 @@ def perform_install(
     if home_src.is_dir():
         for src in _iter_files(home_src):
             dest = app_support / src.name
+            # Never overwrite an operator's TUNED config on a reinstall/upgrade —
+            # home/* is live config (govee.env + laser/led/pack), not cache. (The
+            # cache + pack dirs below keep refreshing; they are content, not tuning.)
+            if dest.exists():
+                result.notes.append(
+                    f"kept existing {src.name} (reinstall did not overwrite tuned config)"
+                )
+                continue
             try:
                 shutil.copyfile(src, dest)
             except OSError as exc:
