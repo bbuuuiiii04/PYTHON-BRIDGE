@@ -18,6 +18,8 @@ relates_to: cross_platform_portability_plan.md, track_identity_move_invariance_d
 
 # USB Bridge Launcher — design spec (macOS-only)
 
+> **Implementation reality (2026-07-10/11 foreign-Mac fix round, branch `claude/rbss-bridge-install-debug-59yrn6`; see AWR-186).** The first run of the built M2 bundle on a second Mac (macOS 12, Apple Silicon) failed across the board — this design assumed a source/dev host and never captured that the FROZEN bundle must: (a) build against a **python.org universal2, LOW-deployment-target** interpreter — Homebrew's macOS-15 `libpython` hard-binds `_mkfifoat` and crashes on macOS < 15 (`make_stick.sh` now enforces this; **spectral analysis stays REQUIRED**, fail-loud, never dropped); (b) guard the menubar singleton with an **flock**, not argv-`pgrep` (a frozen argv never matches); (c) **surface silent child-process crashes** (bridge start, Rekordbox patch) instead of failing invisibly; (d) point the Laser/LED pads at the **App Support live config**, never the code-signed bundle (a pad Save into the bundle invalidates the signature/TCC grants); (e) resolve `ICON_DIR` and pad assets from the bundle, not `/Users/bbui`. Eight defects fixed, one (unresponsive-menu) refuted. ALL frozen/macOS behavior remains operator-unvalidated.
+
 Approved design (2026-07-04). This is the Mac-only "USB-ify" concretization of the portability
 work; the Windows/cross-platform half is deferred. Reviewed + revised 2026-07-04, twice and
 independently: this session's adversarial review at `8abccdf` (env-list, process-discoverability,
