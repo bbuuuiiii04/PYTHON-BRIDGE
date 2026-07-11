@@ -240,28 +240,32 @@ def _read_runtime_anlz_data(
     identity_config: IdentityV2Config | None = None,
     wide_window: bool = False,
     f2_enabled: bool = False,
+    sidecar_v4=None,
 ) -> TrackAnlzData:
     data = read_anlz_drops(anlz_path)
     ctx = data.waveform_context
 
-    v4 = None
+    v4 = sidecar_v4
     beatgrid_times_ms: list[float] = []
-    if (spectral_enabled or identity_enabled) and audio_filepath and ctx is not None:
+    if (spectral_enabled or identity_enabled) and ctx is not None:
         beatgrid_times_ms = list(ctx.beatgrid_times_ms)
-        try:
-            v4 = spectral_cache.get_cached_v4(audio_filepath, beatgrid_times_ms)
-            if v4 is None:
-                grid_span_s = 0.0
-                if len(beatgrid_times_ms) >= 2:
-                    grid_span_s = (float(beatgrid_times_ms[-1]) - float(beatgrid_times_ms[0])) / 1000.0
-                if grid_span_s <= _V4_AT_LOAD_MAX_S:
-                    v4 = extract_spectral_features_v4(audio_filepath, beatgrid_times_ms)
-                    if v4 is not None:
-                        spectral_cache.put_cached_v4(audio_filepath, beatgrid_times_ms, v4)
-                        log.info("[SM] spectral-path  source=v4-extract  file=%s", bf.short(audio_filepath))
-        except Exception as exc:
-            log.warning("[LED] identity-derive-failed file=%s err=%s", bf.short(audio_filepath), type(exc).__name__)
-            v4 = None
+        if v4 is not None:
+            log.info("[SM] spectral-path  source=sidecar-v4  file=%s", bf.short(audio_filepath))
+        elif audio_filepath:
+            try:
+                v4 = spectral_cache.get_cached_v4(audio_filepath, beatgrid_times_ms)
+                if v4 is None:
+                    grid_span_s = 0.0
+                    if len(beatgrid_times_ms) >= 2:
+                        grid_span_s = (float(beatgrid_times_ms[-1]) - float(beatgrid_times_ms[0])) / 1000.0
+                    if grid_span_s <= _V4_AT_LOAD_MAX_S:
+                        v4 = extract_spectral_features_v4(audio_filepath, beatgrid_times_ms)
+                        if v4 is not None:
+                            spectral_cache.put_cached_v4(audio_filepath, beatgrid_times_ms, v4)
+                            log.info("[SM] spectral-path  source=v4-extract  file=%s", bf.short(audio_filepath))
+            except Exception as exc:
+                log.warning("[LED] identity-derive-failed file=%s err=%s", bf.short(audio_filepath), type(exc).__name__)
+                v4 = None
 
     if identity_enabled and identity_config is not None and identity_key:
         data.led_identity = _derive_led_identity_record(
@@ -2290,6 +2294,7 @@ class StateManager(LEDDispatchPolicyMixin):
         identity_config: IdentityV2Config | None = None,
         wide_window: bool = False,
         f2_enabled: bool = False,
+        sidecar_v4=None,
     ) -> None:
         eq = self._eq
         source = "anlz_spectral" if spectral_enabled else ("anlz_identity" if identity_enabled else "anlz")
@@ -2318,6 +2323,7 @@ class StateManager(LEDDispatchPolicyMixin):
                         identity_config=identity_config,
                         wide_window=wide_window,
                         f2_enabled=f2_enabled,
+                        sidecar_v4=sidecar_v4,
                     )
                 except Exception:
                     log.debug("[SM] anlz-worker-error", exc_info=True)
@@ -2564,6 +2570,8 @@ class StateManager(LEDDispatchPolicyMixin):
                         "wide_window": self._wide_window_enable,
                         "f2_enabled": self._f2_enabled,
                     }
+                    if payload.get("sidecar_v4") is not None:
+                        worker_kwargs["sidecar_v4"] = payload["sidecar_v4"]
                     if self._v2_identity_enabled:
                         worker_kwargs.update(
                             identity_enabled=True,

@@ -5,10 +5,13 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from rb_ss_bridge_v2 import filepath_resolver as resolver  # noqa: E402
+from rb_ss_bridge_v2 import state_manager  # noqa: E402
 
 
 def _record() -> dict:
@@ -79,6 +82,129 @@ class SidecarReaderTests(unittest.TestCase):
             payload["tracks"][0]["anlz_relpaths"] = ["../../outside.DAT"]
             path.write_text(json.dumps(payload))
             self.assertIsNone(resolver._load_sidecar_index(path))
+
+
+class SidecarResolutionTests(unittest.TestCase):
+    def test_cross_analysis_collision_needs_tags(self) -> None:
+        base = [i * 500.0 for i in range(401)]
+        foreign = [value + 11.0 for value in base]
+        true_record = _record()
+        true_record["beatgrid_fingerprint"] = resolver._beatgrid_fingerprint(base)
+        wrong_record = {**_record(), "content_id": "99", "title": "Rude Boy (Cazes Edit)"}
+        wrong_record["beatgrid_fingerprint"] = resolver._beatgrid_fingerprint(
+            [value + 15.0 for value in base]
+        )
+        grid = {
+            "beatgrid_times_ms": foreign,
+            "beatgrid_bpms": [128.0] * len(foreign),
+        }
+
+        selected, reason, _ids = resolver._select_sidecar_record(
+            [true_record, wrong_record], grid, None,
+        )
+        self.assertIsNone(selected)
+        self.assertEqual(reason, "usb-crossanalysis-unconfirmed")
+
+        device_track = {
+            "title": "Twin Track", "artist": "Twin Artist", "duration_s": 200,
+        }
+        selected, reason, _ids = resolver._select_sidecar_record(
+            [true_record, wrong_record], grid, device_track,
+        )
+        self.assertIs(selected, true_record)
+        self.assertEqual(reason, "sidecar-pdb-match")
+
+    def test_sidecar_payload_carries_local_anlz_v4_ssid_and_tags(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dat = root / "anlz/42/ANLZ0000.DAT"
+            dat.parent.mkdir(parents=True)
+            dat.write_bytes(b"ANLZ")
+            v4 = root / "v4/42.json"
+            v4.parent.mkdir()
+            v4.write_text("{}")
+            record = _record()
+            record["anlz_relpaths"] = ["anlz/42/ANLZ0000.DAT"]
+            sentinel_v4 = object()
+            grid = {
+                "beatgrid_times_ms": [0.0, 500.0, 1000.0],
+                "beatgrid_bpms": [128.0, 128.0, 128.0],
+                "beatgrid_source": "sidecar-test",
+            }
+            with patch.object(resolver, "_device_audio_filepath", return_value="/Volumes/GUEST/song.wav"), \
+                 patch.object(resolver, "_extract_beatgrid_from_anlz", return_value=grid), \
+                 patch.object(resolver, "_features_v4_from_payload", return_value=sentinel_v4):
+                payload = resolver._payload_for_sidecar(root, record, "/Volumes/GUEST/PIONEER/x")
+
+        self.assertEqual(payload["filepath"], "/Volumes/GUEST/song.wav")
+        self.assertEqual(payload["local_anlz_path"], str(dat.resolve()))
+        self.assertIs(payload["sidecar_v4"], sentinel_v4)
+        self.assertEqual(payload["soundswitch_id"], "{SSID}")
+        self.assertEqual(payload["laser_tag_beats"], [4.0, 68.0])
+
+    def test_local_uuid_hit_never_consults_sidecar(self) -> None:
+        local_id = "938c2a63-a637-4000-8000-000000000001"
+        path = f"/share/PIONEER/USBANLZ/967/{local_id}/ANLZ0000.DAT"
+        content = SimpleNamespace(
+            ID="7", AnalysisDataPath=path, FolderPath="/music/local.wav",
+            BPM=12800, Length=200,
+        )
+        db = Mock()
+        db.get_content.return_value = [content]
+        db.get_cue.return_value = []
+        with patch("pyrekordbox.db6.Rekordbox6Database", return_value=db), \
+             patch.object(resolver, "_extract_beatgrid_from_anlz", return_value={
+                 "beatgrid_times_ms": [0.0, 500.0],
+                 "beatgrid_bpms": [128.0, 128.0],
+                 "beatgrid_source": "test",
+             }), \
+             patch.object(resolver, "_read_soundswitch_id", return_value=""), \
+             patch.object(resolver, "_hotcue_marker", return_value="LASER"), \
+             patch.object(resolver, "_sidecar_lookup") as sidecar_lookup:
+            result = resolver._db_lookup_by_anlz(path)
+
+        self.assertEqual(result["content_id"], "7")
+        sidecar_lookup.assert_not_called()
+
+    def test_local_miss_chains_to_sidecar(self) -> None:
+        db = Mock()
+        db.get_content.return_value = []
+        expected = {"content_id": "42"}
+        with patch("pyrekordbox.db6.Rekordbox6Database", return_value=db), \
+             patch.object(resolver, "_extract_beatgrid_from_anlz", return_value={
+                 "beatgrid_times_ms": [0.0, 500.0],
+                 "beatgrid_bpms": [12000.0, 12000.0],
+                 "beatgrid_source": "test",
+             }), \
+             patch.object(resolver, "_read_device_pdb_track", return_value=None), \
+             patch.object(resolver, "_sidecar_lookup", return_value=expected) as sidecar_lookup:
+            result = resolver._db_lookup_by_anlz(
+                "/Volumes/GUEST/PIONEER/USBANLZ/P001/00000001/ANLZ0000.DAT"
+            )
+
+        self.assertIs(result, expected)
+        sidecar_lookup.assert_called_once()
+
+    def test_runtime_prefers_payload_v4_over_local_cache(self) -> None:
+        sentinel_v4 = object()
+        data = SimpleNamespace(
+            waveform_context=SimpleNamespace(beatgrid_times_ms=(0.0, 500.0)),
+            drop_beat_indices=[], breakdown_beat_indices=[], buildup_beat_indices=[],
+            led_identity=None, f2_plan=None, energy_shadow=None,
+        )
+        with patch.object(state_manager, "read_anlz_drops", return_value=data), \
+             patch.object(state_manager.spectral_cache, "get_cached_v4") as cache_read, \
+             self.assertLogs("state_manager", level="INFO") as logs:
+            result = state_manager._read_runtime_anlz_data(
+                "/sidecar/ANLZ0000.DAT",
+                audio_filepath="/Volumes/GUEST/song.wav",
+                spectral_enabled=True,
+                sidecar_v4=sentinel_v4,
+            )
+
+        self.assertIs(result, data)
+        cache_read.assert_not_called()
+        self.assertTrue(any("source=sidecar-v4" in line for line in logs.output))
 
 
 if __name__ == "__main__":

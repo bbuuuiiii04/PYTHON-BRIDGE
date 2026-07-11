@@ -33,7 +33,7 @@ from .beat_math import _compute_beatgrid_position
 from .config import AUDIO_EXTS, LSOF_LEN_TOLERANCE_MS, LSOF_COOLDOWN_S, RB_DB_PATH
 from .led_config import load_drop_presentation_config
 from .models import BridgeEvent, Ev, PositionSnapshot
-from .spectral_cache import _beatgrid_fingerprint
+from .spectral_cache import _beatgrid_fingerprint, _features_v4_from_payload
 from . import bridge_fmt as bf
 
 log = logging.getLogger("filepath_resolver")
@@ -530,6 +530,143 @@ def _mounted_sidecar_index() -> Optional[tuple[Path, tuple[dict, ...]]]:
     return _discover_sidecar_index(mounts)
 
 
+def _sidecar_prefilter(records: Sequence[dict], usb_beatgrid: dict) -> list[dict]:
+    times = [float(value) for value in usb_beatgrid.get("beatgrid_times_ms", ())]
+    bpms = [float(value) for value in usb_beatgrid.get("beatgrid_bpms", ())]
+    if len(times) < 2 or not bpms or times[-1] <= 0:
+        return []
+    target_bpm = statistics.median(bpms)
+    target_duration_s = times[-1] / 1000.0
+    return [
+        record for record in records
+        if abs(float(record["bpm"]) - target_bpm) <= _USB_TWIN_BPM_TOLERANCE
+        and abs(float(record["duration_s"]) - target_duration_s)
+        <= _USB_TWIN_DURATION_TOLERANCE_S
+    ]
+
+
+def _select_sidecar_record(
+    records: Sequence[dict],
+    usb_beatgrid: dict,
+    device_track: Optional[dict],
+) -> tuple[Optional[dict], str, list[str]]:
+    candidates = _sidecar_prefilter(records, usb_beatgrid)
+    fingerprint = _beatgrid_fingerprint(usb_beatgrid.get("beatgrid_times_ms", ()))
+    exact = [
+        record for record in candidates
+        if record["beatgrid_fingerprint"] == fingerprint
+    ]
+    if len(exact) == 1:
+        return exact[0], "sidecar-mirror-match", []
+    if device_track is None:
+        return None, "usb-crossanalysis-unconfirmed", []
+
+    title = _normalize_usb_tag(device_track.get("title"))
+    artist = _normalize_usb_tag(device_track.get("artist"))
+    duration = float(device_track.get("duration_s") or 0)
+    tagged = [
+        record for record in candidates
+        if _normalize_usb_tag(record["title"]) == title
+        and _normalize_usb_tag(record["artist"]) == artist
+        and abs(float(record["duration_s"]) - duration)
+        <= _USB_TWIN_DURATION_TOLERANCE_S
+    ]
+    if not tagged:
+        return None, "usb-pdb-miss", []
+    if len(tagged) > 1:
+        return None, "usb-pdb-ambiguous", [str(record["content_id"]) for record in tagged]
+    return tagged[0], "sidecar-pdb-match", []
+
+
+def _device_audio_filepath(anlz_path: str) -> str:
+    match = re.match(r"^(/Volumes/[^/]+)/PIONEER/", anlz_path.replace("\\", "/"), re.I)
+    if not match:
+        return ""
+    try:
+        from pyrekordbox.anlz import AnlzFile  # type: ignore
+        relative = str(AnlzFile.parse_file(anlz_path).get("path") or "")
+    except (ImportError, OSError, KeyError, TypeError, ValueError):
+        return ""
+    return str(Path(match.group(1)) / relative.lstrip("/")) if relative else ""
+
+
+def _payload_for_sidecar(
+    root: Path,
+    record: dict,
+    anlz_path: str,
+) -> Optional[dict]:
+    dat_paths = [
+        path for relpath in record["anlz_relpaths"]
+        if relpath.lower().endswith(".dat")
+        and (path := _sidecar_path(root, relpath)) is not None
+        and path.is_file()
+    ]
+    audio_filepath = _device_audio_filepath(anlz_path)
+    if len(dat_paths) != 1 or not audio_filepath:
+        return None
+    local_anlz_path = str(dat_paths[0])
+    local_grid = _extract_beatgrid_from_anlz(local_anlz_path)
+    if len(local_grid.get("beatgrid_times_ms", ())) < 2:
+        return None
+
+    sidecar_v4 = None
+    v4_relpath = record.get("v4_relpath")
+    if v4_relpath:
+        v4_path = _sidecar_path(root, v4_relpath)
+        if v4_path is None:
+            return None
+        try:
+            sidecar_v4 = _features_v4_from_payload(
+                json.loads(v4_path.read_text(encoding="utf-8"))
+            )
+        except (OSError, json.JSONDecodeError):
+            return None
+        if sidecar_v4 is None:
+            return None
+    return {
+        "filepath": audio_filepath,
+        "bpm": float(record["bpm"]),
+        "content_id": str(record["content_id"]),
+        "first_beat_ms": local_grid["beatgrid_times_ms"][0],
+        **local_grid,
+        "soundswitch_id": str(record["soundswitch_id"]),
+        "total_ms": float(record["duration_s"]) * 1000.0,
+        "laser_tag_beats": list(record["laser_tag_beats"]),
+        "local_anlz_path": local_anlz_path,
+        "sidecar_v4": sidecar_v4,
+    }
+
+
+def _sidecar_lookup(anlz_path: str, usb_beatgrid: dict) -> Optional[dict]:
+    sidecar = _mounted_sidecar_index()
+    if sidecar is None:
+        return None
+    root, records = sidecar
+    try:
+        device_track = _read_device_pdb_track(anlz_path)
+    except (OSError, UnicodeError, ValueError, struct.error):
+        device_track = None
+    record, reason, candidate_ids = _select_sidecar_record(
+        records, usb_beatgrid, device_track,
+    )
+    if record is None:
+        suffix = f"  candidate_ids={','.join(candidate_ids)}" if candidate_ids else ""
+        log.info("[FRES] %s  source=sidecar%s", reason, suffix)
+        return None
+    payload = _payload_for_sidecar(root, record, anlz_path)
+    if payload is None:
+        log.info(
+            "[FRES] sidecar-payload-invalid  content_id=%s  source=sidecar",
+            record["content_id"],
+        )
+        return None
+    log.info(
+        "[FRES] sidecar-match  content_id=%s  method=%s  source=sidecar",
+        record["content_id"], reason,
+    )
+    return payload
+
+
 def _unique_usb_twin(
     usb_times_ms: Sequence[float],
     candidate_grids: Sequence[tuple[object, dict]],
@@ -678,14 +815,14 @@ def _db_lookup_by_anlz(anlz_path: str) -> Optional[dict]:
                     "[FRES] usb-crossanalysis-unconfirmed  err=%s",
                     type(exc).__name__,
                 )
-                return None
+                return _sidecar_lookup(anlz_path, beatgrid)
             if device_track is None:
                 log.info("[FRES] usb-crossanalysis-unconfirmed  reason=no-pdb-tags")
-                return None
+                return _sidecar_lookup(anlz_path, beatgrid)
             pdb_candidates = _usb_pdb_candidates(contents, device_track)
             if not pdb_candidates:
                 log.info("[FRES] usb-pdb-miss  candidates=0")
-                return None
+                return _sidecar_lookup(anlz_path, beatgrid)
             if len(pdb_candidates) > 1:
                 candidate_ids = ",".join(
                     str(getattr(candidate, "ID", "")) for candidate in pdb_candidates
@@ -694,14 +831,14 @@ def _db_lookup_by_anlz(anlz_path: str) -> Optional[dict]:
                     "[FRES] usb-pdb-ambiguous  candidate_ids=%s",
                     candidate_ids,
                 )
-                return None
+                return _sidecar_lookup(anlz_path, beatgrid)
             content = pdb_candidates[0]
             if not _relaxed_usb_twin_match(content, beatgrid):
                 log.info(
                     "[FRES] usb-pdb-conflict  content_id=%s",
                     getattr(content, "ID", ""),
                 )
-                return None
+                return _sidecar_lookup(anlz_path, beatgrid)
             analysis_path = str(getattr(content, "AnalysisDataPath", "") or "")
             local_anlz_path = _local_anlz_path(analysis_path) if analysis_path else ""
             if not local_anlz_path or not os.path.isfile(local_anlz_path):
@@ -710,7 +847,7 @@ def _db_lookup_by_anlz(anlz_path: str) -> Optional[dict]:
                     "  action=finish analysis in Rekordbox",
                     getattr(content, "ID", ""),
                 )
-                return None
+                return _sidecar_lookup(anlz_path, beatgrid)
             local_grid = _extract_beatgrid_from_anlz(local_anlz_path)
             if len(local_grid.get("beatgrid_times_ms", ())) < 2:
                 log.info(
@@ -718,7 +855,7 @@ def _db_lookup_by_anlz(anlz_path: str) -> Optional[dict]:
                     "  action=finish analysis in Rekordbox",
                     getattr(content, "ID", ""),
                 )
-                return None
+                return _sidecar_lookup(anlz_path, beatgrid)
             log.info(
                 "[FRES] usb-pdb-match  content_id=%s  track_id=%s",
                 getattr(content, "ID", ""), device_track["track_id"],
@@ -735,7 +872,7 @@ def _db_lookup_by_anlz(anlz_path: str) -> Optional[dict]:
                 db.close()
             except Exception:
                 pass
-    return None
+    return _sidecar_lookup(anlz_path, beatgrid) if device_export else None
 
 
 def _db_lookup(filepath: str) -> tuple[str, float, float]:
