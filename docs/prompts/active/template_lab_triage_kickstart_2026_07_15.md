@@ -31,10 +31,26 @@ Context the lane must know:
 - AWR-193 overhauled the pad; AWR-202 fixed its config merge. Read those
   registry rows before blaming new code.
 
-For each symptom: reproduce read-only (curl the lab endpoints / read the
-render path), rank root causes with file:line evidence, and propose fix shapes
-(not applied). Distinguish "broken" from "by design but undiscoverable" —
-symptom 2 may be a missing UI affordance rather than a bug; if the preview
-renderer ignores BPM by design, say exactly where and why.
+EXECUTIVE PRE-TRIAGE (2026-07-11, verified at that desk — re-verify cites, then
+build on this, don't redo it):
+- Symptom 3 largely EXPLAINED: the BPM control is wired end-to-end into a real
+  playback beat clock (`tools/led_pad_web.py:626-631` → `tools/led_pad_playback.py`
+  set_bpm implementations, correct re-anchor math), and the playback loop passes
+  `abs_beat_pos` into the render call (`tools/led_pad_playback.py:71`). But
+  `govee_frame_renderer.py` contains ZERO bpm references — only beat-synced
+  effects consume `abs_beat_pos`; time-based effects animate on wall seconds, so
+  BPM visibly does nothing for them. Enumerate which effects are beat-driven vs
+  time-driven; that inventory is the deliverable.
+- Symptom 2 CONFIRMED missing affordance: `led_pad_controls.py` exposes no
+  beat-sync metadata whatsoever — the UI cannot show it. Fix shape: surface a
+  beat-synced badge per effect/look in the catalog payload + UI.
+- Symptom 1 OPEN: hypothesis is the same beat/time split (beat-driven drafts
+  sitting near-static in preview; note `beat_sync_engine.py:27`'s historic
+  "beatsynced looks do not look beatsynced" re-anchor bug class). Reproduce
+  per-draft read-only across all 25 wave-1 drafts; separate render-errors from
+  static-but-rendering from working.
+Then propose fix shapes (not applied): beat-sync badges, an honest BPM control
+(greyed/limited to beat-synced effects, or preview-clock unification), and
+per-draft repairs.
 
 Report to /tmp/rbss_lane_signals/<session>.TLAB.report.md + .done signal.
