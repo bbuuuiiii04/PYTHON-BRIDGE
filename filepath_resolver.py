@@ -14,20 +14,23 @@ discard results that arrived for a stale track load.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import queue
 import re
+import statistics
 import subprocess
 import threading
 import time
 import warnings
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 
 from .beat_math import _compute_beatgrid_position
 from .config import AUDIO_EXTS, LSOF_LEN_TOLERANCE_MS, LSOF_COOLDOWN_S, RB_DB_PATH
 from .led_config import load_drop_presentation_config
 from .models import BridgeEvent, Ev, PositionSnapshot
+from .spectral_cache import _beatgrid_fingerprint
 from . import bridge_fmt as bf
 
 log = logging.getLogger("filepath_resolver")
@@ -39,6 +42,13 @@ _EMPTY_BEATGRID = {
 }
 _MIN_BEATGRID_INTERVAL_MS = 150.0
 _MAX_BEATGRID_INTERVAL_MS = 3000.0
+_USB_TWIN_BPM_TOLERANCE = 0.05
+_USB_TWIN_DURATION_TOLERANCE_S = 2.0
+_USB_TWIN_BEAT_COUNT_TOLERANCE = 1
+_USB_TWIN_FIRST_BEAT_TOLERANCE_MS = 10.0
+_USB_TWIN_SAMPLE_TOLERANCE_MS = 10.0
+_USB_TWIN_SAMPLE_POINTS = 17
+_RB_SHARE_ROOT = Path("~/Library/Pioneer/rekordbox/share").expanduser()
 _SS_PRELOAD_CACHE: dict[str, str] = {}
 _SS_SCRIPTED_ID_CACHE: set[str] = set()
 
@@ -223,6 +233,97 @@ def _extract_beatgrid_from_anlz(anlz_path: str) -> dict:
     return dict(_EMPTY_BEATGRID)
 
 
+def _is_device_export_anlz_path(anlz_path: str, captured_id: str = "") -> bool:
+    """True for USB/device ANLZ paths, never for local UUID analysis paths."""
+    normalized = anlz_path.replace("\\", "/")
+    if normalized.startswith("/Volumes/"):
+        return True
+    if not captured_id:
+        match = re.search(r"USBANLZ/[^/]+/([^/]+)/ANLZ", normalized)
+        captured_id = match.group(1) if match else ""
+    return bool(captured_id and not re.fullmatch(
+        r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", captured_id,
+    ))
+
+
+def _beatgrids_match(usb_times_ms: Sequence[float], local_times_ms: Sequence[float]) -> bool:
+    """Pure, fail-closed USB/local beatgrid identity check."""
+    try:
+        usb = tuple(float(value) for value in usb_times_ms)
+        local = tuple(float(value) for value in local_times_ms)
+    except (TypeError, ValueError):
+        return False
+    if len(usb) < 2 or len(local) < 2:
+        return False
+    if not all(math.isfinite(value) for value in (*usb, *local)):
+        return False
+    if abs(len(usb) - len(local)) > _USB_TWIN_BEAT_COUNT_TOLERANCE:
+        return False
+    if abs(usb[0] - local[0]) > _USB_TWIN_FIRST_BEAT_TOLERANCE_MS:
+        return False
+    if len(usb) == len(local) and _beatgrid_fingerprint(usb) == _beatgrid_fingerprint(local):
+        return True
+
+    overlap = min(len(usb), len(local))
+    sample_count = min(_USB_TWIN_SAMPLE_POINTS, overlap)
+    indexes = {
+        round(i * (overlap - 1) / (sample_count - 1))
+        for i in range(sample_count)
+    }
+    return all(
+        abs(usb[index] - local[index]) <= _USB_TWIN_SAMPLE_TOLERANCE_MS
+        for index in indexes
+    )
+
+
+def _usb_twin_prefilter(contents: Sequence[object], usb_beatgrid: dict) -> list[object]:
+    """Cheap BPM/duration filter before any candidate ANLZ file reads."""
+    times = [
+        float(value) for value in usb_beatgrid.get("beatgrid_times_ms", ())
+        if isinstance(value, (int, float)) and math.isfinite(float(value))
+    ]
+    bpms = [
+        float(value) for value in usb_beatgrid.get("beatgrid_bpms", ())
+        if isinstance(value, (int, float)) and math.isfinite(float(value)) and value > 0
+    ]
+    if len(times) < 2 or not bpms or times[-1] <= 0:
+        return []
+    target_bpm = statistics.median(bpms)
+    target_duration_s = times[-1] / 1000.0
+    candidates: list[object] = []
+    for content in contents:
+        bpm_raw = getattr(content, "BPM", None)
+        length = getattr(content, "Length", None)
+        analysis_path = str(getattr(content, "AnalysisDataPath", None) or "")
+        folder_path = str(getattr(content, "FolderPath", None) or "")
+        if not bpm_raw or not length or not analysis_path or not folder_path:
+            continue
+        bpm = float(bpm_raw) / 100.0
+        if (
+            abs(bpm - target_bpm) <= _USB_TWIN_BPM_TOLERANCE
+            and abs(float(length) - target_duration_s) <= _USB_TWIN_DURATION_TOLERANCE_S
+        ):
+            candidates.append(content)
+    return candidates
+
+
+def _local_anlz_path(analysis_data_path: str) -> str:
+    return str(_RB_SHARE_ROOT / analysis_data_path.lstrip("/"))
+
+
+def _unique_usb_twin(
+    usb_times_ms: Sequence[float],
+    candidate_grids: Sequence[tuple[object, dict]],
+) -> tuple[Optional[tuple[object, dict]], int]:
+    """Return the sole fingerprint match and the total passing count."""
+    matches = [
+        (content, grid)
+        for content, grid in candidate_grids
+        if _beatgrids_match(usb_times_ms, grid.get("beatgrid_times_ms", ()))
+    ]
+    return (matches[0] if len(matches) == 1 else None), len(matches)
+
+
 def _hotcue_marker() -> str:
     # `load_drop_presentation_config` degrades to a "LASER" default on any
     # failure (missing/malformed config) — never raises, never blocks a load.
@@ -260,6 +361,35 @@ def _fetch_laser_tag_beats(db, content_id: str, beatgrid_times_ms: list[float], 
     return beats
 
 
+def _payload_for_content(db, content, beatgrid: dict) -> dict:  # type: ignore[no-untyped-def]
+    """Build the one FILEPATH_RESOLVED payload shape for local and USB twins."""
+    filepath = content.FolderPath or ""
+    bpm = (content.BPM / 100.0) if content.BPM else 0.0
+    content_id = str(content.ID)
+    first_beat_ms = beatgrid["beatgrid_times_ms"][0] if beatgrid["beatgrid_times_ms"] else 0.0
+    laser_tag_beats: list[float] = []
+    try:
+        laser_tag_beats = _fetch_laser_tag_beats(
+            db, content_id, beatgrid["beatgrid_times_ms"], _hotcue_marker(),
+        )
+    except Exception as exc:
+        # Curation-data failure only: track identity is already confirmed.
+        log.warning(
+            "[FRES] laser-tag-read-failed  content_id=%s  err=%s",
+            content_id, type(exc).__name__,
+        )
+    return {
+        "filepath": filepath,
+        "bpm": bpm,
+        "content_id": content_id,
+        "first_beat_ms": first_beat_ms,
+        **beatgrid,
+        "soundswitch_id": _read_soundswitch_id(filepath) if filepath else "",
+        "total_ms": float((content.Length * 1000) if content.Length else 0),
+        "laser_tag_beats": laser_tag_beats,
+    }
+
+
 def _db_lookup_by_anlz(anlz_path: str) -> Optional[dict]:
     """Look up track metadata using the ANLZ file path UUID.
 
@@ -272,7 +402,7 @@ def _db_lookup_by_anlz(anlz_path: str) -> Optional[dict]:
         return None
     anlz_uuid = m.group(1)
     beatgrid = _extract_beatgrid_from_anlz(anlz_path)
-    first_beat_ms = beatgrid["beatgrid_times_ms"][0] if beatgrid["beatgrid_times_ms"] else 0.0
+    device_export = _is_device_export_anlz_path(anlz_path, anlz_uuid)
 
     db = None
     try:
@@ -280,35 +410,35 @@ def _db_lookup_by_anlz(anlz_path: str) -> Optional[dict]:
             warnings.simplefilter("ignore")
             from pyrekordbox.db6 import Rekordbox6Database  # type: ignore
         db = Rekordbox6Database(str(RB_DB_PATH), unlock=True)
-        for c in db.get_content():
+        contents = list(db.get_content())
+        for c in contents:
             anlz_db = getattr(c, 'AnalysisDataPath', None) or ""
             if anlz_uuid in anlz_db:
-                fp   = c.FolderPath or ""
-                bpm  = (c.BPM / 100.0) if c.BPM else 0.0
-                ssid = _read_soundswitch_id(fp) if fp else ""
-                content_id = str(c.ID)
-                laser_tag_beats: list[float] = []
-                try:
-                    laser_tag_beats = _fetch_laser_tag_beats(
-                        db, content_id, beatgrid["beatgrid_times_ms"], _hotcue_marker(),
-                    )
-                except Exception as exc:
-                    # Curation-data failure only: the track resolution above
-                    # already succeeded and must not be discarded over this.
-                    log.warning(
-                        "[FRES] laser-tag-read-failed  content_id=%s  err=%s",
-                        content_id, type(exc).__name__,
-                    )
-                return {
-                    'filepath':       fp,
-                    'bpm':            bpm,
-                    'content_id':     content_id,
-                    'first_beat_ms':  first_beat_ms,
-                    **beatgrid,
-                    'soundswitch_id': ssid,
-                    'total_ms':       float((c.Length * 1000) if c.Length else 0),
-                    'laser_tag_beats': laser_tag_beats,
-                }
+                return _payload_for_content(db, c, beatgrid)
+        if device_export:
+            candidates = _usb_twin_prefilter(contents, beatgrid)
+            candidate_grids = [
+                (content, _extract_beatgrid_from_anlz(_local_anlz_path(
+                    str(getattr(content, "AnalysisDataPath", "") or "")
+                )))
+                for content in candidates
+            ]
+            twin, match_count = _unique_usb_twin(
+                beatgrid["beatgrid_times_ms"], candidate_grids,
+            )
+            if twin is not None:
+                content, local_grid = twin
+                log.info(
+                    "[FRES] usb-twin-match  content_id=%s  candidates=%d",
+                    content.ID, len(candidates),
+                )
+                return _payload_for_content(db, content, local_grid)
+            reason = "usb-twin-ambiguous" if match_count > 1 else "usb-twin-miss"
+            log.info(
+                "[FRES] %s  candidates=%d  fingerprint_matches=%d",
+                reason, len(candidates), match_count,
+            )
+            return None
         log.debug("_db_lookup_by_anlz: UUID %s not found in DB", anlz_uuid)
     except Exception as exc:
         log.debug("_db_lookup_by_anlz: %s", exc)
