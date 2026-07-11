@@ -109,14 +109,136 @@ class FoldTests(unittest.TestCase):
                 self.assertTrue(a_entries.issubset(test_ids),
                                 "lineage split across train/test")
 
-    def test_fold_assertion_catches_a_split(self):
-        # build_folds asserts no lineage leaks into its own train set; that
-        # assertion is exercised implicitly above. Here we just confirm the
-        # train count excludes the held-out lineage.
-        lineages = m.build_lineages(m.normalize(_rows()))
+
+class FoldInvariantTests(unittest.TestCase):
+    """The real fold invariant (finding 5), replacing the old tautological
+    `held.key not in train_keys` assertion + its misleading test: no entry id and
+    no RESOLVED amendment lineage may appear in both train and test of any fold."""
+
+    def test_no_entry_or_amendment_lineage_in_both_splits(self):
+        rows = _rows() + [
+            # amendment tied to Usable A ONLY through `amends` — no content_id and
+            # a totally different track string. The hard case: it must still ride
+            # with its parent through the fold, never split into train.
+            {"track": "Totally Different String", "id": "UA-EDIT", "amends": "UA-1",
+             "event": "edit"},
+        ]
+        entries = m.normalize(rows)
+        lineages = m.build_lineages(entries)
         folds = m.build_folds(lineages)
+        usable_ids = {eid for ln in lineages if not ln.excluded for eid in ln.entry_ids}
+        # every usable entry id is held out in exactly one fold (a partition)
+        seen: dict[str, int] = {}
         for f in folds:
-            self.assertEqual(f["train_lineages"], 1)  # 2 usable, hold 1 out
+            for eid in f["test_entry_ids"]:
+                self.assertNotIn(eid, seen, f"{eid} appears in two test folds")
+                seen[eid] = f["fold"]
+        self.assertEqual(set(seen), usable_ids)
+        # the amendment (resolved lineage) is held out WITH Usable A, never in train
+        a_ids = {"UA-1", "UA-2", "UA-AMEND", "UA-EDIT"}
+        for f in folds:
+            test_ids = set(f["test_entry_ids"])
+            if test_ids & a_ids:
+                self.assertTrue(a_ids.issubset(test_ids),
+                                "resolved amendment lineage split across train/test")
+
+
+class AmendmentLineageTests(unittest.TestCase):
+    """Finding 2: amendment grouping follows the `amends` parent link, not the
+    amendment's own (possibly absent) content_id / differing track string."""
+
+    def test_amendment_without_cid_and_diff_track_groups_with_parent(self):
+        rows = [
+            {"track": "Rewind — Artist", "content_id": "900", "id": "P1", "his_words": "drop"},
+            # no content_id, different track string — only `amends` ties it back
+            {"track": "Rewind (post-reanalysis eight-drop)", "id": "P1-AMEND",
+             "amends": "P1", "his_words": "eight drops now"},
+        ]
+        entries = m.normalize(rows)
+        amend = next(e for e in entries if e.label_id == "P1-AMEND")
+        parent = next(e for e in entries if e.label_id == "P1")
+        self.assertEqual(amend.lineage, parent.lineage)   # grouped via amends
+        lineages = m.build_lineages(entries)
+        self.assertEqual(len(lineages), 1)                # one lineage, both entries
+        self.assertEqual(set(lineages[0].entry_ids), {"P1", "P1-AMEND"})
+        self.assertEqual(m.amendment_warnings(entries), [])
+
+    def test_missing_parent_warns_and_stays_ungrouped(self):
+        rows = [
+            {"track": "Solo — Artist", "content_id": "901", "id": "P2"},
+            {"track": "Ghost", "id": "GHOST-AMEND", "amends": "NOPE"},
+        ]
+        entries = m.normalize(rows)
+        warns = m.amendment_warnings(entries)
+        self.assertTrue(any("GHOST-AMEND" in w and "unknown id" in w for w in warns))
+        amend = next(e for e in entries if e.label_id == "GHOST-AMEND")
+        parent = next(e for e in entries if e.label_id == "P2")
+        self.assertNotEqual(amend.lineage, parent.lineage)  # not silently merged/split
+
+    def test_cyclic_parent_link_warns(self):
+        rows = [
+            {"track": "A", "id": "X", "amends": "Y"},
+            {"track": "B", "id": "Y", "amends": "X"},
+        ]
+        warns = m.amendment_warnings(m.normalize(rows))
+        self.assertTrue(any("cyclic" in w for w in warns))
+
+    def test_ambiguous_parent_id_warns(self):
+        rows = [
+            {"track": "Dup — Artist", "content_id": "902", "id": "DUP"},
+            {"track": "Dup — Artist", "content_id": "903", "id": "DUP"},  # same id, 2 rows
+            {"track": "Note", "id": "DUP-AMEND", "amends": "DUP"},
+        ]
+        warns = m.amendment_warnings(m.normalize(rows))
+        self.assertTrue(any("ambiguous" in w and "DUP" in w for w in warns))
+
+
+class IdentityWarningTests(unittest.TestCase):
+    """Finding 6: same-title / no-content_id rows can collide. The harness does
+    NOT guess identity — it surfaces a deterministic warning/limitation."""
+
+    def test_same_title_two_content_ids_flagged(self):
+        rows = [
+            {"track": "Give It To Me Good", "content_id": "500", "id": "G1"},
+            {"track": "Give It To Me Good", "content_id": "501", "id": "G2"},
+        ]
+        warns = m.identity_warnings(m.build_lineages(m.normalize(rows)))
+        self.assertTrue(any("identity ambiguity" in w and "give it to me good" in w for w in warns))
+
+    def test_no_content_id_limitation_surfaced(self):
+        rows = [{"track": "Some Track — Artist", "id": "S1"}]   # usable, no content_id
+        warns = m.identity_warnings(m.build_lineages(m.normalize(rows)))
+        self.assertTrue(any("identity limitation" in w and "1 usable" in w for w in warns))
+
+
+class PlannerBoundaryTests(unittest.TestCase):
+    """Finding 1: EVERY planner call routes through call_planner, and the guard
+    fails if a forbidden label/locator field OR an unexpected field reaches it."""
+
+    @staticmethod
+    def _fake(v4, drops, buildups, *, beatgrid_times_ms=()):
+        return "PLAN"
+
+    def test_rejects_forbidden_label_field(self):
+        with self.assertRaises(ValueError):
+            m.call_planner(self._fake, {"v4": object(), "drops": [], "buildups": [],
+                                        "beatgrid_times_ms": [], "track": "Utopia"})
+
+    def test_rejects_unexpected_field(self):
+        with self.assertRaises(ValueError):
+            m.call_planner(self._fake, {"v4": object(), "drops": [], "buildups": [],
+                                        "beatgrid_times_ms": [], "n_beats": 600})
+
+    def test_clean_call_passes_only_model_inputs(self):
+        seen: dict = {}
+
+        def fake(v4, drops, buildups, *, beatgrid_times_ms=()):
+            seen.update(v4=v4, drops=drops, buildups=buildups, grid=beatgrid_times_ms)
+            return "PLAN"
+
+        out = m.call_planner(fake, {"v4": 1, "drops": [5], "buildups": [], "beatgrid_times_ms": []})
+        self.assertEqual(out, "PLAN")
+        self.assertEqual(seen["drops"], [5])
 
 
 class AvailabilityTests(unittest.TestCase):
@@ -256,6 +378,45 @@ class MarkerSensitivityTests(unittest.TestCase):
         self.assertEqual(out["tracks"], 0)
         self.assertIsNone(out["pm1"]["tier"])
 
+    def test_resolved_but_zero_markers_scored_reads_unavailable(self):
+        # Finding 3: a track resolves and HAS drops, but the plan has no entry
+        # near any drop, so every baseline decision is None -> markers==0 while
+        # tracks==1. Availability must key off markers SCORED, not tracks.
+        def plan_fn(v4, drops, buildups, *, beatgrid_times_ms=()):
+            return _Plan([])   # for_drop returns None for every marker
+
+        res = m.Resolution(lineage="cid:1", track="T", status="resolved",
+                           v4=_V4(600), drops=(100, 200), buildups=(), grid=())
+        out = m.marker_sensitivity([res], plan_fn)
+        self.assertEqual(out["tracks"], 1)      # resolved with drops
+        self.assertEqual(out["markers"], 0)     # but nothing scored
+        self.assertEqual(out["skipped"], 2)     # both drops had no baseline decision
+        axis = {a["axis"]: a for a in m.axis_availability(out["markers"])}["marker_sensitivity"]
+        self.assertFalse(axis["available"])     # NOT a hollow AVAILABLE on tracks>0
+
+
+class MarkerRadiusDenominatorTests(unittest.TestCase):
+    """Finding 4: a marker with no comparable perturbation at a radius must leave
+    that radius's denominator. Per-radius comparable counts are reported."""
+
+    def test_uncomparable_marker_excluded_from_pm1_denominator(self):
+        # drops 9,10,11,100. Marker 10's +-1 neighbours (9,11) are BOTH occupied
+        # by other drops, so it has no comparable +-1 perturbation; it stays in
+        # +-2 (8,12 free). tier flips only at marker 100 (base tier 3 there).
+        def plan_fn(v4, drops, buildups, *, beatgrid_times_ms=()):
+            return _Plan([_Entry(d, _Dec("WALL", 3 if d == 100 else 1, "balloon", 0)) for d in drops])
+
+        res = m.Resolution(lineage="cid:1", track="T", status="resolved",
+                           v4=_V4(600), drops=(9, 10, 11, 100), buildups=(), grid=())
+        out = m.marker_sensitivity([res], plan_fn)
+        self.assertEqual(out["markers"], 4)
+        self.assertEqual(out["comparable_pm1"], 3)   # marker 10 dropped from +-1 denom
+        self.assertEqual(out["comparable_pm2"], 4)   # all comparable at +-2
+        # 1 tier flip (marker 100) / 3 comparable => 33.3, NOT 25.0 (/4 markers)
+        self.assertEqual(out["pm1"]["tier"], 33.3)
+        self.assertEqual(out["pm2"]["tier"], 25.0)   # 1 / 4 comparable at +-2
+        self.assertEqual(out["pm1"]["family"], 0.0)
+
 
 class DeterminismTests(unittest.TestCase):
     def _tmp_labels(self):
@@ -280,6 +441,13 @@ class DeterminismTests(unittest.TestCase):
         self.assertIn("AWR-200 status: PARTIAL", report)
         self.assertIn("marker-sensitivity axis", report.lower())
         self.assertIn("UNAVAILABLE", report)
+
+    def test_core_run_surfaces_identity_limitation(self):
+        # the identity collision limitation (finding 6) is loud in the run, not
+        # silent: the synthetic corpus has a no-content_id usable lineage.
+        path = self._tmp_labels()
+        report, _ = m.run(path, resolve_db=False, head="abc123")
+        self.assertIn("identity limitation", report)
 
 
 if __name__ == "__main__":

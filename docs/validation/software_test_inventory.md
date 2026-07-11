@@ -49,16 +49,25 @@ AWR-197 adds `tests/test_speed_size_law.py`:
 `test_apply_aborts_on_missing_look`. The patch_b `test_tracked_config_validates` also pins the
 approved explicit `loop_beats` literal. These are config/tool software checks only.
 
-AWR-200 adds `tests/test_spectral_ear_benchmark.py` (15 tests) for the Stage-1 EAR benchmark
+AWR-200 adds `tests/test_spectral_ear_benchmark.py` (30 tests) for the Stage-1 EAR benchmark
 harness `tools/spectral_ear_benchmark.py` (read-only offline tooling; no runtime behavior). It
 proves, on small synthetic fixtures with no real cache/DB/planner: meta and amendment rows are
 not primary examples; exclusions are explicit and cited (scripted/unusable_grid/variable_bpm/
 marker_blocked), the manifest counts them, and an undeclared EXCLUDED row is flagged; grouped
-leave-one-lineage-out folds never split a lineage; `assert_no_leak` rejects label-identifying
-fields and passes clean model inputs; the accuracy axes (tier/family/darkness/growl/laser) stay
-UNAVAILABLE — never zero, never PASS — and the marker axis is gated on resolution; marker-
+leave-one-lineage-out folds never split a lineage — the real fold invariant (no entry id and no
+resolved amendment lineage in both train and test, including the hard case of an amendment with
+no content_id and a different track string) replaces the old tautological assertion; amendment
+grouping follows the `amends` parent link, and missing/cyclic/ambiguous parent links warn
+loudly instead of silently splitting; `call_planner` is the single planner boundary (positive
+allowlist + `assert_no_leak`) and rejects any forbidden label/locator field OR unexpected field;
+the accuracy axes (tier/family/darkness/growl/laser) stay UNAVAILABLE — never zero, never PASS —
+and the marker axis is AVAILABLE only when a marker is actually SCORED (a resolved track that
+scores zero markers reads UNAVAILABLE, not a hollow AVAILABLE on track count); marker-
 sensitivity flip counting is correct against a synthetic planner seam, the seam receives only
-model inputs, and unresolved tracks never reach the planner; and the report is byte-
+model inputs, a marker with no comparable perturbation at a radius is dropped from that radius's
+denominator (per-radius `comparable_pm1`/`comparable_pm2` counts), and unresolved tracks never
+reach the planner; same-title/no-content_id identity collisions surface a deterministic
+warning/limitation (identity is not guessed — curation work); and the report is byte-
 deterministic with the core run PARTIAL. These prove the harness's honesty guarantees in
 software only; they do not run the real planner, cache, or Rekordbox DB.
 
