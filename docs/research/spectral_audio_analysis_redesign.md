@@ -652,8 +652,8 @@ The v4 extractor/cache this report built is the KEEP layer; the SOL review
 AWR-195 refactor program whose blocking first stage is a real ear benchmark. That harness
 now exists — read-only offline tooling, no runtime behavior change:
 
-- `tools/spectral_ear_benchmark.py` + `tests/test_spectral_ear_benchmark.py` (32 tests after
-  the 2026-07-11 marker-availability + content_id-coverage pass: single `call_planner` anti-leak
+- `tools/spectral_ear_benchmark.py` + `tests/test_spectral_ear_benchmark.py` (53 tests after
+  the 2026-07-11 AWR-205 gold-intake pass; 32 before: single `call_planner` anti-leak
   boundary on every planner call, amendment grouping via the `amends` parent link (with a
   duplicate-id guard against silent primary corruption), an availability gate that now requires
   markers scored AND at least one comparable ±1/±2 perturbation, per-radius comparable
@@ -661,6 +661,30 @@ now exists — read-only offline tooling, no runtime behavior change:
   now carries content_id locators for all 21 usable lineages).
 - Spec: `docs/plans/active/spectral_ear_benchmark_spec_2026_07_10.md`.
 - Frozen run: `docs/research/spectral_ear_benchmark_stage1_report_2026_07_10.md`.
+
+**AWR-205 gold-label intake (2026-07-11, offline, read-only).** Two new modes on the same
+harness give the ear benchmark a place to hold structured per-drop gold — the missing layer that
+kept every accuracy axis UNAVAILABLE. `--emit-gold-template OUT.json` (requires `--resolve-db`)
+reuses the SAME resolved-marker enumeration the marker-sensitivity pass iterates and writes a
+deterministic, all-null, provenance-keyed **hybrid** template (operator ruling 2026-07-11): every
+enumerated drop marker gets an `is_genuine_drop` yes/no, and the nested `drop` field-set
+(tier/family/family_matches_track/darkness{shape,start,end,bars}/growl{start,end}|"none"/laser/
+confidence/notes) is filled ONLY on genuine drops; it refuses to clobber a file that already
+carries labels. `--gold PATH` runs a strict fail-closed loader — unknown/typo'd fields (positive
+allowlists), unmatched provenance keys, bad enums, and insane beat ranges are HARD errors naming
+every offending row; `is_genuine_drop: null` = unlabeled (excluded from scoring, counted in a
+`labeled/total` coverage line) — and scores it. An accuracy axis flips AVAILABLE only when BOTH a
+genuine-drop gold example exists AND a real scorer compares it to a per-marker output verified in
+`lighting_moments_v2.DropDecision`. Only **tier** (int) and **family** (str) are cleanly exposed,
+so only they score this round; **darkness** (bar↔beat unit / shape-vocab / start-end alignment
+unverified), **growl** (no model span) and **laser** (no model suitability) — plus the yes/no
+**drop_classification** layer (the planner exposes no genuine-drop/blackout classifier) — stay
+UNAVAILABLE with a named blocker (fail toward UNAVAILABLE). Gold never crosses the `call_planner`
+boundary; `is_partial` is untouched, so **AWR-200 stays PARTIAL** until every required accuracy
+axis has gold + a scorer. Template + filled gold live beside the AWR-182 label layer under
+`local/` (gitignored, never committed); the AWR-182 file is read-only. Real-DB read-only spot run:
+21 lineages / 158 markers, label sha `a584dcb1e0293b24` unchanged. Spec:
+`docs/plans/active/spectral_gold_label_intake_spec_2026_07_11.md`.
 
 It loads the AWR-182 ear-truth labels, validates/normalizes them without mutation, applies
 the charter's explicit exclusions with reasons, groups whole track/remix lineages, emits a
