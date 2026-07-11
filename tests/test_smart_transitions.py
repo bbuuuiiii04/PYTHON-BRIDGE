@@ -469,6 +469,36 @@ class SmartRearmFlagTests(unittest.TestCase):
             ),
         ])
 
+    def test_usb_twin_local_anlz_replaces_raw_path_after_filepath_resolved(self) -> None:
+        sm = _manager({
+            "RBSS_SMART_REARM_EXPERIMENT": "1",
+            "RBSS_SPECTRAL_ENABLE": "1",
+        })
+        resolver = Mock()
+        sm.attach_resolver(resolver)
+        raw_path = "/Volumes/MINK/PIONEER/USBANLZ/P018/000086A0/ANLZ0000.DAT"
+        local_path = "/local/share/PIONEER/USBANLZ/967/twin/ANLZ0000.DAT"
+        sm._pending_anlz_path[1] = raw_path
+        payload = _filepath_payload()
+        payload["local_anlz_path"] = local_path
+
+        with patch.object(sm, "_start_anlz_worker") as start_worker:
+            sm._on_track_loaded(1, "track", BridgeEvent(Ev.TRACK_LOADED, 1))
+            sm._on_filepath_resolved(1, payload)
+
+        start_worker.assert_has_calls([
+            call(raw_path, 1, 1, wide_window=True),
+            call(
+                local_path,
+                1,
+                1,
+                audio_filepath="/music/track.wav",
+                spectral_enabled=True,
+                wide_window=True,
+                f2_enabled=True,
+            ),
+        ])
+
     def test_drop_wide_window_env_zero_disables_wide_window_for_anlz_workers(self) -> None:
         sm = _manager({
             "RBSS_SMART_REARM_EXPERIMENT": "1",

@@ -2549,6 +2549,9 @@ class StateManager(LEDDispatchPolicyMixin):
             if loaded_anlz is not None:
                 anlz_path, anlz_gen = loaded_anlz
                 if anlz_gen == d.load_gen:
+                    resolved_anlz_path = str(
+                        payload.get("local_anlz_path") or anlz_path
+                    )
                     worker_kwargs = {
                         "audio_filepath": meta.filepath,
                         "spectral_enabled": self._spectral_enable,
@@ -2565,7 +2568,7 @@ class StateManager(LEDDispatchPolicyMixin):
                             identity_config=self._v2_identity_cfg,
                         )
                     self._start_anlz_worker(
-                        anlz_path,
+                        resolved_anlz_path,
                         deck,
                         d.load_gen,
                         **worker_kwargs,

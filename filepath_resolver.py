@@ -361,7 +361,13 @@ def _fetch_laser_tag_beats(db, content_id: str, beatgrid_times_ms: list[float], 
     return beats
 
 
-def _payload_for_content(db, content, beatgrid: dict) -> dict:  # type: ignore[no-untyped-def]
+def _payload_for_content(  # type: ignore[no-untyped-def]
+    db,
+    content,
+    beatgrid: dict,
+    *,
+    local_anlz_path: str = "",
+) -> dict:
     """Build the one FILEPATH_RESOLVED payload shape for local and USB twins."""
     filepath = content.FolderPath or ""
     bpm = (content.BPM / 100.0) if content.BPM else 0.0
@@ -378,7 +384,7 @@ def _payload_for_content(db, content, beatgrid: dict) -> dict:  # type: ignore[n
             "[FRES] laser-tag-read-failed  content_id=%s  err=%s",
             content_id, type(exc).__name__,
         )
-    return {
+    payload = {
         "filepath": filepath,
         "bpm": bpm,
         "content_id": content_id,
@@ -388,6 +394,9 @@ def _payload_for_content(db, content, beatgrid: dict) -> dict:  # type: ignore[n
         "total_ms": float((content.Length * 1000) if content.Length else 0),
         "laser_tag_beats": laser_tag_beats,
     }
+    if local_anlz_path:
+        payload["local_anlz_path"] = local_anlz_path
+    return payload
 
 
 def _db_lookup_by_anlz(anlz_path: str) -> Optional[dict]:
@@ -428,11 +437,16 @@ def _db_lookup_by_anlz(anlz_path: str) -> Optional[dict]:
             )
             if twin is not None:
                 content, local_grid = twin
+                local_anlz_path = _local_anlz_path(
+                    str(getattr(content, "AnalysisDataPath", "") or "")
+                )
                 log.info(
                     "[FRES] usb-twin-match  content_id=%s  candidates=%d",
                     content.ID, len(candidates),
                 )
-                return _payload_for_content(db, content, local_grid)
+                return _payload_for_content(
+                    db, content, local_grid, local_anlz_path=local_anlz_path,
+                )
             reason = "usb-twin-ambiguous" if match_count > 1 else "usb-twin-miss"
             log.info(
                 "[FRES] %s  candidates=%d  fingerprint_matches=%d",
