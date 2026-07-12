@@ -1,14 +1,14 @@
 ---
 doc_status: current
 truth_level: operator-authoritative target behavior
-last_verified_commit: HEAD-2026-07-09-awr159
-last_verified_date: 2026-07-09
+last_verified_commit: HEAD-2026-07-12-awr220
+last_verified_date: 2026-07-12
 validation_scope: behavior contract, implemented and software-tested against it; no live or hardware validation implied
 ---
 
 # Drop Presentation Authority
 
-Status: AUTHORITATIVE TARGET BEHAVIOR; IMPLEMENTED / SOFTWARE-TESTED (Package 3 of AWR-119, landed 2026-07-04; AWR-135 section-length hold update, AWR-138 impact re-entry update, AWR-139 true-drop section gate landed 2026-07-07, AWR-159 cancel-wire + honest-arms round landed 2026-07-09). SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED — the operator's live pass is the only remaining gate. Implementation: `drop_presentation.py` (planner/ladder/session/learned-store/window machine), base suppression in `soundswitch_laser_player.py`, wiring in `state_manager.py`, hot-cue tag reading in `filepath_resolver.py`, config in `led_config.py` / `config/led_look_director.example.json`. Known limitations vs. this document, deliberate and reported: (1) **narrowed by AWR-159** — a MANUAL arm's own visibility no longer depends on the Laser Director's `is_enabled()` flag (it fires on `base_live`/unmasked/role alone; the physical lasers run on the SoundSwitch pack path independent of that flag), so a manual arm is no longer inert just because the Director is disabled. The remaining gap: impact detection itself still reuses the Laser Director's own `drop_crossing` decision, so if the Director object is never constructed at all (`None`, truly unconfigured rather than merely disabled), no impact tick ever arrives and NEITHER manual nor auto tiers can fire — matches the operator's actual setup, where the Director is configured and only its enable flag gets toggled; (2) **FIXED by AWR-159** — the "manual interaction" fail-open trigger is now wired: pressing the Solo pad while a window is open (`active` feedback) sets a one-tick request that `_drop_presentation_tick` feeds into the WindowMachine as `manual_interaction=True` the very next tick, which was already implemented and tested at the window-machine level but previously had no caller; (3) a `lasers_only` solo that re-enters from inside an already-open window fires at impact without the LED pre-dark countdown because pre-dark only runs from idle.
+Status: AUTHORITATIVE TARGET BEHAVIOR; IMPLEMENTED / SOFTWARE-TESTED (Package 3 of AWR-119, landed 2026-07-04; AWR-135 section-length hold update, AWR-138 impact re-entry update, AWR-139 true-drop section gate landed 2026-07-07, AWR-159 cancel-wire + honest-arms round landed 2026-07-09; AWR-220 laser restraint + section verdict latch landed 2026-07-12). SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED — the operator's live pass is the only remaining gate. Implementation: `drop_presentation.py` (planner/ladder/session/learned-store/window machine), base suppression in `soundswitch_laser_player.py`, wiring in `state_manager.py`, hot-cue tag reading in `filepath_resolver.py`, config in `led_config.py` / `config/led_look_director.example.json`. Known limitations vs. this document, deliberate and reported: (1) **narrowed by AWR-159** — a MANUAL arm's own visibility no longer depends on the Laser Director's `is_enabled()` flag (it fires on `base_live`/unmasked/role alone; the physical lasers run on the SoundSwitch pack path independent of that flag), so a manual arm is no longer inert just because the Director is disabled. The remaining gap: impact detection itself still reuses the Laser Director's own `drop_crossing` decision, so if the Director object is never constructed at all (`None`, truly unconfigured rather than merely disabled), no impact tick ever arrives and NEITHER manual nor auto tiers can fire — matches the operator's actual setup, where the Director is configured and only its enable flag gets toggled; (2) **FIXED by AWR-159** — the "manual interaction" fail-open trigger is now wired: pressing the Solo pad while a window is open (`active` feedback) sets a one-tick request that `_drop_presentation_tick` feeds into the WindowMachine as `manual_interaction=True` the very next tick, which was already implemented and tested at the window-machine level but previously had no caller; (3) a `lasers_only` solo that re-enters from inside an already-open window fires at impact without the LED pre-dark countdown because pre-dark only runs from idle.
 
 This document defines which fixtures fire on which drops. Behavior that
 differs from this document is a regression unless this document is
@@ -66,11 +66,41 @@ First match wins, evaluated per true drop. Auto-solo tiers (4-6) fire at most
 8. **Finale guarantee** — a track's last true drop, when actually reached,
    always renders at least `leds_plus_lasers`, never `leds_only` (subject to
    the opening damper, rung 7 — first match wins).
-9. **Track personality** — everything else: rank the track's true drops by its
-   own dramaturgy (last drop first, then longest runway); the top
-   `ceil(laser_ratio × N)` (default 0.4) render `leds_plus_lasers`, the rest
-   `leds_only`. A pure function of track structure: **the same track presents
-   identically every play** — its lighting identity.
+9. **Track personality** — everything else. With no per-drop energy tiers
+   (`laser_tiers` absent): rank the track's true drops by its own dramaturgy
+   (last drop first, then longest runway); the top `ceil(laser_ratio × N)`
+   (default 0.4) render `leds_plus_lasers`, the rest `leds_only`. With F2
+   laser tiers present (AWR-220): a drop may introduce lasers only when the
+   interim qualifier `drop_laser_qualifies` accepts its tier
+   (`laser_tier_min` default 2 = intense + monster; 3 = monster only) **and**
+   it survives the same `ceil(laser_ratio × N)` cap, ranked monster before
+   intense, then finale, then longer runway (stable beat-ascending ties).
+   Small/standard never qualify. The qualifier is interim — a future spectral
+   musical-element axis (growls / synth sustains, AWR-205) will replace it.
+   Pure / deterministic: **the same track presents identically every play**.
+
+## Section verdict latch (AWR-220)
+
+Lasers may only be **introduced** at a true drop (smart-drop marker crossing
+with buildup runway — the existing `presentation_impact` definition). The
+WindowMachine still opens/closes on that impact; when the window later
+releases because a short non-chorus phrase broke `{drop, post_drop}`, a
+coarse chorus label re-arm must **not** bring lasers back if the true drop
+was ruled `leds_only`.
+
+- At every applied presentation impact, the bridge latches
+  `(presentation, (deck, load_gen), impact abs_beat)`.
+- While role is again `drop`/`post_drop`, the window is idle, and the latch
+  for this load is `leds_only`, pack-base suppression is held
+  (`effective_suppressed = window OR section_hold`). Coarse re-arms inherit
+  the true drop's verdict; they never mint a new one.
+- `lasers_only` / `leds_plus_lasers` are stored but only `leds_only` produces
+  a section hold — LED dark-hold stays window-scoped exactly as today.
+- **No-verdict fail-open:** a drop/post_drop span with no latch for this load
+  (chorus-only track, plan not built yet) does **not** suppress.
+- **Clear paths:** new presentation impact (overwrite); track change;
+  active-deck change; stop; scripted mode; seek/rewind past the latched
+  impact beat. `enabled: false` never sets the latch.
 
 ## Solo Source Contracts
 

@@ -80,9 +80,10 @@ class DropPresentationConfig:
     """`/drop_presentation` config block (Task 5). Immutable after construction."""
 
     __slots__ = (
-        "enabled", "laser_ratio", "opening_tracks", "led_predark_beats",
-        "drop_window_cap_beats", "hotcue_marker", "solo_learn_threshold",
-        "gearshift_bpm_jump", "record_min_drops", "ws_handoff_enabled",
+        "enabled", "laser_ratio", "laser_tier_min", "opening_tracks",
+        "led_predark_beats", "drop_window_cap_beats", "hotcue_marker",
+        "solo_learn_threshold", "gearshift_bpm_jump", "record_min_drops",
+        "ws_handoff_enabled",
     )
 
     def __init__(
@@ -90,6 +91,9 @@ class DropPresentationConfig:
         *,
         enabled: bool = True,
         laser_ratio: float = 0.4,
+        # AWR-220: when per-drop F2 laser_tiers exist, 2 = intense+monster
+        # qualify; 3 = monster only. Unused when laser_tiers is None.
+        laser_tier_min: int = 2,
         opening_tracks: int = 3,
         led_predark_beats: int = 4,
         # Hang guard only: role exit or a newer impact releases normally. 192
@@ -103,6 +107,7 @@ class DropPresentationConfig:
     ) -> None:
         self.enabled = bool(enabled)
         self.laser_ratio = laser_ratio
+        self.laser_tier_min = laser_tier_min
         self.opening_tracks = opening_tracks
         self.led_predark_beats = led_predark_beats
         self.drop_window_cap_beats = drop_window_cap_beats
@@ -118,6 +123,7 @@ class DropPresentationConfig:
         return cls(
             enabled=bool(src.get("enabled", True)),
             laser_ratio=_float_or_default(src.get("laser_ratio"), 0.4),
+            laser_tier_min=_int_or_default(src.get("laser_tier_min"), 2),
             opening_tracks=_int_or_default(src.get("opening_tracks"), 3),
             led_predark_beats=_int_or_default(src.get("led_predark_beats"), 4),
             drop_window_cap_beats=_int_or_default(src.get("drop_window_cap_beats"), 192),
@@ -140,6 +146,25 @@ def load_drop_presentation_config(path: str | Path) -> DropPresentationConfig:
         data = {}
     block = data.get("drop_presentation") if isinstance(data, Mapping) else None
     return DropPresentationConfig.from_dict(block if isinstance(block, Mapping) else {})
+
+
+def drop_laser_qualifies(tier_name: Optional[str], tier_min: int) -> bool:
+    """INTERIM drop→laser qualifier (AWR-220).
+
+    Returns True iff ``tier_name`` is ``\"intense\"`` (when ``tier_min`` <= 2)
+    or ``\"monster\"`` (when ``tier_min`` <= 3). ``\"small\"`` / ``\"standard\"``
+    / ``None`` never qualify.
+
+    This is the interim energy-tier qualifier. A future spectral refactor will
+    replace it with a musical-element axis (growls / synth sustains, AWR-205
+    gold labels). Keep this one small named function so that swap is a single
+    call-site change.
+    """
+    if tier_name == "monster":
+        return int(tier_min) <= 3
+    if tier_name == "intense":
+        return int(tier_min) <= 2
+    return False
 
 
 # ---- Runway ------------------------------------------------------------
@@ -263,8 +288,13 @@ def plan_track(
     - learned match: nearest smart drop within +/-2 beats (LEARNED_TOLERANCE_BEATS),
       surviving a shifted re-analysis beat.
     - finale: the last true drop.
-    - personality: rank drops last-drop-first, then longest runway (ties keep
-      beat-ascending order); the top ceil(laser_ratio * N) render leds_plus_lasers.
+    - personality (laser_tiers is None): rank drops last-drop-first, then
+      longest runway (ties keep beat-ascending order); the top
+      ceil(laser_ratio * N) render leds_plus_lasers.
+    - personality (laser_tiers present, AWR-220): a drop fires lasers iff
+      drop_laser_qualifies(tier, laser_tier_min) AND it survives the same
+      ceil(laser_ratio * N) cap, ranked monster > intense, then finale, then
+      longer runway, stable beat-ascending ties.
     """
     drops = tuple(float(b) for b in drop_beats)
     tags = tuple(float(b) for b in tagged_beats)
@@ -298,27 +328,39 @@ def plan_track(
     n = len(drops)
     laser_count = max(0, min(n, math.ceil(config.laser_ratio * n)))
 
-    # Stable sort on beat-ascending input: ties (equal runway, neither last-drop)
-    # keep earliest-beat-first. last-drop-first outranks runway entirely.
-    ranked = sorted(
-        sorted(drops),
-        key=lambda beat: (1 if beat == last_drop else 0, runways[beat]),
-        reverse=True,
-    )
-    laser_set = set(ranked[:laser_count])
+    if laser_tiers is not None:
+        # AWR-220: tier gate + ratio cap. Cap base is ALL drops (same N as the
+        # legacy branch). Qualifiers only: intense/monster (via
+        # drop_laser_qualifies); ranked monster before intense, then finale,
+        # then longer runway, stable beat-ascending ties. Zero RNG.
+        qualifying = [
+            beat for beat in drops
+            if drop_laser_qualifies(laser_tiers.get(beat), config.laser_tier_min)
+        ]
+        ranked_qualifiers = sorted(
+            sorted(qualifying),
+            key=lambda beat: (
+                1 if laser_tiers.get(beat) == "monster" else 0,
+                1 if beat == last_drop else 0,
+                runways[beat],
+            ),
+            reverse=True,
+        )
+        laser_set = set(ranked_qualifiers[:laser_count])
+    else:
+        # Stable sort on beat-ascending input: ties (equal runway, neither
+        # last-drop) keep earliest-beat-first. last-drop-first outranks runway
+        # entirely. BYTE-IDENTICAL to pre-AWR-220 when laser_tiers is None.
+        ranked = sorted(
+            sorted(drops),
+            key=lambda beat: (1 if beat == last_drop else 0, runways[beat]),
+            reverse=True,
+        )
+        laser_set = set(ranked[:laser_count])
 
     decisions = []
     for beat in drops:
-        # AWR-162 (A): energy-gated activation. When per-drop tiers are available,
-        # the energy tier replaces the personality-ranked laser_ratio selection:
-        # 'small' (NEUTRAL/thin) → LEDS_ONLY (lasers silent), every other tier →
-        # LEDS_PLUS_LASERS. Tier-less tracks keep today's ratio ranking exactly
-        # (byte-identical fallback). Finale/hotcue/learned/manual precedence is
-        # unchanged — those are decided in resolve_presentation above this tail.
-        if laser_tiers is not None:
-            presentation = LEDS_ONLY if laser_tiers.get(beat) == "small" else LEDS_PLUS_LASERS
-        else:
-            presentation = LEDS_PLUS_LASERS if beat in laser_set else LEDS_ONLY
+        presentation = LEDS_PLUS_LASERS if beat in laser_set else LEDS_ONLY
         decisions.append(DropDecision(
             beat=beat,
             tagged=beat in matched_tags,

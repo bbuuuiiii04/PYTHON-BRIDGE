@@ -26,6 +26,7 @@ from rb_ss_bridge_v2.drop_presentation import (  # noqa: E402
     WindowActions,
     WindowInputs,
     WindowMachine,
+    drop_laser_qualifies,
     gearshift_qualifies,
     load_drop_presentation_config,
     plan_track,
@@ -41,9 +42,10 @@ def _seg(start: float, end: float, label: str) -> PhraseSegment:
 
 def _cfg(**overrides) -> DropPresentationConfig:
     defaults = dict(
-        enabled=True, laser_ratio=0.4, opening_tracks=3, led_predark_beats=4,
-        drop_window_cap_beats=192, hotcue_marker="LASER", solo_learn_threshold=1,
-        gearshift_bpm_jump=10.0, record_min_drops=5, ws_handoff_enabled=False,
+        enabled=True, laser_ratio=0.4, laser_tier_min=2, opening_tracks=3,
+        led_predark_beats=4, drop_window_cap_beats=192, hotcue_marker="LASER",
+        solo_learn_threshold=1, gearshift_bpm_jump=10.0, record_min_drops=5,
+        ws_handoff_enabled=False,
     )
     defaults.update(overrides)
     return DropPresentationConfig(**defaults)
@@ -797,7 +799,8 @@ class PlannerDeterminismTests(unittest.TestCase):
 class DropPresentationConfigTests(unittest.TestCase):
     def test_from_dict_reads_every_field(self) -> None:
         cfg = DropPresentationConfig.from_dict({
-            "enabled": False, "laser_ratio": 0.5, "opening_tracks": 2,
+            "enabled": False, "laser_ratio": 0.5, "laser_tier_min": 3,
+            "opening_tracks": 2,
             "led_predark_beats": 8, "drop_window_cap_beats": 16,
             "hotcue_marker": "LZR", "solo_learn_threshold": 2,
             "gearshift_bpm_jump": 12.0, "record_min_drops": 3,
@@ -805,6 +808,7 @@ class DropPresentationConfigTests(unittest.TestCase):
         })
         self.assertFalse(cfg.enabled)
         self.assertEqual(cfg.laser_ratio, 0.5)
+        self.assertEqual(cfg.laser_tier_min, 3)
         self.assertEqual(cfg.opening_tracks, 2)
         self.assertEqual(cfg.led_predark_beats, 8)
         self.assertEqual(cfg.drop_window_cap_beats, 16)
@@ -818,6 +822,7 @@ class DropPresentationConfigTests(unittest.TestCase):
         cfg = DropPresentationConfig.from_dict({})
         self.assertTrue(cfg.enabled)
         self.assertEqual(cfg.laser_ratio, 0.4)
+        self.assertEqual(cfg.laser_tier_min, 2)
         self.assertEqual(cfg.opening_tracks, 3)
         self.assertEqual(cfg.led_predark_beats, 4)
         self.assertEqual(cfg.drop_window_cap_beats, 192)
@@ -841,6 +846,109 @@ class DropPresentationConfigTests(unittest.TestCase):
             cfg = load_drop_presentation_config(path)
         self.assertFalse(cfg.enabled)
         self.assertEqual(cfg.laser_ratio, 0.25)
+
+
+class Awr220LaserTierGateTests(unittest.TestCase):
+    """AWR-220: interim tier qualifier + ratio cap when laser_tiers is present."""
+
+    def test_drop_laser_qualifies_truth_table(self) -> None:
+        cases = [
+            # (tier_name, tier_min, expected)
+            ("small", 2, False),
+            ("standard", 2, False),
+            ("intense", 2, True),
+            ("monster", 2, True),
+            ("small", 3, False),
+            ("standard", 3, False),
+            ("intense", 3, False),
+            ("monster", 3, True),
+            (None, 2, False),
+            (None, 3, False),
+        ]
+        for tier_name, tier_min, expected in cases:
+            with self.subTest(tier=tier_name, tier_min=tier_min):
+                self.assertEqual(drop_laser_qualifies(tier_name, tier_min), expected)
+
+    def test_cap_binds_monsters_ranked_first_finale_outranks_runway(self) -> None:
+        # 10 drops, 7 qualifiers, ratio 0.4 → ceil(4.0)=4 fire.
+        drops = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0]
+        tiers = {
+            10.0: "small",
+            20.0: "standard",
+            30.0: "intense",   # short runway
+            40.0: "intense",   # longest intense runway → 4th slot
+            50.0: "monster",   # short runway among monsters
+            60.0: "intense",
+            70.0: "monster",   # long runway among non-finale monsters
+            80.0: "small",
+            90.0: "intense",
+            100.0: "monster",  # finale → first among monsters
+        }
+        # Runways: contiguous "up" immediately before each drop.
+        segs = [
+            _seg(26, 30, "up"),    # 30: 4
+            _seg(8, 40, "up"),     # 40: 32 (best intense)
+            _seg(46, 50, "up"),    # 50: 4
+            _seg(54, 60, "up"),    # 60: 6
+            _seg(38, 70, "up"),    # 70: 32
+            _seg(82, 90, "up"),    # 90: 8
+            _seg(84, 100, "up"),   # 100: 16 (finale wins anyway)
+        ]
+        plan = plan_track(drops, segs, [], [], _cfg(laser_ratio=0.4), laser_tiers=tiers)
+        got = {
+            d.beat: d.personality_presentation for d in plan.decisions
+        }
+        # Top 4: finale monster 100, long monster 70, short monster 50, best intense 40.
+        self.assertEqual(got[100.0], LEDS_PLUS_LASERS)
+        self.assertEqual(got[70.0], LEDS_PLUS_LASERS)
+        self.assertEqual(got[50.0], LEDS_PLUS_LASERS)
+        self.assertEqual(got[40.0], LEDS_PLUS_LASERS)
+        laser_beats = {b for b, p in got.items() if p == LEDS_PLUS_LASERS}
+        self.assertEqual(laser_beats, {40.0, 50.0, 70.0, 100.0})
+        self.assertEqual(got[30.0], LEDS_ONLY)
+        self.assertEqual(got[60.0], LEDS_ONLY)
+        self.assertEqual(got[90.0], LEDS_ONLY)
+        self.assertEqual(got[10.0], LEDS_ONLY)
+        self.assertEqual(got[20.0], LEDS_ONLY)
+        self.assertEqual(got[80.0], LEDS_ONLY)
+
+    def test_fewer_qualifiers_than_cap_all_fire(self) -> None:
+        drops = [10.0, 20.0, 30.0, 40.0, 50.0]
+        # ceil(0.4*5)=2; only one qualifier → that one fires.
+        tiers = {
+            10.0: "small", 20.0: "standard", 30.0: "small",
+            40.0: "intense", 50.0: "standard",
+        }
+        plan = plan_track(drops, [], [], [], _cfg(laser_ratio=0.4), laser_tiers=tiers)
+        got = {d.beat: d.personality_presentation for d in plan.decisions}
+        self.assertEqual(got[40.0], LEDS_PLUS_LASERS)
+        self.assertEqual(
+            {b for b, p in got.items() if p == LEDS_PLUS_LASERS},
+            {40.0},
+        )
+
+    def test_tier_less_fallback_matches_legacy_ratio_branch(self) -> None:
+        # Kill test: laser_tiers=None must stay byte-identical to today's ranking.
+        segs = [
+            _seg(16, 32, "up"),     # runway for drop@32 -> 16
+            _seg(64, 96, "low"),    # runway for drop@96 -> 32 (longest of the non-last)
+            _seg(144, 160, "up"),   # runway for drop@160 -> 16
+        ]
+        plan = plan_track([32.0, 96.0, 160.0, 224.0], segs, [], [], _cfg())
+        # Same assertions as Required Behavior Test 1's 4-drop case.
+        self.assertEqual(plan.decision_for(224.0).personality_presentation, LEDS_PLUS_LASERS)
+        self.assertEqual(plan.decision_for(96.0).personality_presentation, LEDS_PLUS_LASERS)
+        self.assertEqual(plan.decision_for(32.0).personality_presentation, LEDS_ONLY)
+        self.assertEqual(plan.decision_for(160.0).personality_presentation, LEDS_ONLY)
+
+    def test_tiered_plan_is_deterministic(self) -> None:
+        drops = [32.0, 96.0, 160.0, 224.0]
+        tiers = {
+            32.0: "intense", 96.0: "monster", 160.0: "standard", 224.0: "intense",
+        }
+        segs = [_seg(0, 32, "up"), _seg(64, 96, "up"), _seg(192, 224, "up")]
+        args = (drops, segs, [], [], _cfg(), tiers)
+        self.assertEqual(plan_track(*args).decisions, plan_track(*args).decisions)
 
 
 if __name__ == "__main__":

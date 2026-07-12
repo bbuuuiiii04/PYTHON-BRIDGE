@@ -67,7 +67,8 @@ def _sp_state(**overrides):
 
 def _enable_drop_presentation(sm, **overrides) -> None:
     sm._drop_presentation_config = DropPresentationConfig(**{
-        "enabled": True, "laser_ratio": 0.4, "opening_tracks": 3,
+        "enabled": True, "laser_ratio": 0.4, "laser_tier_min": 2,
+        "opening_tracks": 3,
         "led_predark_beats": 4, "drop_window_cap_beats": 192,
         "hotcue_marker": "LASER", "solo_learn_threshold": 1,
         "gearshift_bpm_jump": 10.0, "record_min_drops": 5,
@@ -1203,6 +1204,264 @@ class IdleNoAudibleReleasesDropWindowTests(unittest.TestCase):
         sm._enter_idle_no_audible(reason="idle_no_audible")
         self.assertEqual(sm._drop_presentation_armed_key, ("sentinel",))
         self.assertEqual(_dp_release_state(sm), before)
+
+
+class SectionVerdictLatchTests(unittest.TestCase):
+    """AWR-220: true-drop leds_only verdict holds base suppression across
+    coarse chorus re-arms after the WindowMachine released on a role gap."""
+
+    def _sm_leds_only_impact(self):
+        # 2-drop track: first personality drop is leds_only (not finale).
+        sm, d = PlanAndTickIntegrationTests()._sm_with_plan(
+            drops=(32.0, 96.0), with_player=True,
+        )
+        sm._drop_presentation_session.opening_tracks_counted = 3
+        sm._drop_presentation_base_live = True
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(
+                abs_beat=32.0, active_drop_beat=32.0, smart_drop_crossing=True,
+                current_phrase_is_chorus=True,
+            ),
+            impact_now=True,
+        )
+        self.assertEqual(sm._drop_presentation_last_actions.presentation, LEDS_ONLY)
+        self.assertTrue(sm._drop_presentation_base_suppressed_held)
+        self.assertEqual(sm._dp_section_verdict, LEDS_ONLY)
+        self.assertEqual(sm._dp_section_key, (1, d.load_gen))
+        return sm, d
+
+    def test_leds_only_holds_through_role_gap_and_coarse_rearm(self) -> None:
+        sm, d = self._sm_leds_only_impact()
+
+        # Role gap: leave {drop, post_drop} → window releases.
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(
+                abs_beat=48.0, active_drop_beat=None, smart_drop_crossing=False,
+                current_phrase_is_chorus=False, smart_post_drop_active=False,
+            ),
+            impact_now=False,
+        )
+        self.assertIsNone(sm._drop_presentation_last_actions.presentation)
+        self.assertFalse(sm._drop_presentation_last_actions.base_suppressed)
+        # Gap itself is role=none → section_hold off during the gap.
+        self.assertFalse(sm._drop_presentation_base_suppressed_held)
+        self.assertEqual(sm._dp_section_verdict, LEDS_ONLY)  # latch remains
+
+        # Coarse chorus re-arm: no smart-drop marker, no new presentation impact.
+        with mock.patch.object(
+            sm._pack_runtime.player, "set_base_suppressed", wraps=sm._pack_runtime.player.set_base_suppressed,
+        ) as suppressed:
+            sm._drop_presentation_tick(
+                active=1, d=d,
+                sp_state=_sp_state(
+                    abs_beat=64.0, active_drop_beat=None, smart_drop_crossing=False,
+                    current_phrase_is_chorus=True, smart_post_drop_active=False,
+                ),
+                impact_now=False,
+            )
+        self.assertIsNone(sm._drop_presentation_last_actions.presentation)
+        self.assertFalse(sm._drop_presentation_last_actions.base_suppressed)
+        self.assertTrue(sm._drop_presentation_base_suppressed_held)
+        suppressed.assert_called_with(True)
+
+    def test_latch_clears_on_track_change(self) -> None:
+        sm, d = self._sm_leds_only_impact()
+        # Force a role-gap then coarse hold so suppression is section-held.
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(
+                abs_beat=48.0, smart_drop_crossing=False,
+                current_phrase_is_chorus=False, smart_post_drop_active=False,
+            ),
+            impact_now=False,
+        )
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(
+                abs_beat=64.0, smart_drop_crossing=False, current_phrase_is_chorus=True,
+            ),
+            impact_now=False,
+        )
+        self.assertTrue(sm._drop_presentation_base_suppressed_held)
+
+        d2 = _deck_state(load_gen=d.load_gen + 1, smart_drops=[64])
+        sm._deck[1] = d2
+        sm._drop_presentation_tick(
+            active=1, d=d2,
+            sp_state=_sp_state(
+                abs_beat=8.0, smart_drop_crossing=False, current_phrase_is_chorus=True,
+            ),
+            impact_now=False,
+        )
+        self.assertIsNone(sm._dp_section_verdict)
+        self.assertIsNone(sm._dp_section_key)
+        self.assertFalse(sm._drop_presentation_base_suppressed_held)
+
+    def test_latch_clears_on_deck_change(self) -> None:
+        sm, d = self._sm_leds_only_impact()
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(
+                abs_beat=48.0, smart_drop_crossing=False,
+                current_phrase_is_chorus=False, smart_post_drop_active=False,
+            ),
+            impact_now=False,
+        )
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(
+                abs_beat=64.0, smart_drop_crossing=False, current_phrase_is_chorus=True,
+            ),
+            impact_now=False,
+        )
+        self.assertTrue(sm._drop_presentation_base_suppressed_held)
+
+        d2 = _deck_state(load_gen=9, content_id="content-2", smart_drops=[64])
+        sm._deck[2] = d2
+        sm._os = SimpleNamespace(active_deck=2, lighting_mode="autoloop")
+        sm._drop_presentation_tick(
+            active=2, d=d2,
+            sp_state=_sp_state(
+                abs_beat=8.0, smart_drop_crossing=False, current_phrase_is_chorus=True,
+            ),
+            impact_now=False,
+        )
+        self.assertIsNone(sm._dp_section_verdict)
+        self.assertFalse(sm._drop_presentation_base_suppressed_held)
+
+    def test_latch_clears_on_stop(self) -> None:
+        sm, d = self._sm_leds_only_impact()
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(
+                abs_beat=48.0, smart_drop_crossing=False,
+                current_phrase_is_chorus=False, smart_post_drop_active=False,
+            ),
+            impact_now=False,
+        )
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(
+                abs_beat=64.0, smart_drop_crossing=False, current_phrase_is_chorus=True,
+            ),
+            impact_now=False,
+        )
+        self.assertTrue(sm._drop_presentation_base_suppressed_held)
+        sm._drop_presentation_release_on_stop()
+        self.assertIsNone(sm._dp_section_verdict)
+        self.assertFalse(sm._drop_presentation_base_suppressed_held)
+
+    def test_latch_clears_on_scripted_tick(self) -> None:
+        sm, d = self._sm_leds_only_impact()
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(
+                abs_beat=48.0, smart_drop_crossing=False,
+                current_phrase_is_chorus=False, smart_post_drop_active=False,
+            ),
+            impact_now=False,
+        )
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(
+                abs_beat=64.0, smart_drop_crossing=False, current_phrase_is_chorus=True,
+            ),
+            impact_now=False,
+        )
+        self.assertTrue(sm._drop_presentation_base_suppressed_held)
+        sm._os = SimpleNamespace(active_deck=1, lighting_mode="scripted")
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(abs_beat=70.0, smart_drop_crossing=False),
+            impact_now=False,
+        )
+        self.assertIsNone(sm._dp_section_verdict)
+        self.assertFalse(sm._drop_presentation_base_suppressed_held)
+
+    def test_latch_clears_on_seek_back(self) -> None:
+        sm, d = self._sm_leds_only_impact()
+        impact_beat = sm._dp_section_impact_beat
+        self.assertIsNotNone(impact_beat)
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(
+                abs_beat=48.0, smart_drop_crossing=False,
+                current_phrase_is_chorus=False, smart_post_drop_active=False,
+            ),
+            impact_now=False,
+        )
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(
+                abs_beat=64.0, smart_drop_crossing=False, current_phrase_is_chorus=True,
+            ),
+            impact_now=False,
+        )
+        self.assertTrue(sm._drop_presentation_base_suppressed_held)
+
+        # Rewind past the latched impact beat.
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(
+                abs_beat=float(impact_beat) - 1.0, smart_drop_crossing=False,
+                current_phrase_is_chorus=True,
+            ),
+            impact_now=False,
+        )
+        self.assertIsNone(sm._dp_section_verdict)
+        self.assertFalse(sm._drop_presentation_base_suppressed_held)
+
+    def test_no_verdict_coarse_span_is_not_suppressed(self) -> None:
+        sm, d = PlanAndTickIntegrationTests()._sm_with_plan(
+            drops=(64.0,), with_player=True,
+        )
+        sm._drop_presentation_session.opening_tracks_counted = 3
+        sm._drop_presentation_base_live = True
+        # Never fired a presentation impact; chorus-only coarse span.
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(
+                abs_beat=80.0, smart_drop_crossing=False, current_phrase_is_chorus=True,
+            ),
+            impact_now=False,
+        )
+        self.assertIsNone(sm._dp_section_verdict)
+        self.assertFalse(sm._drop_presentation_base_suppressed_held)
+
+    def test_new_leds_plus_lasers_impact_replaces_leds_only_latch(self) -> None:
+        sm, d = self._sm_leds_only_impact()
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(
+                abs_beat=48.0, smart_drop_crossing=False,
+                current_phrase_is_chorus=False, smart_post_drop_active=False,
+            ),
+            impact_now=False,
+        )
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(
+                abs_beat=64.0, smart_drop_crossing=False, current_phrase_is_chorus=True,
+            ),
+            impact_now=False,
+        )
+        self.assertTrue(sm._drop_presentation_base_suppressed_held)
+
+        # Finale true-drop impact → leds_plus_lasers (both_finale); latch
+        # overwritten; section hold no longer applies.
+        sm._drop_presentation_tick(
+            active=1, d=d,
+            sp_state=_sp_state(
+                abs_beat=96.0, active_drop_beat=96.0, smart_drop_crossing=True,
+                current_phrase_is_chorus=True,
+            ),
+            impact_now=True,
+        )
+        self.assertEqual(sm._dp_section_verdict, LEDS_PLUS_LASERS)
+        self.assertEqual(sm._drop_presentation_last_actions.presentation, LEDS_PLUS_LASERS)
+        self.assertFalse(sm._drop_presentation_base_suppressed_held)
 
 
 if __name__ == "__main__":

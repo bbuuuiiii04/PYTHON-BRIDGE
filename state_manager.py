@@ -640,6 +640,18 @@ class StateManager(LEDDispatchPolicyMixin):
         self._drop_presentation_last_actions: Optional[WindowActions] = None
         self._drop_presentation_led_dark_held: bool = False
         self._drop_presentation_base_suppressed_held: bool = False
+        # AWR-220 section verdict latch: the true-drop impact's presentation
+        # governs pack-base suppression for the whole drop section, including
+        # coarse chorus re-arms after the WindowMachine released. Only
+        # LEDS_ONLY produces a hold; lasers_only / leds_plus_lasers are stored
+        # but do not extend LED dark or invent suppression. Cleared on: new
+        # presentation impact (overwrite), track change, active-deck change,
+        # stop, scripted mode, seek-back past the impact beat. Never set when
+        # enabled:false. Absent verdict → fail-open (no suppression).
+        self._dp_section_verdict: Optional[str] = None
+        self._dp_section_key: Optional[tuple[int, int]] = None
+        self._dp_section_impact_beat: Optional[float] = None
+        self._dp_section_hold_active: bool = False
         # Fail-open detectors (authority doc: track change / active-deck change
         # must restore any active window). Compared against each tick, updated
         # every tick, so the very NEXT tick after either changes carries True
@@ -2710,6 +2722,8 @@ class StateManager(LEDDispatchPolicyMixin):
             # (scripted_mode=True) so a dark/suppressed state left over from a
             # PRIOR autoloop track's window restores via its universal
             # fail-open, rather than latching until the next autoloop track.
+            # AWR-220: clear section verdict latch (scripted path).
+            self._drop_presentation_clear_section_verdict()
             actions = self._drop_presentation_window.tick(
                 WindowInputs(
                     abs_beat=sp_state.abs_beat, beats_to_next_drop=None, next_drop_beat=None,
@@ -2737,6 +2751,11 @@ class StateManager(LEDDispatchPolicyMixin):
         active_deck_changed = previous_active_deck is not None and previous_active_deck != active
         self._drop_presentation_last_load_gen[active] = d.load_gen
         self._drop_presentation_last_active_deck = active
+
+        # AWR-220 clear paths: track change / active-deck change drop the
+        # section verdict so a prior track's leds_only cannot suppress the next.
+        if track_changed or active_deck_changed:
+            self._drop_presentation_clear_section_verdict()
 
         # AWR-179 D4-F4: drop the dead prior-gen damper key on every track
         # change. Keys are written only for the audible active deck, so each
@@ -2898,7 +2917,52 @@ class StateManager(LEDDispatchPolicyMixin):
         actions = self._drop_presentation_window.tick(
             inputs, pending_presentation=pending_presentation, pending_reason=pending_reason,
         )
-        self._drop_presentation_apply_actions(actions)
+
+        # AWR-220: latch the true-drop window's presentation for the section.
+        # Overwritten by each new presentation impact; only LEDS_ONLY holds.
+        if presentation_impact and actions.presentation is not None:
+            self._dp_section_verdict = actions.presentation
+            self._dp_section_key = track_key
+            self._dp_section_impact_beat = (
+                float(sp_state.abs_beat) if sp_state.abs_beat is not None else None
+            )
+
+        # AWR-220 seek-back guard: never let a stale verdict outlive a rewind
+        # past the section's impact beat.
+        if (
+            self._dp_section_verdict is not None
+            and self._dp_section_impact_beat is not None
+            and sp_state.abs_beat is not None
+            and float(sp_state.abs_beat) < self._dp_section_impact_beat
+        ):
+            self._drop_presentation_clear_section_verdict()
+
+        # AWR-220 section hold: after the window released on a role gap, a
+        # coarse chorus re-arm (role back in drop/post_drop, no new true-drop
+        # impact) re-applies leds_only base suppression for this (deck, load_gen).
+        # No-verdict spans fail-open (absent analysis is no signal).
+        window_active = bool(actions.base_suppressed or actions.presentation is not None)
+        section_hold = (
+            self._dp_section_verdict == LEDS_ONLY
+            and self._dp_section_key == track_key
+            and role in ("drop", "post_drop")
+            and not window_active
+        )
+        if section_hold and not self._dp_section_hold_active:
+            log.info(
+                "[SM] drop-presentation-section-hold  deck=%d  verdict=leds_only  role=%s",
+                active, role,
+            )
+            self._dp_section_hold_active = True
+        elif not section_hold and self._dp_section_hold_active:
+            log.debug(
+                "[SM] drop-presentation-section-hold-release  deck=%d  role=%s",
+                active, role,
+            )
+            self._dp_section_hold_active = False
+
+        effective_suppressed = bool(actions.base_suppressed or section_hold)
+        self._drop_presentation_apply_actions(actions, effective_suppressed=effective_suppressed)
         self._drop_presentation_last_pending = (pending_presentation, pending_reason, eval_beat)
         self._drop_presentation_last_actions = actions
 
@@ -2940,11 +3004,31 @@ class StateManager(LEDDispatchPolicyMixin):
         # the next drop's impact tick or another press (AWR-159 Task 1).
         self._drop_presentation_update_solo_feedback()
 
-    def _drop_presentation_apply_actions(self, actions: WindowActions) -> None:
+    def _drop_presentation_clear_section_verdict(self) -> None:
+        """AWR-220: drop the section verdict latch (and edge-log a hold release).
+
+        Clear paths (every one must call this or overwrite the fields): new
+        presentation impact (overwrite in _drop_presentation_tick); track
+        change; active-deck change; stop (_drop_presentation_release_on_stop);
+        scripted mode branch; seek-back past the impact beat. enabled:false
+        never sets the latch (early return before any write).
+        """
+        if self._dp_section_hold_active:
+            log.debug("[SM] drop-presentation-section-hold-release  reason=clear")
+            self._dp_section_hold_active = False
+        self._dp_section_verdict = None
+        self._dp_section_key = None
+        self._dp_section_impact_beat = None
+
+    def _drop_presentation_apply_actions(
+        self, actions: WindowActions, *, effective_suppressed: Optional[bool] = None,
+    ) -> None:
         """Apply this tick's WindowMachine output. Idempotent: safe to call
         every tick even when nothing changed. LED pre-dark/solo-window dark
         rides the Package-2 owner SET (never touches other owners); base
-        suppression never touches masks/blackout (soundswitch_laser_player)."""
+        suppression never touches masks/blackout (soundswitch_laser_player).
+        AWR-220: ``effective_suppressed`` ORs window suppression with the
+        section verdict hold; defaults to ``actions.base_suppressed``."""
         held = self._drop_presentation_led_dark_held
         if actions.led_dark_hold and not held:
             self._handle_led_event(BridgeEvent(
@@ -2959,10 +3043,13 @@ class StateManager(LEDDispatchPolicyMixin):
             ))
             self._drop_presentation_led_dark_held = False
 
+        suppressed = (
+            actions.base_suppressed if effective_suppressed is None else bool(effective_suppressed)
+        )
         player = getattr(self._pack_runtime, "player", None)
-        if player is not None and actions.base_suppressed != self._drop_presentation_base_suppressed_held:
-            player.set_base_suppressed(actions.base_suppressed)
-            self._drop_presentation_base_suppressed_held = actions.base_suppressed
+        if player is not None and suppressed != self._drop_presentation_base_suppressed_held:
+            player.set_base_suppressed(suppressed)
+            self._drop_presentation_base_suppressed_held = suppressed
 
     def _drop_presentation_release_on_stop(self) -> None:
         """Fail-open the drop-presentation window on a hard stop.
@@ -2982,6 +3069,8 @@ class StateManager(LEDDispatchPolicyMixin):
         tick). Pure/in-memory -- no I/O added to the 200 Hz path."""
         if not self._drop_presentation_config.enabled:
             return
+        # AWR-220: stop clears the section verdict latch.
+        self._drop_presentation_clear_section_verdict()
         if self._drop_presentation_armed_key is not None:
             # AWR-159 Task 5: a stop invalidates any pending arm too -- there
             # is no "next true drop" coming while stopped.

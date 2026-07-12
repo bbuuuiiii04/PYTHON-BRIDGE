@@ -382,6 +382,7 @@
   "drop_presentation": {
     "enabled": true,
     "laser_ratio": 0.4,
+    "laser_tier_min": 2,
     "opening_tracks": 3,
     "led_predark_beats": 4,
     "drop_window_cap_beats": 192,
