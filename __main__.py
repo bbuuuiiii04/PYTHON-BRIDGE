@@ -1086,7 +1086,7 @@ def main() -> None:
             len(getattr(_loaded_pack, "autoloop_bindings", ()) or ()),
             len(getattr(_loaded_pack, "scripted", ()) or ()),
         )
-        # AWR-213: seed scripted recognition from the pack the bridge actually
+        # AWR-216: seed scripted recognition from the pack the bridge actually
         # renders, not only the auto-picked SoundSwitch project. The library
         # scan's _auto_trackmap_path() picks the alphabetically-first *.ssproj,
         # which can be a stale fixture that lacks tracks authored into the real

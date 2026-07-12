@@ -58,7 +58,7 @@ def test_seed_soundswitch_scripted_id_cache_normalizes_ids():
 
 
 def test_pack_seed_recognizes_show_absent_from_scanned_project():
-    """AWR-213: a scripted track authored into the real project (and carried by
+    """AWR-216: a scripted track authored into the real project (and carried by
     the loaded pack) must be recognized even when the auto-picked library scan
     seeded a *different*/stale project that lacks it.
 
@@ -81,7 +81,7 @@ def test_pack_seed_recognizes_show_absent_from_scanned_project():
         # Before the pack seed: resolves ssid but gate says "not scripted".
         assert not has_soundswitch_scripted_id("{3974E696-305D-4368-B6D4-3B88265A8B49}")
 
-        # Mirror __main__.py AWR-213: seed only supported_active shows from the pack.
+        # Mirror __main__.py AWR-216: seed only supported_active shows from the pack.
         pack_ids = [s for s, row in pack_scripted.items() if row.supported_active]
         seed_soundswitch_scripted_id_cache(pack_ids)
 
