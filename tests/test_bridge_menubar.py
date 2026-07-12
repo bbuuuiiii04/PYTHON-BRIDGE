@@ -1159,6 +1159,203 @@ class FrozenDefectHelperTests(BridgeMenubarTests):
         self.assertIn("helper process", generic.lower())
         self.assertIn("code 1", generic)
 
+    def test_is_user_cancel_matches_admin_prompt_dismissal(self) -> None:
+        bridge_menubar = self._import_module()
+        self.assertTrue(
+            bridge_menubar._is_user_cancel(
+                "0:101: execution error: User canceled. (-128)"
+            )
+        )
+        self.assertFalse(bridge_menubar._is_user_cancel("codesign: not permitted"))
+        self.assertFalse(bridge_menubar._is_user_cancel(""))
+
+    def test_spawn_watched_busy_sets_title_and_disables_at_spawn(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock()
+        menu.enable_rb_reads_item = Mock()
+        menu.enable_rb_reads_item.title.return_value = "Enable Rekordbox Reads…"
+        proc = Mock()
+        with patch.object(bridge_menubar.subprocess, "Popen", return_value=proc), \
+             patch.object(bridge_menubar, "_child_error_log_dir", return_value=Path("/tmp")), \
+             patch.object(bridge_menubar.threading, "Thread") as thread_type, \
+             patch("builtins.open", side_effect=OSError("no log")):
+            bridge_menubar.BridgeMenuBar._spawn_watched(
+                menu,
+                ["x"],
+                label="patch_rekordbox",
+                busy_item_attr="enable_rb_reads_item",
+                busy_title="Enabling Rekordbox reads…",
+            )
+        menu.enable_rb_reads_item.setEnabled_.assert_called_once_with(False)
+        menu.enable_rb_reads_item.setTitle_.assert_called_once_with(
+            "Enabling Rekordbox reads…"
+        )
+        self.assertNotEqual(
+            thread_type.call_args.kwargs["target"],
+            bridge_menubar.BridgeMenuBar._watch_child,
+        )
+
+    def test_finish_watched_child_success_notifies_and_restores_item(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock()
+        menu.enable_rb_reads_item = Mock()
+        with patch.object(bridge_menubar, "_notify") as notify:
+            bridge_menubar.BridgeMenuBar.finishWatchedChild_.callable(menu, {
+                "returncode": 0,
+                "tail": "",
+                "busy_item_attr": "enable_rb_reads_item",
+                "saved_title": "Enable Rekordbox Reads…",
+                "success_message": "Rekordbox reads step finished",
+            })
+        notify.assert_called_once_with("Rekordbox reads step finished")
+        menu.enable_rb_reads_item.setTitle_.assert_called_once_with(
+            "Enable Rekordbox Reads…"
+        )
+        menu.enable_rb_reads_item.setEnabled_.assert_called_once_with(True)
+
+    def test_finish_watched_child_empty_stderr_failure_marshals_alert(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock()
+        menu.enable_rb_reads_item = Mock()
+        alert = Mock()
+        nsalert = Mock()
+        nsalert.alloc.return_value.init.return_value = alert
+        with patch.object(bridge_menubar, "NSAlert", nsalert):
+            bridge_menubar.BridgeMenuBar.finishWatchedChild_.callable(menu, {
+                "returncode": 2,
+                "tail": "",
+                "busy_item_attr": "enable_rb_reads_item",
+                "saved_title": "Enable Rekordbox Reads…",
+                "failure_title": "Enable Rekordbox Reads failed",
+                "err_path": "/tmp/patch_rekordbox.err.log",
+            })
+        menu.enable_rb_reads_item.setEnabled_.assert_called_once_with(True)
+        alert.setMessageText_.assert_called_once_with("Enable Rekordbox Reads failed")
+        info = alert.setInformativeText_.call_args.args[0]
+        self.assertIn("code 2", info)
+        self.assertIn("/tmp/patch_rekordbox.err.log", info)
+        self.assertIn("If you cancelled the prompts", info)
+        alert.runModal.assert_called_once_with()
+
+    def test_finish_watched_child_user_cancel_restores_without_alert(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock()
+        menu.enable_rb_reads_item = Mock()
+        nsalert = Mock()
+        with patch.object(bridge_menubar, "NSAlert", nsalert), \
+             patch.object(bridge_menubar, "_notify") as notify:
+            bridge_menubar.BridgeMenuBar.finishWatchedChild_.callable(menu, {
+                "returncode": 1,
+                "tail": "execution error: User canceled. (-128)",
+                "busy_item_attr": "enable_rb_reads_item",
+                "saved_title": "Enable Rekordbox Reads…",
+                "failure_title": "Enable Rekordbox Reads failed",
+            })
+        menu.enable_rb_reads_item.setTitle_.assert_called_once_with(
+            "Enable Rekordbox Reads…"
+        )
+        menu.enable_rb_reads_item.setEnabled_.assert_called_once_with(True)
+        nsalert.alloc.assert_not_called()
+        notify.assert_not_called()
+
+    def test_watch_child_full_marshals_completion_payload(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock()
+        proc = Mock()
+        proc.wait.return_value = 0
+        with patch.object(
+            bridge_menubar.BridgeMenuBar,
+            "_read_child_stderr_tail",
+            return_value="",
+        ):
+            bridge_menubar.BridgeMenuBar._watch_child_full(
+                menu,
+                proc,
+                Path("/tmp/patch_rekordbox.err.log"),
+                "patch_rekordbox",
+                "enable_rb_reads_item",
+                "Enable Rekordbox Reads…",
+                "done",
+                "Enable Rekordbox Reads failed",
+            )
+        args = menu.performSelectorOnMainThread_withObject_waitUntilDone_.call_args.args
+        self.assertEqual(args[0], "finishWatchedChild:")
+        self.assertEqual(args[1]["returncode"], 0)
+        self.assertEqual(args[1]["success_message"], "done")
+        self.assertFalse(args[2])
+
+    def test_spawn_watched_without_busy_keeps_early_window_watcher(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock()
+        proc = Mock()
+        with patch.object(bridge_menubar.subprocess, "Popen", return_value=proc), \
+             patch.object(bridge_menubar, "_child_error_log_dir", return_value=Path("/tmp")), \
+             patch.object(bridge_menubar.threading, "Thread") as thread_type, \
+             patch("builtins.open", side_effect=OSError("no log")):
+            bridge_menubar.BridgeMenuBar._spawn_watched(
+                menu, ["x"], label="frozen_bridge_start", early_window=4.0,
+            )
+        kwargs = thread_type.call_args.kwargs
+        self.assertEqual(kwargs["args"][3], 4.0)
+        self.assertNotEqual(
+            kwargs["target"], bridge_menubar.BridgeMenuBar._watch_child_full,
+        )
+
+    def test_watch_child_early_crash_marshals_failure_dialog(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock()
+        menu._read_child_stderr_tail = Mock(return_value="ImportError: boom")
+        proc = Mock()
+        proc.wait.return_value = 3
+        bridge_menubar.BridgeMenuBar._watch_child(
+            menu, proc, Path("/tmp/frozen_bridge_start.err.log"),
+            "frozen_bridge_start", 4.0,
+        )
+        args = menu.performSelectorOnMainThread_withObject_waitUntilDone_.call_args.args
+        self.assertEqual(args[0], "showChildFailure:")
+        self.assertIn("code 3", args[1])
+        self.assertIn("ImportError: boom", args[1])
+
+    def test_watch_child_survives_early_window_without_alert(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock()
+        proc = Mock()
+        proc.wait.side_effect = bridge_menubar.subprocess.TimeoutExpired("cmd", 4.0)
+        bridge_menubar.BridgeMenuBar._watch_child(
+            menu, proc, None, "frozen_bridge_start", 4.0,
+        )
+        menu.performSelectorOnMainThread_withObject_waitUntilDone_.assert_not_called()
+
+    def test_quit_cancel_does_not_terminate(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock()
+        alert = Mock()
+        alert.runModal.return_value = 1001  # not NSAlertFirstButtonReturn
+        nsalert = Mock()
+        nsalert.alloc.return_value.init.return_value = alert
+        app = Mock()
+        nsapplication = Mock()
+        nsapplication.sharedApplication.return_value = app
+        with patch.object(bridge_menubar, "NSAlert", nsalert), \
+             patch.object(bridge_menubar, "NSApplication", nsapplication):
+            bridge_menubar.BridgeMenuBar.quit_.callable(menu, None)
+        app.terminate_.assert_not_called()
+
+    def test_quit_confirm_terminates(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock()
+        alert = Mock()
+        alert.runModal.return_value = bridge_menubar.NSAlertFirstButtonReturn
+        nsalert = Mock()
+        nsalert.alloc.return_value.init.return_value = alert
+        app = Mock()
+        nsapplication = Mock()
+        nsapplication.sharedApplication.return_value = app
+        with patch.object(bridge_menubar, "NSAlert", nsalert), \
+             patch.object(bridge_menubar, "NSApplication", nsapplication):
+            bridge_menubar.BridgeMenuBar.quit_.callable(menu, None)
+        app.terminate_.assert_called_once_with(menu)
+
 
 class NativeInstallGateTests(BridgeMenubarTests):
     """AWR-186 M2: the install offer must be frozen-gated so source-run menubars

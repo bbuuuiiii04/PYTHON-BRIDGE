@@ -118,7 +118,16 @@ SoundSwitch pack-player boundary (T7c/T7e):
   AUTHORING + CHECKS block (Export, export status line, Record Session, Test
   the Lights…, Run Health Check) → sep → MAINTENANCE block (the AWR-186 M2
   purge slot, then Quit — retitled "Quit Menu" → "Quit Menubar (bridge keeps
-  running)"). The M2 install offer is NOT in the maintenance block: per the M2
+  running)"). Quit now shows a native confirm first: the bridge (if running)
+  keeps running, and the dialog explains how to reopen the menubar from
+  Applications, the USB stick, or the DMG. Child-spawning menubar actions
+  (frozen **Enable Rekordbox Reads…** via `_spawn_watched`) now disable their
+  menu item with a busy title while the helper runs, then always finish with
+  visible feedback — a success notification on exit 0, silent restore on a
+  deliberate admin-prompt cancel, or a native failure alert (including empty
+  stderr) when anything else goes wrong. **Test the Lights…** still uses a
+  direct `Popen` replay path and was not changed. Status: implemented /
+  software-tested / frozen-app behavior operator-unvalidated. The M2 install offer is NOT in the maintenance block: per the M2
   spec it stays the PRIMARY item on DMG-guest runs — inserted at the very top
   of the menu (index 0 + separator) after the blueprint walk, M2's original
   mechanism verbatim. The LEDs glance row reads the `led_look_director` status

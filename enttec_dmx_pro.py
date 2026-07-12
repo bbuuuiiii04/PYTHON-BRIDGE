@@ -46,6 +46,7 @@ MSG_START: int = 0x7E
 MSG_END: int = 0xE7
 LABEL_SEND_DMX: int = 6
 DMX_START_CODE: int = 0x00
+_RECONNECT_INTERVAL_S: float = 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -197,6 +198,9 @@ class SoundSwitchDmxWorker:
         self._sent_count: int = 0
         self._error_count: int = 0
         self._last_error: str | None = None
+        self._reconnect_count: int = 0
+        self._last_reconnect_attempt: float = 0.0
+        self._disconnected_at: float | None = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -237,6 +241,8 @@ class SoundSwitchDmxWorker:
             "error_count": self._error_count,
             "last_error": self._last_error,
             "mailbox_depth": len(self._mailbox),
+            "connected": self._ser is not None,
+            "reconnect_count": self._reconnect_count,
         }
 
     # ------------------------------------------------------------------
@@ -258,10 +264,32 @@ class SoundSwitchDmxWorker:
         try:
             with bridge_log.thread_guard("SoundSwitchDmxWorker"):
                 while not self._stop_event.is_set():
+                    if self._ser is None:
+                        now = time.monotonic()
+                        if now - self._last_reconnect_attempt >= _RECONNECT_INTERVAL_S:
+                            self._last_reconnect_attempt = now
+                            try:
+                                resolved = resolve_enttec_port(self._port)
+                                self._ser = self._port_factory(resolved)
+                            except Exception as exc:
+                                self._last_error = str(exc)
+                                self._error_count += 1
+                                if bf.log_changed("dmx_reconnect", True):
+                                    bridge_log.health("dmx", "reconnect pending: %s", exc)
+                            else:
+                                self._reconnect_count += 1
+                                bridge_log.health(
+                                    "dmx",
+                                    "reconnected on %s (reconnect #%d)",
+                                    resolved,
+                                    self._reconnect_count,
+                                    lvl=logging.INFO,
+                                )
+                                bf.log_changed("dmx_reconnect", False)
                     packet = self._drain_mailbox()
                     if packet is not None:
                         self._send_packet(packet)
-                    else:
+                    if self._ser is None or packet is None:
                         time.sleep(self._poll_s)
         finally:
             self._push_zero_and_close()
@@ -291,6 +319,12 @@ class SoundSwitchDmxWorker:
             self._error_count += 1
             if bf.log_changed("dmx_write_err", True):
                 bridge_log.health("dmx", "write error: %s", exc)
+            try:
+                self._ser.close()
+            except Exception as close_exc:
+                bridge_log.health("dmx", "serial close after write error failed: %s", close_exc)
+            self._ser = None
+            self._disconnected_at = time.monotonic()
 
     def _push_zero_and_close(self) -> None:
         """Push a zero packet before closing to reduce stuck-fixture risk.
@@ -301,6 +335,7 @@ class SoundSwitchDmxWorker:
         A physical kill switch / DMX-side power path is the true failsafe.
         """
         if self._ser is None:
+            # No reachable handle remains to zero during an outage.
             return
         try:
             self._ser.write(_ZERO_PACKET)

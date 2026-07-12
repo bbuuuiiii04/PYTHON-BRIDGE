@@ -243,7 +243,10 @@ class TestSoundSwitchDmxWorker(unittest.TestCase):
         """status() must return the expected diagnostic keys."""
         worker, _ = self._make_worker()
         s = worker.status()
-        for key in ("worker", "port", "running", "sent_count", "error_count", "last_error", "mailbox_depth"):
+        for key in (
+            "worker", "port", "running", "sent_count", "error_count",
+            "last_error", "mailbox_depth", "connected", "reconnect_count",
+        ):
             self.assertIn(key, s, f"Missing status key: {key}")
 
     def test_mailbox_latest_frame_only(self):
@@ -332,6 +335,12 @@ class TestSoundSwitchDmxWorkerHealthTransitions(unittest.TestCase):
             worker.put_frame(pkt)
             time.sleep(0.01)
 
+    def _wait_until(self, predicate, *, timeout_s: float = 1.0) -> None:
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline and not predicate():
+            time.sleep(0.005)
+        self.assertTrue(predicate(), "timed out waiting for worker state")
+
     def test_write_error_emits_once_per_failure_streak(self):
         fake = FakeSerial(fail_write=True)
         worker = self._make_worker(fake, poll_s=0.005)
@@ -340,14 +349,16 @@ class TestSoundSwitchDmxWorkerHealthTransitions(unittest.TestCase):
         self.addCleanup(logger.removeHandler, handler)
 
         worker.start()
-        self._feed_frames_until(worker, lambda: bool(records))
+        self._feed_frames_until(
+            worker, lambda: any("write error" in r.getMessage() for r in records),
+        )
         # Keep feeding briefly after the first record to prove the streak stays silent.
         self._feed_frames_until(worker, lambda: False, timeout_s=0.1)
         worker.stop()
 
-        self.assertEqual(len(records), 1, f"expected exactly one write-error record, got {records!r}")
-        self.assertEqual(records[0].levelname, "WARNING")
-        self.assertIn("write error", records[0].getMessage())
+        write_errors = [r for r in records if "write error" in r.getMessage()]
+        self.assertEqual(len(write_errors), 1, f"expected one write-error record, got {records!r}")
+        self.assertEqual(write_errors[0].levelname, "WARNING")
 
     def test_write_recovers_emits_once_after_failure_streak(self):
         fake = FakeSerial(fail_write=True)
@@ -357,17 +368,175 @@ class TestSoundSwitchDmxWorkerHealthTransitions(unittest.TestCase):
         self.addCleanup(logger.removeHandler, handler)
 
         worker.start()
-        self._feed_frames_until(worker, lambda: bool(records))
+        self._feed_frames_until(
+            worker, lambda: any("write error" in r.getMessage() for r in records),
+        )
         self.assertTrue(records, "expected the write-error record before flipping to healthy")
 
         fake.fail_write = False
-        self._feed_frames_until(worker, lambda: len(records) >= 2)
+        self._feed_frames_until(
+            worker, lambda: any("write recovered" in r.getMessage() for r in records),
+        )
         worker.stop()
 
-        self.assertEqual(len(records), 2, f"expected error+recovered only, got {records!r}")
-        self.assertEqual(records[0].levelname, "WARNING")
-        self.assertEqual(records[1].levelname, "INFO")
-        self.assertIn("recovered", records[1].getMessage())
+        write_errors = [r for r in records if "write error" in r.getMessage()]
+        recoveries = [r for r in records if "write recovered" in r.getMessage()]
+        self.assertEqual(len(write_errors), 1, f"expected one write-error record, got {records!r}")
+        self.assertEqual(len(recoveries), 1, f"expected one recovery record, got {records!r}")
+        self.assertEqual(write_errors[0].levelname, "WARNING")
+        self.assertEqual(recoveries[0].levelname, "INFO")
+
+    def test_write_error_closes_dead_handle_and_reconnects(self):
+        dead = FakeSerial()
+        dead.write = mock.Mock(side_effect=OSError(6, "Device not configured"))
+        fresh = FakeSerial()
+        factory_calls: list[str] = []
+
+        def factory(port: str):
+            factory_calls.append(port)
+            return dead if len(factory_calls) == 1 else fresh
+
+        worker = SoundSwitchDmxWorker(
+            port="/dev/fake_test_port", port_factory=factory, poll_s=0.002,
+        )
+        packet = build_dmx_packet(bytearray([42]))
+        with mock.patch.object(edp, "_RECONNECT_INTERVAL_S", 0.01), \
+                mock.patch.object(edp, "resolve_enttec_port", return_value="/dev/fake_reconnected"):
+            worker.start()
+            try:
+                worker.put_frame(packet)
+                self._wait_until(lambda: dead.closed)
+                worker.put_frame(packet)
+                self._wait_until(lambda: packet in fresh.writes)
+            finally:
+                worker.stop()
+
+        self.assertEqual(factory_calls, ["/dev/fake_test_port", "/dev/fake_reconnected"])
+        self.assertIn(packet, fresh.writes)
+
+    def test_reconnect_failure_retries_and_updates_status(self):
+        dead = FakeSerial()
+        dead.write = mock.Mock(side_effect=OSError(6, "Device not configured"))
+        fresh = FakeSerial()
+        factory_calls = 0
+
+        def factory(_port: str):
+            nonlocal factory_calls
+            factory_calls += 1
+            if factory_calls == 1:
+                return dead
+            if factory_calls == 2:
+                raise OSError(6, "Device not configured")
+            return fresh
+
+        worker = SoundSwitchDmxWorker(
+            port="/dev/fake_test_port", port_factory=factory, poll_s=0.002,
+        )
+        with mock.patch.object(edp, "_RECONNECT_INTERVAL_S", 0.05), \
+                mock.patch.object(edp, "resolve_enttec_port", return_value="/dev/fake_reconnected"):
+            worker.start()
+            try:
+                worker.put_frame(build_dmx_packet(bytearray([42])))
+                self._wait_until(lambda: factory_calls >= 2)
+                self.assertFalse(worker.status()["connected"])
+                self._feed_frames_until(
+                    worker,
+                    lambda: worker.status()["connected"]
+                    and worker.status()["reconnect_count"] == 1,
+                )
+                self.assertTrue(worker.status()["connected"])
+                self.assertEqual(worker.status()["reconnect_count"], 1)
+            finally:
+                worker.stop()
+
+        self.assertEqual(factory_calls, 3)
+
+    def test_reconnect_resolves_port_before_factory(self):
+        dead = FakeSerial()
+        dead.write = mock.Mock(side_effect=OSError(6, "Device not configured"))
+        fresh = FakeSerial()
+        factory_calls: list[str] = []
+
+        def factory(port: str):
+            factory_calls.append(port)
+            return dead if len(factory_calls) == 1 else fresh
+
+        worker = SoundSwitchDmxWorker(
+            port="/dev/fake_test_port", port_factory=factory, poll_s=0.002,
+        )
+        packet = build_dmx_packet(bytearray([42]))
+        with mock.patch.object(edp, "_RECONNECT_INTERVAL_S", 0.01), \
+                mock.patch.object(
+                    edp, "resolve_enttec_port", return_value="/dev/cu.usbserial-NEW",
+                ) as resolve:
+            worker.start()
+            try:
+                worker.put_frame(packet)
+                self._wait_until(lambda: dead.closed)
+                worker.put_frame(packet)
+                self._wait_until(lambda: packet in fresh.writes)
+            finally:
+                worker.stop()
+
+        resolve.assert_called_once_with("/dev/fake_test_port")
+        self.assertEqual(factory_calls, ["/dev/fake_test_port", "/dev/cu.usbserial-NEW"])
+
+    def test_stop_during_outage_joins_cleanly(self):
+        dead = FakeSerial()
+        dead.write = mock.Mock(side_effect=OSError(6, "Device not configured"))
+        factory_calls = 0
+
+        def factory(_port: str):
+            nonlocal factory_calls
+            factory_calls += 1
+            if factory_calls == 1:
+                return dead
+            raise OSError(6, "Device not configured")
+
+        worker = SoundSwitchDmxWorker(
+            port="/dev/fake_test_port", port_factory=factory, poll_s=0.002,
+        )
+        with mock.patch.object(edp, "_RECONNECT_INTERVAL_S", 0.01), \
+                mock.patch.object(edp, "resolve_enttec_port", return_value="/dev/fake_reconnected"):
+            worker.start()
+            worker.put_frame(build_dmx_packet(bytearray([42])))
+            self._wait_until(lambda: factory_calls >= 2)
+            started = time.monotonic()
+            worker.stop()
+
+        self.assertLess(time.monotonic() - started, 1.0)
+        self.assertFalse(worker.status()["running"])
+
+    def test_reconnect_pending_logs_once_per_outage(self):
+        dead = FakeSerial()
+        dead.write = mock.Mock(side_effect=OSError(6, "Device not configured"))
+        factory_calls = 0
+
+        def factory(_port: str):
+            nonlocal factory_calls
+            factory_calls += 1
+            if factory_calls == 1:
+                return dead
+            raise OSError(6, "Device not configured")
+
+        worker = SoundSwitchDmxWorker(
+            port="/dev/fake_test_port", port_factory=factory, poll_s=0.002,
+        )
+        logger, handler, prior_level, records = _capture("health.dmx")
+        self.addCleanup(logger.setLevel, prior_level)
+        self.addCleanup(logger.removeHandler, handler)
+
+        with mock.patch.object(edp, "_RECONNECT_INTERVAL_S", 0.01), \
+                mock.patch.object(edp, "resolve_enttec_port", return_value="/dev/fake_reconnected"):
+            worker.start()
+            try:
+                worker.put_frame(build_dmx_packet(bytearray([42])))
+                self._wait_until(lambda: factory_calls >= 4)
+            finally:
+                worker.stop()
+
+        pending = [r for r in records if "reconnect pending" in r.getMessage()]
+        self.assertEqual(len(pending), 1, f"expected one reconnect-pending record, got {records!r}")
 
     def test_port_open_failure_emits_health_dmx_error(self):
         def _boom(*_a, **_kw):

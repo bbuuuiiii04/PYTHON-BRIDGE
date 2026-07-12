@@ -690,6 +690,12 @@ def open_pad(url: str, port: int, argv: list[str]) -> None:
     open_browser_url(url)
 
 
+def _is_user_cancel(stderr: str) -> bool:
+    """True when an osascript admin escalation was cancelled by the operator."""
+    s = (stderr or "").lower()
+    return "user canceled" in s or "user cancelled" in s or "(-128)" in s
+
+
 def _format_child_failure(label: str, returncode: int, stderr_tail: str) -> str:
     """Plain-language dialog text when a spawned child dies at startup (pure seam
     for the frozen bridge / rekordbox-patch spawns, which otherwise fail silent)."""
@@ -1500,7 +1506,17 @@ class BridgeMenuBar(NSObject):
         else:
             button.setImage_(None)
 
-    def _spawn_watched(self, argv, *, label, early_window=4.0):
+    def _spawn_watched(
+        self,
+        argv,
+        *,
+        label,
+        early_window=4.0,
+        busy_item_attr=None,
+        busy_title=None,
+        success_message=None,
+        failure_title=None,
+    ):
         """Spawn a detached child, capturing its stderr to a log; if it exits
         nonzero within early_window seconds, surface the stderr tail in a dialog.
 
@@ -1508,7 +1524,11 @@ class BridgeMenuBar(NSObject):
         fire-and-forget with no stderr and no exit check, so any early crash was
         completely invisible ('does nothing'). Watching runs on a daemon thread —
         it never touches the bridge's 200 Hz loop (separate process) or the
-        AppKit main thread except the final marshalled alert. Returns the Popen."""
+        AppKit main thread except the final marshalled alert. Returns the Popen.
+
+        When busy_item_attr is set, the watcher waits for the full child lifetime
+        and always marshals a visible completion (busy title, success notify, or
+        failure alert) back to the main thread."""
         err_path = None
         err_fh = subprocess.DEVNULL
         try:
@@ -1521,6 +1541,14 @@ class BridgeMenuBar(NSObject):
             err_fh = open(err_path, "wb")
         except OSError:
             err_path, err_fh = None, subprocess.DEVNULL
+        saved_title = None
+        if busy_item_attr:
+            item = getattr(self, busy_item_attr, None)
+            if item is not None:
+                saved_title = item.title()
+                item.setEnabled_(False)
+                if busy_title:
+                    item.setTitle_(busy_title)
         proc = subprocess.Popen(
             argv,
             start_new_session=True,
@@ -1530,12 +1558,98 @@ class BridgeMenuBar(NSObject):
         )
         if hasattr(err_fh, "close"):
             err_fh.close()  # the child has its own dup; drop the parent's handle
-        threading.Thread(
-            target=self._watch_child,
-            args=(proc, err_path, label, early_window),
-            daemon=True,
-        ).start()
+        if busy_item_attr:
+            threading.Thread(
+                target=self._watch_child_full,
+                args=(
+                    proc,
+                    err_path,
+                    label,
+                    busy_item_attr,
+                    saved_title,
+                    success_message,
+                    failure_title,
+                ),
+                daemon=True,
+            ).start()
+        else:
+            threading.Thread(
+                target=self._watch_child,
+                args=(proc, err_path, label, early_window),
+                daemon=True,
+            ).start()
         return proc
+
+    def _read_child_stderr_tail(self, err_path) -> str:
+        if err_path is None:
+            return ""
+        try:
+            return Path(err_path).read_text(encoding="utf-8", errors="replace")[-2000:]
+        except OSError:
+            return ""
+
+    def _watch_child_full(
+        self,
+        proc,
+        err_path,
+        label,
+        busy_item_attr,
+        saved_title,
+        success_message,
+        failure_title,
+    ):
+        returncode = proc.wait()
+        tail = self._read_child_stderr_tail(err_path)
+        payload = {
+            "returncode": returncode,
+            "tail": tail,
+            "label": label,
+            "err_path": str(err_path) if err_path else "",
+            "busy_item_attr": busy_item_attr,
+            "saved_title": saved_title,
+            "success_message": success_message,
+            "failure_title": failure_title,
+        }
+        self.performSelectorOnMainThread_withObject_waitUntilDone_(
+            "finishWatchedChild:", payload, False,
+        )
+
+    def finishWatchedChild_(self, payload):
+        attr = payload.get("busy_item_attr")
+        saved_title = payload.get("saved_title")
+        if attr:
+            item = getattr(self, attr, None)
+            if item is not None:
+                if saved_title is not None:
+                    item.setTitle_(saved_title)
+                item.setEnabled_(True)
+        returncode = payload.get("returncode", 0)
+        if returncode == 0:
+            message = payload.get("success_message")
+            if message:
+                _notify(message)
+            return
+        if returncode < 0:
+            return
+        tail = payload.get("tail") or ""
+        if _is_user_cancel(tail):
+            return
+        title = payload.get("failure_title") or "Operation failed"
+        detail_parts = [f"It exited with code {returncode}."]
+        stderr_tail = tail.strip()
+        if stderr_tail:
+            if len(stderr_tail) > 600:
+                stderr_tail = "…" + stderr_tail[-600:]
+            detail_parts.append(stderr_tail)
+        err_path = payload.get("err_path") or ""
+        if err_path:
+            detail_parts.append(f"Full log: {err_path}")
+        detail_parts.append("If you cancelled the prompts, you can ignore this.")
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_(title)
+        alert.setInformativeText_("\n\n".join(detail_parts))
+        alert.addButtonWithTitle_("OK")
+        alert.runModal()
 
     def _watch_child(self, proc, err_path, label, early_window):
         try:
@@ -1547,12 +1661,7 @@ class BridgeMenuBar(NSObject):
             # (_stop_frozen_bridge_child sends SIGTERM -> -15) or an OS kill.
             # Neither is a startup crash, so never pop a "couldn't start" dialog.
             return
-        tail = ""
-        if err_path is not None:
-            try:
-                tail = Path(err_path).read_text(encoding="utf-8", errors="replace")[-2000:]
-            except OSError:
-                tail = ""
+        tail = self._read_child_stderr_tail(err_path)
         # Only a CRASH writes a traceback to stderr. A nonzero exit with no stderr
         # is a handled outcome the child already reported via its OWN dialog (e.g.
         # the operator cancelled the Rekordbox-patch prompt) — alerting there would
@@ -1851,8 +1960,16 @@ class BridgeMenuBar(NSObject):
             argv = [sys.executable, "--patch-rekordbox"]
         else:
             argv = [sys.executable, str(REPO_ROOT / "usb_launcher.py"), "--patch-rekordbox"]
-        self._spawn_watched(argv, label="patch_rekordbox")
-        _notify("Enabling Rekordbox reads… follow the prompts (you'll be asked for your admin password).")
+        self._spawn_watched(
+            argv,
+            label="patch_rekordbox",
+            busy_item_attr="enable_rb_reads_item",
+            busy_title="Enabling Rekordbox reads…",
+            success_message=(
+                "Rekordbox reads step finished — follow any dialogs it showed."
+            ),
+            failure_title="Enable Rekordbox Reads failed",
+        )
 
     def mapLasers_(self, _sender):
         # Off the AppKit main thread: open_pad may spawn the server and wait up to
@@ -1894,7 +2011,17 @@ class BridgeMenuBar(NSObject):
         self.refresh_(None)
 
     def quit_(self, _sender):
-        NSApplication.sharedApplication().terminate_(self)
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_("Quit the menubar?")
+        alert.setInformativeText_(
+            "The bridge keeps running if it is already on. To get the menubar "
+            "back, open \"RBSS Bridge\" again from Applications, the USB stick, "
+            "or the DMG."
+        )
+        alert.addButtonWithTitle_("Quit")
+        alert.addButtonWithTitle_("Cancel")
+        if alert.runModal() == NSAlertFirstButtonReturn:
+            NSApplication.sharedApplication().terminate_(self)
 
 
 def main() -> None:

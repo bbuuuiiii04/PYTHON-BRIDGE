@@ -168,6 +168,10 @@
       "pre_drop_blackout_beats": 4,
       "post_drop_hold_beats": 8,
       "breakdown_default_restore_beats": 64,
+      "drop_entry_only": false,
+      "_comment_drop_entry_only": "When true (gated path only): fire once at the drop, then hold — no autoloop-edge re-fires during the drop/post-drop windows.",
+      "drop_arm_cooldown_beats": 0.0,
+      "_comment_drop_arm_cooldown_beats": "Minimum beats between drop-impact arms; 0 = off. A cooldown-suppressed crossing falls to post_drop (same as max_drops_in_a_row suppression).",
       "_comment_scene_banks": "Optional role banks rotate deterministically (round-robin) on role entry/eligible trigger only.",
       "_comment_live_midi_safe_first": "For first live tests keep mappings safe/gentle and leave dry_run=true until validated.",
       "_comment_post_drop_hold": "post_drop_scene hold uses post_drop_hold_beats; normal scene changes use minimum_scene_hold_beats."
