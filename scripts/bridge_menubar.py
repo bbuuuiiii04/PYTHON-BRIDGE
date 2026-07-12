@@ -64,6 +64,7 @@ EXPORT_WORKING_DIRECTORY = str(Path(__file__).resolve().parents[2])
 CANONICAL_SOURCE_PROJECT = str(Path("~/Music/SoundSwitch/default.ssproj").expanduser())
 CANONICAL_PACK_DIR = REPO_ROOT / "local" / "soundswitch" / "rbss_canonical_pack"
 DETECT_MAX_AGE_SECONDS = 30.0
+RB_READS_MAX_AGE_SECONDS = 30.0
 _SIDECAR_SUFFIX = ".source.json"
 
 # Menubar status icons ship WITH the app so a guest Mac (or any non-maintainer
@@ -701,6 +702,42 @@ def _is_user_cancel(stderr: str) -> bool:
     return "user canceled" in s or "user cancelled" in s or "(-128)" in s
 
 
+def _import_rekordbox_patch():
+    """Import rekordbox_patch the way usb_launcher does (`from rb_ss_bridge_v2
+    import rekordbox_patch`): frozen, PyInstaller already bundles the package for
+    --patch-rekordbox; source runs need the repo parent on sys.path first."""
+    parent = str(REPO_ROOT.parent)
+    if not getattr(sys, "frozen", False) and parent not in sys.path:
+        sys.path.insert(0, parent)
+    from rb_ss_bridge_v2 import rekordbox_patch
+
+    return rekordbox_patch
+
+
+def _rb_reads_verdict() -> tuple[str, str]:
+    """Ground-truth check of the get-task-allow patch: (verdict, detail).
+
+    verdict: "enabled" | "not_enabled" | "unknown". Shells out via codesign
+    (has_get_task_allow) — must NEVER run on the AppKit main thread."""
+    try:
+        rekordbox_patch = _import_rekordbox_patch()
+        app = rekordbox_patch.find_rekordbox()
+        if app is None:
+            return "unknown", "Rekordbox app not found in /Applications"
+        if rekordbox_patch.has_get_task_allow(app):
+            return "enabled", str(app)
+        return "not_enabled", str(app)
+    except Exception as exc:
+        return "unknown", f"{type(exc).__name__}: {exc}"
+
+
+def rb_reads_status_title(state: str) -> str:
+    return {
+        "enabled": "Rekordbox reads: enabled ✓",
+        "not_enabled": "Rekordbox reads: not enabled",
+    }.get(state, "Rekordbox reads: unknown")
+
+
 def _format_child_failure(label: str, returncode: int, stderr_tail: str) -> str:
     """Plain-language dialog text when a spawned child dies at startup (pure seam
     for the frozen bridge / rekordbox-patch spawns, which otherwise fail silent)."""
@@ -1057,6 +1094,9 @@ MENU_BLUEPRINT: tuple = (
     ("action", "test_lights_item", "Test the Lights…", "testLights:"),
     ("action", "validation_item", "Run Health Check", "runValidation:"),
     ("action", "enable_rb_reads_item", "Enable Rekordbox Reads…", "enableRekordboxReads:"),
+    # Standing ground-truth row: reflects the get-task-allow entitlement on the
+    # installed Rekordbox app (cached background codesign check, never main-thread).
+    ("info", "rb_reads_status_item", "Rekordbox reads: unknown", None),
     ("sep", None, None, None),  # MAINTENANCE block
     # AWR-186 M2 SLOT: purge item — function owned by the usbm2 round;
     # structure only. Frozen-gated at build time (m2_offer); when the gate is
@@ -1090,6 +1130,11 @@ class BridgeMenuBar(NSObject):
         self._detect_generation = 0
         self._pack_auto_pending_enabled = None
         self._pack_auto_retried_enabled = None
+        # Rekordbox-reads entitlement row cache (same shape as the export detect
+        # cache: monotonic timestamp + in-progress guard + daemon-thread refresh).
+        self._rb_reads_state = "unknown"
+        self._rb_reads_at = 0.0
+        self._rb_reads_in_progress = False
         # Native install offer + purge (AWR-186 M2) — frozen runs only, so
         # source-run menubars never import install_controller and stay
         # byte-identical. Install offered only when running from the DMG/
@@ -1231,6 +1276,7 @@ class BridgeMenuBar(NSObject):
         self._render_export_state()
         self._auto_set_soundswitch_pack()
         self._maybe_detect_export_state()
+        self._maybe_check_rb_reads()
         smart_drop_on = bool(self._snapshot.get("state_manager", {}).get("smart_drop_enabled"))
         self.smart_drop_item.setTitle_("Smart Drops: On" if smart_drop_on else "Smart Drops: Off")
         smart_breakdown_on = bool(self._snapshot.get("state_manager", {}).get("smart_breakdown_enabled"))
@@ -1375,6 +1421,31 @@ class BridgeMenuBar(NSObject):
         self._detect_at = time.monotonic()
         self._detect_in_progress = False
         self._render_export_state()
+
+    def _maybe_check_rb_reads(self):
+        # Mirrors _maybe_detect_export_state: menu render reads the cached row
+        # instantly; a daemon thread refreshes it (codesign shells out, so the
+        # check must never run on the AppKit main thread).
+        if self._rb_reads_in_progress:
+            return
+        if (time.monotonic() - self._rb_reads_at) < RB_READS_MAX_AGE_SECONDS:
+            return
+        self._rb_reads_in_progress = True
+        threading.Thread(target=self._run_rb_reads_check, daemon=True).start()
+
+    def _run_rb_reads_check(self):
+        verdict, _detail = _rb_reads_verdict()
+        self.performSelectorOnMainThread_withObject_waitUntilDone_(
+            "finishRbReadsCheck:", verdict, False,
+        )
+
+    def finishRbReadsCheck_(self, verdict):
+        self._rb_reads_state = str(verdict)
+        self._rb_reads_at = time.monotonic()
+        self._rb_reads_in_progress = False
+        item = getattr(self, "rb_reads_status_item", None)
+        if item is not None:
+            item.setTitle_(rb_reads_status_title(self._rb_reads_state))
 
     def exportFromSS_(self, _sender):
         if getattr(sys, "frozen", False):
@@ -1525,6 +1596,7 @@ class BridgeMenuBar(NSObject):
         busy_title=None,
         success_message=None,
         failure_title=None,
+        verify_rb_reads=False,
     ):
         """Spawn a detached child, capturing its stderr to a log; if it exits
         nonzero within early_window seconds, surface the stderr tail in a dialog.
@@ -1537,7 +1609,10 @@ class BridgeMenuBar(NSObject):
 
         When busy_item_attr is set, the watcher waits for the full child lifetime
         and always marshals a visible completion (busy title, success notify, or
-        failure alert) back to the main thread."""
+        failure alert) back to the main thread. verify_rb_reads additionally
+        re-checks the get-task-allow entitlement on exit 0 (on the watcher
+        thread — codesign shells out) so the completion dialog reports verified
+        ground truth, never an exit-code guess."""
         err_path = None
         err_fh = subprocess.DEVNULL
         try:
@@ -1598,6 +1673,7 @@ class BridgeMenuBar(NSObject):
                     saved_title,
                     success_message,
                     failure_title,
+                    verify_rb_reads,
                 ),
                 daemon=True,
             ).start()
@@ -1626,6 +1702,7 @@ class BridgeMenuBar(NSObject):
         saved_title,
         success_message,
         failure_title,
+        verify_rb_reads=False,
     ):
         payload = {
             "label": label,
@@ -1641,6 +1718,11 @@ class BridgeMenuBar(NSObject):
         except Exception as exc:
             payload["returncode"] = 1
             payload["tail"] = str(exc)
+        if verify_rb_reads and payload["returncode"] == 0:
+            # Ground truth on THIS thread (codesign shells out; never main-thread):
+            # the completion selector only renders the verdict carried here.
+            verdict, detail = _rb_reads_verdict()
+            payload["verify"] = {"verdict": verdict, "detail": detail}
         self.performSelectorOnMainThread_withObject_waitUntilDone_(
             "finishWatchedChild:", payload, False,
         )
@@ -1656,6 +1738,10 @@ class BridgeMenuBar(NSObject):
                 item.setEnabled_(True)
         returncode = payload.get("returncode", 0)
         if returncode == 0:
+            verify = payload.get("verify")
+            if verify:
+                self._show_rb_reads_verdict(verify, payload.get("err_path") or "")
+                return
             message = payload.get("success_message")
             if message:
                 _notify(message)
@@ -1682,6 +1768,47 @@ class BridgeMenuBar(NSObject):
         alert = NSAlert.alloc().init()
         alert.setMessageText_(title)
         alert.setInformativeText_("\n\n".join(detail_parts))
+        alert.addButtonWithTitle_("OK")
+        alert.runModal()
+
+    def _show_rb_reads_verdict(self, verify, err_path):
+        """Verified completion dialog for Enable Rekordbox Reads (exit 0 only).
+
+        Native NSAlert, not an osascript notification — TCC can silently hide
+        notifications on a foreign Mac. The verdict was computed on the watcher
+        thread; here we only render it and refresh the standing status row.
+        Never silent, never a success claim the entitlement check didn't back."""
+        verdict = verify.get("verdict")
+        detail = verify.get("detail") or ""
+        # Reuse the row updater (already main-thread here) so the standing
+        # status line is correct the moment the alert shows.
+        self.finishRbReadsCheck_(
+            verdict if verdict in ("enabled", "not_enabled") else "unknown"
+        )
+        if verdict == "enabled":
+            title = "Rekordbox reads enabled"
+            body = (
+                f"Re-signing verified on {detail}.\n\n"
+                "Start the bridge to confirm reads flow — if this Mac still "
+                'blocks them, the menu will show the "RB reads blocked" warning.'
+            )
+        elif verdict == "not_enabled":
+            title = "Rekordbox reads did not take effect"
+            body = (
+                "The helper finished, but the re-signing did not take effect — "
+                f"Rekordbox still lacks the get-task-allow entitlement on {detail}."
+            )
+            if err_path:
+                body += f"\n\nFull log: {err_path}"
+        else:
+            title = "Rekordbox reads: could not verify"
+            body = (
+                "The helper finished, but the result could not be verified: "
+                f"{detail or 'unknown reason'}."
+            )
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_(title)
+        alert.setInformativeText_(body)
         alert.addButtonWithTitle_("OK")
         alert.runModal()
 
@@ -1999,10 +2126,10 @@ class BridgeMenuBar(NSObject):
             label="patch_rekordbox",
             busy_item_attr="enable_rb_reads_item",
             busy_title="Enabling Rekordbox reads…",
-            success_message=(
-                "Rekordbox reads step finished — follow any dialogs it showed."
-            ),
             failure_title="Enable Rekordbox Reads failed",
+            # Exit 0 alone doesn't prove the re-sign took: the watcher re-checks
+            # the entitlement and the completion dialog reports that verdict.
+            verify_rb_reads=True,
         )
 
     def mapLasers_(self, _sender):

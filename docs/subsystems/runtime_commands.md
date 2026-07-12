@@ -125,11 +125,28 @@ SoundSwitch pack-player boundary (T7c/T7e):
   menu item with a busy title while the helper runs, then always finish with
   visible feedback — a success notification on exit 0, a native failure alert
   (including empty stderr) on nonzero exit, or silent restore when a child is
-  killed by a signal (negative return code, e.g. logout teardown). A cancelled
-  Rekordbox-patch run currently surfaces that same failure alert with the
-  "If you cancelled the prompts, you can ignore this." line — the patch helper
-  exits 1 with empty stderr, so the silent-restore branch only engages if a
-  child ever emits recognizable cancel text on stderr. **Test the Lights…** still uses a
+  killed by a signal (negative return code, e.g. logout teardown). For **Enable
+  Rekordbox Reads…** specifically, exit 0 is no longer reported as success on
+  its own: the watcher thread re-checks ground truth (`find_rekordbox()` +
+  `has_get_task_allow()` from `rekordbox_patch.py`, imported the same
+  `rb_ss_bridge_v2` package way the launcher uses so it works frozen and from
+  source) and the completion is a native NSAlert (not an osascript
+  notification, which TCC can hide on a foreign Mac): "Rekordbox reads
+  enabled" with the verified app path, "did not take effect" when the
+  entitlement is still absent, or "could not verify" (app not found /
+  codesign failed) with the reason — never silent, never an unverified
+  success. The menu also carries a standing disabled status row near the
+  action: "Rekordbox reads: enabled ✓ / not enabled / unknown", refreshed by a
+  cached ~30 s daemon-thread codesign check (same pattern as the export
+  freshness detect; menu open renders the cache instantly, and the row is
+  re-verified from the watcher thread the moment the patch child finishes).
+  Honest boundary: both the dialog and the row verify the get-task-allow
+  entitlement statically; live reads are still proven only by the running
+  bridge (the "RB reads blocked" warning on the BRIDGE glance row). A cancelled
+  Rekordbox-patch run currently surfaces the nonzero-exit failure alert with
+  the "If you cancelled the prompts, you can ignore this." line — the patch
+  helper exits 1 with empty stderr, so the silent-restore branch only engages
+  if a child ever emits recognizable cancel text on stderr. **Test the Lights…** still uses a
   direct `Popen` replay path and was not changed. Status: implemented /
   software-tested / frozen-app behavior operator-unvalidated. The M2 install offer is NOT in the maintenance block: per the M2
   spec it stays the PRIMARY item on DMG-guest runs — inserted at the very top

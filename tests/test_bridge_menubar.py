@@ -1349,6 +1349,235 @@ class FrozenDefectHelperTests(BridgeMenubarTests):
         self.assertEqual(args[1]["success_message"], "done")
         self.assertFalse(args[2])
 
+    def test_finish_watched_child_exit0_with_verify_uses_alert_not_notify(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock()
+        menu.enable_rb_reads_item = Mock()
+        verify = {"verdict": "enabled", "detail": "/Applications/rekordbox 7/rekordbox.app"}
+        with patch.object(bridge_menubar, "_notify") as notify, \
+             patch.object(bridge_menubar, "_rb_reads_verdict") as verdict_fn:
+            bridge_menubar.BridgeMenuBar.finishWatchedChild_.callable(menu, {
+                "returncode": 0,
+                "tail": "",
+                "busy_item_attr": "enable_rb_reads_item",
+                "saved_title": "Enable Rekordbox Reads…",
+                "success_message": "unused",
+                "err_path": "/tmp/patch_rekordbox.err.log",
+                "verify": verify,
+            })
+        menu.enable_rb_reads_item.setEnabled_.assert_called_once_with(True)
+        menu._show_rb_reads_verdict.assert_called_once_with(
+            verify, "/tmp/patch_rekordbox.err.log"
+        )
+        notify.assert_not_called()
+        # The main-thread completion never re-runs codesign: the payload verdict
+        # (computed on the watcher thread) is the only source.
+        verdict_fn.assert_not_called()
+
+    def test_show_rb_reads_verdict_enabled_says_verified(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock()
+        alert = Mock()
+        nsalert = Mock()
+        nsalert.alloc.return_value.init.return_value = alert
+        with patch.object(bridge_menubar, "NSAlert", nsalert):
+            bridge_menubar.BridgeMenuBar._show_rb_reads_verdict(
+                menu,
+                {"verdict": "enabled", "detail": "/Applications/rekordbox 7/rekordbox.app"},
+                "",
+            )
+        alert.setMessageText_.assert_called_once_with("Rekordbox reads enabled")
+        body = alert.setInformativeText_.call_args.args[0]
+        self.assertIn("verified", body)
+        self.assertIn("/Applications/rekordbox 7/rekordbox.app", body)
+        self.assertIn("RB reads blocked", body)
+        alert.runModal.assert_called_once_with()
+        menu.finishRbReadsCheck_.assert_called_once_with("enabled")
+
+    def test_show_rb_reads_verdict_absent_says_did_not_take_effect(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock()
+        alert = Mock()
+        nsalert = Mock()
+        nsalert.alloc.return_value.init.return_value = alert
+        with patch.object(bridge_menubar, "NSAlert", nsalert):
+            bridge_menubar.BridgeMenuBar._show_rb_reads_verdict(
+                menu,
+                {"verdict": "not_enabled", "detail": "/Applications/rekordbox 7/rekordbox.app"},
+                "/tmp/patch_rekordbox.err.log",
+            )
+        body = alert.setInformativeText_.call_args.args[0]
+        self.assertIn("did not take effect", body)
+        self.assertIn("/tmp/patch_rekordbox.err.log", body)
+        alert.runModal.assert_called_once_with()
+        menu.finishRbReadsCheck_.assert_called_once_with("not_enabled")
+
+    def test_show_rb_reads_verdict_error_says_could_not_verify(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock()
+        alert = Mock()
+        nsalert = Mock()
+        nsalert.alloc.return_value.init.return_value = alert
+        with patch.object(bridge_menubar, "NSAlert", nsalert):
+            bridge_menubar.BridgeMenuBar._show_rb_reads_verdict(
+                menu,
+                {"verdict": "unknown", "detail": "Rekordbox app not found in /Applications"},
+                "",
+            )
+        body = alert.setInformativeText_.call_args.args[0]
+        self.assertIn("could not be verified", body)
+        self.assertIn("not found", body)
+        alert.runModal.assert_called_once_with()
+        menu.finishRbReadsCheck_.assert_called_once_with("unknown")
+
+    def test_watch_child_full_verifies_on_watcher_thread(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock()
+        proc = Mock()
+        proc.wait.return_value = 0
+        with patch.object(
+            bridge_menubar.BridgeMenuBar, "_read_child_stderr_tail", return_value="",
+        ), patch.object(
+            bridge_menubar, "_rb_reads_verdict",
+            return_value=("enabled", "/Applications/rekordbox 7/rekordbox.app"),
+        ) as verdict_fn:
+            bridge_menubar.BridgeMenuBar._watch_child_full(
+                menu,
+                proc,
+                None,
+                "patch_rekordbox",
+                "enable_rb_reads_item",
+                "Enable Rekordbox Reads…",
+                None,
+                "Enable Rekordbox Reads failed",
+                True,
+            )
+        verdict_fn.assert_called_once_with()
+        args = menu.performSelectorOnMainThread_withObject_waitUntilDone_.call_args.args
+        self.assertEqual(args[1]["verify"], {
+            "verdict": "enabled",
+            "detail": "/Applications/rekordbox 7/rekordbox.app",
+        })
+
+    def test_watch_child_full_skips_verification_on_nonzero_exit(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock()
+        proc = Mock()
+        proc.wait.return_value = 1
+        with patch.object(
+            bridge_menubar.BridgeMenuBar, "_read_child_stderr_tail", return_value="",
+        ), patch.object(bridge_menubar, "_rb_reads_verdict") as verdict_fn:
+            bridge_menubar.BridgeMenuBar._watch_child_full(
+                menu, proc, None, "patch_rekordbox", "enable_rb_reads_item",
+                "Enable Rekordbox Reads…", None, "failed", True,
+            )
+        verdict_fn.assert_not_called()
+        args = menu.performSelectorOnMainThread_withObject_waitUntilDone_.call_args.args
+        self.assertNotIn("verify", args[1])
+
+    def test_rb_reads_status_title_truth_table(self) -> None:
+        bridge_menubar = self._import_module()
+        self.assertEqual(
+            bridge_menubar.rb_reads_status_title("enabled"),
+            "Rekordbox reads: enabled ✓",
+        )
+        self.assertEqual(
+            bridge_menubar.rb_reads_status_title("not_enabled"),
+            "Rekordbox reads: not enabled",
+        )
+        for state in ("unknown", "", "bogus"):
+            self.assertEqual(
+                bridge_menubar.rb_reads_status_title(state),
+                "Rekordbox reads: unknown",
+            )
+
+    def test_maybe_check_rb_reads_uses_cache_and_background_thread(self) -> None:
+        bridge_menubar = self._import_module()
+        handler = bridge_menubar.BridgeMenuBar._maybe_check_rb_reads
+        # Fresh cache: menu refresh renders the cached row, no thread spawned.
+        menu = Mock(
+            _rb_reads_in_progress=False,
+            _rb_reads_at=bridge_menubar.time.monotonic(),
+        )
+        with patch.object(bridge_menubar.threading, "Thread") as thread:
+            handler(menu)
+        thread.assert_not_called()
+        # Stale cache: a daemon thread refreshes it off the main thread.
+        menu._rb_reads_at = 0.0
+        with patch.object(bridge_menubar.threading, "Thread") as thread:
+            handler(menu)
+        thread.assert_called_once_with(target=menu._run_rb_reads_check, daemon=True)
+        thread.return_value.start.assert_called_once_with()
+        self.assertTrue(menu._rb_reads_in_progress)
+        # Check already running: never stack a second one.
+        with patch.object(bridge_menubar.threading, "Thread") as thread:
+            handler(menu)
+        thread.assert_not_called()
+
+    def test_finish_rb_reads_check_updates_row_text(self) -> None:
+        bridge_menubar = self._import_module()
+        handler = bridge_menubar.BridgeMenuBar.finishRbReadsCheck_.callable
+        menu = Mock(rb_reads_status_item=Mock())
+        handler(menu, "enabled")
+        menu.rb_reads_status_item.setTitle_.assert_called_with(
+            "Rekordbox reads: enabled ✓"
+        )
+        self.assertEqual(menu._rb_reads_state, "enabled")
+        self.assertFalse(menu._rb_reads_in_progress)
+        # Cache refresh flips the rendered text enabled -> not enabled.
+        handler(menu, "not_enabled")
+        menu.rb_reads_status_item.setTitle_.assert_called_with(
+            "Rekordbox reads: not enabled"
+        )
+        # Check failure renders "unknown".
+        handler(menu, "unknown")
+        menu.rb_reads_status_item.setTitle_.assert_called_with(
+            "Rekordbox reads: unknown"
+        )
+
+    def test_run_rb_reads_check_marshals_verdict_to_main_thread(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock()
+        with patch.object(
+            bridge_menubar, "_rb_reads_verdict", return_value=("not_enabled", "/app"),
+        ):
+            bridge_menubar.BridgeMenuBar._run_rb_reads_check(menu)
+        menu.performSelectorOnMainThread_withObject_waitUntilDone_.assert_called_once_with(
+            "finishRbReadsCheck:", "not_enabled", False,
+        )
+
+    def test_rb_reads_verdict_truth_table(self) -> None:
+        bridge_menubar = self._import_module()
+        patch_mod = Mock()
+        # App missing -> unknown.
+        patch_mod.find_rekordbox.return_value = None
+        with patch.object(bridge_menubar, "_import_rekordbox_patch", return_value=patch_mod):
+            self.assertEqual(bridge_menubar._rb_reads_verdict()[0], "unknown")
+        # Entitlement present / absent.
+        patch_mod.find_rekordbox.return_value = Path("/Applications/rekordbox 7/rekordbox.app")
+        patch_mod.has_get_task_allow.return_value = True
+        with patch.object(bridge_menubar, "_import_rekordbox_patch", return_value=patch_mod):
+            self.assertEqual(
+                bridge_menubar._rb_reads_verdict(),
+                ("enabled", "/Applications/rekordbox 7/rekordbox.app"),
+            )
+        patch_mod.has_get_task_allow.return_value = False
+        with patch.object(bridge_menubar, "_import_rekordbox_patch", return_value=patch_mod):
+            self.assertEqual(bridge_menubar._rb_reads_verdict()[0], "not_enabled")
+        # Check itself blowing up -> unknown with the reason, never a raise.
+        patch_mod.has_get_task_allow.side_effect = OSError("codesign missing")
+        with patch.object(bridge_menubar, "_import_rekordbox_patch", return_value=patch_mod):
+            verdict, detail = bridge_menubar._rb_reads_verdict()
+        self.assertEqual(verdict, "unknown")
+        self.assertIn("codesign missing", detail)
+
+    def test_menu_blueprint_has_rb_reads_status_row(self) -> None:
+        bridge_menubar = self._import_module()
+        flat = self._flatten_blueprint(bridge_menubar.MENU_BLUEPRINT)
+        row = next(e for e in flat if e[1] == "rb_reads_status_item")
+        self.assertEqual(row[0], "info")  # disabled status line, not an action
+        self.assertIsNone(row[3])
+
     def test_watch_child_full_exception_still_marshals_failure(self) -> None:
         bridge_menubar = self._import_module()
         menu = Mock()
