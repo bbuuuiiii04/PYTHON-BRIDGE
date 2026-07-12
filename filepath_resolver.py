@@ -645,7 +645,7 @@ def _sidecar_lookup(anlz_path: str, usb_beatgrid: dict) -> Optional[dict]:
     root, records = sidecar
     try:
         device_track = _read_device_pdb_track(anlz_path)
-    except (OSError, UnicodeError, ValueError, struct.error):
+    except (OSError, UnicodeError, ValueError, struct.error, IndexError):
         device_track = None
     record, reason, candidate_ids = _select_sidecar_record(
         records, usb_beatgrid, device_track,
