@@ -17,7 +17,6 @@ class DropLifecycleConfig:
     drop_impact_beats: float           # flat impact window (operator 32.0; LED-parity 8.0)
     post_drop_cycle_beats: float       # inert here; carried for the future native-DMX cadence
     impact_predecessors: frozenset     # = frozenset({"up", "low", "buildup", "breakdown"})
-    drop_arm_cooldown_beats: float = 0.0  # min beats between arms; 0.0 = off (today's behavior)
 
 
 @dataclass(frozen=True)
@@ -32,13 +31,11 @@ class DropLifecycle:
         self._first_drop_anchor_beat: Optional[float] = None
         self._impact_until_beat: Optional[float] = None
         self._impact_count: int = 0
-        self._last_arm_abs_beat: Optional[float] = None
 
     def reset(self) -> None:
         self._first_drop_anchor_beat = None
         self._impact_until_beat = None
         self._impact_count = 0
-        self._last_arm_abs_beat = None
 
     def _abs_beat(self, sp) -> Optional[float]:
         if sp.abs_beat is not None:
@@ -60,15 +57,6 @@ class DropLifecycle:
         return None
 
     def impact_allowed(self, sp) -> bool:
-        cooldown = float(self._config.drop_arm_cooldown_beats)
-        if cooldown > 0.0 and self._last_arm_abs_beat is not None:
-            abs_beat = self._abs_beat(sp)
-            if abs_beat is not None:
-                if abs_beat < self._last_arm_abs_beat:
-                    # Operator seeked/rewound — never permanently block drops.
-                    self._last_arm_abs_beat = None
-                elif abs_beat - self._last_arm_abs_beat < cooldown:
-                    return False
         previous = str(sp.previous_phrase_label or "other")
         if previous in self._config.impact_predecessors:
             return True
@@ -94,7 +82,6 @@ class DropLifecycle:
             self._first_drop_anchor_beat = float(anchor_beat)
         self._impact_until_beat = float(anchor_beat) + self._config.drop_impact_beats
         self._impact_count += 1
-        self._last_arm_abs_beat = float(anchor_beat)
 
     def resolve(self, sp, *, mutate: bool) -> DropResult:
         if mutate and self.should_clear(sp):

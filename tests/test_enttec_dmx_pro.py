@@ -243,11 +243,15 @@ class TestSoundSwitchDmxWorker(unittest.TestCase):
         """status() must return the expected diagnostic keys."""
         worker, _ = self._make_worker()
         s = worker.status()
-        for key in (
-            "worker", "port", "running", "sent_count", "error_count",
-            "last_error", "mailbox_depth", "connected", "reconnect_count",
-        ):
-            self.assertIn(key, s, f"Missing status key: {key}")
+        self.assertEqual(
+            set(s),
+            {
+                "worker", "port", "running", "sent_count", "error_count",
+                "last_error", "mailbox_depth", "connected", "reconnect_count",
+            },
+        )
+        self.assertFalse(s["connected"])
+        self.assertEqual(s["reconnect_count"], 0)
 
     def test_mailbox_latest_frame_only(self):
         """When multiple frames are queued before the worker drains, only the

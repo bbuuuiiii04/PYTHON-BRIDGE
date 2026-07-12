@@ -99,15 +99,6 @@ Config:
   future `post_drop_cycle_beats`; laser cycle cadence still comes from autoloop
   ticks. Deprecated leftover `pre_drop_scene` keys are ignored for load
   compatibility.
-- Drop restraint taste knobs (AWR-220; both default to today's behavior):
-  - `drop_entry_only` (default `false`): when true and `drop_lifecycle_mirror` is on, the laser
-    still fires once at an allowed drop crossing, then uses hold reasons (`drop_hold` /
-    `post_drop_hold`) instead of cycling reasons so autoloop edges do not re-fire MIDI during
-    the drop/post-drop windows. Status: implemented / software-tested / hardware-unvalidated.
-  - `drop_arm_cooldown_beats` (default `0.0`): minimum beats between drop-impact arms. A
-    cooldown-suppressed crossing falls to the `post_drop` role with no new arm (same shape as
-    `max_drops_in_a_row` suppression). `0.0` leaves arming unchanged. Status: implemented /
-    software-tested / hardware-unvalidated.
 - `/drop_presentation` top-level block in `config/led_look_director.example.json` (`enabled`, `laser_ratio`, `opening_tracks`, `led_predark_beats`, `drop_window_cap_beats`, `hotcue_marker`, `solo_learn_threshold`, `gearshift_bpm_jump`, `record_min_drops`, `ws_handoff_enabled`); loaded independently of the main LED config's validate/build pipeline via `led_config.load_drop_presentation_config()`, so an unrelated `looks`/`banks` config error never blocks hot-cue tags or the presentation policy.
 
 Laser Pad (operator companion tool):

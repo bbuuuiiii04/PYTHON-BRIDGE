@@ -129,7 +129,6 @@ class LaserDirector:
         self._decision_log = LaserDecisionLog()
         self._drop_lifecycle: Optional[DropLifecycle] = None
         self._drop_lifecycle_mirror: bool = True
-        self._drop_entry_only: bool = False
         self._allow_high_impact: bool = False
         self._post_drop_bank: tuple[str, ...] = ()
 
@@ -205,7 +204,6 @@ class LaserDirector:
             getattr(personality, "drop_style", "drop_mode")
         )
         self._drop_lifecycle_mirror = bool(getattr(personality, "drop_lifecycle_mirror", True))
-        self._drop_entry_only = bool(getattr(personality, "drop_entry_only", False))
         self._allow_high_impact = bool(getattr(personality, "allow_high_impact", False))
         self._post_drop_bank = tuple(personality.post_drop_bank)
         self._drop_lifecycle = DropLifecycle(DropLifecycleConfig(
@@ -213,7 +211,6 @@ class LaserDirector:
             drop_impact_beats=float(getattr(personality, "drop_impact_beats", 32.0)),
             post_drop_cycle_beats=float(getattr(personality, "post_drop_cycle_beats", 32.0)),
             impact_predecessors=_LASER_DROP_IMPACT_PREDECESSORS,
-            drop_arm_cooldown_beats=float(getattr(personality, "drop_arm_cooldown_beats", 0.0)),
         ))
 
     @staticmethod
@@ -547,28 +544,20 @@ class LaserDirector:
                 )
             if res.role == "drop":  # sustained inside the window (or guarded-out first tick)
                 self._last_smart_abs_beat = abs_beat
-                # drop_entry_only: reuse legacy hold reasons so the executor latches
-                # (no autoloop-edge MIDI re-fire). Defaults False → today's drop_cycle.
-                drop_reason = "drop_hold" if self._drop_entry_only else "drop_cycle"
                 return LaserSceneDecision(
-                    scene=self._drop_scene, reason=drop_reason,
+                    scene=self._drop_scene, reason="drop_cycle",
                     priority=10, source="policy", role="drop",
                 )
             if res.role == "post_drop":
                 self._last_smart_abs_beat = abs_beat
                 if self._has_usable_cyclable_post_drop():
-                    post_reason = (
-                        "post_drop_hold" if self._drop_entry_only else "post_drop_cycle"
-                    )
                     return LaserSceneDecision(
                         scene=self._post_drop_scene or self._drop_scene,
-                        reason=post_reason,
+                        reason="post_drop_cycle",
                         priority=10, source="policy", role="post_drop",
                     )
-                # no usable post_drop -> hold/cycle drops, never dark
-                fallback_reason = "drop_hold" if self._drop_entry_only else "drop_cycle"
-                return LaserSceneDecision(
-                    scene=self._drop_scene, reason=fallback_reason,
+                return LaserSceneDecision(  # no usable post_drop -> cycle drops, never dark
+                    scene=self._drop_scene, reason="drop_cycle",
                     priority=10, source="policy", role="drop",
                 )
             # res.role == "none": the resolver owns the drop/post_drop window, so we are NOT in a

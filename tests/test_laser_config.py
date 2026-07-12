@@ -979,45 +979,12 @@ class PersonalityValidationTests(unittest.TestCase):
         self.assertFalse(r.available)
         self.assertTrue(any("post_drop_cycle_beats" in e for e in r.errors))
 
-    def test_drop_entry_only_must_be_bool(self) -> None:
-        p = self._valid_personality()
-        p["drop_entry_only"] = 1  # int, not bool
-        r = load_laser_director_config(_write_config(self._cfg_with_personality(p)))
-        self.assertFalse(r.available)
-        self.assertTrue(any("drop_entry_only" in e for e in r.errors))
-
-    def test_drop_arm_cooldown_beats_must_be_non_negative(self) -> None:
-        p = self._valid_personality()
-        p["drop_arm_cooldown_beats"] = -1
-        r = load_laser_director_config(_write_config(self._cfg_with_personality(p)))
-        self.assertFalse(r.available)
-        self.assertTrue(any("drop_arm_cooldown_beats" in e for e in r.errors))
-
-    def test_drop_arm_cooldown_beats_rejects_bool(self) -> None:
-        p = self._valid_personality()
-        p["drop_arm_cooldown_beats"] = True  # bool must NOT count as a valid number
-        r = load_laser_director_config(_write_config(self._cfg_with_personality(p)))
-        self.assertFalse(r.available)
-        self.assertTrue(any("drop_arm_cooldown_beats" in e for e in r.errors))
-
-    def test_drop_restraint_knobs_default_when_absent(self) -> None:
-        p = self._valid_personality()
-        p.pop("drop_entry_only", None)
-        p.pop("drop_arm_cooldown_beats", None)
-        r = load_laser_director_config(_write_config(self._cfg_with_personality(p)))
-        self.assertTrue(r.available, msg=r.errors)
-        house = r.config.personalities["house"]
-        self.assertFalse(house.drop_entry_only)
-        self.assertEqual(house.drop_arm_cooldown_beats, 0.0)
-
     def test_valid_non_default_lifecycle_knobs_ok(self) -> None:
         p = self._valid_personality()
         p["drop_lifecycle_mirror"] = False
         p["max_drops_in_a_row"] = 3
         p["drop_impact_beats"] = 16
         p["post_drop_cycle_beats"] = 24.0
-        p["drop_entry_only"] = True
-        p["drop_arm_cooldown_beats"] = 64.0
         r = load_laser_director_config(_write_config(self._cfg_with_personality(p)))
         self.assertTrue(r.available, msg=r.errors)
         house = r.config.personalities["house"]
@@ -1025,8 +992,6 @@ class PersonalityValidationTests(unittest.TestCase):
         self.assertEqual(house.max_drops_in_a_row, 3)
         self.assertEqual(house.drop_impact_beats, 16.0)
         self.assertEqual(house.post_drop_cycle_beats, 24.0)
-        self.assertTrue(house.drop_entry_only)
-        self.assertEqual(house.drop_arm_cooldown_beats, 64.0)
 
     def test_phrase_interval_beats_must_be_positive_int(self) -> None:
         p = self._valid_personality()
@@ -1382,8 +1347,6 @@ class LaserModelsTests(unittest.TestCase):
         self.assertEqual(p.minimum_scene_hold_beats, 0)
         self.assertFalse(p.normal_changes_only_on_phrase_boundary)
         self.assertEqual(p.buildup_lookahead_beats, 32)
-        self.assertFalse(p.drop_entry_only)
-        self.assertEqual(p.drop_arm_cooldown_beats, 0.0)
 
 
 if __name__ == "__main__":

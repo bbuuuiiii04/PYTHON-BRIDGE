@@ -70,14 +70,7 @@ def _scene(name: str, *, scene_type: str = "autoloop") -> LaserScene:
     )
 
 
-def _personality(
-    *,
-    mirror: bool = True,
-    max_drops: int = 2,
-    impact_beats: float = 32.0,
-    drop_entry_only: bool = False,
-    drop_arm_cooldown_beats: float = 0.0,
-) -> LaserPersonality:
+def _personality(*, mirror: bool = True, max_drops: int = 2, impact_beats: float = 32.0) -> LaserPersonality:
     return LaserPersonality(
         name="house",
         safe_scene="safe_static",
@@ -97,8 +90,6 @@ def _personality(
         max_drops_in_a_row=max_drops,
         drop_impact_beats=impact_beats,
         post_drop_cycle_beats=32.0,
-        drop_entry_only=drop_entry_only,
-        drop_arm_cooldown_beats=drop_arm_cooldown_beats,
     )
 
 
@@ -253,78 +244,6 @@ class TestTeardown(unittest.TestCase):
         dec = d.tick(_ctx(abs_beat=210.0, smart_phrasing=sp_cross2), now=now + 0.03)
         self.assertEqual(dec.role, "drop")
         self.assertEqual(dec.reason, "drop_crossing")
-
-
-class TestDropEntryOnly(unittest.TestCase):
-    """drop_entry_only: gated path uses hold reasons instead of cycle reasons."""
-
-    def _prime_and_cross(self, d: LaserDirector, *, impact_beats: float = 8.0):
-        now = time.monotonic()
-        sp_prime = _sp(abs_beat=60.0, current_phrase_label="up", current_phrase_is_up=True)
-        d.tick(_ctx(abs_beat=60.0, smart_phrasing=sp_prime), now=now)
-        sp_cross = _sp(
-            abs_beat=64.0,
-            smart_drop_crossing=True,
-            active_drop_beat=64.0,
-            previous_phrase_label="up",
-            current_phrase_label="chorus",
-            current_phrase_is_chorus=True,
-        )
-        cross = d.tick(_ctx(abs_beat=64.0, smart_phrasing=sp_cross), now=now + 0.01)
-        return d, now, cross
-
-    def test_entry_only_hold_reasons(self) -> None:
-        d = _make_director(mirror=True, impact_beats=8.0, drop_entry_only=True)
-        d, now, cross = self._prime_and_cross(d)
-        self.assertEqual(cross.reason, "drop_crossing")
-        self.assertEqual(cross.role, "drop")
-
-        # Sustained inside impact window → drop_hold (not drop_cycle)
-        sp_hold = _sp(
-            abs_beat=68.0,
-            current_phrase_label="chorus",
-            current_phrase_is_chorus=True,
-            smart_post_drop_active=True,
-        )
-        hold = d.tick(_ctx(abs_beat=68.0, smart_phrasing=sp_hold), now=now + 0.02)
-        self.assertEqual(hold.reason, "drop_hold")
-        self.assertEqual(hold.role, "drop")
-        self.assertEqual(hold.priority, 10)
-
-        # Past impact window → post_drop_hold (not post_drop_cycle)
-        sp_post = _sp(
-            abs_beat=80.0,
-            current_phrase_label="chorus",
-            current_phrase_is_chorus=True,
-            smart_post_drop_active=True,
-        )
-        post = d.tick(_ctx(abs_beat=80.0, smart_phrasing=sp_post), now=now + 0.03)
-        self.assertEqual(post.reason, "post_drop_hold")
-        self.assertEqual(post.role, "post_drop")
-        self.assertEqual(post.priority, 10)
-
-    def test_entry_only_false_keeps_cycle_reasons(self) -> None:
-        d = _make_director(mirror=True, impact_beats=8.0, drop_entry_only=False)
-        d, now, cross = self._prime_and_cross(d)
-        self.assertEqual(cross.reason, "drop_crossing")
-
-        sp_hold = _sp(
-            abs_beat=68.0,
-            current_phrase_label="chorus",
-            current_phrase_is_chorus=True,
-            smart_post_drop_active=True,
-        )
-        hold = d.tick(_ctx(abs_beat=68.0, smart_phrasing=sp_hold), now=now + 0.02)
-        self.assertEqual(hold.reason, "drop_cycle")
-
-        sp_post = _sp(
-            abs_beat=80.0,
-            current_phrase_label="chorus",
-            current_phrase_is_chorus=True,
-            smart_post_drop_active=True,
-        )
-        post = d.tick(_ctx(abs_beat=80.0, smart_phrasing=sp_post), now=now + 0.03)
-        self.assertEqual(post.reason, "post_drop_cycle")
 
 
 if __name__ == "__main__":

@@ -116,8 +116,6 @@ class LaserPersonality:
     max_drops_in_a_row: int = 2
     drop_impact_beats: float = 32.0           # operator value; flat window
     post_drop_cycle_beats: float = 32.0       # operator-reserved future post-drop laser cycling
-    drop_entry_only: bool = False             # gated path: hold (no autoloop re-fire) after first hit
-    drop_arm_cooldown_beats: float = 0.0      # min beats between drop-impact arms (0 = off)
 
 
 @dataclass(frozen=True)

@@ -696,10 +696,6 @@ def _validate_personality(
     if not isinstance(drop_lifecycle_mirror, bool):
         errors.append(f"{prefix}: 'drop_lifecycle_mirror' must be a boolean")
 
-    drop_entry_only = data.get("drop_entry_only", False)
-    if not isinstance(drop_entry_only, bool):
-        errors.append(f"{prefix}: 'drop_entry_only' must be a boolean")
-
     max_drops_in_a_row = data.get("max_drops_in_a_row", 2)
     if (
         not isinstance(max_drops_in_a_row, int)
@@ -712,14 +708,6 @@ def _validate_personality(
         _value = data.get(_knob, 32.0)
         if isinstance(_value, bool) or not isinstance(_value, (int, float)) or _value <= 0:
             errors.append(f"{prefix}: '{_knob}' must be a positive number")
-
-    drop_arm_cooldown_beats = data.get("drop_arm_cooldown_beats", 0.0)
-    if (
-        isinstance(drop_arm_cooldown_beats, bool)
-        or not isinstance(drop_arm_cooldown_beats, (int, float))
-        or drop_arm_cooldown_beats < 0
-    ):
-        errors.append(f"{prefix}: 'drop_arm_cooldown_beats' must be a non-negative number")
 
     bpm_band_min = data.get("bpm_band_min", 0.0)
     bpm_band_max = data.get("bpm_band_max", 0.0)
@@ -899,8 +887,6 @@ def _build_personality(name: str, data: dict[str, Any]) -> LaserPersonality:
         max_drops_in_a_row=int(data.get("max_drops_in_a_row", 2)),
         drop_impact_beats=float(data.get("drop_impact_beats", 32.0)),
         post_drop_cycle_beats=float(data.get("post_drop_cycle_beats", 32.0)),
-        drop_entry_only=bool(data.get("drop_entry_only", False)),
-        drop_arm_cooldown_beats=float(data.get("drop_arm_cooldown_beats", 0.0)),
     )
 
 

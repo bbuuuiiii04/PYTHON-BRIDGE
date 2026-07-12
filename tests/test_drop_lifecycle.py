@@ -32,14 +32,12 @@ def _cfg(
     max_drops: int = 2,
     impact_beats: float = 8.0,
     cycle_beats: float = 32.0,
-    arm_cooldown_beats: float = 0.0,
 ) -> DropLifecycleConfig:
     return DropLifecycleConfig(
         max_drops_in_a_row=max_drops,
         drop_impact_beats=impact_beats,
         post_drop_cycle_beats=cycle_beats,
         impact_predecessors=_PREDECESSORS,
-        drop_arm_cooldown_beats=arm_cooldown_beats,
     )
 
 
@@ -536,114 +534,6 @@ class TestResolveMutateFalse(unittest.TestCase):
         )
         res = lc.resolve(sp, mutate=False)
         self.assertEqual(res.role, "post_drop")
-
-
-class TestArmCooldown(unittest.TestCase):
-    """drop_arm_cooldown_beats: min beats between drop-impact arms."""
-
-    def test_cooldown_zero_unchanged(self) -> None:
-        """cooldown 0.0 leaves today's arming unchanged."""
-        lc = DropLifecycle(_cfg(arm_cooldown_beats=0.0, impact_beats=8.0))
-        sp1 = _sp(
-            smart_drop_crossing=True,
-            active_drop_beat=64.0,
-            previous_phrase_label="up",
-            abs_beat=64.0,
-        )
-        res1 = lc.resolve(sp1, mutate=True)
-        self.assertEqual((res1.role, res1.armed_this_tick), ("drop", True))
-
-        sp2 = _sp(
-            smart_drop_crossing=True,
-            active_drop_beat=72.0,
-            previous_phrase_label="up",
-            abs_beat=72.0,
-            current_phrase_is_chorus=True,
-        )
-        res2 = lc.resolve(sp2, mutate=True)
-        self.assertEqual((res2.role, res2.armed_this_tick), ("drop", True))
-
-    def test_cooldown_blocks_then_allows(self) -> None:
-        """Second arm inside the window is blocked; after cooldown it arms again."""
-        lc = DropLifecycle(_cfg(arm_cooldown_beats=32.0, impact_beats=8.0, max_drops=4))
-        sp1 = _sp(
-            smart_drop_crossing=True,
-            active_drop_beat=64.0,
-            previous_phrase_label="up",
-            abs_beat=64.0,
-            current_phrase_is_chorus=True,
-        )
-        res1 = lc.resolve(sp1, mutate=True)
-        self.assertEqual((res1.role, res1.armed_this_tick), ("drop", True))
-        self.assertEqual(lc._last_arm_abs_beat, 64.0)
-
-        # Inside cooldown (64 + 16 < 64 + 32)
-        sp2 = _sp(
-            smart_drop_crossing=True,
-            active_drop_beat=80.0,
-            previous_phrase_label="up",
-            abs_beat=80.0,
-            current_phrase_is_chorus=True,
-        )
-        res2 = lc.resolve(sp2, mutate=True)
-        self.assertEqual((res2.role, res2.armed_this_tick), ("post_drop", False))
-        self.assertEqual(lc._impact_count, 1)
-
-        # After cooldown (64 + 32 = 96)
-        sp3 = _sp(
-            smart_drop_crossing=True,
-            active_drop_beat=96.0,
-            previous_phrase_label="up",
-            abs_beat=96.0,
-            current_phrase_is_chorus=True,
-        )
-        res3 = lc.resolve(sp3, mutate=True)
-        self.assertEqual((res3.role, res3.armed_this_tick), ("drop", True))
-        self.assertEqual(lc._last_arm_abs_beat, 96.0)
-
-    def test_rewind_clears_cooldown(self) -> None:
-        """abs_beat going backward past the last arm clears cooldown state."""
-        lc = DropLifecycle(_cfg(arm_cooldown_beats=64.0, impact_beats=8.0))
-        lc.resolve(
-            _sp(
-                smart_drop_crossing=True,
-                active_drop_beat=128.0,
-                previous_phrase_label="up",
-                abs_beat=128.0,
-                current_phrase_is_chorus=True,
-            ),
-            mutate=True,
-        )
-        self.assertEqual(lc._last_arm_abs_beat, 128.0)
-
-        # Rewind before last arm — clears cooldown, then existing rules apply
-        sp_rewind = _sp(
-            smart_drop_crossing=True,
-            active_drop_beat=64.0,
-            previous_phrase_label="up",
-            abs_beat=64.0,
-            current_phrase_is_chorus=True,
-        )
-        self.assertTrue(lc.impact_allowed(sp_rewind))
-        self.assertIsNone(lc._last_arm_abs_beat)
-        res = lc.resolve(sp_rewind, mutate=True)
-        self.assertEqual((res.role, res.armed_this_tick), ("drop", True))
-
-    def test_reset_clears_cooldown(self) -> None:
-        lc = DropLifecycle(_cfg(arm_cooldown_beats=32.0))
-        lc.arm(64.0)
-        self.assertEqual(lc._last_arm_abs_beat, 64.0)
-        lc.reset()
-        self.assertIsNone(lc._last_arm_abs_beat)
-
-    def test_abs_beat_none_falls_through(self) -> None:
-        """No beat clock → cooldown judgement skipped; existing rules unchanged."""
-        lc = DropLifecycle(_cfg(arm_cooldown_beats=32.0))
-        lc._last_arm_abs_beat = 64.0
-        # No abs_beat / phrase / active_drop_beat → _abs_beat returns None
-        sp = _sp(previous_phrase_label="up", smart_drop_crossing=False)
-        self.assertTrue(lc.impact_allowed(sp))
-        self.assertEqual(lc._last_arm_abs_beat, 64.0)  # uncleared
 
 
 if __name__ == "__main__":
