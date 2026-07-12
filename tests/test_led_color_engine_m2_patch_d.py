@@ -232,7 +232,7 @@ class PatchDTests(unittest.TestCase):
                 "rt_drop_palette_comet": ("palette_comet", "engine", {"width": 6, "cycle_beats": 1, "travel_per_beat": 30}, "drop", "drop"),
                 "rt_post_drop_palette_comet": ("palette_comet", "engine", {"width": 2, "cycle_beats": 8, "loop_beats": 4.0}, "post_drop", "post_drop"),
                 # AWR-187 post-apply firework redesign (single approved state).
-                "rt_drop_firework_explosion": ("drop_firework_explosion_2", "engine", {"color_a": [255, 240, 220], "color_b": [255, 170, 60], "spark_a": [255, 170, 60], "spark_b": [255, 240, 220], "surge_beats": 0.25, "bg_hold": 0.25, "sparkle_density": 0.5, "sparkle_size": 1.0, "sparkle_life_s": 0.15, "hz": 6.0, "duty": 0.3}, "drop", "drop"),
+                "rt_drop_firework_explosion": ("drop_firework_explosion_2", "engine", {"color_a": [255, 240, 220], "color_b": [255, 170, 60], "spark_a": [255, 170, 60], "spark_b": [255, 240, 220], "surge_beats": 0.25, "bg_hold": 0.0, "sparkle_density": 0.5, "sparkle_size": 1.0, "sparkle_life_s": 0.15, "hz": 6.0, "duty": 0.3}, "drop", "drop"),
             },
         }
         for rel in ("config/led_look_director.example.json", "config/led_look_director.json"):

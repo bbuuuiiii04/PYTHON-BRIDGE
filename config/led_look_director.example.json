@@ -1538,7 +1538,7 @@
         "spark_a": [255, 170, 60],
         "spark_b": [255, 240, 220],
         "surge_beats": 0.25,
-        "bg_hold": 0.25,
+        "bg_hold": 0.0,
         "sparkle_density": 0.5,
         "sparkle_size": 1.0,
         "sparkle_life_s": 0.15,
