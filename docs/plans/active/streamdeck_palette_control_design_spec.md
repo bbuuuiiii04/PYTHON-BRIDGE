@@ -146,6 +146,15 @@ gesture v2 removes the dedicated lock pad).** Stream Deck 3×5, ch3.
   optional/back-compatible and leaves key 6 dark when it is absent.
   Declared once in bridge config (Part C.6) and carried to the deck via the feedback file
   (Part C.7) — the deck script hardcodes no palette names or notes.
+- **AWR-216 amendment (v2 main layout, keys 12-13).** The two blank v2 main-layout pads are
+  filled with existing already-wired controls, no new event/binding/handler: key 12 = **Lock**
+  (`lock_note`, revived at **57** → `palette_lock_pad` → v2 zone-correction lock/unlock) and key
+  13 = **Max Energy** (reuses `max_energy_note` **71** → `max_energy_pad`), promoted from the
+  shift layer so the drop strobe arm needs no shift press. The bottom-row static looks now fill
+  only the region slots (keys 10-13) those two control pads leave free — with the current two
+  static looks they sit at 10-11; a four-static-look layout takes 12-13 back and the control pads
+  drop out. Applies to the v2 main layer only (this v1 spec's key 6 stays dark). `lock_note` now
+  ships in the example/live `color_engine.palette_control`. Authority: `docs/architecture/palette_control_authority.md`.
 
 **2. Gesture (LOCKED; state machine finalized 2026-07-04).** No timers, no double-press windows —
 the gesture is pure state:

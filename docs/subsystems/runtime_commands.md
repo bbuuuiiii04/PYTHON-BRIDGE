@@ -70,6 +70,10 @@ Stream Deck palette control (Package 2, 2026-07-04):
   name (`GLACIER`, `DEEP_POOL`, `TWILIGHT`, `ION`, `VOLT`, `EMBERCORE`, or `NEUTRAL`) when the
   bridge is latched to v2. These are software control surfaces only; they do not prove Stream Deck
   hardware, Govee output, or room-visible behavior.
+- AWR-216 adds no new command; it fills the two blank v2 main-layout Stream Deck pads (keys 12-13)
+  with the physical-pad equivalents of two existing rails — Lock (`led_palette_lock` /
+  `led_palette_unlock`, via `lock_note`) and Max Energy (`led_max_energy_toggle`, via the existing
+  `max_energy_note`). Command semantics are unchanged.
 - `ValidationRunner._check_singleton()` derives the singleton result from one process count.
 
 SoundSwitch pack-player boundary (T7c/T7e):
