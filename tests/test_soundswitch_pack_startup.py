@@ -222,6 +222,18 @@ class StartupMatrixTests(unittest.TestCase):
         self.assertIn("event_sink=_pad_event_sink", prepare)
         self.assertIn("extra_midi_bindings=palette_control_bindings", prepare)
 
+    def test_main_seeds_scripted_recognition_from_pack(self):
+        # AWR-216 wiring guard: main() must seed the scripted-recognition cache
+        # from the loaded pack (not only the auto-picked SoundSwitch project),
+        # else a track authored into the real project silently falls to autoloop.
+        # The seed *logic* is tested in test_ss_library_scanner; this proves the
+        # wiring is present so deleting the block can't pass green.
+        source = inspect.getsource(bridge_main.main)
+        block = source[source.index("_loaded_pack = soundswitch_pack_bundle.pack"):]
+        block = block[:block.index("[MAIN] laser-config")]
+        self.assertIn("supported_active", block)
+        self.assertIn("seed_soundswitch_scripted_id_cache(pack_scripted_ssids)", block)
+
     def test_missing_controller_input_degrades_but_pack_sender_starts(self):
         events = []
 
