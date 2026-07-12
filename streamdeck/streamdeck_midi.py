@@ -238,6 +238,21 @@ def compose_layout(
                 layout[key] = _v2_pad_row(row, "zone_pad")
             if key_count > 6:
                 layout[6] = _manual_row(feedback, "white_sand")
+            # Keys 12-13: the two live-control pads the operator asked to fill.
+            # Lock freezes the current zone (palette_lock_pad -> _handle_v2_lock);
+            # Max Energy is promoted here from the shift layer so the drop-moment
+            # strobe arm is reachable without a shift press. Both are None-safe:
+            # a missing lock note or max_energy payload just leaves the pad dark.
+            if key_count > 12:
+                layout[12] = _control_row(feedback, "lock", "Lock")
+            max_energy = feedback.get("max_energy", {})
+            if isinstance(max_energy, dict) and type(max_energy.get("note")) is int and key_count > 13:
+                layout[13] = _v2_pad_row({
+                    "name": "max_energy",
+                    "note": max_energy["note"],
+                    "state": max_energy.get("state", "inactive"),
+                    "rgb": (255, 180, 40),
+                }, "max_energy_pad")
         else:
             for key, name in enumerate(("red", "green", "blue")):
                 layout[key] = _manual_row(feedback, name)
@@ -311,7 +326,10 @@ def compose_layout(
     static_rows = list(sidecar)[:4]
     for offset, row in enumerate(static_rows):
         key = 10 + offset
-        if key < key_count:
+        # Static looks fill only the region keys (10-13) that a v2 control pad
+        # did not already claim (lock/max energy at 12-13). Legacy v1 and blank
+        # layouts leave 12-13 empty, so they still take all four static looks.
+        if key < key_count and layout[key] is None:
             layout[key] = dict(row)
     return layout
 
@@ -706,6 +724,12 @@ def render_key(deck, key: int, pressed: bool, sidecar=None, pulse: bool = False,
     elif kind == "rainbow":
         draw.rectangle([0, 0, w, h], fill=_BG)
         _draw_rainbow_arc(draw, w, h, vivid=active)
+    elif kind == "lock":
+        # Zone-freeze pad: filled padlock on blue when locked, open shackle on
+        # dark when free — the same padlock glyph the locked-palette cue uses.
+        locked = active
+        draw.rectangle([0, 0, w, h], fill=(0, 120, 210) if locked else _BG)
+        _draw_padlock(draw, w, h, locked)
     else:  # static looks: the name is the identity — one clean label, no note text
         on = latched or active
         draw.rectangle([0, 0, w, h], fill=(0, 120, 210) if on else (26, 26, 30))

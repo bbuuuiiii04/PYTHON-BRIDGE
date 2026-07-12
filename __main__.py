@@ -1086,6 +1086,25 @@ def main() -> None:
             len(getattr(_loaded_pack, "autoloop_bindings", ()) or ()),
             len(getattr(_loaded_pack, "scripted", ()) or ()),
         )
+        # AWR-213: seed scripted recognition from the pack the bridge actually
+        # renders, not only the auto-picked SoundSwitch project. The library
+        # scan's _auto_trackmap_path() picks the alphabetically-first *.ssproj,
+        # which can be a stale fixture that lacks tracks authored into the real
+        # project (pack was built from) — those tracks then resolve their ssid
+        # but fail the scripted gate and fall to autoloop. Seeding from the pack
+        # keeps recognition ⊆ what the pack can render, independent of the scan.
+        # ponytail: additive union with the scan seed below — never narrows the
+        # already-recognized set; only supported_active shows can arm scripted.
+        pack_scripted_ssids = [
+            ssid for ssid, row in (getattr(_loaded_pack, "scripted", {}) or {}).items()
+            if getattr(row, "supported_active", False)
+        ]
+        if pack_scripted_ssids:
+            seed_soundswitch_scripted_id_cache(pack_scripted_ssids)
+            log.info(
+                "[MAIN] soundswitch-scripted-recognition-seeded  source=pack  count=%d",
+                len(pack_scripted_ssids),
+            )
     log.info(
         "[MAIN] laser-config  reason=%s  available=%s  enabled=%s",
         laser_cfg_result.reason,

@@ -57,6 +57,44 @@ def test_seed_soundswitch_scripted_id_cache_normalizes_ids():
         _SS_SCRIPTED_ID_CACHE.clear()
 
 
+def test_pack_seed_recognizes_show_absent_from_scanned_project():
+    """AWR-213: a scripted track authored into the real project (and carried by
+    the loaded pack) must be recognized even when the auto-picked library scan
+    seeded a *different*/stale project that lacks it.
+
+    Reproduces the Clarity (Extended Mix) miss: ssid resolves from the file tag
+    but the scripted gate reads a fixture project's id set, so it falls to
+    autoloop. The pack seed (mirrors __main__.py) closes the gap additively.
+    """
+    from types import SimpleNamespace
+
+    _SS_SCRIPTED_ID_CACHE.clear()
+    # Scan seeded the stale fixture project — new show is NOT in it.
+    seed_soundswitch_scripted_id_cache(["{AAAA1111-0000-0000-0000-000000000001}"])
+    new_show = "3974e696-305d-4368-b6d4-3b88265a8b49"  # bare/lowercase, as pack keys are
+    pack_scripted = {
+        new_show: SimpleNamespace(supported_active=True),
+        "1111ffff-0000-0000-0000-0000000000ff": SimpleNamespace(supported_active=False),
+    }
+
+    try:
+        # Before the pack seed: resolves ssid but gate says "not scripted".
+        assert not has_soundswitch_scripted_id("{3974E696-305D-4368-B6D4-3B88265A8B49}")
+
+        # Mirror __main__.py AWR-213: seed only supported_active shows from the pack.
+        pack_ids = [s for s, row in pack_scripted.items() if row.supported_active]
+        seed_soundswitch_scripted_id_cache(pack_ids)
+
+        # New show now recognized (normalizer matches bare-lower ↔ braced-upper).
+        assert has_soundswitch_scripted_id("{3974E696-305D-4368-B6D4-3B88265A8B49}")
+        # Additive: the fixture-only id is untouched.
+        assert has_soundswitch_scripted_id("{AAAA1111-0000-0000-0000-000000000001}")
+        # Unsupported shows are never armed as scripted.
+        assert not has_soundswitch_scripted_id("{1111FFFF-0000-0000-0000-0000000000FF}")
+    finally:
+        _SS_SCRIPTED_ID_CACHE.clear()
+
+
 def test_read_soundswitch_id_uses_generic_mutagen_tag(monkeypatch):
     class FakeAudio:
         tags = {"soundswitch_id": ["ssid-flac"]}
