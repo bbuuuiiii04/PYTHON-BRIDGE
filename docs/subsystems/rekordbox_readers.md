@@ -146,7 +146,12 @@ Runtime flow:
   `usb-crossanalysis-unconfirmed`; no local tag match logs `usb-pdb-miss`;
   duplicate local matches log `usb-pdb-ambiguous` with candidate IDs; missing
   or unreadable local analysis logs `imported-not-analyzed` and tells the
-  operator to finish analysis in Rekordbox. Every conflict returns no identity.
+  operator to finish analysis in Rekordbox, then CHAINS to the sidecar source
+  (AWR-211 source order: local DB → sidecar → miss) rather than returning None,
+  so a foreign laptop can still resolve the track from his stick's sidecar. A
+  crafted `export.pdb` that raises IndexError is caught alongside the other
+  parse errors and degrades to the sidecar with the right reason. Every conflict
+  returns no identity.
 - AWR-211 portable sidecar resolution runs only after the local library cannot
   answer. It lazily discovers schema-v1
   `*/RBSS BRIDGE USB/lighting_sidecar/index.json` across mounted volumes and
@@ -195,6 +200,13 @@ Tests:
   multi-mount discovery, session caching, collision/tag rules, duplicate
   rejection, payload parity (including SSID/laser tags/v4), local-hit priority,
   local-miss chaining, no-DB logging, and sidecar-v4 preference.
+- `tests/test_awr211_sidecar_phrase_e2e.py` is the executed no-mocked-seams
+  sidecar phrase proof (review R1): a hermetic test builds a real PQTZ/.DAT +
+  PSSI/.EXT sidecar, loads the real index, selects via the real exact-fingerprint
+  rule, and parses phrase through the real runtime worker; a skip-unless-mounted
+  test drives AWR-210's real 880-track MINK sidecar through the full
+  `_sidecar_lookup` → `_payload_for_sidecar` → `_read_runtime_anlz_data` chain and
+  asserts real USB loads resolve to phrase with v4.
 - if no direct hardware/process test exists, mark live behavior unvalidated in repo evidence
 
 Change contract:

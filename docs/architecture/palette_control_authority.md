@@ -80,10 +80,18 @@ exist; the later max-energy renderer does not.
 | --- | --- | --- |
 | Top | 0-5 | Zone pads: `GLACIER`, `DEEP_POOL`, `TWILIGHT`, `ION`, `VOLT`, `EMBERCORE`. |
 | Middle | 6-9 | `white_sand` manual, LED mute, Laser mute, Laser Solo. |
-| Bottom | 10-13, 14 | Static looks filling left→right by note; key 14 switches to the v2 shift layer. |
+| Bottom | 10-11 | Static looks filling left→right by note. |
+| Bottom | 12-13 | **Lock** (freeze the current zone; `lock_note` / `palette_lock_pad`) · **Max Energy** arm (`max_energy_note`), promoted here from the shift layer so the drop-moment strobe is reachable without a shift press. |
+| Bottom | 14 | Switches to the v2 shift layer. |
 | Shift | 0-4 | Red, green, blue, max-energy arm, Rainbow manual. |
 | Shift | 5-6 | Dark/reserved. |
 | Shift | 7-13, 14 | LED mute, Laser mute, Laser Solo, static looks, shift toggle. |
+
+Keys 12-13 are the two operator-live-control pads (AWR-216). Static looks fill
+only the region slots (keys 10-13) those two pads leave free: with the current
+two static looks they sit at 10-11, so 12-13 host the control pads. A layout
+carrying four static looks would take 12-13 back and the control pads drop out
+(legacy v1 and blank layouts keep all four static slots).
 
 Zone-pad behavior:
 

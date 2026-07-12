@@ -738,6 +738,13 @@ LIGHTING ENGINE v2 F1 identity surface (AWR-128, 2026-07-06):
   looks/mutes/Solo remain on the existing rows. The bridge also exposes runtime commands:
   `led_engine`, `led_manual_override`, `led_manual_clear`, `led_max_energy_toggle`, and zone names
   through `led_palette_queue` / `led_palette_override`.
+- AWR-216 fills the two blank v2 main-layout pads (keys 12-13) with existing already-wired controls:
+  key 12 = **Lock** (`lock_note`, default 57 → `palette_lock_pad` → `Ev.LED_PALETTE_LOCK_PAD` →
+  v2 zone-correction lock/unlock) and key 13 = **Max Energy** (reuses `max_energy_note` 71 →
+  `max_energy_pad`), promoted from the shift layer so the drop strobe arm is one press away. Static
+  looks fill only the region keys (10-13) those two control pads leave free; legacy v1 and blank
+  layouts still take all four static looks. No new event kind, binding kind, or handler — `lock_note`
+  now ships in the example/live `color_engine.palette_control` and the deck composes the two pads.
 - Look selection may bias toward `LEDLook.motion_style` (`sharp`/`flowing`) and `LEDLook.travel`
   (`calm`/`wide`) when v2 dressing is active. This is a filter over existing eligible looks, not a
   new effect renderer.
