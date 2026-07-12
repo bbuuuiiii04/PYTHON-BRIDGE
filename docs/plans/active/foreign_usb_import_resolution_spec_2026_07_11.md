@@ -75,9 +75,20 @@ a lever conflict (tags match, BPM wildly differs) → None with reason.
 
 ### Task 2 — imported-not-analyzed visibility
 When a pdb-lever match finds the local content but its analysis is absent
-(no AnalysisDataPath / unreadable local ANLZ): resolve to None with reason
+(no AnalysisDataPath / unreadable local ANLZ): log the reason
 `imported-not-analyzed` at INFO — the operator's fix is "finish analysis in
 Rekordbox", and the log must say so in those words.
+
+**[reconciled 2026-07-11, executive decision — AWR-211 source-chaining]** After
+logging the reason, the resolver CHAINS to the sidecar source
+(`_sidecar_lookup`) rather than returning None outright, so the charter's
+source order (local DB → sidecar → miss) holds uniformly: on the operator's
+laptop no sidecar match exists so the load stays an honest miss and the
+"finish analysis" advice is the operative fix; a foreign laptop can still
+resolve the track from his stick's sidecar. The `imported-not-analyzed` reason
+therefore surfaces the *local* gap; the sidecar may or may not then supply the
+track. (The AWR-209 review flagged the earlier "resolve to None" wording as a
+silent deviation; this reconciles the spec to the shipped source-chaining.)
 
 ### Task 3 — duplicates and his-own-track overlap
 If the pdb lever lands on a track he also owns in multiple versions

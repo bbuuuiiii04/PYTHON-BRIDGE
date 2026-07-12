@@ -822,7 +822,10 @@ def _db_lookup_by_anlz(anlz_path: str) -> Optional[dict]:
             )
             try:
                 device_track = _read_device_pdb_track(anlz_path)
-            except (OSError, UnicodeError, ValueError, struct.error) as exc:
+            # IndexError guards a crafted guest export.pdb whose in-bounds page
+            # structure still points a string offset past the file heap; without
+            # it the outer except mislabels the cause as sidecar-only mode.
+            except (OSError, UnicodeError, ValueError, struct.error, IndexError) as exc:
                 log.info(
                     "[FRES] usb-crossanalysis-unconfirmed  err=%s",
                     type(exc).__name__,
@@ -851,6 +854,12 @@ def _db_lookup_by_anlz(anlz_path: str) -> Optional[dict]:
                     getattr(content, "ID", ""),
                 )
                 return _sidecar_lookup(anlz_path, beatgrid)
+            # imported-not-analyzed: the DB tag-matched a local import that has no
+            # readable ANLZ. Per AWR-211 source-chaining (local DB -> sidecar ->
+            # miss), fall through to the sidecar rather than returning here: on the
+            # operator's laptop no sidecar match exists so this stays an honest miss
+            # (the log's "finish analysis" advice holds), but a foreign laptop can
+            # still resolve the track from his stick's sidecar.
             analysis_path = str(getattr(content, "AnalysisDataPath", "") or "")
             local_anlz_path = _local_anlz_path(analysis_path) if analysis_path else ""
             if not local_anlz_path or not os.path.isfile(local_anlz_path):

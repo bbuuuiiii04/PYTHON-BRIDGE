@@ -315,6 +315,31 @@ class UsbTwinResolverTests(unittest.TestCase):
         self.assertIsNone(result)
         self.assertTrue(any("usb-crossanalysis-unconfirmed" in line for line in logs.output))
 
+    def test_crafted_pdb_indexerror_degrades_cleanly_not_sidecar_only(self) -> None:
+        # AWR-209/211 R3: a crafted export.pdb whose in-bounds page structure still
+        # points a string offset past the heap raises IndexError. It must be caught
+        # with the right reason (usb-crossanalysis-unconfirmed err=IndexError) and
+        # NOT mislabeled as the DB-open "sidecar-only mode".
+        resolver_mod = sys.modules["rb_ss_bridge_v2.filepath_resolver"]
+        resolver_mod._SIDECAR_ONLY_LOGGED = False
+        db = _FakeDB([_content()])
+        with patch("pyrekordbox.db6.Rekordbox6Database", return_value=db), \
+             patch("rb_ss_bridge_v2.filepath_resolver._extract_beatgrid_from_anlz",
+                   side_effect=lambda path: _grid() if path == _USB_PATH
+                   else _grid([value + 11.0 for value in _GRID])), \
+             patch("rb_ss_bridge_v2.filepath_resolver._read_device_pdb_track",
+                   side_effect=IndexError("string offset past heap")), \
+             patch("rb_ss_bridge_v2.filepath_resolver._sidecar_lookup",
+                   return_value=None) as sidecar, \
+             self.assertLogs("filepath_resolver", level="INFO") as logs:
+            result = _db_lookup_by_anlz(_USB_PATH)
+
+        self.assertIsNone(result)
+        sidecar.assert_called_once()  # degraded to the sidecar, did not crash
+        joined = "\n".join(logs.output)
+        self.assertIn("usb-crossanalysis-unconfirmed  err=IndexError", joined)
+        self.assertNotIn("sidecar-only mode", joined)
+
     def test_imported_track_without_analysis_says_how_to_fix_it(self) -> None:
         content = _content(AnalysisDataPath="")
         db = _FakeDB([content])
@@ -325,18 +350,46 @@ class UsbTwinResolverTests(unittest.TestCase):
             "duration_s": 200,
             "bpm": 128.0,
         }
+        # Isolate from any real mounted sidecar: AWR-211 source-chaining makes
+        # imported-not-analyzed consult _sidecar_lookup, so stub it to a miss to
+        # pin the local reason without depending on /Volumes state.
         with patch("pyrekordbox.db6.Rekordbox6Database", return_value=db), \
              patch("rb_ss_bridge_v2.filepath_resolver._extract_beatgrid_from_anlz",
                    return_value=_grid()), \
              patch("rb_ss_bridge_v2.filepath_resolver._read_device_pdb_track",
                    return_value=device_track), \
+             patch("rb_ss_bridge_v2.filepath_resolver._sidecar_lookup",
+                   return_value=None) as sidecar, \
              self.assertLogs("filepath_resolver", level="INFO") as logs:
             result = _db_lookup_by_anlz(_USB_PATH)
 
         self.assertIsNone(result)
+        sidecar.assert_called_once()  # chains to the sidecar (source order)
         joined = "\n".join(logs.output)
         self.assertIn("imported-not-analyzed", joined)
         self.assertIn("finish analysis in Rekordbox", joined)
+
+    def test_imported_not_analyzed_resolves_from_sidecar_when_available(self) -> None:
+        # AWR-211 source-chaining: local import absent → hand off to the sidecar,
+        # which resolves the track (foreign-laptop path). Not None.
+        content = _content(AnalysisDataPath="")
+        db = _FakeDB([content])
+        device_track = {
+            "track_id": 77, "title": "Twin Track", "artist": "Twin Artist",
+            "duration_s": 200, "bpm": 128.0,
+        }
+        sidecar_payload = {"content_id": "42", "filepath": "/Volumes/GUEST/song.wav"}
+        with patch("pyrekordbox.db6.Rekordbox6Database", return_value=db), \
+             patch("rb_ss_bridge_v2.filepath_resolver._extract_beatgrid_from_anlz",
+                   return_value=_grid()), \
+             patch("rb_ss_bridge_v2.filepath_resolver._read_device_pdb_track",
+                   return_value=device_track), \
+             patch("rb_ss_bridge_v2.filepath_resolver._sidecar_lookup",
+                   return_value=sidecar_payload) as sidecar:
+            result = _db_lookup_by_anlz(_USB_PATH)
+
+        self.assertIs(result, sidecar_payload)
+        sidecar.assert_called_once()
 
     def test_unreadable_local_analysis_uses_same_actionable_reason(self) -> None:
         db = _FakeDB([_content()])
@@ -356,10 +409,13 @@ class UsbTwinResolverTests(unittest.TestCase):
              patch("rb_ss_bridge_v2.filepath_resolver._read_device_pdb_track",
                    return_value=device_track), \
              patch("rb_ss_bridge_v2.filepath_resolver.os.path.isfile", return_value=False), \
+             patch("rb_ss_bridge_v2.filepath_resolver._sidecar_lookup",
+                   return_value=None) as sidecar, \
              self.assertLogs("filepath_resolver", level="INFO") as logs:
             result = _db_lookup_by_anlz(_USB_PATH)
 
         self.assertIsNone(result)
+        sidecar.assert_called_once()
         self.assertTrue(any("imported-not-analyzed" in line for line in logs.output))
 
     def test_duplicate_local_tag_matches_list_ids_and_abstain(self) -> None:
