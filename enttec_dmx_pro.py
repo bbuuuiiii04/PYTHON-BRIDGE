@@ -201,6 +201,9 @@ class SoundSwitchDmxWorker:
         self._reconnect_count: int = 0
         self._last_reconnect_attempt: float = 0.0
         self._disconnected_at: float | None = None
+        # Per-instance edge keys so concurrent workers don't suppress each other.
+        self._edge_key_write = f"dmx_write_err:{id(self)}"
+        self._edge_key_reconnect = f"dmx_reconnect:{id(self)}"
 
     # ------------------------------------------------------------------
     # Public API
@@ -274,7 +277,7 @@ class SoundSwitchDmxWorker:
                             except Exception as exc:
                                 self._last_error = str(exc)
                                 self._error_count += 1
-                                if bf.log_changed("dmx_reconnect", True):
+                                if bf.log_changed(self._edge_key_reconnect, True):
                                     bridge_log.health("dmx", "reconnect pending: %s", exc)
                             else:
                                 self._reconnect_count += 1
@@ -285,9 +288,15 @@ class SoundSwitchDmxWorker:
                                     self._reconnect_count,
                                     lvl=logging.INFO,
                                 )
-                                bf.log_changed("dmx_reconnect", False)
+                                bf.log_changed(self._edge_key_reconnect, False)
+                                # Reconnect owns the recovery message; suppress the duplicate.
+                                bf.log_changed(self._edge_key_write, False)
+                                if self._stop_event.is_set():
+                                    break
                     packet = self._drain_mailbox()
                     if packet is not None:
+                        if self._stop_event.is_set():
+                            break
                         self._send_packet(packet)
                     if self._ser is None or packet is None:
                         time.sleep(self._poll_s)
@@ -312,12 +321,12 @@ class SoundSwitchDmxWorker:
             self._sent_count += 1
             # _last_error is sticky diagnostics (never cleared on success — status()
             # behavior is unchanged); use it only as "has failed before" for the gate.
-            if self._last_error and bf.log_changed("dmx_write_err", False):
+            if self._last_error and bf.log_changed(self._edge_key_write, False):
                 bridge_log.health("dmx", "write recovered", lvl=logging.INFO)
         except Exception as exc:
             self._last_error = str(exc)
             self._error_count += 1
-            if bf.log_changed("dmx_write_err", True):
+            if bf.log_changed(self._edge_key_write, True):
                 bridge_log.health("dmx", "write error: %s", exc)
             try:
                 self._ser.close()

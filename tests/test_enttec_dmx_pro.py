@@ -346,49 +346,38 @@ class TestSoundSwitchDmxWorkerHealthTransitions(unittest.TestCase):
         self.assertTrue(predicate(), "timed out waiting for worker state")
 
     def test_write_error_emits_once_per_failure_streak(self):
-        fake = FakeSerial(fail_write=True)
-        worker = self._make_worker(fake, poll_s=0.005)
+        """One write-error edge per outage; reconnect failures must not re-arm it."""
+        dead = FakeSerial()
+        dead.write = mock.Mock(side_effect=OSError("FakeSerial: simulated write failure"))
+        factory_calls = 0
+
+        def factory(_port: str):
+            nonlocal factory_calls
+            factory_calls += 1
+            if factory_calls == 1:
+                return dead
+            raise OSError("still disconnected")
+
+        worker = SoundSwitchDmxWorker(
+            port="/dev/fake_test_port", port_factory=factory, poll_s=0.005,
+        )
         logger, handler, prior_level, records = _capture("health.dmx")
         self.addCleanup(logger.setLevel, prior_level)
         self.addCleanup(logger.removeHandler, handler)
 
-        worker.start()
-        self._feed_frames_until(
-            worker, lambda: any("write error" in r.getMessage() for r in records),
-        )
-        # Keep feeding briefly after the first record to prove the streak stays silent.
-        self._feed_frames_until(worker, lambda: False, timeout_s=0.1)
-        worker.stop()
+        with mock.patch.object(edp, "_RECONNECT_INTERVAL_S", 0.01), \
+                mock.patch.object(edp, "resolve_enttec_port", return_value="/dev/fake_reconnected"):
+            worker.start()
+            self._feed_frames_until(
+                worker, lambda: any("write error" in r.getMessage() for r in records),
+            )
+            # Keep feeding briefly after the first record to prove the streak stays silent.
+            self._feed_frames_until(worker, lambda: False, timeout_s=0.15)
+            worker.stop()
 
         write_errors = [r for r in records if "write error" in r.getMessage()]
         self.assertEqual(len(write_errors), 1, f"expected one write-error record, got {records!r}")
         self.assertEqual(write_errors[0].levelname, "WARNING")
-
-    def test_write_recovers_emits_once_after_failure_streak(self):
-        fake = FakeSerial(fail_write=True)
-        worker = self._make_worker(fake, poll_s=0.005)
-        logger, handler, prior_level, records = _capture("health.dmx")
-        self.addCleanup(logger.setLevel, prior_level)
-        self.addCleanup(logger.removeHandler, handler)
-
-        worker.start()
-        self._feed_frames_until(
-            worker, lambda: any("write error" in r.getMessage() for r in records),
-        )
-        self.assertTrue(records, "expected the write-error record before flipping to healthy")
-
-        fake.fail_write = False
-        self._feed_frames_until(
-            worker, lambda: any("write recovered" in r.getMessage() for r in records),
-        )
-        worker.stop()
-
-        write_errors = [r for r in records if "write error" in r.getMessage()]
-        recoveries = [r for r in records if "write recovered" in r.getMessage()]
-        self.assertEqual(len(write_errors), 1, f"expected one write-error record, got {records!r}")
-        self.assertEqual(len(recoveries), 1, f"expected one recovery record, got {records!r}")
-        self.assertEqual(write_errors[0].levelname, "WARNING")
-        self.assertEqual(recoveries[0].levelname, "INFO")
 
     def test_write_error_closes_dead_handle_and_reconnects(self):
         dead = FakeSerial()
@@ -417,6 +406,208 @@ class TestSoundSwitchDmxWorkerHealthTransitions(unittest.TestCase):
 
         self.assertEqual(factory_calls, ["/dev/fake_test_port", "/dev/fake_reconnected"])
         self.assertIn(packet, fresh.writes)
+
+    def test_one_outage_logs_single_reconnect_not_write_recovered(self):
+        """Write error → N failed reconnects → success → next good write:
+        exactly one write-error, one reconnect-pending, one reconnected; zero write-recovered.
+        """
+        dead = FakeSerial()
+        dead.write = mock.Mock(side_effect=OSError(6, "Device not configured"))
+        fresh = FakeSerial()
+        factory_calls = 0
+
+        def factory(_port: str):
+            nonlocal factory_calls
+            factory_calls += 1
+            if factory_calls == 1:
+                return dead
+            if factory_calls <= 3:
+                raise OSError(6, "Device not configured")
+            return fresh
+
+        worker = SoundSwitchDmxWorker(
+            port="/dev/fake_test_port", port_factory=factory, poll_s=0.002,
+        )
+        logger, handler, prior_level, records = _capture("health.dmx")
+        self.addCleanup(logger.setLevel, prior_level)
+        self.addCleanup(logger.removeHandler, handler)
+
+        packet = build_dmx_packet(bytearray([42]))
+        with mock.patch.object(edp, "_RECONNECT_INTERVAL_S", 0.01), \
+                mock.patch.object(edp, "resolve_enttec_port", return_value="/dev/fake_reconnected"):
+            worker.start()
+            try:
+                worker.put_frame(packet)
+                self._wait_until(lambda: dead.closed)
+                self._feed_frames_until(
+                    worker,
+                    lambda: any("reconnected" in r.getMessage() for r in records),
+                    timeout_s=2.0,
+                )
+                worker.put_frame(packet)
+                self._wait_until(lambda: packet in fresh.writes)
+                # Give one more drain cycle so a sticky write-recovered would appear.
+                time.sleep(0.05)
+            finally:
+                worker.stop()
+
+        msgs = [r.getMessage() for r in records]
+        write_errors = [m for m in msgs if "write error" in m]
+        pending = [m for m in msgs if "reconnect pending" in m]
+        reconnected = [m for m in msgs if "reconnected" in m]
+        recovered = [m for m in msgs if "write recovered" in m]
+        self.assertEqual(len(write_errors), 1, f"expected one write-error, got {msgs!r}")
+        self.assertEqual(len(pending), 1, f"expected one reconnect-pending, got {msgs!r}")
+        self.assertEqual(len(reconnected), 1, f"expected one reconnected, got {msgs!r}")
+        self.assertEqual(len(recovered), 0, f"expected zero write-recovered, got {msgs!r}")
+        self.assertTrue(
+            any(r.levelname == "INFO" and "reconnected" in r.getMessage() for r in records),
+        )
+
+    def test_two_workers_do_not_suppress_each_others_reconnect_edges(self):
+        """Per-instance edge keys: worker A's pending edge must not hide worker B's."""
+        dead_a = FakeSerial()
+        dead_a.write = mock.Mock(side_effect=OSError(6, "Device not configured"))
+        dead_b = FakeSerial()
+        dead_b.write = mock.Mock(side_effect=OSError(6, "Device not configured"))
+        calls_a = 0
+        calls_b = 0
+
+        def factory_a(_port: str):
+            nonlocal calls_a
+            calls_a += 1
+            if calls_a == 1:
+                return dead_a
+            raise OSError(6, "Device not configured")
+
+        def factory_b(_port: str):
+            nonlocal calls_b
+            calls_b += 1
+            if calls_b == 1:
+                return dead_b
+            raise OSError(6, "Device not configured")
+
+        worker_a = SoundSwitchDmxWorker(
+            port="/dev/fake_a", port_factory=factory_a, poll_s=0.002,
+        )
+        worker_b = SoundSwitchDmxWorker(
+            port="/dev/fake_b", port_factory=factory_b, poll_s=0.002,
+        )
+        logger, handler, prior_level, records = _capture("health.dmx")
+        self.addCleanup(logger.setLevel, prior_level)
+        self.addCleanup(logger.removeHandler, handler)
+
+        with mock.patch.object(edp, "_RECONNECT_INTERVAL_S", 0.01), \
+                mock.patch.object(edp, "resolve_enttec_port", side_effect=lambda p: p):
+            worker_a.start()
+            worker_b.start()
+            try:
+                worker_a.put_frame(build_dmx_packet(bytearray([1])))
+                self._wait_until(lambda: calls_a >= 2)
+                worker_b.put_frame(build_dmx_packet(bytearray([2])))
+                self._wait_until(
+                    lambda: sum(1 for r in records if "reconnect pending" in r.getMessage()) >= 2,
+                )
+            finally:
+                worker_a.stop()
+                worker_b.stop()
+
+        pending = [r for r in records if "reconnect pending" in r.getMessage()]
+        self.assertGreaterEqual(
+            len(pending), 2,
+            f"expected both workers to emit reconnect-pending, got {records!r}",
+        )
+
+    def test_stop_during_blocked_reconnect_sends_only_zero_on_fresh_handle(self):
+        """stop() while reconnect factory is in-flight must not send a live frame."""
+        dead = FakeSerial()
+        dead.write = mock.Mock(side_effect=OSError(6, "Device not configured"))
+        fresh = FakeSerial()
+        entered = threading.Event()
+        release = threading.Event()
+        factory_calls = 0
+
+        def factory(_port: str):
+            nonlocal factory_calls
+            factory_calls += 1
+            if factory_calls == 1:
+                return dead
+            entered.set()
+            self.assertTrue(release.wait(timeout=2.0), "factory release timed out")
+            return fresh
+
+        worker = SoundSwitchDmxWorker(
+            port="/dev/fake_test_port", port_factory=factory, poll_s=0.002,
+        )
+        nonzero = build_dmx_packet(bytearray([99]))
+        with mock.patch.object(edp, "_RECONNECT_INTERVAL_S", 0.01), \
+                mock.patch.object(edp, "resolve_enttec_port", return_value="/dev/fake_reconnected"):
+            worker.start()
+            worker.put_frame(nonzero)
+            self._wait_until(lambda: dead.closed)
+            worker.put_frame(nonzero)  # sits in mailbox while factory blocks
+            self._wait_until(entered.is_set)
+
+            stop_done = threading.Event()
+            stop_exc: list[BaseException] = []
+
+            def _stop():
+                try:
+                    worker.stop()
+                except BaseException as exc:  # noqa: BLE001 — capture for assertion
+                    stop_exc.append(exc)
+                finally:
+                    stop_done.set()
+
+            stopper = threading.Thread(target=_stop, name="stop-during-reconnect")
+            stopper.start()
+            # Give stop() a moment to set the event before releasing the factory.
+            time.sleep(0.05)
+            release.set()
+            self.assertTrue(stop_done.wait(timeout=2.0), "stop() did not complete")
+            stopper.join(timeout=1.0)
+
+        self.assertEqual(stop_exc, [])
+        self.assertFalse(worker.status()["running"])
+        self.assertEqual(
+            fresh.writes, [_ZERO_PACKET],
+            f"fresh handle must receive only the shutdown zero, got {fresh.writes!r}",
+        )
+        self.assertTrue(fresh.closed)
+
+    def test_mailbox_frame_not_sent_after_stop_drain_check(self):
+        """A frame drained after stop is set must not be transmitted (path b)."""
+        fake = FakeSerial()
+        worker = self._make_worker(fake, poll_s=0.002)
+        drained = threading.Event()
+        release_send = threading.Event()
+        original_drain = worker._drain_mailbox
+
+        def gated_drain():
+            packet = original_drain()
+            if packet is not None and not drained.is_set():
+                drained.set()
+                self.assertTrue(release_send.wait(timeout=2.0), "send-gate release timed out")
+            return packet
+
+        worker._drain_mailbox = gated_drain  # type: ignore[method-assign]
+        nonzero = build_dmx_packet(bytearray([77]))
+        worker.start()
+        try:
+            worker.put_frame(nonzero)
+            self._wait_until(drained.is_set)
+            # Arm stop while the worker is held between drain and send, then release.
+            worker._stop_event.set()
+            release_send.set()
+            worker.stop()
+        finally:
+            release_send.set()
+            if worker.status()["running"]:
+                worker.stop()
+
+        data_writes = [w for w in fake.writes if w != _ZERO_PACKET]
+        self.assertNotIn(nonzero, data_writes, f"nonzero frame sent after stop: {fake.writes!r}")
+        self.assertIn(_ZERO_PACKET, fake.writes)
 
     def test_reconnect_failure_retries_and_updates_status(self):
         dead = FakeSerial()

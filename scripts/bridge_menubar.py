@@ -691,7 +691,12 @@ def open_pad(url: str, port: int, argv: list[str]) -> None:
 
 
 def _is_user_cancel(stderr: str) -> bool:
-    """True when an osascript admin escalation was cancelled by the operator."""
+    """True when an osascript admin escalation was cancelled by the operator.
+
+    The patch_rekordbox helper captures osascript stderr internally and exits 1
+    with empty stderr on both consent-cancel and admin-password-cancel, so this
+    branch is presently unreachable for that child — kept for future helpers that
+    surface cancel text on stderr."""
     s = (stderr or "").lower()
     return "user canceled" in s or "user cancelled" in s or "(-128)" in s
 
@@ -739,11 +744,15 @@ def rekordbox_running() -> bool:
 def _notify(message: str) -> None:
     # Reuse osascript (already this file's dialog mechanism) for a visible,
     # non-blocking heads-up without pulling in more AppKit surface.
-    subprocess.run(
-        ["osascript", "-e", f'display notification {json.dumps(message)} with title "RBSS Bridge"'],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    try:
+        subprocess.run(
+            ["osascript", "-e", f'display notification {json.dumps(message)} with title "RBSS Bridge"'],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )
+    except subprocess.TimeoutExpired:
+        pass
 
 
 def recording_status_from_snapshot(status: dict) -> dict:
@@ -1549,13 +1558,33 @@ class BridgeMenuBar(NSObject):
                 item.setEnabled_(False)
                 if busy_title:
                     item.setTitle_(busy_title)
-        proc = subprocess.Popen(
-            argv,
-            start_new_session=True,
-            stdout=subprocess.DEVNULL,
-            stderr=err_fh,
-            env=_system_env(),
-        )
+        try:
+            proc = subprocess.Popen(
+                argv,
+                start_new_session=True,
+                stdout=subprocess.DEVNULL,
+                stderr=err_fh,
+                env=_system_env(),
+            )
+        except Exception as exc:
+            if hasattr(err_fh, "close") and err_fh is not subprocess.DEVNULL:
+                try:
+                    err_fh.close()
+                except OSError:
+                    pass
+            if busy_item_attr:
+                self.finishWatchedChild_({
+                    "returncode": 1,
+                    "tail": str(exc),
+                    "label": label,
+                    "err_path": str(err_path) if err_path else "",
+                    "busy_item_attr": busy_item_attr,
+                    "saved_title": saved_title,
+                    "success_message": success_message,
+                    "failure_title": failure_title,
+                })
+                return None
+            raise
         if hasattr(err_fh, "close"):
             err_fh.close()  # the child has its own dup; drop the parent's handle
         if busy_item_attr:
@@ -1598,11 +1627,7 @@ class BridgeMenuBar(NSObject):
         success_message,
         failure_title,
     ):
-        returncode = proc.wait()
-        tail = self._read_child_stderr_tail(err_path)
         payload = {
-            "returncode": returncode,
-            "tail": tail,
             "label": label,
             "err_path": str(err_path) if err_path else "",
             "busy_item_attr": busy_item_attr,
@@ -1610,6 +1635,12 @@ class BridgeMenuBar(NSObject):
             "success_message": success_message,
             "failure_title": failure_title,
         }
+        try:
+            payload["returncode"] = proc.wait()
+            payload["tail"] = self._read_child_stderr_tail(err_path)
+        except Exception as exc:
+            payload["returncode"] = 1
+            payload["tail"] = str(exc)
         self.performSelectorOnMainThread_withObject_waitUntilDone_(
             "finishWatchedChild:", payload, False,
         )
@@ -1630,6 +1661,9 @@ class BridgeMenuBar(NSObject):
                 _notify(message)
             return
         if returncode < 0:
+            # Signal death (e.g. SIGTERM at logout): restore the item silently —
+            # mirrors the early-window watcher and avoids false alerts when
+            # children are torn down by the OS.
             return
         tail = payload.get("tail") or ""
         if _is_user_cancel(tail):

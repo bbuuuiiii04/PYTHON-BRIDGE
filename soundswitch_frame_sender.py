@@ -124,10 +124,13 @@ class SoundSwitchFrameSender:
             try:
                 handle = actual_port_factory(port_name, **kwargs)
             except Exception as exc:
-                self._startup_error = type(exc).__name__
-                self._ready_event.set()
+                # Only the startup window owns readiness / _startup_error.
+                if not self._ready_event.is_set():
+                    self._startup_error = type(exc).__name__
+                    self._ready_event.set()
                 raise
-            self._ready_event.set()
+            if not self._ready_event.is_set():
+                self._ready_event.set()
             return handle
 
         self._worker = SoundSwitchDmxWorker(

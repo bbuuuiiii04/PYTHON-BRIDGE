@@ -120,12 +120,16 @@ SoundSwitch pack-player boundary (T7c/T7e):
   purge slot, then Quit — retitled "Quit Menu" → "Quit Menubar (bridge keeps
   running)"). Quit now shows a native confirm first: the bridge (if running)
   keeps running, and the dialog explains how to reopen the menubar from
-  Applications, the USB stick, or the DMG. Child-spawning menubar actions
+  Applications, the USB stick, or the DMG.   Child-spawning menubar actions
   (frozen **Enable Rekordbox Reads…** via `_spawn_watched`) now disable their
   menu item with a busy title while the helper runs, then always finish with
-  visible feedback — a success notification on exit 0, silent restore on a
-  deliberate admin-prompt cancel, or a native failure alert (including empty
-  stderr) when anything else goes wrong. **Test the Lights…** still uses a
+  visible feedback — a success notification on exit 0, a native failure alert
+  (including empty stderr) on nonzero exit, or silent restore when a child is
+  killed by a signal (negative return code, e.g. logout teardown). A cancelled
+  Rekordbox-patch run currently surfaces that same failure alert with the
+  "If you cancelled the prompts, you can ignore this." line — the patch helper
+  exits 1 with empty stderr, so the silent-restore branch only engages if a
+  child ever emits recognizable cancel text on stderr. **Test the Lights…** still uses a
   direct `Popen` replay path and was not changed. Status: implemented /
   software-tested / frozen-app behavior operator-unvalidated. The M2 install offer is NOT in the maintenance block: per the M2
   spec it stays the PRIMARY item on DMG-guest runs — inserted at the very top

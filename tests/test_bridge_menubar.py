@@ -1195,6 +1195,50 @@ class FrozenDefectHelperTests(BridgeMenubarTests):
             bridge_menubar.BridgeMenuBar._watch_child,
         )
 
+    def test_spawn_watched_popen_failure_restores_busy_and_surfaces(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock()
+        menu.enable_rb_reads_item = Mock()
+        menu.enable_rb_reads_item.title.return_value = "Enable Rekordbox Reads…"
+        menu.finishWatchedChild_ = lambda payload: (
+            bridge_menubar.BridgeMenuBar.finishWatchedChild_.callable(menu, payload)
+        )
+        err_fh = Mock()
+        alert = Mock()
+        nsalert = Mock()
+        nsalert.alloc.return_value.init.return_value = alert
+        with patch.object(
+            bridge_menubar.subprocess, "Popen",
+            side_effect=OSError("spawn failed"),
+        ), patch.object(
+            bridge_menubar, "_child_error_log_dir", return_value=Path("/tmp"),
+        ), patch("builtins.open", return_value=err_fh), patch.object(
+            bridge_menubar, "NSAlert", nsalert,
+        ):
+            bridge_menubar.BridgeMenuBar._spawn_watched(
+                menu,
+                ["x"],
+                label="patch_rekordbox",
+                busy_item_attr="enable_rb_reads_item",
+                busy_title="Enabling Rekordbox reads…",
+                failure_title="Enable Rekordbox Reads failed",
+            )
+        err_fh.close.assert_called_once()
+        menu.enable_rb_reads_item.setEnabled_.assert_called_with(True)
+        alert.setMessageText_.assert_called_once_with("Enable Rekordbox Reads failed")
+        info = alert.setInformativeText_.call_args.args[0]
+        self.assertIn("spawn failed", info)
+
+    def test_notify_uses_timeout_and_swallows_timeout_expired(self) -> None:
+        bridge_menubar = self._import_module()
+        with patch.object(
+            bridge_menubar.subprocess, "run",
+            side_effect=bridge_menubar.subprocess.TimeoutExpired("osascript", 5),
+        ) as run:
+            bridge_menubar._notify("hello")
+        run.assert_called_once()
+        self.assertEqual(run.call_args.kwargs.get("timeout"), 5)
+
     def test_finish_watched_child_success_notifies_and_restores_item(self) -> None:
         bridge_menubar = self._import_module()
         menu = Mock()
@@ -1258,6 +1302,27 @@ class FrozenDefectHelperTests(BridgeMenubarTests):
         nsalert.alloc.assert_not_called()
         notify.assert_not_called()
 
+    def test_finish_watched_child_signal_death_restores_without_alert(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock()
+        menu.enable_rb_reads_item = Mock()
+        nsalert = Mock()
+        with patch.object(bridge_menubar, "NSAlert", nsalert), \
+             patch.object(bridge_menubar, "_notify") as notify:
+            bridge_menubar.BridgeMenuBar.finishWatchedChild_.callable(menu, {
+                "returncode": -15,
+                "tail": "killed",
+                "busy_item_attr": "enable_rb_reads_item",
+                "saved_title": "Enable Rekordbox Reads…",
+                "failure_title": "Enable Rekordbox Reads failed",
+            })
+        menu.enable_rb_reads_item.setTitle_.assert_called_once_with(
+            "Enable Rekordbox Reads…"
+        )
+        menu.enable_rb_reads_item.setEnabled_.assert_called_once_with(True)
+        nsalert.alloc.assert_not_called()
+        notify.assert_not_called()
+
     def test_watch_child_full_marshals_completion_payload(self) -> None:
         bridge_menubar = self._import_module()
         menu = Mock()
@@ -1283,6 +1348,26 @@ class FrozenDefectHelperTests(BridgeMenubarTests):
         self.assertEqual(args[1]["returncode"], 0)
         self.assertEqual(args[1]["success_message"], "done")
         self.assertFalse(args[2])
+
+    def test_watch_child_full_exception_still_marshals_failure(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock()
+        proc = Mock()
+        proc.wait.side_effect = RuntimeError("wait blew up")
+        bridge_menubar.BridgeMenuBar._watch_child_full(
+            menu,
+            proc,
+            None,
+            "patch_rekordbox",
+            "enable_rb_reads_item",
+            "Enable Rekordbox Reads…",
+            "done",
+            "Enable Rekordbox Reads failed",
+        )
+        args = menu.performSelectorOnMainThread_withObject_waitUntilDone_.call_args.args
+        self.assertEqual(args[0], "finishWatchedChild:")
+        self.assertEqual(args[1]["returncode"], 1)
+        self.assertIn("wait blew up", args[1]["tail"])
 
     def test_spawn_watched_without_busy_keeps_early_window_watcher(self) -> None:
         bridge_menubar = self._import_module()

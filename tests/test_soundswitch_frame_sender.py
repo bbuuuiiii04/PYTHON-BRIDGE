@@ -12,11 +12,13 @@ import sys
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 # Ensure the package parent is importable regardless of how tests are discovered.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from rb_ss_bridge_v2.enttec_dmx_pro import build_dmx_packet, _ZERO_PACKET
+from rb_ss_bridge_v2 import enttec_dmx_pro as edp
 from rb_ss_bridge_v2.soundswitch_frame_sender import (
     expand_ch1_ch19_to_512,
     SoundSwitchFrameSender,
@@ -34,12 +36,15 @@ class FakeSerial:
     CONFIRMATION: No serial/Enttec/hardware port opened in this test.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, fail_write: bool = False) -> None:
+        self.fail_write = fail_write
         self.writes: list[bytes] = []
         self.flushed: int = 0
         self.closed: bool = False
 
     def write(self, data: bytes) -> None:
+        if self.fail_write:
+            raise OSError("FakeSerial: simulated write failure")
         self.writes.append(bytes(data))
 
     def flush(self) -> None:
@@ -286,6 +291,48 @@ class TestSoundSwitchFrameSender(unittest.TestCase):
             self.fail(f"double start() raised and bricked the sender: {e}")
         self.assertTrue(sender.status()["worker"]["running"],
                         "double start() killed the running sender - DMX bricked")
+        self.assertFalse(sender.status()["stopped"])
+        sender.stop()
+
+    def test_start_after_post_startup_reconnect_failure_is_noop(self):
+        """Failed reconnects must not poison _startup_error; a later start() stays a no-op."""
+        live = FakeSerial()
+        factory_calls = 0
+
+        def factory(_port, **_kw):
+            nonlocal factory_calls
+            factory_calls += 1
+            if factory_calls == 1:
+                return live
+            raise OSError("post-startup reconnect failure")
+
+        sender = SoundSwitchFrameSender(
+            port="/dev/fake_test_port",
+            fixture_map=FULL_FIXTURE_MAP,
+            port_factory=factory,
+            poll_s=0.002,
+        )
+        sender.start()
+        self.assertIsNone(sender._startup_error)
+        self.assertTrue(sender.status()["worker"]["running"])
+
+        live.fail_write = True
+        with mock.patch.object(edp, "_RECONNECT_INTERVAL_S", 0.01), \
+                mock.patch.object(edp, "resolve_enttec_port", return_value="/dev/fake_reconnected"):
+            sender.submit((42,) + (0,) * 18)
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline and factory_calls < 2:
+                time.sleep(0.01)
+            self.assertGreaterEqual(factory_calls, 2, "expected a post-startup reconnect attempt")
+
+            # Documented-idempotent start() must remain a no-op despite the failed reconnect.
+            try:
+                sender.start()
+            except RuntimeError as e:
+                self.fail(f"start() after reconnect failure raised: {e}")
+
+        self.assertIsNone(sender._startup_error)
+        self.assertTrue(sender.status()["worker"]["running"])
         self.assertFalse(sender.status()["stopped"])
         sender.stop()
 
