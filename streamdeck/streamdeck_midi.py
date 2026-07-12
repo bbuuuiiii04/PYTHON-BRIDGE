@@ -39,6 +39,13 @@ LOCK_PATH = "/tmp/streamdeck_midi.lock"
 RETRY_SECONDS = 3
 PACK_DIR = Path(__file__).resolve().parents[1] / "local" / "soundswitch" / "rbss_canonical_pack"
 BINDING_SIDECAR = PACK_DIR.parent / f".{PACK_DIR.name}.midi_bindings.json"
+INSTALLED_BINDING_SIDECAR = (
+    Path.home()
+    / "Library"
+    / "Application Support"
+    / "RBSS Bridge"
+    / "streamdeck_midi_bindings.json"
+)
 PALETTE_STATE_PATH = Path(
     os.environ.get("RBSS_PALETTE_STATE_PATH", "/tmp/rb_ss_bridge_v2_palette_state.json")
 )
@@ -69,7 +76,9 @@ def log(message: str) -> None:
 def _acquire_singleton_lock() -> bool:
     global _LOCK_FILE
 
-    _LOCK_FILE = open(LOCK_PATH, "w")
+    # Do not truncate before acquiring the lock: a second process must not erase
+    # the live owner's pid while discovering that the lock is already held.
+    _LOCK_FILE = open(LOCK_PATH, "a+")
     try:
         fcntl.flock(_LOCK_FILE, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
@@ -77,7 +86,21 @@ def _acquire_singleton_lock() -> bool:
         _LOCK_FILE.close()
         _LOCK_FILE = None
         return False
+    _LOCK_FILE.seek(0)
+    _LOCK_FILE.truncate()
+    _LOCK_FILE.write(f"{os.getpid()}\n")
+    _LOCK_FILE.flush()
     return True
+
+
+def binding_sidecar_path() -> Path:
+    """Operator override, then installed frozen data, then source-tree data."""
+    override = os.environ.get("RBSS_STREAMDECK_BINDINGS")
+    if override:
+        return Path(override).expanduser()
+    if getattr(sys, "frozen", False):
+        return INSTALLED_BINDING_SIDECAR
+    return BINDING_SIDECAR
 
 
 def _fixed_rows(key_count: int = 15) -> list[dict]:
@@ -118,7 +141,8 @@ def _rows_from_payload(payload) -> list[dict]:
     return cleaned
 
 
-def load_sidecar(path: Path = BINDING_SIDECAR, key_count: int = 15) -> list[dict]:
+def load_sidecar(path: Path | None = None, key_count: int = 15) -> list[dict]:
+    path = binding_sidecar_path() if path is None else path
     try:
         rows = _rows_from_payload(json.loads(path.read_text(encoding="utf-8")))
     except (OSError, json.JSONDecodeError):
@@ -873,6 +897,8 @@ def main():
     recent_local: dict[tuple[int, int], float] = {}
     watch = FeedbackWatch()
     tick = [time.monotonic()]
+    bindings_path = binding_sidecar_path()
+    log(f"streamdeck_midi: bindings={bindings_path}")
     threading.Thread(target=_watchdog, args=(stop, tick), daemon=True,
                      name="streamdeck-watchdog").start()
 
@@ -890,7 +916,7 @@ def main():
 
         port = None
         try:
-            static_rows = load_sidecar(key_count=deck.key_count())
+            static_rows = load_sidecar(bindings_path, key_count=deck.key_count())
             if len(static_rows) > 4:
                 log(f"streamdeck_midi: dropping {len(static_rows) - 4} static-look binding(s) beyond key 13")
             feedback = load_feedback_state()

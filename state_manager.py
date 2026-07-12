@@ -2568,7 +2568,11 @@ class StateManager(LEDDispatchPolicyMixin):
         log.info("[SM] resolve  deck=%d  file=%s  bpm=%.1f  ssid=%s  latency_ms=%d",
                  deck, bf.short(payload["filepath"]), meta.bpm,
                  meta.soundswitch_id or "none", int(load_delta_ms))
-        if self._spectral_enable or self._v2_identity_enabled:
+        if (
+            self._spectral_enable
+            or self._v2_identity_enabled
+            or (self._smart_rearm_experiment and payload.get("local_anlz_path"))
+        ):
             loaded_anlz = self._loaded_anlz_path.pop(deck, None)
             if loaded_anlz is not None:
                 anlz_path, anlz_gen = loaded_anlz

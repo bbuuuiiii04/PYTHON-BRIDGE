@@ -26,8 +26,13 @@ validation_scope: >
   only source.
 - [confirmed] TWO-USB case: the sidecar lives on HIS stick; tracks may load
   from a DIFFERENT (guest) stick. Sidecar discovery therefore scans all
-  mounts for `*/RBSS BRIDGE USB/lighting_sidecar/index.json` (cache the found
-  root per session; tolerate absence silently).
+  mounts for `*/RBSS BRIDGE USB/lighting_sidecar/index.json` and also checks
+  `~/Library/Application Support/RBSS Bridge/lighting_sidecar/index.json` so an
+  installed bridge survives eject. Implemented behavior revalidates every
+  candidate and discovers rebuilds/unplug/replug/new mounts instead of pinning
+  one root for the session. Byte-identical matching installed+mounted records
+  deduplicate with App Support preferred; different matching generations fail
+  closed as `sidecar-root-ambiguous`. Absence remains a silent miss.
 - [binding] AWR-209 Task 0 identity rule applies IDENTICALLY here:
   fingerprint-only match = mirror-class strictness only; looser requires the
   tag lever (the sidecar index carries tags precisely for this); no
@@ -37,7 +42,8 @@ validation_scope: >
   PSSI). v4: the payload carries the sidecar v4 record; the runtime worker
   prefers payload-provided v4 over a spectral-cache lookup (verify the exact
   seam in `_read_runtime_anlz_data`/its caller at HEAD; smallest change wins;
-  no push-loop edits).
+  no push-loop I/O). With smart rearm enabled, the resolved sidecar ANLZ worker
+  must start even when spectral analysis and LED-v2 identity are disabled.
 
 ## Part B — Tasks
 ### Absolute Rules

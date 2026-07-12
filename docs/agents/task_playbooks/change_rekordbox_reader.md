@@ -89,9 +89,11 @@ Implementation notes:
   documented `usb-*` / `imported-not-analyzed` reason; never guess.
 - (AWR-211) Local DB resolution is always first. Sidecar fallback accepts only
   schema version 1, confines every declared path under the discovered sidecar
-  root, and applies the same exact-grid/tag-corroborated identity rule. Keep
-  sidecar v4 read-only and payload-provided; it must precede local cache/extract
-  without being copied into the cache. Unknown/corrupt/ambiguous data abstains.
+  root, applies the same exact-grid/tag-corroborated identity rule, revalidates
+  mounted and installed App-Support indexes across rebuild/eject, and
+  deduplicates only logically identical records. Keep sidecar v4 read-only and
+  payload-provided; it must precede local cache/extract without being copied
+  into the cache. Unknown/corrupt/conflicting-generation data abstains.
 
 Required tests:
 - Run the targeted tests listed in the subsystem card.

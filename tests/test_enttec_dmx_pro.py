@@ -407,6 +407,102 @@ class TestSoundSwitchDmxWorkerHealthTransitions(unittest.TestCase):
         self.assertEqual(factory_calls, ["/dev/fake_test_port", "/dev/fake_reconnected"])
         self.assertIn(packet, fresh.writes)
 
+    def test_initial_open_failure_reconnects_and_sends_latest_frame(self):
+        fresh = FakeSerial()
+        retry_entered = threading.Event()
+        release_retry = threading.Event()
+        factory_calls: list[str] = []
+
+        def factory(port: str):
+            factory_calls.append(port)
+            if len(factory_calls) == 1:
+                raise OSError(6, "Device not configured")
+            retry_entered.set()
+            self.assertTrue(release_retry.wait(timeout=2.0), "factory release timed out")
+            return fresh
+
+        worker = SoundSwitchDmxWorker(
+            port="/dev/fake_stale_port", port_factory=factory, poll_s=0.002,
+        )
+        stale = build_dmx_packet(bytearray([1]))
+        latest = build_dmx_packet(bytearray([99]))
+        with mock.patch.object(edp, "_RECONNECT_INTERVAL_S", 0.02), \
+                mock.patch.object(
+                    edp, "resolve_enttec_port", return_value="/dev/fake_reconnected",
+                ) as resolve:
+            worker.start()
+            try:
+                self._wait_until(retry_entered.is_set)
+                worker.put_frame(stale)
+                worker.put_frame(latest)
+                release_retry.set()
+                self._wait_until(lambda: latest in fresh.writes)
+            finally:
+                release_retry.set()
+                worker.stop()
+
+        resolve.assert_called_once_with("/dev/fake_stale_port")
+        self.assertEqual(factory_calls, ["/dev/fake_stale_port", "/dev/fake_reconnected"])
+        self.assertNotIn(stale, fresh.writes)
+        self.assertIn(latest, fresh.writes)
+
+    def test_initial_and_reconnect_failures_keep_worker_alive_until_stop(self):
+        factory_calls = 0
+
+        def factory(_port: str):
+            nonlocal factory_calls
+            factory_calls += 1
+            raise OSError(6, "Device not configured")
+
+        worker = SoundSwitchDmxWorker(
+            port="/dev/fake_stale_port", port_factory=factory, poll_s=0.002,
+        )
+        with mock.patch.object(edp, "_RECONNECT_INTERVAL_S", 0.01), \
+                mock.patch.object(edp, "resolve_enttec_port", return_value="/dev/fake_missing"):
+            worker.start()
+            self._wait_until(lambda: factory_calls >= 3)
+            self.assertTrue(worker.status()["running"])
+            worker.stop()
+
+        self.assertFalse(worker.status()["running"])
+        self.assertGreaterEqual(worker.status()["error_count"], 3)
+
+    def test_stop_during_initial_open_reconnect_sends_no_live_frame(self):
+        fresh = FakeSerial()
+        retry_entered = threading.Event()
+        release_retry = threading.Event()
+        factory_calls = 0
+
+        def factory(_port: str):
+            nonlocal factory_calls
+            factory_calls += 1
+            if factory_calls == 1:
+                raise OSError(6, "Device not configured")
+            retry_entered.set()
+            self.assertTrue(release_retry.wait(timeout=2.0), "factory release timed out")
+            return fresh
+
+        worker = SoundSwitchDmxWorker(
+            port="/dev/fake_stale_port", port_factory=factory, poll_s=0.002,
+        )
+        nonzero = build_dmx_packet(bytearray([99]))
+        with mock.patch.object(edp, "_RECONNECT_INTERVAL_S", 0.01), \
+                mock.patch.object(edp, "resolve_enttec_port", return_value="/dev/fake_reconnected"):
+            worker.start()
+            self._wait_until(retry_entered.is_set)
+            worker.put_frame(nonzero)
+
+            stopper = threading.Thread(target=worker.stop)
+            stopper.start()
+            self._wait_until(worker._stop_event.is_set)
+            release_retry.set()
+            stopper.join(timeout=2.0)
+            self.assertFalse(stopper.is_alive(), "stop() did not complete")
+
+        self.assertFalse(worker.status()["running"])
+        self.assertEqual(fresh.writes, [_ZERO_PACKET])
+        self.assertTrue(fresh.closed)
+
     def test_one_outage_logs_single_reconnect_not_write_recovered(self):
         """Write error → N failed reconnects → success → next good write:
         exactly one write-error, one reconnect-pending, one reconnected; zero write-recovered.

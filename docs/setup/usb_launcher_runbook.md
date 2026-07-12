@@ -1,19 +1,24 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: a31bde9
-last_verified_date: 2026-07-10
+last_verified_commit: aa7d441
+last_verified_date: 2026-07-12
 validation_scope: >
-  USB bridge launcher runbook, M1 build + M2 native install/PURGE (AWR-186).
-  M1 build/sign/DMG commands verified on the maintainer's Mac (PyInstaller
-  6.21.0 × Python 3.14.6). M2 (make_stick.sh, native menubar install, config
-  overrides, frozen state dir, menubar PURGE) is code + unit tests only —
-  make_stick.sh has NOT been run against the stick and no M2 bundle has been
-  built yet. SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED — the operator
-  walkthrough (parity table below) is the physical gate.
+  Current USB builder, frozen launcher, native/shell install and purge, target
+  Rekordbox patch, and software tests. Two physical foreign-Mac attempts failed
+  to produce live Rekordbox reads. AWR-222 is a confirmed authorization blocker:
+  current ad-hoc target-only signing is not a supported stock-macOS task_for_pid
+  path. SOFTWARE-VALIDATED COMPONENTS ONLY / FOREIGN-MAC LIVE READS UNSUPPORTED.
 ---
 
 # USB Bridge Launcher — Runbook (M1 build · M2 install/PURGE)
+
+> **STOP before another foreign-Mac build or show test (AWR-222, 2026-07-12).**
+> The app and installer can be packaged, but the current frozen bridge cannot
+> obtain live Rekordbox memory reads on a stock foreign Mac. Both physical tests
+> failed. “Apply Rekordbox Target Patch” verifies only a patch on the Rekordbox target;
+> it does not authorize the bridge caller. Rebuilding the same package will not
+> change this. Do not weaken SIP or improvise signing on a guest Mac.
 
 What M1 delivers: a double-clickable macOS app (`RBSS Bridge.app`, shipped as
 `RBSS Bridge.dmg`) that carries its own Python and the whole `rb_ss_bridge_v2`
@@ -91,24 +96,10 @@ ships claiming success with no show; an absent config or empty `pack_path`
 stays backward-compatible no-pack). Summary line reports DMG size, payload file
 count, stick free space.
 
-### Manual reference (what make_stick.sh runs, M1 commands)
-
-```bash
-# 1. Build the .app (onedir, windowed). build/ and dist/ are gitignored.
-./.build-venv-314/bin/pyinstaller packaging/rbss_launcher.spec \
-    --noconfirm --distpath dist --workpath build
-rm -rf build                                   # delete the intermediate (disk)
-
-# 2. Sign (re-runnable): Apple Development identity if present, else ad-hoc.
-bash packaging/sign.sh "dist/RBSS Bridge.app"
-
-# 3. DMG for the exFAT stick (never a raw .app / Finder-zip on exFAT).
-#    make_stick.sh points -srcfolder at its staging dir (app + RBSS_payload).
-hdiutil create -volname "RBSS Bridge" -srcfolder "dist/RBSS Bridge.app" \
-    -ov -format UDZO "dist/RBSS Bridge.dmg"
-```
-M1 reference sizes: `dist/RBSS Bridge.app` ~252 MB, app-only DMG ~111 MB (the
-M2 DMG is larger — it carries the payload).
+There is no supported manual build recipe. Use `make_stick.sh`; it owns the
+low-target build environment and the app-plus-payload DMG layout. The retired
+`.build-venv-314`/app-only commands can recreate the macOS-12 launch crash or
+ship a DMG without its payload.
 
 ### Signing status (A1/A8)
 
@@ -231,8 +222,10 @@ carries the secrets it shipped with.
 - **LaunchAgent / `StartOnMount` / auto-start** — M3. Launch-on-click stands
   (operator default). `launch_agent_plist.py` can *render* a plist; nothing
   installs/loads it.
-- **Foreign-Mac** memory-grant/permission cascade — M4; the walkthrough below
-  is the gate.
+- **Foreign-Mac live Rekordbox reads** — blocked by AWR-222. The existing target
+  patch is diagnostics/setup plumbing, not a working stock-macOS authorization
+  mechanism. The next gate is an approved replacement-reader feasibility pass,
+  not another physical retry of this package.
 - **XDJ-RX3 stick reading (R5)** — settled IMPOSSIBLE (AWR-167).
 - **Dev-only watcher features** not carried into the bundle: the
   `RBSS_BRIDGE_TRUTH=1` Art-Net truth-check and the `WATCHER_NO_LOOP` test hook.
@@ -249,41 +242,39 @@ carries the secrets it shipped with.
   `[bundle]` extra + spec `hiddenimports`; the maintainer's Homebrew Python already
   has it, but the clean build venv needs it or scripted/autoloop selection silently
   dies on the guest.
-- **Read-authorization is surfaced, not solved.** If the guest blocks `task_for_pid`
-  (KERN_FAILURE) or runs an unsupported Rekordbox build, the menubar's BRIDGE row now
-  shows a named reason (`RB reads blocked` / `RB version unsupported`) instead of
-  silent no-lights. The bridge still can't read in that case — the reason is the
-  diagnostic, not a fix.
+- **Read authorization is not solved (AWR-222).** The bridge bundle is ad-hoc
+  signed without caller authorization; patching only Rekordbox with
+  `get-task-allow` does not create a supported stock-macOS `task_for_pid` path.
+  The menubar may surface `RB reads blocked`, but its target-patch status is not
+  proof that live reads are enabled. `unsupported_version` and transient
+  `attach_failed` are not standing menubar reasons today; inspect the bridge log.
 - **KNOWN LIMITATION — Local Network (TCC) denial is not detected.** macOS has no
   Python-visible API for the Local Network permission state, so if the guest denies
   it, Govee/SoundSwitch discovery just finds nothing. There is no clean signal to
   surface; if the rig is silent and reads are OK, check System Settings → Privacy →
   Local Network for "RBSS Bridge".
+- **Open packaging safety follow-ups:** AWR-223 now fails closed and keeps its
+  original-app backup through native Purge. AWR-224/229 are selecting and
+  verifying the complete macOS-12 wheel set. AWR-225's partial-install retry is
+  implemented. These remain software-only until a clean foreign-Mac run.
 
-## Stick helpers (AWR-122 interim — still ride the stick as the no-menubar fallback)
+## One installation path
 
-`packaging/stick/install.command` + `purge.command` sit next to the DMG
-(make_stick.sh copies them). The NATIVE menubar install/PURGE above is the
-primary flow; these remain for a Mac where the app won't launch:
+The stick ships no `.command` installers and no duplicate payload. Open
+`RBSS Bridge.dmg`, open the app, and use its single native action:
 
-- **install.command**: mounts the DMG, copies the app to `~/Applications`,
-  installs stick-side `RBSS_payload/spectral_cache` if present, records every
-  path in the same `install_manifest.txt`. App + pre-warm only — the native
-  installer is what carries configs/secrets.
-- **purge.command**: requires typing `PURGE`, removes exactly the manifest
-  paths (same allowlist discipline), prunes emptied dirs. Narrower than the
-  native PURGE: App Support extras and run logs remain.
-- Tests: `tests/test_stick_commands.py` (purge deletion scoping);
-  `tests/test_make_stick.py` (builder staging layout, existence-gating,
-  fail-closed unreadable — incl. malformed pack config + non-readable non-empty
-  `pack_path` — PIONEER refusal); `tests/test_install_controller.py`
-  (native install/purge pure seams: detection, manifest exactness, allowlist +
-  `..` + three-root order, frozen state-dir resolution).
+- **Install on This Mac…** on a fresh Mac;
+- **Update This Mac…** when an installed copy already exists;
+- **Retry Installation…** after an interrupted copy.
 
-## Operator parity run (Task 7 — the gate, do on a TEST session, never a live show)
+The installed menubar owns **Purge RBSS Bridge…**. Older manifests created by
+the retired shell helpers remain readable so native Purge can clean them safely.
 
-Quit the dev watcher, mount the DMG, launch the app, and check each subsystem
-against a watcher run. Nothing here is "working" until these pass.
+## Operator parity run (PAUSED by AWR-222)
+
+Do not start this physical run until the foreign-Mac reader authority is
+redesigned and the replacement has its own explicit test approval. The table
+remains the later acceptance checklist; it is not a current instruction to retry.
 
 | Check | Expected | Pass? |
 |---|---|---|
@@ -299,12 +290,13 @@ against a watcher run. Nothing here is "working" until these pass.
 | Laser output | laser scenes fire | ☐ |
 | LED / Govee frames | realtime frames render (frame-engine child alive) | ☐ |
 | Stream Deck | pads live | ☐ |
-| **Memory reads** | deck state reads match a source-run bridge | ☐ |
+| **Memory reads** | **BLOCKED:** current package cannot establish supported stock-macOS caller authorization (AWR-222) | ☐ |
 | Test the Lights | recorded session drives the rig; refuses while Rekordbox open | ☐ |
 
-**Memory-read STOP rule:** if the bundled bridge's memory reads behave differently
-from a source-run bridge, STOP and report — do not improvise entitlements or new
-authorization mechanics (that is the separate reader spec's scope).
+**Memory-read STOP rule:** already fired on both physical attempts. Do not
+improvise entitlements, weaken SIP, or repeat the same build. Resume only after
+AWR-222 selects and software-proves a replacement reader path and the operator
+approves a new test session.
 
 Evidence class until this table is green: **SOFTWARE-VALIDATED ONLY /
 HARDWARE-UNVALIDATED**.

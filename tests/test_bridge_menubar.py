@@ -991,55 +991,77 @@ class BridgeMenubarTests(unittest.TestCase):
         return entries
 
     def test_menu_blueprint_selector_inventory_exact(self) -> None:
-        # The regroup adds/removes NO commands: the selector multiset is the
-        # pre-refactor 14 plus M2's purge plus the get-task-allow "Enable
-        # Rekordbox Reads" action — each exactly once. The install offer is
-        # deliberately NOT a blueprint entry: per the M2 spec it is
-        # primary-positioned (insertItem_atIndex_ 0 after the walk), and its
-        # source/gating is pinned by NativeInstallGateTests.
         bridge_menubar = self._import_module()
         flat = self._flatten_blueprint(bridge_menubar.MENU_BLUEPRINT)
         selectors = sorted(e[3] for e in flat if e[3])
         self.assertEqual(
             selectors,
             sorted([
-                "toggleBridge:", "exportFromSS:", "toggleSmartDrop:",
-                "toggleSmartBreakdown:", "toggleLaserDirector:",
-                "laserBlackout:", "laserClearBlackout:", "runValidation:",
-                "toggleRecordSession:", "testLights:", "mapLasers:",
-                "openLedPad:", "toggleLedEngineV2:", "quit:",
-                "purgeBridge:", "enableRekordboxReads:",
+                "toggleBridge:", "openLiveLog:", "laserBlackout:",
+                "laserClearBlackout:", "mapLasers:", "openLedPad:",
+                "exportFromSS:", "updateUsbBridge:", "purgeBridge:",
+                "restartMenubar:",
             ]),
         )
         self.assertNotIn("installOnMac:", selectors)
 
-    def test_menu_blueprint_blackout_promoted_to_top_level(self) -> None:
+    def test_menu_blueprint_source_and_frozen_inventory_exact(self) -> None:
         bridge_menubar = self._import_module()
-        top_selectors = [
-            e[3] for e in bridge_menubar.MENU_BLUEPRINT if e[0] == "action"
-        ]
-        self.assertIn("laserBlackout:", top_selectors)
-        self.assertIn("laserClearBlackout:", top_selectors)
-        laser_sub = next(
-            e for e in bridge_menubar.MENU_BLUEPRINT
-            if e[0] == "submenu" and e[1] == "laser_item"
+        flat = self._flatten_blueprint(bridge_menubar.MENU_BLUEPRINT)
+
+        def visible_selectors(*, frozen, purge):
+            gates = bridge_menubar._menu_visibility(frozen=frozen, purge=purge)
+            hidden_submenus = {
+                e[1] for e in bridge_menubar.MENU_BLUEPRINT
+                if e[0] == "submenu" and gates.get(e[1]) is False
+            }
+            hidden_children = {
+                child[1]
+                for entry in bridge_menubar.MENU_BLUEPRINT
+                if entry[0] == "submenu" and entry[1] in hidden_submenus
+                for child in entry[4]
+            }
+            return sorted(
+                e[3] for e in flat
+                if e[3] and gates.get(e[1], True) and e[1] not in hidden_children
+            )
+
+        common = sorted([
+            "toggleBridge:", "openLiveLog:", "laserBlackout:",
+            "laserClearBlackout:", "restartMenubar:",
+        ])
+        self.assertEqual(
+            visible_selectors(frozen=False, purge=False),
+            sorted(common + ["mapLasers:", "openLedPad:", "exportFromSS:", "updateUsbBridge:"]),
         )
-        sub_selectors = [s[3] for s in laser_sub[4] if s[3]]
-        self.assertNotIn("laserBlackout:", sub_selectors)
-        self.assertNotIn("laserClearBlackout:", sub_selectors)
+        self.assertEqual(visible_selectors(frozen=True, purge=False), common)
+        self.assertEqual(
+            visible_selectors(frozen=True, purge=True),
+            sorted(common + ["purgeBridge:"]),
+        )
 
     def test_menu_blueprint_maintenance_block_order(self) -> None:
-        # Purge sits after the last separator and before quit; quit is last.
-        # (Install is not a blueprint entry — see the selector-inventory test.)
         bridge_menubar = self._import_module()
         blueprint = bridge_menubar.MENU_BLUEPRINT
-        self.assertEqual(blueprint[-1][1], "quit_item")
+        self.assertEqual(blueprint[-1][1], "restart_item")
         attrs = [e[1] for e in blueprint]
         last_sep = max(i for i, e in enumerate(blueprint) if e[0] == "sep")
         purge_i = attrs.index("purge_item")
-        quit_i = attrs.index("quit_item")
+        restart_i = attrs.index("restart_item")
         self.assertLess(last_sep, purge_i)
-        self.assertLess(purge_i, quit_i)
+        self.assertLess(purge_i, restart_i)
+        self.assertNotIn("quit_item", attrs)
+
+    def test_menu_blueprint_has_only_essential_status_and_no_dead_controls(self) -> None:
+        bridge_menubar = self._import_module()
+        status = next(e for e in bridge_menubar.MENU_BLUEPRINT if e[1] == "status_item")
+        self.assertEqual(status[4], (("status_rows", "status_rows", 4, None),))
+        text = repr(bridge_menubar.MENU_BLUEPRINT)
+        for forbidden in (
+            "Smart Phrasing", "Laser Director", "LED Engine v2", "Rekordbox Target Patch",
+            "Record Session", "Test the Lights", "Run Health Check", "Quit Menubar",
+        ):
+            self.assertNotIn(forbidden, text)
 
     def test_menu_blueprint_attrs_unique(self) -> None:
         bridge_menubar = self._import_module()
@@ -1047,30 +1069,47 @@ class BridgeMenubarTests(unittest.TestCase):
         attrs = [e[1] for e in flat if e[1]]
         self.assertEqual(len(attrs), len(set(attrs)))
 
-    def test_compact_status_lines_returns_ten_rows_both_branches(self) -> None:
-        # Pins the zip contract in refresh_: a row-count mismatch silently
-        # drops rows, so both branches must agree with the range(10) allocation.
+    def test_compact_status_lines_returns_four_rows_both_branches(self) -> None:
         bridge_menubar = self._import_module()
-        self.assertEqual(len(bridge_menubar.compact_status_lines({})), 10)
+        self.assertEqual(len(bridge_menubar.compact_status_lines({})), 4)
         self.assertEqual(
             len(bridge_menubar.compact_status_lines({"stale": True, "stale_age_s": 4})),
-            10,
+            4,
         )
-        self.assertEqual(len(bridge_menubar.compact_status_lines({"schema": 1})), 10)
+        self.assertEqual(len(bridge_menubar.compact_status_lines({"schema": 1})), 4)
 
     def test_compact_status_lines_surfaces_rekordbox_reason(self) -> None:
-        # P1: the make-or-break (reads blocked) shows on the BRIDGE row (still 10 rows).
         bridge_menubar = self._import_module()
         rows = bridge_menubar.compact_status_lines(
             {"schema": 1, "rekordbox": {"reason": "reads_blocked"}}, ["123"])
-        self.assertEqual(len(rows), 10)
-        self.assertIn("RB reads blocked", rows[0].string())
-        # We do NOT warn on unsupported_version (ObjC reads are version-robust) or on a
-        # transient attach_failed — those would false-alarm the maintainer.
-        for benign in ("unsupported_version", "attach_failed", ""):
-            rows = bridge_menubar.compact_status_lines(
-                {"schema": 1, "rekordbox": {"reason": benign}}, ["123"])
-            self.assertNotIn("⚠ RB", rows[0].string(), benign)
+        self.assertEqual(len(rows), 4)
+
+    def test_compact_status_uses_process_truth_and_never_shows_deck_status(self) -> None:
+        bridge_menubar = self._import_module()
+        stale_live_snapshot = {
+            "schema": 1,
+            "state_manager": {"active_deck": 2},
+            "rekordbox": {"reads_ok": True},
+            "laser_director": {"available": True, "enabled": True},
+            "led_look_director": {"enabled": True},
+        }
+        rows = bridge_menubar.compact_status_lines(
+            stale_live_snapshot, ["123"], bridge_state="off"
+        )
+        text = "\n".join(row.string() for row in rows)
+        self.assertIn("BRIDGE  Off", text)
+        self.assertNotIn("D2", text)
+        self.assertNotIn("Reading", text)
+        self.assertNotIn("Lasers  On", text)
+
+        live = bridge_menubar.compact_status_lines(
+            stale_live_snapshot, ["123"], bridge_state="on"
+        )
+        live_text = "\n".join(row.string() for row in live)
+        self.assertIn("BRIDGE  On", live_text)
+        self.assertNotIn("D2", live_text)
+        self.assertIn("Rekordbox", live[1].string())
+        self.assertIn("Reading", live[1].string())
 
 
 class FrozenDefectHelperTests(BridgeMenubarTests):
@@ -1145,6 +1184,28 @@ class FrozenDefectHelperTests(BridgeMenubarTests):
             # dead/unknown pid -> None (os.kill probe fails)
             Path(lock).write_text("999999\n", encoding="utf-8")
             self.assertIsNone(bridge_menubar._running_bridge_pid(lock))
+
+    def test_running_streamdeck_pid_accepts_only_the_locked_helper(self) -> None:
+        import os as _os
+
+        bridge_menubar = self._import_module()
+        with tempfile.TemporaryDirectory() as d:
+            lock = str(Path(d) / "streamdeck.lock")
+            Path(lock).write_text(f"{_os.getpid()}\n", encoding="utf-8")
+            with patch.object(
+                bridge_menubar.subprocess,
+                "run",
+                return_value=Mock(stdout="/Applications/RBSS Bridge --run-streamdeck"),
+            ):
+                self.assertEqual(
+                    bridge_menubar._running_streamdeck_pid(lock), _os.getpid()
+                )
+            with patch.object(
+                bridge_menubar.subprocess,
+                "run",
+                return_value=Mock(stdout="/usr/bin/unrelated"),
+            ):
+                self.assertIsNone(bridge_menubar._running_streamdeck_pid(lock))
 
     def test_format_child_failure_names_code_and_tail(self) -> None:
         bridge_menubar = self._import_module()
@@ -1374,7 +1435,7 @@ class FrozenDefectHelperTests(BridgeMenubarTests):
         # (computed on the watcher thread) is the only source.
         verdict_fn.assert_not_called()
 
-    def test_show_rb_reads_verdict_enabled_says_verified(self) -> None:
+    def test_show_rb_reads_verdict_enabled_says_target_only(self) -> None:
         bridge_menubar = self._import_module()
         menu = Mock()
         alert = Mock()
@@ -1386,10 +1447,12 @@ class FrozenDefectHelperTests(BridgeMenubarTests):
                 {"verdict": "enabled", "detail": "/Applications/rekordbox 7/rekordbox.app"},
                 "",
             )
-        alert.setMessageText_.assert_called_once_with("Rekordbox reads enabled")
+        alert.setMessageText_.assert_called_once_with("Rekordbox target patch installed")
         body = alert.setInformativeText_.call_args.args[0]
         self.assertIn("verified", body)
         self.assertIn("/Applications/rekordbox 7/rekordbox.app", body)
+        self.assertIn("does not authorize", body)
+        self.assertIn("stock foreign Mac", body)
         self.assertIn("RB reads blocked", body)
         alert.runModal.assert_called_once_with()
         menu.finishRbReadsCheck_.assert_called_once_with("enabled")
@@ -1479,16 +1542,16 @@ class FrozenDefectHelperTests(BridgeMenubarTests):
         bridge_menubar = self._import_module()
         self.assertEqual(
             bridge_menubar.rb_reads_status_title("enabled"),
-            "Rekordbox reads: enabled ✓",
+            "Rekordbox target patch: present",
         )
         self.assertEqual(
             bridge_menubar.rb_reads_status_title("not_enabled"),
-            "Rekordbox reads: not enabled",
+            "Rekordbox target patch: not present",
         )
         for state in ("unknown", "", "bogus"):
             self.assertEqual(
                 bridge_menubar.rb_reads_status_title(state),
-                "Rekordbox reads: unknown",
+                "Rekordbox target patch: unknown",
             )
 
     def test_maybe_check_rb_reads_uses_cache_and_background_thread(self) -> None:
@@ -1520,19 +1583,19 @@ class FrozenDefectHelperTests(BridgeMenubarTests):
         menu = Mock(rb_reads_status_item=Mock())
         handler(menu, "enabled")
         menu.rb_reads_status_item.setTitle_.assert_called_with(
-            "Rekordbox reads: enabled ✓"
+            "Rekordbox target patch: present"
         )
         self.assertEqual(menu._rb_reads_state, "enabled")
         self.assertFalse(menu._rb_reads_in_progress)
         # Cache refresh flips the rendered text enabled -> not enabled.
         handler(menu, "not_enabled")
         menu.rb_reads_status_item.setTitle_.assert_called_with(
-            "Rekordbox reads: not enabled"
+            "Rekordbox target patch: not present"
         )
         # Check failure renders "unknown".
         handler(menu, "unknown")
         menu.rb_reads_status_item.setTitle_.assert_called_with(
-            "Rekordbox reads: unknown"
+            "Rekordbox target patch: unknown"
         )
 
     def test_run_rb_reads_check_marshals_verdict_to_main_thread(self) -> None:
@@ -1571,12 +1634,12 @@ class FrozenDefectHelperTests(BridgeMenubarTests):
         self.assertEqual(verdict, "unknown")
         self.assertIn("codesign missing", detail)
 
-    def test_menu_blueprint_has_rb_reads_status_row(self) -> None:
+    def test_menu_blueprint_hides_target_patch_action_and_status(self) -> None:
         bridge_menubar = self._import_module()
         flat = self._flatten_blueprint(bridge_menubar.MENU_BLUEPRINT)
-        row = next(e for e in flat if e[1] == "rb_reads_status_item")
-        self.assertEqual(row[0], "info")  # disabled status line, not an action
-        self.assertIsNone(row[3])
+        attrs = {e[1] for e in flat}
+        self.assertNotIn("rb_reads_status_item", attrs)
+        self.assertNotIn("enable_rb_reads_item", attrs)
 
     def test_watch_child_full_exception_still_marshals_failure(self) -> None:
         bridge_menubar = self._import_module()
@@ -1640,34 +1703,38 @@ class FrozenDefectHelperTests(BridgeMenubarTests):
         )
         menu.performSelectorOnMainThread_withObject_waitUntilDone_.assert_not_called()
 
-    def test_quit_cancel_does_not_terminate(self) -> None:
+    def test_restart_argv_is_delayed_for_source_and_frozen(self) -> None:
         bridge_menubar = self._import_module()
-        menu = Mock()
-        alert = Mock()
-        alert.runModal.return_value = 1001  # not NSAlertFirstButtonReturn
-        nsalert = Mock()
-        nsalert.alloc.return_value.init.return_value = alert
-        app = Mock()
-        nsapplication = Mock()
-        nsapplication.sharedApplication.return_value = app
-        with patch.object(bridge_menubar, "NSAlert", nsalert), \
-             patch.object(bridge_menubar, "NSApplication", nsapplication):
-            bridge_menubar.BridgeMenuBar.quit_.callable(menu, None)
-        app.terminate_.assert_not_called()
+        source = bridge_menubar.restart_menubar_argv()
+        self.assertEqual(source[:2], ["/bin/sh", "-c"])
+        self.assertIn("sleep 1", source[2])
+        self.assertIn(bridge_menubar.sys.executable, source[2])
+        self.assertIn("bridge_menubar.py", source[2])
+        with patch.object(bridge_menubar.sys, "frozen", True, create=True), \
+             patch.object(
+                 bridge_menubar.sys, "executable",
+                 "/Volumes/RBSS/RBSS Bridge.app/Contents/MacOS/RBSS Bridge",
+             ):
+            frozen = bridge_menubar.restart_menubar_argv()
+        self.assertIn("sleep 1", frozen[2])
+        self.assertIn("open -n", frozen[2])
+        self.assertIn("RBSS Bridge.app", frozen[2])
 
-    def test_quit_confirm_terminates(self) -> None:
+    def test_restart_spawns_replacement_without_touching_bridge(self) -> None:
         bridge_menubar = self._import_module()
         menu = Mock()
-        alert = Mock()
-        alert.runModal.return_value = bridge_menubar.NSAlertFirstButtonReturn
-        nsalert = Mock()
-        nsalert.alloc.return_value.init.return_value = alert
         app = Mock()
         nsapplication = Mock()
         nsapplication.sharedApplication.return_value = app
-        with patch.object(bridge_menubar, "NSAlert", nsalert), \
-             patch.object(bridge_menubar, "NSApplication", nsapplication):
-            bridge_menubar.BridgeMenuBar.quit_.callable(menu, None)
+        with patch.object(bridge_menubar, "restart_menubar_argv", return_value=["sh", "-c", "sleep 1; x"]), \
+             patch.object(bridge_menubar.subprocess, "Popen") as popen, \
+             patch.object(bridge_menubar, "NSApplication", nsapplication), \
+             patch.object(bridge_menubar, "_system_env", return_value={}), \
+             patch.object(bridge_menubar, "bridge_status", side_effect=AssertionError("bridge touched")), \
+             patch.object(bridge_menubar, "stop_manual_launchctl_job", side_effect=AssertionError("bridge stopped")):
+            bridge_menubar.BridgeMenuBar.restartMenubar_.callable(menu, None)
+        popen.assert_called_once()
+        self.assertEqual(popen.call_args.args[0], ["sh", "-c", "sleep 1; x"])
         app.terminate_.assert_called_once_with(menu)
 
 
@@ -1680,7 +1747,7 @@ class NativeInstallGateTests(BridgeMenubarTests):
         source = (scripts_dir / "bridge_menubar.py").read_text(encoding="utf-8")
         # The install block sits behind the same frozen gate the bridge toggle
         # uses, and install_controller is imported nowhere at module level.
-        self.assertIn("Install on this Mac…", source)
+        self.assertIn("Install on This Mac…", source)
         self.assertIn('if getattr(sys, "frozen", False):', source)
         for line in source.splitlines():
             stripped = line.lstrip()
@@ -1729,6 +1796,314 @@ class NativeInstallGateTests(BridgeMenubarTests):
         self.assertEqual(args[0], "finishInstall:")
         self.assertFalse(args[1]["ok"])
         self.assertIn("OSError", args[1]["failed_step"])
+
+    def test_adopted_or_owned_bridge_blocks_install_and_purge(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock()
+        menu._frozen_bridge_proc = None
+        menu._frozen_streamdeck_proc = None
+        with patch.object(bridge_menubar, "bridge_status", return_value="off"), \
+             patch.object(bridge_menubar, "_running_bridge_pid", return_value=91), \
+             patch.object(bridge_menubar, "_running_streamdeck_pid", return_value=None):
+            self.assertFalse(bridge_menubar.BridgeMenuBar._bridge_fully_off(menu))
+        proc = Mock()
+        proc.poll.return_value = None
+        menu._frozen_bridge_proc = proc
+        with patch.object(bridge_menubar, "bridge_status", return_value="off"), \
+             patch.object(bridge_menubar, "_running_bridge_pid", return_value=None), \
+             patch.object(bridge_menubar, "_running_streamdeck_pid", return_value=None):
+            self.assertFalse(bridge_menubar.BridgeMenuBar._bridge_fully_off(menu))
+
+        proc.poll.return_value = 0
+        menu._frozen_bridge_proc = None
+        with patch.object(bridge_menubar, "bridge_status", return_value="off"), \
+             patch.object(bridge_menubar, "_running_bridge_pid", return_value=None), \
+             patch.object(bridge_menubar, "_running_streamdeck_pid", return_value=92):
+            self.assertFalse(bridge_menubar.BridgeMenuBar._bridge_fully_off(menu))
+
+        menu = Mock(_install_in_progress=False, _purge_in_progress=False)
+        menu._require_bridge_off.return_value = False
+        bridge_menubar.BridgeMenuBar.installOnMac_.callable(menu, None)
+        bridge_menubar.BridgeMenuBar.purgeBridge_.callable(menu, None)
+        menu._require_bridge_off.assert_any_call("installing or updating this Mac")
+        menu._require_bridge_off.assert_any_call("purging this Mac")
+        menu.install_item.setTitle_.assert_not_called()
+        menu.purge_item.setTitle_.assert_not_called()
+
+    def test_dmg_install_required_disables_bridge_start(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock(_install_required=True)
+        with patch.object(bridge_menubar.sys, "frozen", True, create=True):
+            bridge_menubar.BridgeMenuBar.toggleBridge_.callable(menu, None)
+        menu._toggle_bridge_frozen.assert_not_called()
+
+        menu = Mock(toggle_item=Mock(), _install_required=True)
+        menu._snapshot = {}
+        menu._status = None
+        menu.status_rows = []
+        menu._render_export_state = Mock()
+        menu._auto_set_soundswitch_pack = Mock()
+        menu._maybe_detect_export_state = Mock()
+        menu.laser_blackout_item = Mock()
+        menu.laser_clear_blackout_item = Mock()
+        menu._adapt_timer = Mock()
+        with patch.object(bridge_menubar, "read_status", return_value={}), \
+             patch.object(bridge_menubar, "bridge_pids", return_value=[]), \
+             patch.object(bridge_menubar, "watcher_running", return_value=False), \
+             patch.object(bridge_menubar.sys, "frozen", True, create=True), \
+             patch.object(bridge_menubar, "_running_bridge_pid", return_value=None):
+            bridge_menubar.BridgeMenuBar.refresh_.callable(menu, None)
+        menu.toggle_item.setTitle_.assert_called_with("Install or Update This Mac first")
+        menu.toggle_item.setEnabled_.assert_called_with(False)
+
+    def test_failed_install_restores_retry_title(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock()
+        alert = Mock()
+        nsalert = Mock()
+        nsalert.alloc.return_value.init.return_value = alert
+        with patch.object(bridge_menubar, "NSAlert", nsalert), \
+             patch("rb_ss_bridge_v2.install_controller.install_action_title",
+                   return_value="Retry Installation…") as title:
+            bridge_menubar.BridgeMenuBar.finishInstall_.callable(
+                menu, {"ok": False, "failed_step": "copy failed"}
+            )
+        title.assert_called_once()
+        menu.install_item.setTitle_.assert_called_once_with("Retry Installation…")
+        menu.install_item.setEnabled_.assert_called_once_with(True)
+
+
+class PortableLogAndUsbUpdateTests(BridgeMenubarTests):
+    def test_log_argv_source_and_frozen_never_needs_host_python(self) -> None:
+        bridge_menubar = self._import_module()
+        source = bridge_menubar.log_viewer_argv()
+        self.assertEqual(source[0], bridge_menubar.sys.executable)
+        self.assertTrue(source[1].endswith("/bridge_view.py"))
+        with patch.object(bridge_menubar.sys, "frozen", True, create=True):
+            self.assertEqual(
+                bridge_menubar.log_viewer_argv(),
+                [bridge_menubar.sys.executable, "--run-log-viewer"],
+            )
+
+    def test_log_terminal_marker_title_and_one_viewer_guard(self) -> None:
+        bridge_menubar = self._import_module()
+        command = bridge_menubar.log_viewer_terminal_command(["/app", "--run-log-viewer"])
+        self.assertIn("RBSS_BRIDGE_MONITOR", command)
+        self.assertIn("--run-log-viewer", command)
+        with patch.object(
+            bridge_menubar.subprocess, "run", return_value=Mock(returncode=0)
+        ) as run:
+            self.assertTrue(
+                bridge_menubar.open_terminal_command(command, "RBSS_BRIDGE_MONITOR")
+            )
+        apple_script = run.call_args.args[0][-1]
+        self.assertIn('custom title of selected tab', apple_script)
+        self.assertIn('RBSS_BRIDGE_MONITOR', apple_script)
+        with patch.object(bridge_menubar, "monitor_open", return_value=True), \
+             patch.object(bridge_menubar, "open_terminal_command") as terminal:
+            self.assertTrue(bridge_menubar.open_live_log())
+        terminal.assert_not_called()
+        with patch.object(bridge_menubar, "monitor_open", return_value=False), \
+             patch.object(bridge_menubar, "open_terminal_command", return_value=True) as terminal, \
+             patch.object(bridge_menubar, "bridge_status", side_effect=AssertionError("bridge touched")):
+            self.assertTrue(bridge_menubar.open_live_log())
+        terminal.assert_called_once()
+        self.assertEqual(terminal.call_args.args[1], "RBSS_BRIDGE_MONITOR")
+
+        with patch.object(bridge_menubar, "monitor_open", return_value=False), \
+             patch.object(bridge_menubar, "open_terminal_command", return_value=False):
+            self.assertFalse(bridge_menubar.open_live_log())
+
+    def test_open_live_log_failure_is_visible_and_does_not_touch_bridge(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock()
+        with patch.object(bridge_menubar, "open_live_log", return_value=False):
+            bridge_menubar.BridgeMenuBar.openLiveLog_.callable(menu, None)
+        menu.showLiveLogFailure_.assert_called_once_with(None)
+
+        alert = Mock()
+        nsalert = Mock()
+        nsalert.alloc.return_value.init.return_value = alert
+        with patch.object(bridge_menubar, "NSAlert", nsalert):
+            bridge_menubar.BridgeMenuBar.showLiveLogFailure_.callable(menu, None)
+        body = alert.setInformativeText_.call_args.args[0]
+        self.assertIn("Privacy & Security", body)
+        self.assertIn("Automation", body)
+        self.assertIn("keeps running", body)
+
+    def test_frozen_bridge_start_opens_log(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock()
+        menu._stop_frozen_bridge_child.return_value = False
+        proc = Mock()
+        menu._spawn_watched.return_value = proc
+        with patch.object(bridge_menubar, "_running_bridge_pid", return_value=None), \
+             patch.object(bridge_menubar, "open_live_log") as open_log:
+            bridge_menubar.BridgeMenuBar._toggle_bridge_frozen(menu)
+        self.assertIs(menu._frozen_bridge_proc, proc)
+        menu._ensure_frozen_streamdeck.assert_called_once_with()
+        open_log.assert_called_once_with()
+
+    def test_frozen_streamdeck_supervisor_reuses_or_starts_one_helper(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock(_frozen_streamdeck_proc=None, _streamdeck_retry_at=0.0)
+        helper = Mock()
+        menu._spawn_watched.return_value = helper
+        with patch.object(bridge_menubar, "_running_streamdeck_pid", return_value=77):
+            bridge_menubar.BridgeMenuBar._ensure_frozen_streamdeck(menu)
+        menu._spawn_watched.assert_not_called()
+
+        with patch.object(bridge_menubar, "_running_streamdeck_pid", return_value=None), \
+             patch.object(bridge_menubar.time, "monotonic", return_value=10.0):
+            bridge_menubar.BridgeMenuBar._ensure_frozen_streamdeck(menu)
+        menu._spawn_watched.assert_called_once_with(
+            [bridge_menubar.sys.executable, "--run-streamdeck"],
+            label="frozen_streamdeck_start",
+            combined_log=True,
+        )
+        self.assertIs(menu._frozen_streamdeck_proc, helper)
+
+    def test_frozen_refresh_stops_an_orphan_streamdeck_when_bridge_is_off(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock(
+            _frozen_bridge_proc=None,
+            _frozen_streamdeck_proc=None,
+            _adopted_frozen_bridge=False,
+            _install_required=False,
+            _status="off",
+            status_rows=[],
+        )
+        menu._snapshot = {}
+        with patch.object(bridge_menubar, "read_status", return_value={}), \
+             patch.object(bridge_menubar, "bridge_pids", return_value=[]), \
+             patch.object(bridge_menubar, "watcher_running", return_value=False), \
+             patch.object(bridge_menubar.sys, "frozen", True, create=True), \
+             patch.object(bridge_menubar, "_running_bridge_pid", return_value=None), \
+             patch.object(bridge_menubar, "_running_streamdeck_pid", return_value=92):
+            bridge_menubar.BridgeMenuBar.refresh_.callable(menu, None)
+        menu._stop_frozen_streamdeck.assert_called_once_with()
+
+    def test_installed_relaunch_waits_for_dmg_menubar_lock_release(self) -> None:
+        bridge_menubar = self._import_module()
+        events = []
+        alert = Mock()
+        alert.runModal.side_effect = lambda: events.append("dialog") or 0
+        nsalert = Mock()
+        nsalert.alloc.return_value.init.return_value = alert
+        application = Mock()
+        nsapplication = Mock()
+        nsapplication.sharedApplication.return_value = application
+        menu = Mock(_install_in_progress=True)
+        payload = {
+            "ok": True,
+            "app_dest": "/Users/guest/Applications/RBSS Bridge.app",
+            "installed_files": 12,
+        }
+        with patch.object(bridge_menubar, "NSAlert", nsalert), \
+             patch.object(bridge_menubar, "NSApplication", nsapplication), \
+             patch("rb_ss_bridge_v2.install_controller.bundle_root",
+                   return_value=Path("/tmp/RBSS Bridge.app")), \
+             patch.object(
+                 bridge_menubar.subprocess,
+                 "Popen",
+                 side_effect=lambda *args, **kwargs: events.append("spawn") or Mock(),
+             ) as popen:
+            bridge_menubar.BridgeMenuBar.finishInstall_.callable(menu, payload)
+        self.assertEqual(events, ["dialog", "spawn"])
+        argv = popen.call_args.args[0]
+        self.assertEqual(argv[:2], ["/bin/sh", "-c"])
+        self.assertIn("sleep 1; exec open -n", argv[2])
+        self.assertIn("RBSS Bridge.app", argv[2])
+        application.terminate_.assert_called_once_with(menu)
+
+    def test_frozen_stop_orders_streamdeck_before_owned_or_adopted_bridge(self) -> None:
+        bridge_menubar = self._import_module()
+        events = []
+        owned = Mock()
+        owned.poll.return_value = None
+        menu = Mock(_frozen_bridge_proc=owned)
+        menu._stop_frozen_streamdeck.side_effect = lambda: events.append("streamdeck")
+        menu._stop_frozen_bridge_child.side_effect = lambda: events.append("bridge") or True
+        bridge_menubar.BridgeMenuBar._toggle_bridge_frozen(menu)
+        self.assertEqual(events, ["streamdeck", "bridge"])
+
+        events.clear()
+        menu = Mock(_frozen_bridge_proc=None)
+        menu._stop_frozen_bridge_child.return_value = False
+        menu._stop_frozen_streamdeck.side_effect = lambda: events.append("streamdeck")
+        with patch.object(bridge_menubar, "_running_bridge_pid", return_value=91), \
+             patch.object(
+                 bridge_menubar.os,
+                 "kill",
+                 side_effect=lambda pid, sig: events.append((pid, sig)),
+             ):
+            bridge_menubar.BridgeMenuBar._toggle_bridge_frozen(menu)
+        self.assertEqual(events[0], "streamdeck")
+        self.assertEqual(events[1], (91, bridge_menubar.signal.SIGTERM))
+
+    def test_frozen_streamdeck_stop_handles_owned_and_adopted_helpers(self) -> None:
+        bridge_menubar = self._import_module()
+        owned = Mock()
+        owned.poll.return_value = None
+        menu = Mock(_frozen_streamdeck_proc=owned)
+        self.assertTrue(bridge_menubar.BridgeMenuBar._stop_frozen_streamdeck(menu))
+        owned.terminate.assert_called_once_with()
+        owned.wait.assert_called_once_with(timeout=5)
+        self.assertIsNone(menu._frozen_streamdeck_proc)
+
+        menu = Mock(_frozen_streamdeck_proc=None)
+        with patch.object(
+            bridge_menubar,
+            "_running_streamdeck_pid",
+            side_effect=[91, None, None],
+        ), patch.object(bridge_menubar.os, "kill") as kill:
+            self.assertTrue(bridge_menubar.BridgeMenuBar._stop_frozen_streamdeck(menu))
+        kill.assert_called_once_with(91, bridge_menubar.signal.SIGTERM)
+
+    def test_pioneer_usb_mount_detection(self) -> None:
+        bridge_menubar = self._import_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "B" / "PIONEER").mkdir(parents=True)
+            (root / "a" / "PIONEER").mkdir(parents=True)
+            (root / "not-rb").mkdir()
+            self.assertEqual(
+                [p.name for p in bridge_menubar.pioneer_usb_mounts(root)],
+                ["a", "B"],
+            )
+
+    def test_update_usb_requires_exactly_one_mount_and_dispatches_build(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock()
+        menu._require_bridge_off.return_value = True
+        mount = Path("/Volumes/DJ USB")
+        alert = Mock()
+        alert.runModal.return_value = bridge_menubar.NSAlertFirstButtonReturn
+        nsalert = Mock()
+        nsalert.alloc.return_value.init.return_value = alert
+        with patch.object(bridge_menubar, "pioneer_usb_mounts", return_value=[mount]), \
+             patch.object(bridge_menubar, "NSAlert", nsalert):
+            bridge_menubar.BridgeMenuBar.updateUsbBridge_.callable(menu, None)
+        argv = menu._spawn_watched.call_args.args[0]
+        self.assertEqual(argv, [
+            "bash", str(bridge_menubar.REPO_ROOT / "packaging" / "make_stick.sh"),
+            str(mount),
+        ])
+        self.assertEqual(menu._spawn_watched.call_args.kwargs["busy_item_attr"], "update_usb_item")
+
+        for mounts, title in (([], "No Rekordbox USB found"),
+                              ([Path("/Volumes/A"), Path("/Volumes/B")],
+                               "More than one Rekordbox USB found")):
+            menu = Mock()
+            menu._require_bridge_off.return_value = True
+            alert = Mock()
+            nsalert = Mock()
+            nsalert.alloc.return_value.init.return_value = alert
+            with patch.object(bridge_menubar, "pioneer_usb_mounts", return_value=mounts), \
+                 patch.object(bridge_menubar, "NSAlert", nsalert):
+                bridge_menubar.BridgeMenuBar.updateUsbBridge_.callable(menu, None)
+            alert.setMessageText_.assert_called_once_with(title)
+            menu._spawn_watched.assert_not_called()
 
 
 if __name__ == "__main__":

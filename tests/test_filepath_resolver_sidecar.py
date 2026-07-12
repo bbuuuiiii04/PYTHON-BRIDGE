@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+import types
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -30,21 +31,25 @@ def _record() -> dict:
     }
 
 
-def _write_index(mount: Path, *, schema: int = 1) -> Path:
+def _write_index(mount: Path, *, schema: int = 1, record: dict | None = None) -> Path:
     path = mount / "RBSS BRIDGE USB" / "lighting_sidecar" / "index.json"
-    path.parent.mkdir(parents=True)
-    payload = {"schema_version": schema, "track_count": 1, "tracks": [_record()]}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": schema,
+        "track_count": 1,
+        "tracks": [record if record is not None else _record()],
+    }
     path.write_text(json.dumps(payload), encoding="utf-8")
     return path
 
 
 class SidecarReaderTests(unittest.TestCase):
     def setUp(self) -> None:
-        resolver._SIDECAR_CACHE = None
+        resolver._SIDECAR_CACHE = {}
         resolver._SIDECAR_ONLY_LOGGED = False
 
     def tearDown(self) -> None:
-        resolver._SIDECAR_CACHE = None
+        resolver._SIDECAR_CACHE = {}
         resolver._SIDECAR_ONLY_LOGGED = False
 
     def test_schema_one_loads_and_unknown_schema_fails_closed(self) -> None:
@@ -60,20 +65,68 @@ class SidecarReaderTests(unittest.TestCase):
                 self.assertIsNone(resolver._load_sidecar_index(unsupported))
             self.assertTrue(any("sidecar-schema-unsupported" in line for line in logs.output))
 
-    def test_discovers_his_sidecar_beside_guest_stick_and_caches_it(self) -> None:
+    def test_discovers_his_sidecar_beside_guest_stick_and_drops_it_when_unplugged(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             guest = root / "A-GUEST"
             guest.mkdir()
             his = root / "MINK"
-            _write_index(his)
+            index = _write_index(his)
 
             loaded = resolver._discover_sidecar_index([guest, his])
             self.assertEqual(loaded[0], his / "RBSS BRIDGE USB" / "lighting_sidecar")
 
-            # Found roots are session-cached; disappearance does not redirect
-            # a running resolver to a different stick mid-session.
-            self.assertIs(resolver._discover_sidecar_index([]), loaded)
+            index.unlink()
+            self.assertIsNone(resolver._discover_sidecar_index([guest, his]))
+
+    def test_rebuild_reloads_changed_index_and_new_mount_is_discovered(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = root / "FIRST"
+            _write_index(first)
+            loaded = resolver._discover_sidecar_indexes([first])
+            self.assertEqual(loaded[0][1][0]["title"], "Twin Track")
+
+            rebuilt = _record()
+            rebuilt["title"] = "Twin Track Rebuilt With Fresh Phrase Memory"
+            _write_index(first, record=rebuilt)
+            loaded = resolver._discover_sidecar_indexes([first])
+            self.assertEqual(loaded[0][1][0]["title"], rebuilt["title"])
+
+            second = root / "SECOND"
+            _write_index(second)
+            loaded = resolver._discover_sidecar_indexes([second, first])
+            self.assertEqual(
+                [entry[0] for entry in loaded],
+                [
+                    first / "RBSS BRIDGE USB" / "lighting_sidecar",
+                    second / "RBSS BRIDGE USB" / "lighting_sidecar",
+                ],
+            )
+
+    def test_replug_at_a_new_mount_and_installed_candidate_are_discovered(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            old = root / "OLD"
+            old_index = _write_index(old)
+            self.assertIsNotNone(resolver._discover_sidecar_index([old]))
+            old_index.unlink()
+
+            new = root / "NEW"
+            _write_index(new)
+            loaded = resolver._discover_sidecar_indexes([old, new])
+            self.assertEqual(
+                [entry[0] for entry in loaded],
+                [new / "RBSS BRIDGE USB" / "lighting_sidecar"],
+            )
+
+            source = _write_index(root / "SOURCE")
+            installed = root / "Application Support" / "RBSS Bridge" / "lighting_sidecar" / "index.json"
+            installed.parent.mkdir(parents=True)
+            installed.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+            with patch.object(resolver, "_INSTALLED_SIDECAR_INDEX", installed):
+                loaded = resolver._discover_sidecar_indexes([])
+            self.assertEqual([entry[0] for entry in loaded], [installed.parent])
 
     def test_missing_and_path_escape_are_silent_misses(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -86,9 +139,112 @@ class SidecarReaderTests(unittest.TestCase):
             self.assertIsNone(resolver._load_sidecar_index(path))
 
 
+class DeviceAudioFilepathTests(unittest.TestCase):
+    def _device_path(self, anlz_path: str, parsed_path: str) -> str:
+        anlz = types.ModuleType("pyrekordbox.anlz")
+        anlz.AnlzFile = type(
+            "AnlzFile", (), {"parse_file": staticmethod(lambda _path: {"path": parsed_path})}
+        )
+        package = types.ModuleType("pyrekordbox")
+        package.__path__ = []
+        with patch.dict(sys.modules, {"pyrekordbox": package, "pyrekordbox.anlz": anlz}):
+            return resolver._device_audio_filepath(anlz_path)
+
+    def test_device_audio_path_stays_inside_anlz_usb_mount(self) -> None:
+        with TemporaryDirectory() as tmp:
+            volumes = Path(tmp)
+            mount = volumes / "TEST_STICK"
+            (mount / "PIONEER" / "ANLZ").mkdir(parents=True)
+            with patch.object(resolver, "_VOLUMES_ROOT", volumes):
+                path = self._device_path(
+                    str(mount / "PIONEER" / "ANLZ" / "ANLZ0000.DAT").replace("/", "\\"),
+                    "MUSIC\\Folder\\song.wav",
+                )
+            self.assertEqual(path, str((mount / "MUSIC" / "Folder" / "song.wav").resolve()))
+
+    def test_device_audio_path_rejects_escapes_and_outside_symlink(self) -> None:
+        with TemporaryDirectory() as tmp:
+            volumes = Path(tmp)
+            mount = volumes / "TEST_STICK"
+            (mount / "PIONEER" / "ANLZ").mkdir(parents=True)
+            outside = volumes / "outside"
+            outside.mkdir()
+            (mount / "MUSIC").mkdir()
+            (mount / "MUSIC" / "escape").symlink_to(outside, target_is_directory=True)
+            anlz_path = str(mount / "PIONEER" / "ANLZ" / "ANLZ0000.DAT")
+            with patch.object(resolver, "_VOLUMES_ROOT", volumes):
+                for parsed_path in ("../outside.wav", "/tmp/outside.wav", "C:/outside.wav", "MUSIC/escape/song.wav"):
+                    with self.subTest(parsed_path=parsed_path):
+                        self.assertEqual(self._device_path(anlz_path, parsed_path), "")
+
+
 class SidecarResolutionTests(unittest.TestCase):
     def setUp(self) -> None:
+        resolver._SIDECAR_CACHE = {}
         resolver._SIDECAR_ONLY_LOGGED = False
+
+    def tearDown(self) -> None:
+        resolver._SIDECAR_CACHE = {}
+        resolver._SIDECAR_ONLY_LOGGED = False
+
+    def test_multiple_roots_try_deterministically_and_deduplicate_identical_records(self) -> None:
+        times = [i * 500.0 for i in range(401)]
+        grid = {
+            "beatgrid_times_ms": times,
+            "beatgrid_bpms": [128.0] * len(times),
+        }
+        match = _record()
+        match["beatgrid_fingerprint"] = resolver._beatgrid_fingerprint(times)
+        miss = {**match, "content_id": "99", "bpm": 100.0}
+        roots = (
+            (Path("/a-sidecar"), (miss,)),
+            (Path("/b-sidecar"), (match,)),
+        )
+
+        with patch.object(resolver, "_mounted_sidecar_indexes", return_value=roots), \
+             patch.object(resolver, "_read_device_pdb_track", return_value=None), \
+             patch.object(
+                 resolver,
+                 "_payload_for_sidecar",
+                 side_effect=lambda root, _record, _path: {"root": str(root)},
+             ):
+            self.assertEqual(
+                resolver._sidecar_lookup("/Volumes/GUEST/PIONEER/x", grid),
+                {"root": "/b-sidecar"},
+            )
+
+        installed = Path("/z-installed/lighting_sidecar")
+        identical = (
+            (Path("/a-mounted/lighting_sidecar"), (match,)),
+            (installed, (match,)),
+        )
+        with patch.object(resolver, "_mounted_sidecar_indexes", return_value=identical), \
+             patch.object(resolver, "_INSTALLED_SIDECAR_INDEX", installed / "index.json"), \
+             patch.object(resolver, "_read_device_pdb_track", return_value=None), \
+             patch.object(
+                 resolver,
+                 "_payload_for_sidecar",
+                 side_effect=lambda root, _record, _path: {"root": str(root)},
+             ), \
+             self.assertLogs("filepath_resolver", level="INFO") as logs:
+            self.assertEqual(
+                resolver._sidecar_lookup("/Volumes/GUEST/PIONEER/x", grid),
+                {"root": str(installed)},
+            )
+        self.assertTrue(any("sidecar-root-deduplicated" in line for line in logs.output))
+
+        old_generation = {**match, "source_sig": {"mtime_ns": 1, "size": 10}}
+        new_generation = {**match, "source_sig": {"mtime_ns": 2, "size": 10}}
+        conflicting = (
+            (Path("/a-sidecar"), (old_generation,)),
+            (Path("/b-sidecar"), (new_generation,)),
+        )
+        with patch.object(resolver, "_mounted_sidecar_indexes", return_value=conflicting), \
+             patch.object(resolver, "_read_device_pdb_track", return_value=None), \
+             patch.object(resolver, "_payload_for_sidecar", return_value={"ok": True}), \
+             self.assertLogs("filepath_resolver", level="INFO") as logs:
+            self.assertIsNone(resolver._sidecar_lookup("/Volumes/GUEST/PIONEER/x", grid))
+        self.assertTrue(any("sidecar-root-ambiguous" in line for line in logs.output))
 
     def test_cross_analysis_collision_needs_tags(self) -> None:
         base = [i * 500.0 for i in range(401)]

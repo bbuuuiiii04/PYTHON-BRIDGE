@@ -1,0 +1,4 @@
+# python-rtmidi 1.5.8 has no published CPython 3.13 macOS ARM64 wheel.
+# Its official sdist is hash-locked, built locally with the locked Meson/Cython
+# toolchain above, then its wheel tag and every Mach-O are checked before use.
+python-rtmidi==1.5.8 --hash=sha256:7f9ade68b068ae09000ecb562ae9521da3a234361ad5449e83fc734544d004fa  # python_rtmidi-1.5.8.tar.gz

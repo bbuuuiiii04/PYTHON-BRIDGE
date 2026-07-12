@@ -5,6 +5,7 @@ import fcntl
 import hashlib
 import json
 import os
+import shlex
 import signal
 import socket
 import subprocess
@@ -46,9 +47,11 @@ MENUBAR_LOCK_PATH = "/tmp/rb_ss_bridge_v2_menubar.lock"
 # Lets a reopened frozen menubar re-adopt a bridge it has no Popen handle for
 # (pgrep can't match a frozen bridge's argv).
 BRIDGE_LOCK_PATH = "/tmp/rb_ss_bridge_v2.lock"
+STREAMDECK_LOCK_PATH = "/tmp/streamdeck_midi.lock"
 BRIDGE_PATTERN = r"^[^[:space:]]*(python3|Python)[^[:space:]]*([[:space:]]+-u)?[[:space:]]+-m[[:space:]]+rb_ss_bridge_v2$"
 WATCHER_PATTERN = "^(/bin/bash|bash)[[:space:]]+" + WATCHER.replace(".", r"\.") + "$"
-MONITOR_PATTERN = r"RBSS_BRIDGE_MONITOR|^tail -n 100 -F /tmp/bridge\.log$"
+MONITOR_TITLE = "RBSS_BRIDGE_MONITOR"
+MONITOR_PATTERN = r"RBSS_BRIDGE_MONITOR|--run-log-viewer|/bridge_view\.py"
 MANUAL_LAUNCHCTL_LABEL = "rbss_bridge_manual"
 STATUS_PATH = "/tmp/rb_ss_bridge_v2_status.json"
 COMMANDS_PATH = "/tmp/rb_ss_bridge_v2_commands.jsonl"
@@ -299,6 +302,31 @@ def _running_bridge_pid(path: str = BRIDGE_LOCK_PATH) -> int | None:
     except (OSError, subprocess.SubprocessError):
         return None
     if "rb_ss_bridge_v2" in out and ("--run-bridge" in out or "-m rb_ss_bridge_v2" in out):
+        return pid
+    return None
+
+
+def _running_streamdeck_pid(path: str = STREAMDECK_LOCK_PATH) -> int | None:
+    """Live Stream Deck helper holding its singleton lock, or None."""
+    try:
+        with open(path, "r", encoding="utf-8") as fp:
+            pid = int(fp.readline().strip())
+    except (OSError, ValueError):
+        return None
+    if pid <= 0:
+        return None
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return None
+    try:
+        command = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "command="],
+            capture_output=True, text=True, timeout=5,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if "--run-streamdeck" in command or "streamdeck_midi.py" in command:
         return pid
     return None
 
@@ -623,13 +651,95 @@ def _export_failure_result(exc: Exception) -> dict:
     }
 
 
-def open_terminal_command(command: str, title: str = "RBSS_TERMINAL") -> None:
+def open_terminal_command(command: str, title: str = "RBSS_TERMINAL") -> bool:
     safe_cmd = command.replace("\\", "\\\\").replace('"', '\\"')
+    safe_title = title.replace("\\", "\\\\").replace('"', '\\"')
     script = (
-        'tell application "Terminal" to activate\n'
-        f'tell application "Terminal" to do script "{safe_cmd}"'
+        'tell application "Terminal"\n'
+        'activate\n'
+        f'do script "{safe_cmd}"\n'
+        f'set custom title of selected tab of front window to "{safe_title}"\n'
+        'end tell'
     )
-    subprocess.run(["osascript", "-e", script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
+
+
+def log_viewer_argv() -> list[str]:
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "--run-log-viewer"]
+    return [sys.executable, str(REPO_ROOT / "bridge_view.py")]
+
+
+def log_viewer_terminal_command(argv: list[str] | None = None) -> str:
+    command = " ".join(shlex.quote(part) for part in (argv or log_viewer_argv()))
+    inner = f"printf '\\033]0;{MONITOR_TITLE}\\007'; {command}"
+    # $0 carries the stable marker while the viewer child is alive, allowing
+    # source and frozen menubars to share one no-duplicates check.
+    return f"bash -c {shlex.quote(inner)} {MONITOR_TITLE}"
+
+
+def monitor_open() -> bool:
+    return subprocess.run(
+        ["pgrep", "-f", MONITOR_PATTERN], capture_output=True
+    ).returncode == 0
+
+
+def open_live_log() -> bool:
+    """Ensure one disposable log viewer is open; report launch failure."""
+    if monitor_open():
+        return True
+    return open_terminal_command(log_viewer_terminal_command(), MONITOR_TITLE)
+
+
+def pioneer_usb_mounts(volumes_root: str | os.PathLike[str] = "/Volumes") -> list[Path]:
+    """Mounted Rekordbox USB roots, identified by their PIONEER directory."""
+    try:
+        mounts = list(Path(volumes_root).iterdir())
+    except OSError:
+        return []
+    return sorted(
+        (mount for mount in mounts if mount.is_dir() and (mount / "PIONEER").is_dir()),
+        key=lambda path: path.name.lower(),
+    )
+
+
+def _app_bundle_for_executable(executable: str | os.PathLike[str]) -> Path | None:
+    for parent in Path(executable).resolve().parents:
+        if parent.suffix == ".app":
+            return parent
+    return None
+
+
+def restart_menubar_argv() -> list[str]:
+    """Delayed replacement so this process releases the singleton lock first."""
+    if getattr(sys, "frozen", False):
+        bundle = _app_bundle_for_executable(sys.executable)
+        if bundle is None:
+            return []
+        relaunch = f"open -n {shlex.quote(str(bundle))}"
+    else:
+        relaunch = " ".join(
+            shlex.quote(part) for part in (sys.executable, str(Path(__file__).resolve()))
+        )
+    return ["/bin/sh", "-c", f"sleep 1; exec {relaunch}"]
+
+
+def installed_relaunch_argv(app_dest: str | os.PathLike[str]) -> list[str]:
+    """Open the installed app only after this DMG menubar releases its lock."""
+    return [
+        "/bin/sh",
+        "-c",
+        f"sleep 1; exec open -n {shlex.quote(str(app_dest))}",
+    ]
 
 
 def open_browser_url(url: str) -> None:
@@ -715,10 +825,12 @@ def _import_rekordbox_patch():
 
 
 def _rb_reads_verdict() -> tuple[str, str]:
-    """Ground-truth check of the get-task-allow patch: (verdict, detail).
+    """Check only the Rekordbox target's get-task-allow patch.
 
-    verdict: "enabled" | "not_enabled" | "unknown". Shells out via codesign
-    (has_get_task_allow) — must NEVER run on the AppKit main thread."""
+    The legacy verdict tokens are "enabled" | "not_enabled" | "unknown", but
+    enabled means only "target patch present". It does not prove caller
+    authorization or a live task_for_pid attach. Shells out via codesign and
+    must NEVER run on the AppKit main thread."""
     try:
         rekordbox_patch = _import_rekordbox_patch()
         app = rekordbox_patch.find_rekordbox()
@@ -733,9 +845,9 @@ def _rb_reads_verdict() -> tuple[str, str]:
 
 def rb_reads_status_title(state: str) -> str:
     return {
-        "enabled": "Rekordbox reads: enabled ✓",
-        "not_enabled": "Rekordbox reads: not enabled",
-    }.get(state, "Rekordbox reads: unknown")
+        "enabled": "Rekordbox target patch: present",
+        "not_enabled": "Rekordbox target patch: not present",
+    }.get(state, "Rekordbox target patch: unknown")
 
 
 def _format_child_failure(label: str, returncode: int, stderr_tail: str) -> str:
@@ -743,7 +855,8 @@ def _format_child_failure(label: str, returncode: int, stderr_tail: str) -> str:
     for the frozen bridge / rekordbox-patch spawns, which otherwise fail silent)."""
     what = {
         "frozen_bridge_start": "The bridge couldn't start",
-        "patch_rekordbox": "Enabling Rekordbox reads didn't start",
+        "frozen_streamdeck_start": "The Stream Deck helper couldn't start",
+        "patch_rekordbox": "The Rekordbox target patch didn't start",
     }.get(label, "A helper process didn't start")
     tail = (stderr_tail or "").strip()
     if len(tail) > 600:
@@ -800,139 +913,71 @@ def recording_status_from_snapshot(status: dict) -> dict:
     return rec
 
 
-def compact_status_lines(status: dict, pids: list[str] | None = None) -> list:
+def compact_status_lines(
+    status: dict,
+    pids: list[str] | None = None,
+    *,
+    bridge_state: str | None = None,
+) -> list:
+    """Four operator-useful rows. Detailed deck/phrasing/check data belongs in
+    the live log, not the everyday menu."""
     pids = pids or []
-    _dash = _seg("  —", color=_cs())
+
+    # The process/lock result is newer truth than the last JSON snapshot. After
+    # a stop, never keep painting the old Rekordbox/laser/LED state green until
+    # the status file ages out.
+    if bridge_state in {"off", "initializing"}:
+        bridge_text = "Starting" if bridge_state == "initializing" else "Off"
+        bridge_color = _co() if bridge_state == "initializing" else _cs()
+        return [
+            _join(_seg("○  ", color=bridge_color), _seg("BRIDGE", bold=True),
+                  _seg(f"  {bridge_text}", color=bridge_color)),
+            _join(_seg("  Rekordbox  ", color=_cs()), _seg("—", color=_cs())),
+            _join(_seg("  Lasers  ", color=_cs()), _seg("—", color=_cs())),
+            _join(_seg("  LEDs  ", color=_cs()), _seg("—", color=_cs())),
+        ]
 
     if not status or status.get("stale"):
         age_s = status.get("stale_age_s", 0) if status else 0
         age_str = f"{age_s}s stale" if age_s else "no snapshot"
         return [
             _join(_seg("⊘  ", color=_co()), _seg("BRIDGE", bold=True), _seg(f"  {age_str}", color=_co())),
-            _join(_seg("  SS  ", color=_cs()), _seg("Unknown", color=_cs())),
-            _join(_seg("■ ", color=_cs()), _seg("D1", bold=True), _dash),
-            _join(_seg("  └  ", color=_cs()), _seg("—", color=_cs())),
-            _join(_seg("■ ", color=_cs()), _seg("D2", bold=True), _dash),
-            _join(_seg("  └  ", color=_cs()), _seg("—", color=_cs())),
-            _seg("  Checks  —", color=_cs()),
-            _join(_seg("  Smart Phrasing  ", color=_cs()), _seg("—", color=_cs())),
+            _join(_seg("  Rekordbox  ", color=_cs()), _seg("—", color=_cs())),
             _join(_seg("  Lasers  ", color=_cs()), _seg("—", color=_cs())),
             _join(_seg("  LEDs  ", color=_cs()), _seg("—", color=_cs())),
         ]
 
-    sm = status.get("state_manager", {})
-    ss = status.get("soundswitch", {})
-    validation = status.get("validation", {})
     laser = status.get("laser_director", {})
-    active = str(sm.get("active_deck", "?"))
-    mode = sm.get("lighting_mode", "idle")
-    decks = sm.get("deck", {})
-    smart_drop_on = bool(sm.get("smart_drop_enabled"))
-    smart_breakdown_on = bool(sm.get("smart_breakdown_enabled"))
-
-    # Row 0: bridge header
     multi_seg = _seg(f"  ⚠ {len(pids)} procs", color=_co()) if len(pids) > 1 else _seg("")
-    # Surface the ONE reliable make-or-break (P1 diagnosability): the bridge can't
-    # read Rekordbox on this Mac (authorization denied). No extra row (the 10-row zip
-    # contract holds); it rides on the BRIDGE line. We deliberately do NOT warn on
-    # 'unsupported_version' (deck reads use a version-robust ObjC scan that doesn't
-    # need the offset table, so it would false-alarm on an RB upgrade) or on a
-    # transient 'attach_failed'; both still ride in the status JSON for diagnostics.
-    rb = status.get("rekordbox", {})
-    rb_reason = rb.get("reason") if isinstance(rb, dict) else ""
-    rb_warn_text = "  ⚠ RB reads blocked" if rb_reason == "reads_blocked" else ""
     bridge_row = _join(
         _seg("●  ", color=_cg()),
         _seg("BRIDGE", bold=True),
-        _seg(f"  D{active} Active", color=_cs()),
+        _seg("  On", color=_cg()),
         multi_seg,
-        _seg(rb_warn_text, color=_cr()) if rb_warn_text else _seg(""),
     )
 
-    # Row 1: SoundSwitch
-    ss_ok = ss.get("connected")
-    ss_row = _join(
-        _seg("  SS  ", color=_cb()),
-        _seg("✓" if ss_ok else "✗", color=_cg() if ss_ok else _cr()),
-    )
-
-    # Rows 2–5: two deck pairs (header + track)
-    mode_map = {"autoloop": "Autoloop", "scripted": "Scripted", "idle": "Idle"}
-    deck_rows = []
-    for deck in ("1", "2"):
-        d = decks.get(deck, {})
-        runtime = status.get("deck_runtime", {}).get(deck, {})
-        is_active = active == deck
-        playing = d.get("playing")
-
-        play_sym = "▶" if playing else "■"
-        play_color = _cg() if playing else _cs()
-        d_color = _co() if is_active else None
-
-        live = runtime.get("live_bpm") or {}
-        bpm_str = f"  {live['bpm']:.1f} BPM" if live.get("bpm") else "  — BPM"
-
-        if is_active:
-            ml = mode_map.get(str(mode), str(mode).title()[:10])
-            ml_color = _cl() if ml == "Autoloop" else (_cp() if ml == "Scripted" else _cs())
-        else:
-            ml = "—"
-            ml_color = _cs()
-
-        name = Path(d.get("filepath") or "").name or "—"
-        if len(name) > 30:
-            name = name[:27] + "…"
-
-        header = _join(
-            _seg(f"{play_sym} ", color=play_color),
-            _seg(f"D{deck}", bold=True, color=d_color),
-            _seg(bpm_str, color=_cs()),
-            _seg(f"   {ml}", color=ml_color),
-        )
-        track = _join(
-            _seg("  └  ", color=_cs()),
-            _seg(name, color=_cs()),
-        )
-        deck_rows.extend([header, track])
-
-    # Row 6: checks
-    pass_c = validation.get("pass_count", 0)
-    warn_c = validation.get("warn_count", 0)
-    fail_c = validation.get("fail_count", 0)
-    issue = validation.get("latest_issue") or ""
-    if len(issue) > 26:
-        issue = issue[:23] + "…"
-    check_color = _cr() if fail_c else (_co() if warn_c else _cs())
-    checks_row = _join(
-        _seg("  Checks  ", color=_cs()),
-        _seg(validation.get("state", "idle").title(), color=check_color),
-        _seg(f"   {pass_c}P {warn_c}W {fail_c}F", color=_cs()),
-        _seg(f"   {issue}", color=_co()) if issue else _seg(""),
-    )
-
-    # Row 7: smart phrasing
-    sd_txt = "On" if smart_drop_on else "Off"
-    sd_col = _cg() if smart_drop_on else _cs()
-    sb_txt = "On" if smart_breakdown_on else "Off"
-    sb_col = _cg() if smart_breakdown_on else _cs()
-    
-    smart_row = _join(
-        _seg("  Smart Phrasing  ", color=_cs()),
-        _seg(f"Drops: {sd_txt}", color=sd_col),
-        _seg("  |  ", color=_cs()),
-        _seg(f"Breakdowns: {sb_txt}", color=sb_col),
+    rb = status.get("rekordbox", {})
+    rb = rb if isinstance(rb, dict) else {}
+    rb_reason = str(rb.get("reason") or "")
+    if rb.get("reads_ok"):
+        rb_text, rb_color = "Reading", _cg()
+    elif rb_reason == "reads_blocked":
+        rb_text, rb_color = "Blocked", _cr()
+    elif rb.get("version") in (None, "", "unknown") and not rb_reason:
+        rb_text, rb_color = "Not detected", _cs()
+    else:
+        rb_text, rb_color = "Waiting", _co()
+    rb_row = _join(
+        _seg("  Rekordbox  ", color=_cs()),
+        _seg(rb_text, color=rb_color),
+        _seg(f"  {rb_reason}", color=_cs()) if rb_reason else _seg(""),
     )
 
     laser_available = bool(laser.get("available"))
     laser_enabled = bool(laser.get("enabled"))
     laser_emergency = bool(laser.get("emergency"))
-    laser_scene = str(laser.get("current_scene") or "—")
-    laser_reason = str(laser.get("last_reason") or "—")
     executor = laser.get("executor") or {}
     midi = executor.get("midi") or {}
-    queue_size = int(midi.get("queue_size", 0) or 0)
-    queue_max = int(midi.get("queue_max", 0) or 0)
-    drop_count = int(midi.get("drop_count", 0) or 0)
     degraded_reason = str(midi.get("degraded_reason") or "")
 
     if not laser_available:
@@ -951,21 +996,12 @@ def compact_status_lines(status: dict, pids: list[str] | None = None) -> list:
         laser_txt = "Off"
         laser_col = _cs()
 
-    if len(laser_scene) > 18:
-        laser_scene = laser_scene[:15] + "..."
-    if len(laser_reason) > 18:
-        laser_reason = laser_reason[:15] + "..."
-
     laser_row = _join(
         _seg("  Lasers  ", color=_cs()),
         _seg(laser_txt, color=laser_col),
-        _seg(f"  scene={laser_scene}", color=_cs()),
-        _seg(f"  reason={laser_reason}", color=_cs()),
-        _seg(f"  midi={queue_size}/{queue_max} drops={drop_count}", color=_cs()),
         _seg(f"  {degraded_reason[:14]}", color=_co()) if degraded_reason else _seg(""),
     )
 
-    # Row 9: LEDs glance (AWR-192) — same shape discipline as the laser row.
     led_fields = led_row_fields(status)
     led_state = led_fields["state"]
     led_degraded = led_fields["degraded_reason"]
@@ -980,26 +1016,12 @@ def compact_status_lines(status: dict, pids: list[str] | None = None) -> list:
         led_col = _cs()
 
     led_segs = [_seg("  LEDs  ", color=_cs()), _seg(led_txt, color=led_col)]
-    if led_state == "on":
-        led_fps = led_fields["fps"]
-        if led_fps is not None:
-            led_segs.append(_seg(f"  {led_fps:.0f}fps", color=_cs()))
-        led_effect = led_fields["effect"]
-        if led_effect:
-            if len(led_effect) > 18:
-                led_effect = led_effect[:15] + "..."
-            led_segs.append(_seg(f"  {led_effect}", color=_cs()))
-        led_palette = led_fields["palette"]
-        if led_palette:
-            if len(led_palette) > 18:
-                led_palette = led_palette[:15] + "..."
-            led_segs.append(_seg(f"  {led_palette}", color=_cs()))
     led_segs.append(
         _seg(f"  {led_degraded[:14]}", color=_co()) if led_degraded else _seg("")
     )
     led_row = _join(*led_segs)
 
-    return [bridge_row, ss_row] + deck_rows + [checks_row, smart_row, laser_row, led_row]
+    return [bridge_row, rb_row, laser_row, led_row]
 
 
 def _phrasing_summary(sp_block: dict | None) -> str:
@@ -1058,54 +1080,39 @@ def led_row_fields(status: dict) -> dict:
     }
 
 
-# (kind, attr, title, selector) — kind: "status_rows" | "sep" | "action" | "info" | "submenu"
-# "submenu" carries a nested tuple of entries in slot 4.
-# AWR-192 layout: status glance → bridge toggle → LIVE block → AUTHORING +
-# CHECKS block → MAINTENANCE block. Pure data; the builder in
-# BridgeMenuBar._build_menu_entry walks it.
+# One small menu on both Macs. Source-only authoring actions are filtered by
+# _menu_visibility(); frozen install/purge is filtered by the same seam.
 MENU_BLUEPRINT: tuple = (
-    ("status_rows", "status_rows", 10, None),
-    ("sep", None, None, None),
     ("action", "toggle_item", "", "toggleBridge:"),  # title set by refresh_
-    ("sep", None, None, None),  # LIVE block
-    ("action", "laser_blackout_item", "Laser Blackout", "laserBlackout:"),
-    ("action", "laser_clear_blackout_item", "Clear Laser Blackout", "laserClearBlackout:"),
-    ("submenu", "smart_phrasing_item", "Smart Phrasing", None, (
-        ("action", "smart_drop_item", "Smart Drops", "toggleSmartDrop:"),
-        ("action", "smart_breakdown_item", "Smart Breakdowns", "toggleSmartBreakdown:"),
+    ("action", "open_log_item", "Open Live Log", "openLiveLog:"),
+    ("submenu", "status_submenu_item", "Status", None, (
+        ("status_rows", "status_rows", 4, None),
     )),
-    ("submenu", "laser_item", "Laser Director", None, (
-        ("action", "laser_toggle_item", "Laser Director", "toggleLaserDirector:"),
-        ("sep", None, None, None),
-        ("info", "laser_scene_item", "", None),
-        ("info", "laser_reason_item", "", None),
-        ("info", "laser_personality_item", "", None),
-        ("info", "laser_midi_item", "", None),
-        ("info", "laser_phrasing_item", "", None),
+    ("submenu", "tools_item", "Tools", None, (
+        ("action", "map_lasers_item", "Laser Pad…", "mapLasers:"),
+        ("action", "led_pad_item", "LED Pad…", "openLedPad:"),
     )),
-    # TEMPORARY (v2 rollout): remove after v2 color identity is the default operator surface.
-    ("action", "led_engine_v2_item", "LED Engine v2", "toggleLedEngineV2:"),
-    ("action", "map_lasers_item", "Laser Pad…", "mapLasers:"),
-    ("action", "led_pad_item", "LED Pad…", "openLedPad:"),
-    ("sep", None, None, None),  # AUTHORING + CHECKS block
-    ("action", "export_item", "Export", "exportFromSS:"),
-    ("info", "export_status_item", "", None),
-    ("action", "record_session_item", "Record Session: Off", "toggleRecordSession:"),
-    ("action", "test_lights_item", "Test the Lights…", "testLights:"),
-    ("action", "validation_item", "Run Health Check", "runValidation:"),
-    ("action", "enable_rb_reads_item", "Enable Rekordbox Reads…", "enableRekordboxReads:"),
-    # Standing ground-truth row: reflects the get-task-allow entitlement on the
-    # installed Rekordbox app (cached background codesign check, never main-thread).
-    ("info", "rb_reads_status_item", "Rekordbox reads: unknown", None),
-    ("sep", None, None, None),  # MAINTENANCE block
-    # AWR-186 M2 SLOT: purge item — function owned by the usbm2 round;
-    # structure only. Frozen-gated at build time (m2_offer); when the gate is
-    # closed the attr stays None, exactly as M2 shipped it. The install offer
-    # is NOT here: per the M2 spec it is primary-positioned (inserted at menu
-    # index 0 + separator, after the blueprint walk) on DMG-guest runs.
+    ("submenu", "laser_safety_item", "Laser Safety", None, (
+        ("action", "laser_blackout_item", "EMERGENCY: Stop All Lasers", "laserBlackout:"),
+        ("action", "laser_clear_blackout_item", "Resume Lasers", "laserClearBlackout:"),
+    )),
+    ("sep", "maintenance_sep", None, None),
+    ("action", "export_item", "SoundSwitch Export…", "exportFromSS:"),
+    ("action", "update_usb_item", "Rebuild USB Bridge…", "updateUsbBridge:"),
     ("action", "purge_item", "Purge RBSS Bridge…", "purgeBridge:"),
-    ("action", "quit_item", "Quit Menubar (bridge keeps running)", "quit:"),
+    ("action", "restart_item", "Restart Menubar", "restartMenubar:"),
 )
+
+
+def _menu_visibility(*, frozen: bool, purge: bool) -> dict[str, bool]:
+    """Exact source/frozen inventory; the builder is the only consumer."""
+    return {
+        "tools_item": not frozen,
+        "export_item": not frozen,
+        "update_usb_item": not frozen,
+        "maintenance_sep": not frozen or purge,
+        "purge_item": frozen and purge,
+    }
 
 
 class BridgeMenuBar(NSObject):
@@ -1130,6 +1137,10 @@ class BridgeMenuBar(NSObject):
         self._detect_generation = 0
         self._pack_auto_pending_enabled = None
         self._pack_auto_retried_enabled = None
+        self._frozen_bridge_proc = None
+        self._frozen_streamdeck_proc = None
+        self._streamdeck_retry_at = 0.0
+        self._adopted_frozen_bridge = False
         # Rekordbox-reads entitlement row cache (same shape as the export detect
         # cache: monotonic timestamp + in-progress guard + daemon-thread refresh).
         self._rb_reads_state = "unknown"
@@ -1145,13 +1156,17 @@ class BridgeMenuBar(NSObject):
         self.purge_item = None
         self._install_in_progress = False
         self._purge_in_progress = False
+        self._install_action_title = "Install on This Mac…"
         offer_install = False
-        m2_offer = {"purge_item": False}
-        if getattr(sys, "frozen", False):
+        frozen = bool(getattr(sys, "frozen", False))
+        purge_offer = False
+        if frozen:
             from rb_ss_bridge_v2.install_controller import (
                 APP_SUPPORT_DIR,
+                INCOMPLETE_MARKER_NAME,
                 MANIFEST_NAME,
                 bundle_root,
+                install_action_title,
                 running_from_read_only_location,
                 should_offer_install,
             )
@@ -1159,23 +1174,24 @@ class BridgeMenuBar(NSObject):
             bundle = bundle_root(sys.executable)
             manifest_exists = (APP_SUPPORT_DIR / MANIFEST_NAME).exists()
             offer_install = bool(should_offer_install(bundle, manifest_exists))
-            # PURGE (AWR-186 Task 4): installed copies only — manifest present
-            # and not running from the DMG/translocation.
-            m2_offer["purge_item"] = bool(
+            self._install_action_title = install_action_title(
+                manifest_exists,
+                (APP_SUPPORT_DIR / INCOMPLETE_MARKER_NAME).exists(),
+            )
+            purge_offer = bool(
                 manifest_exists
                 and bundle is not None
                 and not running_from_read_only_location(bundle)
             )
+        self._install_required = offer_install
 
         self.status_rows = []
+        visibility = _menu_visibility(frozen=frozen, purge=purge_offer)
         for entry in MENU_BLUEPRINT:
-            self._build_menu_entry(self.menu, entry, m2_offer)
-        # Install offer stays the PRIMARY item on DMG-guest runs (M2 spec Task
-        # 2): inserted at the very top, above the status rows — M2's original
-        # mechanism verbatim, not a blueprint slot.
+            self._build_menu_entry(self.menu, entry, visibility)
         if offer_install:
             self.install_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-                "Install on this Mac…", "installOnMac:", ""
+                self._install_action_title, "installOnMac:", ""
             )
             self.install_item.setTarget_(self)
             self.menu.insertItem_atIndex_(self.install_item, 0)
@@ -1197,14 +1213,11 @@ class BridgeMenuBar(NSObject):
         self.menu.addItem_(item)
         return item
 
-    def _build_menu_entry(self, menu, entry, m2_offer):
-        """Materialize one MENU_BLUEPRINT entry into `menu` (AWR-192).
-
-        Reproduces the pre-blueprint per-item mechanics exactly: _add_action
-        for top-level actions, disabled no-action items for info rows,
-        setSubmenu_ for submenus, setattr for every named entry.
-        """
+    def _build_menu_entry(self, menu, entry, visibility):
+        """Materialize one visible MENU_BLUEPRINT entry."""
         kind, attr, title, selector = entry[0], entry[1], entry[2], entry[3]
+        if attr in visibility and not visibility[attr]:
+            return
         if kind == "sep":
             menu.addItem_(NSMenuItem.separatorItem())
         elif kind == "status_rows":
@@ -1222,15 +1235,13 @@ class BridgeMenuBar(NSObject):
             # smart_phrasing_item -> smart_phrasing_menu, laser_item -> laser_menu
             setattr(self, attr.replace("_item", "_menu"), submenu)
             for sub_entry in entry[4]:
-                self._build_menu_entry(submenu, sub_entry, m2_offer)
+                self._build_menu_entry(submenu, sub_entry, visibility)
         elif kind == "info":
             item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(title, None, "")
             item.setEnabled_(False)
             menu.addItem_(item)
             setattr(self, attr, item)
         else:  # "action"
-            if attr in m2_offer and not m2_offer[attr]:
-                return  # M2 gate closed: attr stays None (set before the loop)
             if menu is self.menu:
                 item = self._add_action(title, selector)
             else:
@@ -1257,10 +1268,26 @@ class BridgeMenuBar(NSObject):
                 status = "on"
             elif _running_bridge_pid() is not None:
                 status = "on"
+                self._adopted_frozen_bridge = True
+        if getattr(sys, "frozen", False) and not getattr(self, "_install_required", False):
+            if status == "on":
+                self._ensure_frozen_streamdeck()
+            else:
+                streamdeck_proc = getattr(self, "_frozen_streamdeck_proc", None)
+                if (
+                    (streamdeck_proc is not None and streamdeck_proc.poll() is None)
+                    or _running_streamdeck_pid() is not None
+                    or getattr(self, "_adopted_frozen_bridge", False)
+                ):
+                    self._stop_frozen_streamdeck()
+                self._adopted_frozen_bridge = False
         if status != self._status:
             self._set_icon(status)
             self._status = status
-        for item, title in zip(self.status_rows, compact_status_lines(self._snapshot, pids)):
+        for item, title in zip(
+            self.status_rows,
+            compact_status_lines(self._snapshot, pids, bridge_state=status),
+        ):
             if isinstance(title, str):
                 item.setTitle_(title)
             else:
@@ -1273,91 +1300,33 @@ class BridgeMenuBar(NSObject):
             self.toggle_item.setTitle_("Bridge Initializing  (click to stop)")
         else:
             self.toggle_item.setTitle_("Bridge Off  (click to start)")
+        if getattr(self, "_install_required", False):
+            self.toggle_item.setTitle_("Install or Update This Mac first")
+            self.toggle_item.setEnabled_(False)
+        else:
+            self.toggle_item.setEnabled_(True)
         self._render_export_state()
         self._auto_set_soundswitch_pack()
         self._maybe_detect_export_state()
-        self._maybe_check_rb_reads()
-        smart_drop_on = bool(self._snapshot.get("state_manager", {}).get("smart_drop_enabled"))
-        self.smart_drop_item.setTitle_("Smart Drops: On" if smart_drop_on else "Smart Drops: Off")
-        smart_breakdown_on = bool(self._snapshot.get("state_manager", {}).get("smart_breakdown_enabled"))
-        self.smart_breakdown_item.setTitle_("Smart Breakdowns: On" if smart_breakdown_on else "Smart Breakdowns: Off")
         laser = self._snapshot.get("laser_director", {})
         available = bool(laser.get("available"))
         enabled = bool(laser.get("enabled"))
         emergency = bool(laser.get("emergency"))
         manual_override = bool(laser.get("manual_override"))
-        if available:
-            self.laser_toggle_item.setEnabled_(True)
-            self.laser_toggle_item.setTitle_(f"Laser Director: {'On' if enabled else 'Off'}")
-        else:
-            self.laser_toggle_item.setEnabled_(False)
-            self.laser_toggle_item.setTitle_("Laser Director: not configured")
-
         self.laser_blackout_item.setEnabled_(available and enabled and not emergency)
         self.laser_clear_blackout_item.setEnabled_(available and (emergency or manual_override))
-
-        scene = str(laser.get("current_scene") or "—")
-        reason = str(laser.get("last_reason") or "—")
-        personality = str(laser.get("personality") or "—")
-        executor = laser.get("executor") or {}
-        midi = executor.get("midi") or {}
-        queue_size = int(midi.get("queue_size", 0) or 0)
-        queue_max = int(midi.get("queue_max", 0) or 0)
-        drop_count = int(midi.get("drop_count", 0) or 0)
-        degraded_reason = str(midi.get("degraded_reason") or "")
-        midi_suffix = f" {degraded_reason}" if degraded_reason else ""
-        self.laser_scene_item.setTitle_(f"Current Scene: {scene}")
-        self.laser_reason_item.setTitle_(f"Reason: {reason}")
-        self.laser_personality_item.setTitle_(f"Personality: {personality}")
-        self.laser_midi_item.setTitle_(
-            f"MIDI: {queue_size}/{queue_max} drops={drop_count}{midi_suffix}"
-        )
-        sp_block = (self._snapshot.get("state_manager") or {}).get("smart_phrasing")
-        self.laser_phrasing_item.setTitle_(_phrasing_summary(sp_block))
-        recording = recording_status_from_snapshot(self._snapshot)
-        recording_active = bool(recording.get("active"))
-        if status == "off":
-            self.record_session_item.setEnabled_(False)
-            self.record_session_item.setTitle_("Record Session: Bridge Off")
-        else:
-            self.record_session_item.setEnabled_(True)
-            if recording_active:
-                rec_path = Path(str(recording.get("path") or "")).name or "capture"
-                self.record_session_item.setTitle_(f"Record Session: On ({rec_path})")
-            else:
-                self.record_session_item.setTitle_("Record Session: Off")
-        v2_available = led_engine_v2_available(self._snapshot)
-        self.led_engine_v2_item.setEnabled_(status == "on" and v2_available)
-        self.led_engine_v2_item.setTitle_(
-            "LED Engine v2" if v2_available else "LED Engine v2: not configured"
-        )
-        self.led_engine_v2_item.setState_(1 if led_engine_v2_enabled(self._snapshot) else 0)
         self._adapt_timer(status)
 
     def _render_export_state(self):
-        frozen = bool(getattr(sys, "frozen", False))
-        self.export_item.setEnabled_(
-            export_button_enabled(self._export_in_progress, self._export_up_to_date, frozen))
-        if frozen:
-            # Authoring-only: the guest bundle has no SoundSwitch source project
-            # and can't run the -m export tool, so make that plain, not a dead
-            # lit button that fails on click.
-            self.export_item.setTitle_("Export — on the mixing Mac only")
-            self.export_status_item.setTitle_("Lighting pack ships pre-exported on the stick")
+        if getattr(self, "export_item", None) is None:
             return
-        self.export_item.setTitle_(
-            export_button_text(self._export_in_progress, self._export_up_to_date))
-        self.export_status_item.setTitle_(
-            pack_export_status_line(
-                self._snapshot.get("soundswitch_pack", {}),
-                stale=not self._snapshot or bool(self._snapshot.get("stale")),
-                export_phase=self._export_phase,
-                export_state=self._export_state,
-                export_up_to_date=self._export_up_to_date,
-                export_result=self._export_result,
-                bridge_status=self._status,
-                soundswitch_connected=(self._snapshot.get("soundswitch", {}) or {}).get("connected"),
-            ))
+        self.export_item.setEnabled_(
+            export_button_enabled(self._export_in_progress, self._export_up_to_date, False))
+        self.export_item.setTitle_({
+            "Export": "SoundSwitch Export…",
+            "Exporting…": "SoundSwitch Exporting…",
+            "Exported": "SoundSwitch Exported",
+        }[export_button_text(self._export_in_progress, self._export_up_to_date)])
 
     def _auto_set_soundswitch_pack(self):
         command = pack_auto_command(self._snapshot, bridge_status=self._status)
@@ -1597,6 +1566,7 @@ class BridgeMenuBar(NSObject):
         success_message=None,
         failure_title=None,
         verify_rb_reads=False,
+        combined_log=False,
     ):
         """Spawn a detached child, capturing its stderr to a log; if it exits
         nonzero within early_window seconds, surface the stderr tail in a dialog.
@@ -1618,11 +1588,13 @@ class BridgeMenuBar(NSObject):
         try:
             log_dir = _child_error_log_dir()
             log_dir.mkdir(parents=True, exist_ok=True)
-            err_path = log_dir / f"{label}.err.log"
+            err_path = log_dir / (
+                "streamdeck.log" if combined_log else f"{label}.err.log"
+            )
             # Truncate per spawn ("wb"): _watch_child reads this file's tail to
             # decide whether THIS start crashed. Appending would let a previous
             # crash's traceback trigger a false alert on a later clean start.
-            err_fh = open(err_path, "wb")
+            err_fh = open(err_path, "ab" if combined_log else "wb")
         except OSError:
             err_path, err_fh = None, subprocess.DEVNULL
         saved_title = None
@@ -1637,8 +1609,8 @@ class BridgeMenuBar(NSObject):
             proc = subprocess.Popen(
                 argv,
                 start_new_session=True,
-                stdout=subprocess.DEVNULL,
-                stderr=err_fh,
+                stdout=err_fh if combined_log else subprocess.DEVNULL,
+                stderr=subprocess.STDOUT if combined_log else err_fh,
                 env=_system_env(),
             )
         except Exception as exc:
@@ -1772,12 +1744,12 @@ class BridgeMenuBar(NSObject):
         alert.runModal()
 
     def _show_rb_reads_verdict(self, verify, err_path):
-        """Verified completion dialog for Enable Rekordbox Reads (exit 0 only).
+        """Verified completion dialog for the Rekordbox target patch (exit 0 only).
 
         Native NSAlert, not an osascript notification — TCC can silently hide
         notifications on a foreign Mac. The verdict was computed on the watcher
         thread; here we only render it and refresh the standing status row.
-        Never silent, never a success claim the entitlement check didn't back."""
+        Never silent, and never describes the target check as live-read proof."""
         verdict = verify.get("verdict")
         detail = verify.get("detail") or ""
         # Reuse the row updater (already main-thread here) so the standing
@@ -1786,14 +1758,16 @@ class BridgeMenuBar(NSObject):
             verdict if verdict in ("enabled", "not_enabled") else "unknown"
         )
         if verdict == "enabled":
-            title = "Rekordbox reads enabled"
+            title = "Rekordbox target patch installed"
             body = (
-                f"Re-signing verified on {detail}.\n\n"
-                "Start the bridge to confirm reads flow — if this Mac still "
-                'blocks them, the menu will show the "RB reads blocked" warning.'
+                f"The target patch was verified on {detail}.\n\n"
+                "This does not authorize the bridge caller or prove live reads. "
+                "The current USB package cannot read Rekordbox on a stock "
+                "foreign Mac (AWR-222). On the maintainer Mac, only the running "
+                'bridge log can confirm a live attach; watch for "RB reads blocked".'
             )
         elif verdict == "not_enabled":
-            title = "Rekordbox reads did not take effect"
+            title = "Rekordbox target patch did not take effect"
             body = (
                 "The helper finished, but the re-signing did not take effect — "
                 f"Rekordbox still lacks the get-task-allow entitlement on {detail}."
@@ -1801,7 +1775,7 @@ class BridgeMenuBar(NSObject):
             if err_path:
                 body += f"\n\nFull log: {err_path}"
         else:
-            title = "Rekordbox reads: could not verify"
+            title = "Rekordbox target patch: could not verify"
             body = (
                 "The helper finished, but the result could not be verified: "
                 f"{detail or 'unknown reason'}."
@@ -1844,7 +1818,10 @@ class BridgeMenuBar(NSObject):
         """Stop the owned bridge child by handle (never pkill/pattern — the
         flock is the real single-instance guard). True if one was stopped."""
         proc = getattr(self, "_frozen_bridge_proc", None)
-        if proc is None or proc.poll() is not None:
+        if proc is None:
+            return False
+        if proc.poll() is not None:
+            self._frozen_bridge_proc = None
             return False
         proc.terminate()
         try:
@@ -1854,6 +1831,63 @@ class BridgeMenuBar(NSObject):
         self._frozen_bridge_proc = None
         return True
 
+    def _ensure_frozen_streamdeck(self) -> None:
+        """Keep one packaged Stream Deck helper beside a running frozen bridge."""
+        proc = getattr(self, "_frozen_streamdeck_proc", None)
+        if proc is not None and proc.poll() is None:
+            return
+        self._frozen_streamdeck_proc = None
+        if _running_streamdeck_pid() is not None:
+            return
+        now = time.monotonic()
+        if now < getattr(self, "_streamdeck_retry_at", 0.0):
+            return
+        self._streamdeck_retry_at = now + 3.0
+        try:
+            self._frozen_streamdeck_proc = self._spawn_watched(
+                [sys.executable, "--run-streamdeck"],
+                label="frozen_streamdeck_start",
+                combined_log=True,
+            )
+        except Exception as exc:
+            self.showChildFailure_(
+                _format_child_failure("frozen_streamdeck_start", 1, str(exc))
+            )
+
+    def _stop_frozen_streamdeck(self) -> bool:
+        """Stop the owned or safely adopted helper before stopping the bridge."""
+        proc = getattr(self, "_frozen_streamdeck_proc", None)
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                try:
+                    proc.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    pass
+            self._frozen_streamdeck_proc = None
+            return True
+        self._frozen_streamdeck_proc = None
+
+        pid = _running_streamdeck_pid()
+        if pid is None:
+            return False
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            return False
+        deadline = time.monotonic() + 5.0
+        while _running_streamdeck_pid() == pid and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if _running_streamdeck_pid() == pid:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
+        return True
+
     def _toggle_bridge_frozen(self) -> None:
         # Frozen bundle only: the menubar owns the bridge as its OWN child
         # process (a re-exec of this binary with --run-bridge). No pkill / no
@@ -1861,8 +1895,12 @@ class BridgeMenuBar(NSObject):
         # source-run regexes, and the exclusive flock is the real
         # single-instance guard. M1 is launch-on-click with no auto-restart;
         # M2 finalizes the frozen lifecycle (see the runbook).
-        if self._stop_frozen_bridge_child():
+        owned = getattr(self, "_frozen_bridge_proc", None)
+        if owned is not None and owned.poll() is None:
+            self._stop_frozen_streamdeck()
+            self._stop_frozen_bridge_child()
             return
+        self._stop_frozen_bridge_child()  # discard a completed owned handle
         # No owned child, but a bridge from a PREVIOUS menubar may still hold the
         # lock (pgrep can't see a frozen one). Re-adopt and STOP it by its lockfile
         # pid — validated to be a live bridge, so we never SIGTERM a recycled pid —
@@ -1871,6 +1909,7 @@ class BridgeMenuBar(NSObject):
         # flock; the next refresh reflects it, and one bridge is never left running.
         adopted = _running_bridge_pid()
         if adopted is not None:
+            self._stop_frozen_streamdeck()
             try:
                 os.kill(adopted, signal.SIGTERM)
             except OSError:
@@ -1883,9 +1922,15 @@ class BridgeMenuBar(NSObject):
         self._frozen_bridge_proc = self._spawn_watched(
             [sys.executable, "--run-bridge"], label="frozen_bridge_start",
         )
+        if self._frozen_bridge_proc is not None:
+            self._ensure_frozen_streamdeck()
+            if not open_live_log():
+                self.showLiveLogFailure_(None)
 
     def toggleBridge_(self, _sender):
         if getattr(sys, "frozen", False):
+            if getattr(self, "_install_required", False):
+                return
             self._toggle_bridge_frozen()
             self.refresh_(None)
             return
@@ -1911,23 +1956,70 @@ class BridgeMenuBar(NSObject):
             )
         self.refresh_(None)
 
+    def openLiveLog_(self, _sender):
+        if not open_live_log():
+            self.showLiveLogFailure_(None)
+
+    def showLiveLogFailure_(self, _sender):
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_("The live log couldn't open")
+        alert.setInformativeText_(
+            "Allow RBSS Bridge to control Terminal in System Settings → "
+            "Privacy & Security → Automation, then choose Open Live Log again. "
+            "The bridge keeps running."
+        )
+        alert.addButtonWithTitle_("OK")
+        alert.runModal()
+
+    def _bridge_fully_off(self) -> bool:
+        proc = getattr(self, "_frozen_bridge_proc", None)
+        streamdeck_proc = getattr(self, "_frozen_streamdeck_proc", None)
+        return (
+            bridge_status() == "off"
+            and _running_bridge_pid() is None
+            and _running_streamdeck_pid() is None
+            and (proc is None or proc.poll() is not None)
+            and (streamdeck_proc is None or streamdeck_proc.poll() is not None)
+        )
+
+    def _require_bridge_off(self, operation: str) -> bool:
+        if self._bridge_fully_off():
+            return True
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_("Stop the bridge first")
+        alert.setInformativeText_(
+            f"The bridge must be fully off before {operation}. Stop it from this "
+            "menu, wait until it says Bridge Off, then try again."
+        )
+        alert.addButtonWithTitle_("OK")
+        alert.runModal()
+        return False
+
     def installOnMac_(self, _sender):
         if self._install_in_progress:
             return
+        if not self._require_bridge_off("installing or updating this Mac"):
+            return
+        action_title = getattr(self, "_install_action_title", "Install on This Mac…")
+        verb = action_title.split()[0]
         alert = NSAlert.alloc().init()
-        alert.setMessageText_("Install RBSS Bridge on this Mac?")
+        alert.setMessageText_(f"{verb} RBSS Bridge on this Mac?")
         alert.setInformativeText_(
             "Copies the app to ~/Applications and installs the lighting payload "
             "(pre-analyzed tracks, configs, Govee key) into Application Support. "
             "The bridge never starts by itself — you still start it from this menu."
         )
-        alert.addButtonWithTitle_("Install")
+        alert.addButtonWithTitle_(verb)
         alert.addButtonWithTitle_("Cancel")
         if alert.runModal() != NSAlertFirstButtonReturn:
             return
         self._install_in_progress = True
         self.install_item.setEnabled_(False)
-        self.install_item.setTitle_("Installing…")
+        self.install_item.setTitle_({
+            "Install": "Installing…",
+            "Update": "Updating…",
+            "Retry": "Retrying…",
+        }.get(verb, "Working…"))
         threading.Thread(target=self._run_install, daemon=True).start()
 
     def _run_install(self):
@@ -1955,7 +2047,18 @@ class BridgeMenuBar(NSObject):
     def finishInstall_(self, payload):
         self._install_in_progress = False
         if not payload.get("ok"):
-            self.install_item.setTitle_("Install on this Mac…")
+            from rb_ss_bridge_v2.install_controller import (
+                APP_SUPPORT_DIR,
+                INCOMPLETE_MARKER_NAME,
+                MANIFEST_NAME,
+                install_action_title,
+            )
+
+            self._install_action_title = install_action_title(
+                (APP_SUPPORT_DIR / MANIFEST_NAME).exists(),
+                (APP_SUPPORT_DIR / INCOMPLETE_MARKER_NAME).exists(),
+            )
+            self.install_item.setTitle_(self._install_action_title)
             self.install_item.setEnabled_(True)
             alert = NSAlert.alloc().init()
             alert.setMessageText_("Install didn't finish")
@@ -1967,9 +2070,10 @@ class BridgeMenuBar(NSObject):
             alert.addButtonWithTitle_("OK")
             alert.runModal()
             return
-        # Relaunch the installed copy (menubar only — never starts the bridge),
-        # offer to eject the DMG, then quit this DMG-run copy.
-        subprocess.Popen(["open", payload["app_dest"]])
+        # Offer to eject, then quit this DMG-run copy. The installed menu opens
+        # one second later, after this process releases the menubar singleton
+        # lock; opening it here can merely activate this DMG copy and strand the
+        # user with no installed menubar after termination.
         from rb_ss_bridge_v2.install_controller import bundle_root
 
         bundle = bundle_root(sys.executable)
@@ -1995,10 +2099,18 @@ class BridgeMenuBar(NSObject):
                 ["/bin/sh", "-c", f'sleep 1; hdiutil detach "{mount}" -quiet'],
                 start_new_session=True,
             )
+        subprocess.Popen(
+            installed_relaunch_argv(payload["app_dest"]),
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
         NSApplication.sharedApplication().terminate_(self)
 
     def purgeBridge_(self, _sender):
         if self._purge_in_progress:
+            return
+        if not self._require_bridge_off("purging this Mac"):
             return
         alert = NSAlert.alloc().init()
         alert.setMessageText_("Purge RBSS Bridge from this Mac?")
@@ -2017,10 +2129,49 @@ class BridgeMenuBar(NSObject):
         self._purge_in_progress = True
         self.purge_item.setEnabled_(False)
         self.purge_item.setTitle_("Purging…")
-        # Stop the owned bridge child FIRST, by handle + flock (M1 rule:
-        # never pkill/pattern), so nothing writes while files disappear.
-        self._stop_frozen_bridge_child()
         threading.Thread(target=self._run_purge, daemon=True).start()
+
+    def updateUsbBridge_(self, _sender):
+        if not self._require_bridge_off("rebuilding the USB bridge"):
+            return
+        mounts = pioneer_usb_mounts()
+        if len(mounts) != 1:
+            alert = NSAlert.alloc().init()
+            if not mounts:
+                alert.setMessageText_("No Rekordbox USB found")
+                alert.setInformativeText_(
+                    "Connect one USB containing a PIONEER folder, then try again."
+                )
+            else:
+                alert.setMessageText_("More than one Rekordbox USB found")
+                alert.setInformativeText_(
+                    "Leave only the USB you want to rebuild connected: "
+                    + ", ".join(path.name for path in mounts)
+                )
+            alert.addButtonWithTitle_("OK")
+            alert.runModal()
+            return
+        mount = mounts[0]
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_(f"Rebuild RBSS Bridge on {mount.name}?")
+        alert.setInformativeText_(
+            "This creates a fresh DMG and updates the show payload and phrase "
+            "memory on that USB."
+        )
+        alert.addButtonWithTitle_("Rebuild")
+        alert.addButtonWithTitle_("Cancel")
+        if alert.runModal() != NSAlertFirstButtonReturn:
+            return
+        self._spawn_watched(
+            ["bash", str(REPO_ROOT / "packaging" / "make_stick.sh"), str(mount)],
+            label="update_usb_bridge",
+            busy_item_attr="update_usb_item",
+            busy_title="Rebuilding USB Bridge…",
+            success_message=(
+                f"USB Bridge, show payload, and phrase memory rebuilt on {mount.name}."
+            ),
+            failure_title="USB Bridge rebuild failed",
+        )
 
     def _run_purge(self):
         from rb_ss_bridge_v2.install_controller import bundle_root, perform_purge
@@ -2062,7 +2213,7 @@ class BridgeMenuBar(NSObject):
             alert.setMessageText_("Purged")
             alert.setInformativeText_(
                 f"Removed {payload.get('removed', 0)} item(s). The app itself now "
-                f"moves to the Trash and the menubar quits. "
+                f"moves to the Trash and this removed app closes. "
                 f"{payload.get('remains_note', '')}"
             )
         alert.addButtonWithTitle_("OK")
@@ -2113,10 +2264,9 @@ class BridgeMenuBar(NSObject):
         _notify(f"Test the Lights: replaying {Path(path).name} — watch the rig.")
 
     def enableRekordboxReads_(self, _sender):
-        # Re-sign Rekordbox (with your consent + admin password) so the bridge can
-        # read its playback state — the get-task-allow patch. Dispatched to the
-        # launcher so the menubar thread never blocks on the admin prompt/codesign;
-        # all UI is macOS dialogs owned by that process.
+        # Re-sign the Rekordbox target with get-task-allow. This is necessary on
+        # the maintainer's custom-SIP Mac but does not authorize a stock foreign
+        # Mac caller (AWR-222). The launcher keeps admin UI off the menubar thread.
         if getattr(sys, "frozen", False):
             argv = [sys.executable, "--patch-rekordbox"]
         else:
@@ -2125,8 +2275,8 @@ class BridgeMenuBar(NSObject):
             argv,
             label="patch_rekordbox",
             busy_item_attr="enable_rb_reads_item",
-            busy_title="Enabling Rekordbox reads…",
-            failure_title="Enable Rekordbox Reads failed",
+            busy_title="Applying Rekordbox target patch…",
+            failure_title="Rekordbox target patch failed",
             # Exit 0 alone doesn't prove the re-sign took: the watcher re-checks
             # the entitlement and the completion dialog reports that verdict.
             verify_rb_reads=True,
@@ -2171,18 +2321,23 @@ class BridgeMenuBar(NSObject):
         append_command({"cmd": "laser_clear_blackout"})
         self.refresh_(None)
 
-    def quit_(self, _sender):
-        alert = NSAlert.alloc().init()
-        alert.setMessageText_("Quit the menubar?")
-        alert.setInformativeText_(
-            "The bridge keeps running if it is already on. To get the menubar "
-            "back, open \"RBSS Bridge\" again from Applications, the USB stick, "
-            "or the DMG."
+    def restartMenubar_(self, _sender):
+        argv = restart_menubar_argv()
+        if not argv:
+            alert = NSAlert.alloc().init()
+            alert.setMessageText_("Menubar restart unavailable")
+            alert.setInformativeText_("The running app bundle could not be located.")
+            alert.addButtonWithTitle_("OK")
+            alert.runModal()
+            return
+        subprocess.Popen(
+            argv,
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=_system_env(),
         )
-        alert.addButtonWithTitle_("Quit")
-        alert.addButtonWithTitle_("Cancel")
-        if alert.runModal() == NSAlertFirstButtonReturn:
-            NSApplication.sharedApplication().terminate_(self)
+        NSApplication.sharedApplication().terminate_(self)
 
 
 def main() -> None:

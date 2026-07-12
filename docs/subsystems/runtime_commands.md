@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 0eec665
-last_verified_date: 2026-07-10
-validation_scope: software-only; Stream Deck palette control runtime command rail plus AWR-121 gesture v2 interactions software-tested; AWR-192 menubar layout software-tested
+last_verified_commit: HEAD-2026-07-12-usb-worktree
+last_verified_date: 2026-07-12
+validation_scope: software-only; runtime command rail and slim source/frozen menubar inventory tested; frozen app and hardware behavior unvalidated
 ---
 
 # Runtime Commands Subsystem
@@ -105,74 +105,52 @@ SoundSwitch pack-player boundary (T7c/T7e):
 - The menubar bridge toggle launches the canonical repo watcher at
   `scripts/ss_bridge_watcher.sh`. Menubar UI state is only a control surface; it
   does not prove watcher or bridge process health.
-- Menubar menu layout (AWR-192; software-tested, hardware-unvalidated): the menu
-  is declared as pure data (`MENU_BLUEPRINT` in `scripts/bridge_menubar.py`) and
-  built by one walker. Order: **10** disabled status glance rows (bridge, SS,
-  two deck pairs, checks, smart phrasing, lasers, and a new **LEDs** row) → sep
-  → bridge toggle → sep → LIVE block (**Laser Blackout** and **Clear Laser
-  Blackout** at top level — promoted out of the Laser Director submenu so the
-  mid-show panic control is one click, retitled from "Emergency
-  Blackout"/"Clear Blackout" with the same selectors and the same
-  enabled-gating expressions; then Smart Phrasing ▸, Laser Director ▸ — now
-  toggle + info rows only, LED Engine v2, Laser Pad…, LED Pad…) → sep →
-  AUTHORING + CHECKS block (Export, export status line, Record Session, Test
-  the Lights…, Run Health Check) → sep → MAINTENANCE block (the AWR-186 M2
-  purge slot, then Quit — retitled "Quit Menu" → "Quit Menubar (bridge keeps
-  running)"). Quit now shows a native confirm first: the bridge (if running)
-  keeps running, and the dialog explains how to reopen the menubar from
-  Applications, the USB stick, or the DMG.   Child-spawning menubar actions
-  (frozen **Enable Rekordbox Reads…** via `_spawn_watched`) now disable their
-  menu item with a busy title while the helper runs, then always finish with
-  visible feedback — a success notification on exit 0, a native failure alert
-  (including empty stderr) on nonzero exit, or silent restore when a child is
-  killed by a signal (negative return code, e.g. logout teardown). For **Enable
-  Rekordbox Reads…** specifically, exit 0 is no longer reported as success on
-  its own: the watcher thread re-checks ground truth (`find_rekordbox()` +
-  `has_get_task_allow()` from `rekordbox_patch.py`, imported the same
-  `rb_ss_bridge_v2` package way the launcher uses so it works frozen and from
-  source) and the completion is a native NSAlert (not an osascript
-  notification, which TCC can hide on a foreign Mac): "Rekordbox reads
-  enabled" with the verified app path, "did not take effect" when the
-  entitlement is still absent, or "could not verify" (app not found /
-  codesign failed) with the reason — never silent, never an unverified
-  success. The menu also carries a standing disabled status row near the
-  action: "Rekordbox reads: enabled ✓ / not enabled / unknown", refreshed by a
-  cached ~30 s daemon-thread codesign check (same pattern as the export
-  freshness detect; menu open renders the cache instantly, and the row is
-  re-verified from the watcher thread the moment the patch child finishes).
-  Honest boundary: both the dialog and the row verify the get-task-allow
-  entitlement statically; live reads are still proven only by the running
-  bridge (the "RB reads blocked" warning on the BRIDGE glance row). A cancelled
-  Rekordbox-patch run currently surfaces the nonzero-exit failure alert with
-  the "If you cancelled the prompts, you can ignore this." line — the patch
-  helper exits 1 with empty stderr, so the silent-restore branch only engages
-  if a child ever emits recognizable cancel text on stderr. **Test the Lights…** still uses a
-  direct `Popen` replay path and was not changed. Status: implemented /
-  software-tested / frozen-app behavior operator-unvalidated. The M2 install offer is NOT in the maintenance block: per the M2
-  spec it stays the PRIMARY item on DMG-guest runs — inserted at the very top
-  of the menu (index 0 + separator) after the blueprint walk, M2's original
-  mechanism verbatim. The LEDs glance row reads the `led_look_director` status
-  block via the pure `led_row_fields()` helper: On/Off/— state, achieved fps
-  (only while realtime is active), active effect, current palette, and the
-  adapter `degraded_reason` as an orange suffix; every field fails soft to
-  "—"/blank on missing or malformed status. No commands were added, removed, or
-  reworded by the regroup — a test pins the selector inventory to the
-  pre-refactor 14 plus the 2 M2 selectors, each exactly once.
-- Frozen-bundle-only menu items (AWR-186 M2; both sit behind the same
-  `getattr(sys, "frozen", False)` gate, so a source-run menubar is
-  byte-identical and never imports `install_controller.py`): **"Install on this
-  Mac…"** appears only when running from a DMG/translocated location with no
-  install manifest (NSAlert confirm → app copy to `~/Applications` + payload to
-  App Support + interim-compatible manifest → relaunch + eject offer; never
-  starts the bridge); **"Purge RBSS Bridge…"** appears only on installed copies
-  (manifest present, not DMG-run) — explicit Purge confirm, stops the owned
-  bridge child by handle first, removes manifest paths (allowlist, `..`
-  rejected) then the whole App Support dir then `~/Library/Logs/rb_ss_bridge`,
-  then Trashes its own bundle and quits. Neither sends runtime commands.
-  AWR-192 moved only WHERE purge sits (now in the MAINTENANCE block between
-  the last separator and Quit); the install offer keeps M2's primary top-of-
-  menu position on DMG-guest runs. Titles, selectors, gating, and confirmation
-  flows are M2's, verbatim.
+- The current menubar is intentionally small. `MENU_BLUEPRINT` is pure data and
+  one walker builds it. Both editions have the Bridge On/Off control, **Open
+  Live Log**, a **Status** submenu with exactly four disabled rows (Bridge,
+  Rekordbox, Lasers, LEDs), and a **Laser Safety** submenu containing
+  **EMERGENCY: Stop All Lasers** and **Resume Lasers**. The safety actions keep
+  their existing `laser_blackout` / `laser_clear_blackout` command behavior.
+- The source/main-Mac edition additionally has exactly four operator tools:
+  **Laser Pad…**, **LED Pad…**, **SoundSwitch Export…**, and **Rebuild USB
+  Bridge…**. The first two live under **Tools**. The frozen/foreign-Mac edition
+  hides all four. SoundSwitch status, deck rows, check status, smart-phrasing
+  status/menu, Laser Director menu, Record Session, Test the Lights, normal
+  Health Check, and the Rekordbox target-patch action/status are absent from
+  both editions. The detailed facts remain available in the live log and
+  status JSON; removing menu items does not remove their runtime commands.
+- **Restart Menubar** replaces Quit everywhere. It launches a fresh menubar
+  after a short delay and closes only the old menubar process; it does not stop
+  or restart the bridge. There is no ordinary Quit item. Child start failures
+  are captured under the normal bridge log directory and surfaced through a
+  native alert instead of failing silently.
+- A DMG/translocated frozen copy inserts one primary native action at the top:
+  **Install on This Mac…**, **Update This Mac…**, or **Retry Installation…**,
+  selected from the complete/incomplete install records. A DMG-run copy cannot
+  start the bridge; it says to install or update first. A complete installed
+  frozen copy offers **Purge RBSS Bridge…**. Install, update, retry, purge, and
+  source **Rebuild USB Bridge…** all refuse while any owned or adopted bridge
+  process is still running. Install/update copies the app and managed payload
+  to `~/Applications` and Application Support, then opens the installed menu;
+  it never starts the bridge automatically. Purge is confirm-gated and removes
+  only its recorded/allowlisted installed files plus the bridge's App Support
+  and log roots before closing the removed app.
+- **Open Live Log** uses frozen self-dispatch (`--run-log-viewer`) in a packaged
+  app, so it does not require host Python. Frozen bridge start opens the same
+  viewer automatically; the viewer has a stable Terminal marker and duplicate
+  guard. This path is software-tested but the built, windowed PyInstaller app
+  and Terminal interaction remain operator-unvalidated.
+- A frozen installed menubar owns the packaged Stream Deck helper alongside the
+  bridge. Starting the bridge starts or adopts exactly one helper through
+  `/tmp/streamdeck_midi.lock`; stopping an owned or safely adopted bridge stops
+  the helper first. **Restart Menubar** intentionally leaves both running, and
+  the replacement menubar re-adopts them from their validated lock-file PIDs.
+  A crashed helper is retried no faster than once every three seconds. Frozen
+  bindings resolve as explicit `RBSS_STREAMDECK_BINDINGS` first, then
+  `~/Library/Application Support/RBSS Bridge/streamdeck_midi_bindings.json`;
+  source mode keeps the existing canonical-pack sibling sidecar. Helper output
+  is appended to `~/Library/Logs/rb_ss_bridge/streamdeck.log`. These lifecycle
+  paths are software-tested; physical Stream Deck behavior is unvalidated.
 
 Authoritative code:
 - `runtime_status.py`

@@ -259,10 +259,12 @@ class SoundSwitchDmxWorker:
         except Exception as exc:
             self._last_error = str(exc)
             self._error_count += 1
+            self._ser = None
+            self._disconnected_at = time.monotonic()
+            self._last_reconnect_attempt = self._disconnected_at
             bridge_log.health(
                 "dmx", "failed to open port %s: %s", self._port, exc, lvl=logging.ERROR,
             )
-            return
 
         try:
             with bridge_log.thread_guard("SoundSwitchDmxWorker"):

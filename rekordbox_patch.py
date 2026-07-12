@@ -1,15 +1,15 @@
-"""Detect and (with explicit consent) patch Rekordbox so the bridge can read it.
+"""Detect and (with explicit consent) patch the Rekordbox target.
 
 The bridge reads Rekordbox's live state via ``task_for_pid`` (see ``rb_memory.py``),
-which macOS only permits when the TARGET — rekordbox — carries the
-``com.apple.security.get-task-allow`` entitlement. Stock Rekordbox from
-Pioneer/AlphaTheta is Developer-ID signed + notarized and does NOT carry it, so
-on an un-patched Mac the bridge launches but reads nothing.
+which requires authorization on both sides of the attach. This helper changes
+only the TARGET — Rekordbox — by adding ``com.apple.security.get-task-allow``.
+It does not authorize the bridge caller and therefore does not prove or enable
+live reads on a stock foreign Mac (AWR-222).
 
 This module re-signs Rekordbox **ad-hoc** with ``get-task-allow`` added
 (preserving its existing entitlements), replicating the signature already present
-and proven working on the maintainer's primary Mac (ad-hoc + get-task-allow +
-disable-library-validation).
+and used on the maintainer's primary Mac, whose custom SIP configuration has
+Debugging Restrictions disabled. That local behavior is not portability proof.
 
 THIS MODIFIES A THIRD-PARTY APP, so it is deliberately conservative:
   * **opt-in** — never runs without explicit operator consent (CLI ``--apply`` /
@@ -55,6 +55,9 @@ REKORDBOX_BUNDLE_ID = "com.pioneerdj.rekordboxdj"
 # ad-hoc signature on the maintainer's primary Mac. Merged OVER the app's existing
 # entitlements (everything else preserved), so Rekordbox keeps its own capabilities.
 GET_TASK_ALLOW = "com.apple.security.get-task-allow"
+BACKUP_ROOT = (
+    Path.home() / "Library" / "Application Support" / "RBSS Rekordbox Backups"
+)
 ADDED_ENTITLEMENTS: dict[str, bool] = {
     GET_TASK_ALLOW: True,
     "com.apple.security.cs.disable-library-validation": True,
@@ -94,6 +97,27 @@ def sanitized_system_env(mapping) -> dict:
     return env
 
 
+class EntitlementsReadError(RuntimeError):
+    """The target's entitlements could not be read safely."""
+
+
+def _parse_entitlements_checked(data: bytes) -> tuple[dict, bool]:
+    """Return (entitlements, structurally_valid_output)."""
+    if not data:
+        return {}, True
+    start = data.find(b"<?xml")
+    if start == -1:
+        start = data.find(b"<plist")
+    end = data.rfind(b"</plist>")
+    if start == -1 or end == -1:
+        return {}, False
+    try:
+        obj = plistlib.loads(data[start:end + len(b"</plist>")])
+    except Exception:
+        return {}, False
+    return (obj, True) if isinstance(obj, dict) else ({}, False)
+
+
 def parse_entitlements_output(data: bytes) -> dict:
     """Extract the entitlements dict from ``codesign -d --entitlements`` output.
 
@@ -102,19 +126,8 @@ def parse_entitlements_output(data: bytes) -> dict:
     anything unparseable — fail-open to "no entitlements known" is safe because
     the caller then treats the app as needing a patch and re-verifies after.
     """
-    if not data:
-        return {}
-    start = data.find(b"<?xml")
-    if start == -1:
-        start = data.find(b"<plist")
-    end = data.rfind(b"</plist>")
-    if start == -1 or end == -1:
-        return {}
-    try:
-        obj = plistlib.loads(data[start:end + len(b"</plist>")])
-    except Exception:
-        return {}
-    return obj if isinstance(obj, dict) else {}
+    parsed, valid = _parse_entitlements_checked(data)
+    return parsed if valid else {}
 
 
 def build_patched_entitlements(current: dict) -> dict:
@@ -182,23 +195,40 @@ def read_entitlements(app: Path) -> dict:
             ["codesign", "-d", "--entitlements", ":-", "--xml", str(app)],
             capture_output=True, timeout=30, env=sanitized_system_env(os.environ),
         )
-    except (OSError, subprocess.SubprocessError):
-        return {}
-    return parse_entitlements_output(proc.stdout or b"")
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise EntitlementsReadError(f"codesign could not run: {exc}") from exc
+    if proc.returncode != 0:
+        raw_detail = proc.stderr or b""
+        detail = (
+            raw_detail.decode("utf-8", errors="replace")
+            if isinstance(raw_detail, bytes)
+            else str(raw_detail)
+        ).strip()
+        raise EntitlementsReadError(detail or f"codesign exited {proc.returncode}")
+    parsed, valid = _parse_entitlements_checked(proc.stdout or b"")
+    if not valid:
+        raise EntitlementsReadError("codesign returned malformed entitlement data")
+    return parsed
 
 
 def has_get_task_allow(app: Path) -> bool:
     return read_entitlements(app).get(GET_TASK_ALLOW) is True
 
 
-def is_rekordbox_running() -> bool:
+def is_rekordbox_running() -> bool | None:
+    """True/False when pgrep knows, None when it cannot be trusted."""
     try:
-        return subprocess.run(
+        result = subprocess.run(
             ["pgrep", "-x", "rekordbox"], capture_output=True, timeout=10,
             env=sanitized_system_env(os.environ),
-        ).returncode == 0
+        )
     except (OSError, subprocess.SubprocessError):
-        return False  # can't tell -> treat as not running; apply_patch re-guards
+        return None
+    if result.returncode == 0:
+        return True
+    if result.returncode == 1:
+        return False
+    return None
 
 
 # ── The patch ────────────────────────────────────────────────────────────────
@@ -242,26 +272,29 @@ def _dir_size(path: Path) -> int:
     return total
 
 
-def _snapshot_app(app: Path) -> Path | None:
+def _snapshot_app(app: Path, backup_root: Path = BACKUP_ROOT) -> Path | None:
     """Copy the bundle to a user temp backup after a free-disk guard. Returns the
     backup path, or None if there is not enough disk or the copy failed — the
     caller then REFUSES (never re-sign without a restore path)."""
     try:
         app_size = _dir_size(app)
-        free = shutil.disk_usage(app.parent).free
+        backup_root.mkdir(parents=True, exist_ok=True)
+        free = shutil.disk_usage(backup_root).free
     except OSError:
         return None
     if not enough_disk_for_backup(app_size, free):
         return None
+    backup_dir = None
     try:
-        backup_dir = Path(tempfile.mkdtemp(prefix="rbss_rekordbox_backup_"))
+        backup_dir = Path(tempfile.mkdtemp(prefix="backup_", dir=backup_root))
         backup = backup_dir / app.name
         # ditto preserves the bundle's signature/metadata exactly (the point of
         # the backup); as the user, no admin prompt.
         subprocess.run(["ditto", str(app), str(backup)], check=True, timeout=1200,
                        capture_output=True)
     except (OSError, subprocess.SubprocessError):
-        shutil.rmtree(backup_dir, ignore_errors=True)
+        if backup_dir is not None:
+            shutil.rmtree(backup_dir, ignore_errors=True)
         return None
     return backup
 
@@ -332,11 +365,23 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
     if bundle_id(app) != REKORDBOX_BUNDLE_ID:
         return PatchResult(False, "refused",
                            f"{app} is not Rekordbox (bundle id != {REKORDBOX_BUNDLE_ID}); refusing to sign.")
-    if is_rekordbox_running():
+    running = is_rekordbox_running()
+    if running is None:
+        return PatchResult(False, "refused",
+                           "Could not tell whether Rekordbox is running; refusing to re-sign it.")
+    if running:
         return PatchResult(False, "refused",
                            "Rekordbox is running — quit it first (re-sign only takes effect on relaunch).")
 
-    current = read_entitlements(app)
+    try:
+        current = read_entitlements(app)
+    except EntitlementsReadError as exc:
+        return PatchResult(
+            False,
+            "refused",
+            f"Could not safely read Rekordbox's existing entitlements ({exc}); "
+            "refusing to re-sign so none are stripped.",
+        )
     if not needs_patch(current):
         return PatchResult(True, "already_patched",
                            "Rekordbox already carries get-task-allow — nothing to do.")
@@ -398,14 +443,22 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
         if verify.returncode != 0:
             return _fail_restored(app, backup, runner,
                                   "the re-sign did not verify: " + verify.stderr.strip() + ".", argv)
-        if not has_get_task_allow(app):
+        try:
+            target_patched = has_get_task_allow(app)
+        except EntitlementsReadError as exc:
+            return _fail_restored(
+                app, backup, runner,
+                f"the re-sign could not be verified safely ({exc}).", argv,
+            )
+        if not target_patched:
             return _fail_restored(app, backup, runner,
                                   "the re-sign succeeded but get-task-allow is still absent — no change took effect.",
                                   argv)
-        _cleanup_backup(backup)
         return PatchResult(True, "patched",
-                           "Rekordbox patched. RELAUNCH Rekordbox and confirm it opens; then start the "
-                           "bridge and it will read it.", command=argv)
+                           "Rekordbox target patched. RELAUNCH Rekordbox and confirm it opens. "
+                           "This does not prove that the bridge is authorized for live reads. "
+                           f"The original app is kept at {backup.parent}; purging RBSS Bridge does not remove it.",
+                           command=argv)
     finally:
         lock_fh.close()  # releases the flock
 
@@ -425,11 +478,11 @@ def _gui_notify(message: str) -> None:
 
 def _gui_confirm(message: str) -> bool:
     try:
-        p = _osascript(f'display dialog {json.dumps(message)} buttons {{"Cancel", "Enable Reads"}} '
+        p = _osascript(f'display dialog {json.dumps(message)} buttons {{"Cancel", "Apply Patch"}} '
                        f'default button "Cancel" with title "RBSS Bridge"')
     except subprocess.SubprocessError:
         return False
-    return p.returncode == 0 and "Enable Reads" in (p.stdout or "")
+    return p.returncode == 0 and "Apply Patch" in (p.stdout or "")
 
 
 def run_interactive_gui() -> int:
@@ -439,17 +492,32 @@ def run_interactive_gui() -> int:
     if app is None:
         _gui_notify("Rekordbox not found in /Applications — install it first.")
         return 2
-    if has_get_task_allow(app):
-        _gui_notify("Rekordbox reads are already enabled on this Mac.")
+    try:
+        already_patched = has_get_task_allow(app)
+    except EntitlementsReadError as exc:
+        _gui_notify(
+            "Could not safely read Rekordbox's current entitlements, so it was "
+            f"not modified: {exc}"
+        )
+        return 1
+    if already_patched:
+        _gui_notify(
+            "The Rekordbox target patch is already present. This does not prove "
+            "that the bridge is authorized for live reads on this Mac."
+        )
         return 0
-    if is_rekordbox_running():
-        _gui_notify("Quit Rekordbox first, then choose Enable Rekordbox Reads again.")
+    running = is_rekordbox_running()
+    if running is None:
+        _gui_notify("Could not tell whether Rekordbox is running, so it was not modified.")
+        return 1
+    if running:
+        _gui_notify("Quit Rekordbox first, then choose Apply Rekordbox Target Patch again.")
         return 1
     if not _gui_confirm(
-        "Enable the bridge to read Rekordbox on this Mac?\n\n"
-        "This re-signs Rekordbox so the bridge can read its playback state. A "
-        "Rekordbox update will undo it — just run this again. You'll be asked for "
-        "your admin password."
+        "Apply the Rekordbox target patch?\n\n"
+        "This re-signs Rekordbox with get-task-allow. It is used on the maintainer "
+        "Mac, but it does not authorize live reads on a stock foreign Mac. A "
+        "Rekordbox update will undo it. You'll be asked for your admin password."
     ):
         return 1
     result = apply_patch(app, dry_run=False, runner=run_via_admin)
@@ -460,7 +528,7 @@ def run_interactive_gui() -> int:
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="Enable the bridge to read Rekordbox memory on this Mac.")
+    ap = argparse.ArgumentParser(description="Inspect or apply the Rekordbox target patch.")
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--check", action="store_true", help="report whether Rekordbox is already patched (default)")
     g.add_argument("--dry-run", action="store_true", help="show the exact command without modifying anything")
@@ -485,13 +553,19 @@ def main(argv: list[str] | None = None) -> int:
     elif args.dry_run:
         result = apply_patch(app, dry_run=True)
     else:  # --check (default)
-        patched = has_get_task_allow(app)
+        try:
+            patched = has_get_task_allow(app)
+        except EntitlementsReadError as exc:
+            print(f"Could not safely read Rekordbox entitlements: {exc}")
+            return 4
         running = is_rekordbox_running()
         print(f"Rekordbox: {app}")
-        print(f"  get-task-allow present: {'YES (bridge can read it)' if patched else 'NO (bridge will read nothing)'}")
-        print(f"  running now: {'yes' if running else 'no'}")
+        print(f"  target get-task-allow present: {'YES (live reads still unverified)' if patched else 'NO'}")
+        print(f"  running now: {'yes' if running else 'no' if running is False else 'unknown (could not verify)'}")
+        if running is None:
+            return 4
         if not patched:
-            print("  -> run with --apply to enable reads (quit Rekordbox first).")
+            print("  -> run with --apply to add the target patch (quit Rekordbox first).")
         return 0 if patched else 3
 
     print(result.message)

@@ -1,24 +1,28 @@
 ---
 doc_status: current
 truth_level: spec
-last_verified_commit: a31bde9
-last_verified_date: 2026-07-10
+last_verified_commit: aa7d441
+last_verified_date: 2026-07-12
 validation_scope: >
-  Design spec for a macOS-only self-contained USB bridge launcher (PyInstaller bundle +
-  menubar with temporary/permanent install). Software-design only — no code, no build, no
-  hardware run. Windows is deferred (out of scope). The memory-read authorization *mechanism*
-  is the separate reader spec's job; this design only *invokes* that step. All code claims
-  re-verified against HEAD 9ead100 at the 2026-07-09 paper-phase pickup and labelled
-  confirmed/assumed/unknown; the five days of drift since 8abccdf are folded in (AWR-149
-  env-flag removal, AWR-125 log-surface move, AWR-151 launchd ProcessType, AWR-146
-  frame-engine child process, watcher manual-mode unification).
-work_status: paper phase active (operator re-raise 2026-07-09) — implementation stays parked behind the executive gate (F2/F4 landed + operator live-tuning, phantom-load leak fix, Codex routing decision); this doc, the track-identity design, and the M1 Codex spec are the paper deliverables
+  Current macOS USB launcher design reconciled to the landed M1/M2 code and two
+  failed physical foreign-Mac attempts. AWR-222 confirms that the current ad-hoc
+  target-only Rekordbox patch does not provide stock-macOS caller authorization.
+  Packaging components remain software-tested; foreign-Mac live reads are unsupported.
+work_status: implementation partial; packaging/install UX landed, but foreign-Mac live Rekordbox input is blocked by AWR-222 pending a replacement-reader design decision
 relates_to: cross_platform_portability_plan.md, track_identity_move_invariance_design.md
 ---
 
 # USB Bridge Launcher — design spec (macOS-only)
 
 > **Implementation reality (2026-07-10/11 foreign-Mac fix round, branch `claude/rbss-bridge-install-debug-59yrn6`; see AWR-186).** The first run of the built M2 bundle on a second Mac (macOS 12, Apple Silicon) failed across the board — this design assumed a source/dev host and never captured that the FROZEN bundle must: (a) build against a **python.org universal2, LOW-deployment-target** interpreter — Homebrew's macOS-15 `libpython` hard-binds `_mkfifoat` and crashes on macOS < 15 (`make_stick.sh` now enforces this; **spectral analysis stays REQUIRED**, fail-loud, never dropped); (b) guard the menubar singleton with an **flock**, not argv-`pgrep` (a frozen argv never matches); (c) **surface silent child-process crashes** (bridge start, Rekordbox patch) instead of failing invisibly; (d) point the Laser/LED pads at the **App Support live config**, never the code-signed bundle (a pad Save into the bundle invalidates the signature/TCC grants); (e) resolve `ICON_DIR` and pad assets from the bundle, not `/Users/bbui`. Eight defects fixed, one (unresponsive-menu) refuted. ALL frozen/macOS behavior remains operator-unvalidated.
+
+> **Current blocker (AWR-222, 2026-07-12).** Those packaging fixes do not solve
+> live input. The shipped bridge is ad-hoc signed without caller debugger
+> authorization, while `rekordbox_patch.py` changes only the Rekordbox target.
+> Both physical foreign-Mac attempts failed. The maintainer Mac has custom SIP
+> with Debugging Restrictions disabled, so local success cannot validate a stock
+> guest Mac. Do not rebuild-and-retry or weaken a guest's SIP; the next design
+> step is a measured non-memory input path.
 
 Approved design (2026-07-04). This is the Mac-only "USB-ify" concretization of the portability
 work; the Windows/cross-platform half is deferred. Reviewed + revised 2026-07-04, twice and
@@ -207,10 +211,11 @@ untouched for the current dev workflow.
 
 **3.3 Setup controller** — first-run detection (is there a permanent install / LaunchAgent on this
 Mac?) and the two install modes (§4). Purpose: manage where the app lives + its lifecycle. Depends on:
-filesystem, `launchd`, and the reader-spec's memory-grant step (invoked, not designed here).
-*Interim note (2026-07-09, AWR-122): stick-side `packaging/stick/install.command` + `purge.command`
-exist as the labeled Saturday interim (app + pre-warm only, manifest-scoped purge — runbook §Stick
-helpers); they are conveniences, not this controller. The M2 operator directive + decomposition:
+filesystem and `launchd`; a working foreign-Mac reader is now the separate AWR-222 blocker.
+*Historical note (2026-07-09, AWR-122): the stick-side shell install/purge
+helpers were an interim path. They are retired and no longer ship; their old
+file-level manifests remain readable by native Purge. The native controller is
+the only install/update/purge surface. The M2 operator directive + decomposition:
 `docs/plans/active/usb_launcher_m2_operator_directive_2026_07_09.md`.*
 
 *IMPLEMENTED NOW (2026-07-10, AWR-186 M2, software-tested / hardware-unvalidated): the permanent
@@ -324,7 +329,13 @@ in the installed location, not the stick.
   direction, name source, consumer, foreign-Mac strategy). Default strategy: bridge-created
   virtual ports (Stream Deck precedent); "enable IAC in Audio MIDI Setup" is runbook fallback
   only, never a code path (it would fork the launch path Mac-only — portability ruling).
-- **Memory grant** — reader-spec dependency; Setup invokes it. `unknown` until that spec lands whether the grant works cleanly on a foreign Mac (the top open risk, carried from `cross_platform_portability_plan.md` §7).
+- **Memory grant — confirmed blocker (AWR-222).** The current setup re-signs only
+  Rekordbox ad-hoc with `get-task-allow`; the frozen bridge is also ad-hoc and
+  carries no caller debugger entitlement. That is not a supported stock-macOS
+  `task_for_pid` path, and both physical attempts failed. AWR-221 verifies only
+  the target patch and improves feedback. Replacement-reader candidates must be
+  measured before this design selects one; invasive SIP changes are not a guest
+  setup strategy.
 - **Dependency manifest gap (re-swept 2026-07-09, `confirmed`):** `pyproject.toml` declares
   only `mido, pyobjc-framework-Cocoa, pyrekordbox, python-osc, zeroconf` (+ optional
   spectral/analysis extras: `librosa`, `soundfile`, `numpy`, `scipy`) and has ZERO diff since

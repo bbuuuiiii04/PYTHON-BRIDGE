@@ -47,11 +47,19 @@ _MIN_BEATGRID_INTERVAL_MS = 150.0
 _MAX_BEATGRID_INTERVAL_MS = 3000.0
 _USB_TWIN_BPM_TOLERANCE = 0.05
 _USB_TWIN_DURATION_TOLERANCE_S = 2.0
+_VOLUMES_ROOT = Path("/Volumes")
 _RB_SHARE_ROOT = Path("~/Library/Pioneer/rekordbox/share").expanduser()
 _SS_PRELOAD_CACHE: dict[str, str] = {}
 _SS_SCRIPTED_ID_CACHE: set[str] = set()
 _SIDECAR_SCHEMA_VERSION = 1
-_SIDECAR_CACHE: Optional[tuple[Path, tuple[dict, ...]]] = None
+_INSTALLED_SIDECAR_INDEX = (
+    Path.home() / "Library" / "Application Support" / "RBSS Bridge"
+    / "lighting_sidecar" / "index.json"
+)
+_SIDECAR_CACHE: dict[
+    Path,
+    tuple[tuple[int, int], tuple[Path, tuple[dict, ...]]],
+] = {}
 _SIDECAR_ONLY_LOGGED = False
 
 
@@ -510,25 +518,56 @@ def _load_sidecar_index(index_path: Path) -> Optional[tuple[Path, tuple[dict, ..
     return root, tuple(validated)
 
 
-def _discover_sidecar_index(mounts: Sequence[Path]) -> Optional[tuple[Path, tuple[dict, ...]]]:
+def _discover_sidecar_indexes(
+    mounts: Sequence[Path],
+) -> tuple[tuple[Path, tuple[dict, ...]], ...]:
     global _SIDECAR_CACHE
-    if _SIDECAR_CACHE is not None:
-        return _SIDECAR_CACHE
-    for mount in sorted(mounts, key=lambda path: str(path).casefold()):
-        index_path = mount / "RBSS BRIDGE USB" / "lighting_sidecar" / "index.json"
-        loaded = _load_sidecar_index(index_path)
+    candidates = {
+        *(mount / "RBSS BRIDGE USB" / "lighting_sidecar" / "index.json"
+          for mount in mounts),
+        _INSTALLED_SIDECAR_INDEX,
+    }
+    cache = _SIDECAR_CACHE if isinstance(_SIDECAR_CACHE, dict) else {}
+    refreshed: dict[
+        Path,
+        tuple[tuple[int, int], tuple[Path, tuple[dict, ...]]],
+    ] = {}
+    loaded_indexes: list[tuple[Path, tuple[dict, ...]]] = []
+    for index_path in sorted(candidates, key=lambda path: (str(path).casefold(), str(path))):
+        try:
+            stat = index_path.stat()
+        except OSError:
+            continue
+        signature = (stat.st_mtime_ns, stat.st_size)
+        cached = cache.get(index_path)
+        loaded = cached[1] if cached is not None and cached[0] == signature else None
+        if loaded is None:
+            loaded = _load_sidecar_index(index_path)
         if loaded is not None:
-            _SIDECAR_CACHE = loaded
-            return loaded
-    return None
+            refreshed[index_path] = (signature, loaded)
+            loaded_indexes.append(loaded)
+    _SIDECAR_CACHE = refreshed
+    return tuple(loaded_indexes)
 
 
-def _mounted_sidecar_index() -> Optional[tuple[Path, tuple[dict, ...]]]:
+def _discover_sidecar_index(mounts: Sequence[Path]) -> Optional[tuple[Path, tuple[dict, ...]]]:
+    """Compatibility helper returning the first deterministic valid root."""
+    indexes = _discover_sidecar_indexes(mounts)
+    return indexes[0] if indexes else None
+
+
+def _mounted_sidecar_indexes() -> tuple[tuple[Path, tuple[dict, ...]], ...]:
     try:
         mounts = tuple(Path("/Volumes").iterdir())
     except OSError:
-        return None
-    return _discover_sidecar_index(mounts)
+        mounts = ()
+    return _discover_sidecar_indexes(mounts)
+
+
+def _mounted_sidecar_index() -> Optional[tuple[Path, tuple[dict, ...]]]:
+    """Compatibility helper returning the first deterministic valid root."""
+    indexes = _mounted_sidecar_indexes()
+    return indexes[0] if indexes else None
 
 
 def _sidecar_prefilter(records: Sequence[dict], usb_beatgrid: dict) -> list[dict]:
@@ -559,6 +598,10 @@ def _select_sidecar_record(
     ]
     if len(exact) == 1:
         return exact[0], "sidecar-mirror-match", []
+    if len(exact) > 1:
+        return None, "sidecar-mirror-ambiguous", [
+            str(record["content_id"]) for record in exact
+        ]
     if device_track is None:
         return None, "usb-crossanalysis-unconfirmed", []
 
@@ -580,15 +623,37 @@ def _select_sidecar_record(
 
 
 def _device_audio_filepath(anlz_path: str) -> str:
-    match = re.match(r"^(/Volumes/[^/]+)/PIONEER/", anlz_path.replace("\\", "/"), re.I)
-    if not match:
+    normalized_anlz = anlz_path.replace("\\", "/")
+    if re.match(r"^[A-Za-z]:", normalized_anlz):
         return ""
+    try:
+        volumes_root = _VOLUMES_ROOT.resolve()
+        anlz_relative = Path(normalized_anlz).resolve(strict=False).relative_to(volumes_root)
+    except (OSError, ValueError):
+        return ""
+    if len(anlz_relative.parts) < 2 or anlz_relative.parts[1].casefold() != "pioneer":
+        return ""
+    mount = volumes_root / anlz_relative.parts[0]
     try:
         from pyrekordbox.anlz import AnlzFile  # type: ignore
         relative = str(AnlzFile.parse_file(anlz_path).get("path") or "")
     except (ImportError, OSError, KeyError, TypeError, ValueError):
         return ""
-    return str(Path(match.group(1)) / relative.lstrip("/")) if relative else ""
+    relative = relative.replace("\\", "/")
+    if (
+        not relative
+        or relative.startswith("/")
+        or re.match(r"^[A-Za-z]:", relative)
+        or ".." in relative.split("/")
+    ):
+        return ""
+    candidate = mount.joinpath(*(part for part in relative.split("/") if part not in ("", ".")))
+    try:
+        resolved = candidate.resolve(strict=False)
+        resolved.relative_to(mount.resolve())
+    except (OSError, ValueError):
+        return ""
+    return str(resolved)
 
 
 def _payload_for_sidecar(
@@ -639,31 +704,67 @@ def _payload_for_sidecar(
 
 
 def _sidecar_lookup(anlz_path: str, usb_beatgrid: dict) -> Optional[dict]:
-    sidecar = _mounted_sidecar_index()
-    if sidecar is None:
+    sidecars = tuple(sorted(
+        _mounted_sidecar_indexes(),
+        key=lambda item: (str(item[0]).casefold(), str(item[0])),
+    ))
+    if not sidecars:
         return None
-    root, records = sidecar
     try:
         device_track = _read_device_pdb_track(anlz_path)
     except (OSError, UnicodeError, ValueError, struct.error, IndexError):
         device_track = None
-    record, reason, candidate_ids = _select_sidecar_record(
-        records, usb_beatgrid, device_track,
-    )
-    if record is None:
-        suffix = f"  candidate_ids={','.join(candidate_ids)}" if candidate_ids else ""
-        log.info("[FRES] %s  source=sidecar%s", reason, suffix)
-        return None
-    payload = _payload_for_sidecar(root, record, anlz_path)
-    if payload is None:
+    matches: list[tuple[Path, dict, dict, str]] = []
+    misses: list[str] = []
+    for root, records in sidecars:
+        record, reason, candidate_ids = _select_sidecar_record(
+            records, usb_beatgrid, device_track,
+        )
+        if candidate_ids:
+            log.info(
+                "[FRES] %s  source=sidecar root=%s candidate_ids=%s",
+                reason, root, ",".join(candidate_ids),
+            )
+            return None
+        if record is None:
+            misses.append(reason)
+            continue
+        payload = _payload_for_sidecar(root, record, anlz_path)
+        if payload is None:
+            misses.append("sidecar-payload-invalid")
+            continue
+        matches.append((root, record, payload, reason))
+    if len(matches) > 1:
+        first_record = matches[0][1]
+        if all(record == first_record for _root, record, _payload, _reason in matches[1:]):
+            installed_root = _INSTALLED_SIDECAR_INDEX.parent
+            selected = next(
+                (match for match in matches if match[0] == installed_root),
+                matches[0],
+            )
+            log.info(
+                "[FRES] sidecar-root-deduplicated  source=sidecar roots=%s selected=%s",
+                ",".join(str(root) for root, _record, _payload, _reason in matches),
+                selected[0],
+            )
+            matches = [selected]
+        else:
+            log.info(
+                "[FRES] sidecar-root-ambiguous  source=sidecar roots=%s candidate_ids=%s",
+                ",".join(str(root) for root, _record, _payload, _reason in matches),
+                ",".join(str(record["content_id"]) for _root, record, _payload, _reason in matches),
+            )
+            return None
+    if not matches:
         log.info(
-            "[FRES] sidecar-payload-invalid  content_id=%s  source=sidecar",
-            record["content_id"],
+            "[FRES] sidecar-no-match  source=sidecar roots=%d reasons=%s",
+            len(sidecars), ",".join(misses),
         )
         return None
+    root, record, payload, reason = matches[0]
     log.info(
-        "[FRES] sidecar-match  content_id=%s  method=%s  source=sidecar",
-        record["content_id"], reason,
+        "[FRES] sidecar-match  content_id=%s  method=%s  source=sidecar root=%s",
+        record["content_id"], reason, root,
     )
     return payload
 

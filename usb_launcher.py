@@ -9,6 +9,7 @@ bundle needs no host Python and no shell:
   --run-streamdeck     → the Stream Deck MIDI controller
   --run-laser-pad      → the Laser Pad web server (port 8765)
   --run-led-pad        → the LED Pad web server (port 8766)
+  --run-log-viewer     → the bundled read-only live log viewer
   --check-deps         → import every required runtime dep; nonzero if any missing
                          (build-time fail-closed guard against a stale bundle)
   --run-frame-engine --fd N → the headless Govee frame-engine child (the frozen
@@ -139,8 +140,8 @@ def _pad_config_path(filename: str, env_key: str) -> str:
     """The config file a pad must edit: an explicit operator env override, else the
     installed App Support copy the bridge actually runs on, else the repo default.
 
-    A frozen guest keeps its live config in App Support (install.command /
-    install_controller land it there), NOT in the bundle — which ships only
+    A frozen guest keeps its live config in App Support (the native installer
+    lands it there), NOT in the bundle — which ships only
     *.example.json. Without this the pad would open a blank/default config AND a
     Save would write into sys._MEIPASS inside the code-signed .app, mutating the
     signed bundle (invalidating the signature and its TCC grants). We pass an
@@ -177,6 +178,13 @@ def _run_led_pad() -> int:
 
     config = _pad_config_path("led_look_director.json", "RBSS_LED_CONFIG")
     return int(led_pad_main(["--config", config]) or 0)
+
+
+def _run_log_viewer() -> int:
+    """Run the bundled viewer; frozen guests never need a host Python."""
+    from rb_ss_bridge_v2.bridge_view import main as viewer_main
+
+    return int(viewer_main() or 0)
 
 
 # Every runtime dependency the bundle MUST carry (import names). Kept as declared:
@@ -265,6 +273,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_laser_pad()
     if mode == "--run-led-pad":
         return _run_led_pad()
+    if mode == "--run-log-viewer":
+        return _run_log_viewer()
     if mode == "--check-deps":
         return _run_check_deps()
     if mode == "--replay-session":

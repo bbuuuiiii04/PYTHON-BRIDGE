@@ -107,12 +107,14 @@ app = BUNDLE(
         "LSUIElement": True,   # menubar app, no Dock icon
         "NSLocalNetworkUsageDescription":
             "RBSS Bridge finds SoundSwitch and Govee lights on your local network.",
+        "NSAppleEventsUsageDescription":
+            "RBSS Bridge opens Terminal to show its read-only live log.",
         "CFBundleName": "RBSS Bridge",
         "CFBundleDisplayName": "RBSS Bridge",
-        # The bundled python.org interpreter floors at macOS 11; declare it so an
-        # older-macOS guest gets Finder's clean "requires macOS 11.0 or later"
+        # The locked native dependency set floors at macOS 12.3; declare it so an
+        # older-macOS guest gets Finder's clean "requires macOS 12.3 or later"
         # instead of a raw dyld crash. Real version (not 0.0.0) so upgrades compare.
-        "LSMinimumSystemVersion": "11.0",
+        "LSMinimumSystemVersion": "12.3",
         "CFBundleShortVersionString": "0.0.1",
         "CFBundleVersion": "0.0.1",
     },

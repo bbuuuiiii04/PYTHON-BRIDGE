@@ -18,6 +18,13 @@ from rb_ss_bridge_v2 import launch_profile  # noqa: E402
 
 
 class DispatchTests(unittest.TestCase):
+    def test_bundle_declares_terminal_apple_events_reason(self) -> None:
+        spec = (
+            Path(__file__).resolve().parents[1] / "packaging" / "rbss_launcher.spec"
+        ).read_text(encoding="utf-8")
+        self.assertIn('"NSAppleEventsUsageDescription"', spec)
+        self.assertIn("opens Terminal to show its read-only live log", spec)
+
     def test_no_args_runs_menubar(self) -> None:
         with mock.patch.object(usb_launcher, "_run_menubar", return_value=0) as menubar:
             self.assertEqual(usb_launcher.main([]), 0)
@@ -42,6 +49,16 @@ class DispatchTests(unittest.TestCase):
         with mock.patch.object(usb_launcher, "_run_led_pad", return_value=0) as run:
             self.assertEqual(usb_launcher.main(["--run-led-pad"]), 0)
         run.assert_called_once_with()
+
+    def test_run_log_viewer_dispatch(self) -> None:
+        with mock.patch.object(usb_launcher, "_run_log_viewer", return_value=0) as run:
+            self.assertEqual(usb_launcher.main(["--run-log-viewer"]), 0)
+        run.assert_called_once_with()
+
+    def test_run_log_viewer_calls_bundled_module(self) -> None:
+        with mock.patch("rb_ss_bridge_v2.bridge_view.main", return_value=None) as viewer:
+            self.assertEqual(usb_launcher._run_log_viewer(), 0)
+        viewer.assert_called_once_with()
 
     def test_check_deps_dispatch(self) -> None:
         with mock.patch.object(usb_launcher, "_run_check_deps", return_value=0) as run:

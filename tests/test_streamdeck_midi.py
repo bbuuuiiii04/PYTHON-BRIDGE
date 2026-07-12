@@ -131,6 +131,40 @@ def _v2_feedback() -> dict:
 
 
 class StreamDeckPartialSidecarTests(unittest.TestCase):
+    def test_binding_path_override_then_frozen_then_source(self):
+        with mock.patch.dict("os.environ", {"RBSS_STREAMDECK_BINDINGS": "~/deck.json"}):
+            self.assertEqual(sd.binding_sidecar_path(), Path("~/deck.json").expanduser())
+        with mock.patch.dict("os.environ", {}, clear=True), \
+             mock.patch.object(sd.sys, "frozen", True, create=True):
+            self.assertEqual(sd.binding_sidecar_path(), sd.INSTALLED_BINDING_SIDECAR)
+        with mock.patch.dict("os.environ", {}, clear=True), \
+             mock.patch.object(sd.sys, "frozen", False, create=True):
+            self.assertEqual(sd.binding_sidecar_path(), sd.BINDING_SIDECAR)
+
+    def test_singleton_lock_publishes_pid_without_duplicate_truncation(self):
+        import fcntl
+        import os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            lock_path = Path(tmp) / "streamdeck.lock"
+            with mock.patch.object(sd, "LOCK_PATH", str(lock_path)):
+                self.assertTrue(sd._acquire_singleton_lock())
+                self.assertEqual(lock_path.read_text(encoding="utf-8"), f"{os.getpid()}\n")
+                fcntl.flock(sd._LOCK_FILE, fcntl.LOCK_UN)
+                sd._LOCK_FILE.close()
+                sd._LOCK_FILE = None
+
+                holder = lock_path.open("a+")
+                fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                holder.seek(0)
+                holder.truncate()
+                holder.write("12345\n")
+                holder.flush()
+                self.assertFalse(sd._acquire_singleton_lock())
+                self.assertEqual(lock_path.read_text(encoding="utf-8"), "12345\n")
+                fcntl.flock(holder, fcntl.LOCK_UN)
+                holder.close()
+
     def test_load_sidecar_keeps_partial_rows_partial(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / ".pack.midi_bindings.json"

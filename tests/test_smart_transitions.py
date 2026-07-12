@@ -500,6 +500,36 @@ class SmartRearmFlagTests(unittest.TestCase):
             f2_enabled=True,
         )
 
+    def test_usb_twin_smart_rearm_starts_resolved_worker_with_spectral_disabled(self) -> None:
+        sm = _manager({
+            "RBSS_SMART_REARM_EXPERIMENT": "1",
+            "RBSS_SPECTRAL_ENABLE": "0",
+        })
+        resolver = Mock()
+        sm.attach_resolver(resolver)
+        raw_path = "/Volumes/MINK/PIONEER/USBANLZ/P018/000086A0/ANLZ0000.DAT"
+        local_path = "/sidecar/anlz/39964930/ANLZ0000.DAT"
+        sm._pending_anlz_path[1] = raw_path
+        payload = _filepath_payload()
+        payload["local_anlz_path"] = local_path
+
+        with patch.object(sm, "_start_anlz_worker") as start_worker:
+            sm._on_track_loaded(1, "track", BridgeEvent(Ev.TRACK_LOADED, 1))
+            sm._on_filepath_resolved(1, payload)
+
+        self.assertTrue(sm._smart_rearm_experiment)
+        self.assertFalse(sm._spectral_enable)
+        self.assertFalse(sm._v2_identity_enabled)
+        start_worker.assert_called_once_with(
+            local_path,
+            1,
+            1,
+            audio_filepath="/music/track.wav",
+            spectral_enabled=False,
+            wide_window=True,
+            f2_enabled=True,
+        )
+
     def test_local_load_still_runs_both_early_and_resolved_anlz_workers(self) -> None:
         # AWR-207 R2 regression: a local (UUID) ANLZ path is NOT a device export,
         # so the early TRACK_LOADED-time worker still fires exactly as before, and
