@@ -123,7 +123,6 @@ def _v2_feedback() -> dict:
         ],
         "max_energy": {"note": 71, "state": "armed"},
         "controls": {
-            "lock": {"name": "Lock", "note": 57, "state": "active"},
             "led_mute": {"name": "LED Mute", "note": 58, "state": "inactive"},
             "laser_mute": {"name": "Laser Mute", "note": 59, "state": "active"},
             "laser_solo": {"name": "Laser Solo", "note": 60, "state": "queued"},
@@ -541,13 +540,6 @@ class IdentityV2LayoutTests(unittest.TestCase):
         self.assertEqual(primary[6]["name"], "white_sand")
         self.assertEqual(primary[14]["target_kind"], "shift_layer")
         self.assertEqual(primary[10]["target_kind"], "static_look")
-        # Keys 12-13 are the two live-control pads (lock / max energy). They win
-        # the region over the third/fourth static look — the static guard skips
-        # a slot a control already claimed.
-        self.assertEqual(primary[12]["target_kind"], "lock")
-        self.assertEqual(primary[12]["note"], 57)
-        self.assertEqual(primary[13]["target_kind"], "max_energy_pad")
-        self.assertEqual(primary[13]["note"], 71)
 
         shifted = sd.compose_layout(_v2_feedback(), STATIC_ROWS, key_count=15, shift=True)
         self.assertEqual(shifted[0]["name"], "red")
@@ -572,23 +564,6 @@ class IdentityV2LayoutTests(unittest.TestCase):
             self.assertTrue(img)
         # rainbow is no longer the flat-swatch rendering a plain manual pad gets
         self.assertNotEqual(rainbow, red_swatch)
-
-    def test_main_layout_lock_pad_draws_padlock_by_state(self):
-        # Key 12 lock pad: a filled padlock body (white) when the zone is locked,
-        # an open shackle (no filled body) when it is free. Renders through the
-        # real path either way. Mirrors the palette padlock pixel check.
-        locked_layout = sd.compose_layout(_v2_feedback(), STATIC_ROWS, key_count=15)
-        free_fb = _v2_feedback()
-        free_fb["controls"]["lock"] = dict(free_fb["controls"]["lock"], state="inactive")
-        free_layout = sd.compose_layout(free_fb, STATIC_ROWS, key_count=15)
-        self.assertEqual(locked_layout[12]["target_kind"], "lock")
-        with mock.patch.object(sd.PILHelper, "to_native_format",
-                               side_effect=lambda _deck, image: image):
-            locked_img = sd.render_key(FakeDeck(), 12, False, locked_layout)
-            free_img = sd.render_key(FakeDeck(), 12, False, free_layout)
-        # (24, 44) sits inside the padlock body: white when locked, not white free.
-        self.assertEqual(locked_img.getpixel((24, 44)), (255, 255, 255))
-        self.assertNotEqual(free_img.getpixel((24, 44)), (255, 255, 255))
 
 
 class WatchdogTests(unittest.TestCase):

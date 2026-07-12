@@ -311,10 +311,7 @@ def compose_layout(
     static_rows = list(sidecar)[:4]
     for offset, row in enumerate(static_rows):
         key = 10 + offset
-        # Static looks fill only the region keys (10-13) that a v2 control pad
-        # did not already claim (lock/max energy at 12-13). Legacy v1 and blank
-        # layouts leave 12-13 empty, so they still take all four static looks.
-        if key < key_count and layout[key] is None:
+        if key < key_count:
             layout[key] = dict(row)
     return layout
 
@@ -709,12 +706,6 @@ def render_key(deck, key: int, pressed: bool, sidecar=None, pulse: bool = False,
     elif kind == "rainbow":
         draw.rectangle([0, 0, w, h], fill=_BG)
         _draw_rainbow_arc(draw, w, h, vivid=active)
-    elif kind == "lock":
-        # Zone-freeze pad: filled padlock on blue when locked, open shackle on
-        # dark when free — the same padlock glyph the locked-palette cue uses.
-        locked = active
-        draw.rectangle([0, 0, w, h], fill=(0, 120, 210) if locked else _BG)
-        _draw_padlock(draw, w, h, locked)
     else:  # static looks: the name is the identity — one clean label, no note text
         on = latched or active
         draw.rectangle([0, 0, w, h], fill=(0, 120, 210) if on else (26, 26, 30))
