@@ -12,7 +12,7 @@ permissions:
 jobs:
   derive:
     runs-on: macos-15
-    timeout-minutes: 35
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -68,7 +68,7 @@ jobs:
             nm -arch arm64 -n --defined-only "$binary" > "/tmp/rb-offset-evidence/${version}-nm.txt"
           done
 
-      - name: Trace deck-root code references across versions
+      - name: Trace deck-root references in matching functions
         shell: bash
         run: |
           set -euo pipefail
@@ -78,18 +78,18 @@ jobs:
           import bisect, difflib, re, struct
           from dataclasses import dataclass
           from pathlib import Path
+          from collections import Counter
           from capstone import Cs, CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN
-          from capstone.arm64 import ARM64_INS_ADRP, ARM64_INS_ADD, ARM64_OP_REG, ARM64_OP_IMM, ARM64_OP_MEM
 
           LC_SEGMENT_64=0x19
           IMAGE_BASE=0x100000000
-          KNOWN_14=IMAGE_BASE+0x04E0BFE0
+          KNOWN_ROOT=IMAGE_BASE+0x04E0BFE0
 
           @dataclass
           class Sym:
               addr:int; typ:str; name:str
 
-          def text_section(path:str):
+          def macho_text(path:str):
               data=Path(path).read_bytes()
               magic,_,_,_,ncmds,_,_,_=struct.unpack_from('<IiiIIIII',data,0)
               if magic != 0xFEEDFACF: raise RuntimeError(f'bad Mach-O magic {magic:#x}')
@@ -97,124 +97,147 @@ jobs:
               for _ in range(ncmds):
                   cmd,cmdsize=struct.unpack_from('<II',data,off)
                   if cmd==LC_SEGMENT_64:
-                      _,_,segraw,_,_,_,_,_,_,nsects,_=struct.unpack_from('<II16sQQQQiiII',data,off)
+                      _,_,_,_,_,_,_,_,_,nsects,_=struct.unpack_from('<II16sQQQQiiII',data,off)
                       so=off+72
                       for _ in range(nsects):
-                          sectraw,secseg,addr,size,fileoff,*_=struct.unpack_from('<16s16sQQ8I',data,so)
-                          sect=sectraw.split(b'\0',1)[0].decode(); seg=secseg.split(b'\0',1)[0].decode()
-                          if seg=='__TEXT' and sect=='__text':
-                              return addr,data[fileoff:fileoff+size]
+                          sec,seg,addr,size,fileoff,*_=struct.unpack_from('<16s16sQQ8I',data,so)
+                          sec=sec.split(b'\0',1)[0].decode(); seg=seg.split(b'\0',1)[0].decode()
+                          if seg=='__TEXT' and sec=='__text': return addr,data[fileoff:fileoff+size]
                           so+=80
                   off+=cmdsize
-              raise RuntimeError('no __TEXT,__text')
+              raise RuntimeError('missing __TEXT,__text')
 
-          def symbols(path:str):
+          def parse_nm(path:str):
               out=[]
               for line in Path(path).read_text(errors='replace').splitlines():
                   p=line.split(' ',2)
                   if len(p)!=3: continue
                   try:a=int(p[0],16)
-                  except ValueError:continue
+                  except ValueError: continue
                   out.append(Sym(a,p[1],p[2]))
+              return out
+
+          def sext(v,bits):
+              sign=1<<(bits-1)
+              return (v^sign)-sign
+
+          def adrp_page(word,pc):
+              if word & 0x9F000000 != 0x90000000: return None
+              immlo=(word>>29)&3; immhi=(word>>5)&0x7ffff
+              imm=sext((immhi<<2)|immlo,21)<<12
+              return (pc & ~0xfff)+imm,word&31
+
+          def scan_refs(text_addr: int, code: bytes, start_addr: int|None=None, end_addr: int|None=None, page_filter: int|None=None):
+              lo=max(0,((start_addr or text_addr)-text_addr)//4)
+              hi=min(len(code)//4,((end_addr or (text_addr+len(code)))-text_addr+3)//4)
+              words=memoryview(code).cast('I')
+              refs=[]
+              for idx in range(lo,hi):
+                  pc=text_addr+idx*4; ap=adrp_page(words[idx],pc)
+                  if not ap: continue
+                  page,rd=ap
+                  if page_filter is not None and page!=page_filter: continue
+                  tracked={rd:page}
+                  for j in range(idx+1,min(idx+13,hi)):
+                      w=words[j]; ipc=text_addr+j*4
+                      # ADD/SUB immediate class. Only ADD is useful for address formation.
+                      if w & 0x7F000000 == 0x11000000 and ((w>>30)&1)==0:
+                          rn=(w>>5)&31; dst=w&31
+                          if rn in tracked:
+                              imm12=(w>>10)&0xfff; shift=(w>>22)&1
+                              target=tracked[rn]+(imm12<<(12 if shift else 0))
+                              refs.append((ipc,target,'add'))
+                              tracked[dst]=target
+                      # Load/store unsigned-immediate class; size controls scale.
+                      if w & 0x3B000000 == 0x39000000:
+                          rn=(w>>5)&31
+                          if rn in tracked:
+                              imm12=(w>>10)&0xfff; scale=1<<((w>>30)&3)
+                              refs.append((ipc,tracked[rn]+imm12*scale,'mem_uimm'))
+                      # Load/store unscaled immediate class.
+                      if w & 0x3B200C00 == 0x38000000:
+                          rn=(w>>5)&31
+                          if rn in tracked:
+                              imm9=sext((w>>12)&0x1ff,9)
+                              refs.append((ipc,tracked[rn]+imm9,'mem_unscaled'))
+                      # A new ADRP or obvious register-producing instruction invalidates dst.
+                      nap=adrp_page(w,ipc)
+                      if nap: tracked[nap[1]]=nap[0]
+              # Dedupe, preserving order.
+              seen=set(); out=[]
+              for r in refs:
+                  if r not in seen: seen.add(r); out.append(r)
               return out
 
           class Binary:
               def __init__(self,binpath,nmpath):
-                  self.base,self.code=text_section(binpath)
-                  md=Cs(CS_ARCH_ARM64,CS_MODE_LITTLE_ENDIAN); md.detail=True
-                  self.ins=list(md.disasm(self.code,self.base))
-                  self.byaddr={x.address:i for i,x in enumerate(self.ins)}
-                  self.syms=symbols(nmpath)
+                  self.text,self.code=macho_text(binpath)
+                  self.syms=parse_nm(nmpath)
                   self.funcs=sorted([s for s in self.syms if s.typ in ('t','T')],key=lambda s:s.addr)
                   self.faddrs=[s.addr for s in self.funcs]
-                  self.func_by_name={}
-                  for i,s in enumerate(self.funcs): self.func_by_name.setdefault(s.name,[]).append(i)
-                  self.refs=self._refs()
-                  self.refs_by_addr={}
-                  for r in self.refs:self.refs_by_addr.setdefault(r[0],[]).append(r)
-              def func_index_for(self,addr):
-                  i=bisect.bisect_right(self.faddrs,addr)-1
-                  return i if i>=0 else None
-              def func_range(self,i):
-                  start=self.funcs[i].addr
-                  end=self.funcs[i+1].addr if i+1<len(self.funcs) else self.base+len(self.code)
-                  a=bisect.bisect_left([x.address for x in self.ins],start)
-                  b=bisect.bisect_left([x.address for x in self.ins],end)
-                  return a,b
-              def _refs(self):
-                  refs=[]; tracked={}
-                  for idx,ins in enumerate(self.ins):
-                      tracked={r:v for r,v in tracked.items() if idx-v[1] <= 12}
-                      ops=ins.operands
-                      # Memory access based on a recent ADRP/ADD address base.
-                      for op in ops:
-                          if op.type==ARM64_OP_MEM and op.mem.base in tracked:
-                              target=tracked[op.mem.base][0]+op.mem.disp
-                              refs.append((ins.address,target,'mem',ins.mnemonic,ins.op_str))
-                      new=[]
-                      if ins.id==ARM64_INS_ADD and len(ops)>=3 and ops[0].type==ARM64_OP_REG and ops[1].type==ARM64_OP_REG and ops[2].type==ARM64_OP_IMM and ops[1].reg in tracked:
-                          target=tracked[ops[1].reg][0]+ops[2].imm
-                          refs.append((ins.address,target,'add',ins.mnemonic,ins.op_str))
-                          new.append((ops[0].reg,target))
-                      try:_,writes=ins.regs_access()
-                      except Exception:writes=[]
-                      for r in writes:tracked.pop(r,None)
-                      if ins.id==ARM64_INS_ADRP and len(ops)>=2 and ops[0].type==ARM64_OP_REG and ops[1].type==ARM64_OP_IMM:
-                          tracked[ops[0].reg]=(ops[1].imm,idx)
-                      for r,target in new:tracked[r]=(target,idx)
-                  return refs
-              def norm(self,ins):
-                  s=ins.mnemonic+' '+ins.op_str
-                  s=re.sub(r'#-?0x[0-9a-f]+|#-?\d+','#IMM',s)
-                  return s
-              def function_payload(self,i):
-                  a,b=self.func_range(i)
-                  ins=self.ins[a:b]
-                  local={x.address:j for j,x in enumerate(ins)}
-                  refs=[]
-                  for r in self.refs:
-                      if a < len(self.ins) and self.ins[a].address <= r[0] < (self.ins[b].address if b<len(self.ins) else 1<<64):
-                          refs.append((local.get(r[0]),r))
-                  return ins,refs
+                  self.by_name={}
+                  for i,s in enumerate(self.funcs): self.by_name.setdefault(s.name,[]).append(i)
+              def func_index(self,addr): return bisect.bisect_right(self.faddrs,addr)-1
+              def bounds(self,i):
+                  return self.funcs[i].addr,(self.funcs[i+1].addr if i+1<len(self.funcs) else self.text+len(self.code))
+              def bytes_for(self,i):
+                  a,b=self.bounds(i); return a,self.code[a-self.text:b-self.text]
+              def disasm_norm(self,i):
+                  a,blob=self.bytes_for(i)
+                  md=Cs(CS_ARCH_ARM64,CS_MODE_LITTLE_ENDIAN)
+                  ins=list(md.disasm(blob,a))
+                  seq=[]
+                  for x in ins:
+                      s=x.mnemonic+' '+x.op_str
+                      s=re.sub(r'#-?0x[0-9a-f]+|#-?\d+','#IMM',s)
+                      seq.append(s)
+                  return ins,seq
+              def refs_for(self,i):
+                  a,b=self.bounds(i); return scan_refs(self.text,self.code,a,b)
 
           b14=Binary('/tmp/rb-7.2.14/rekordbox-arm64','/tmp/rb-offset-evidence/7.2.14-nm.txt')
           b16=Binary('/tmp/rb-7.2.16/rekordbox-arm64','/tmp/rb-offset-evidence/7.2.16-nm.txt')
-          known=[r for r in b14.refs if r[1]==KNOWN_14]
-          near=[r for r in b14.refs if abs(r[1]-KNOWN_14)<=0x40]
-          print(f'known_root=0x{KNOWN_14:x} exact_xrefs={len(known)} near_xrefs={len(near)}')
-          source=known or near
+          raw14=scan_refs(b14.text,b14.code,page_filter=KNOWN_ROOT&~0xfff)
+          near=[r for r in raw14 if abs(r[1]-KNOWN_ROOT)<=0x80]
+          exact=[r for r in near if r[1]==KNOWN_ROOT]
+          print(f'known_root=0x{KNOWN_ROOT:x} page_scan_refs={len(raw14)} near={len(near)} exact={len(exact)}')
+          source=exact or near
+          if not source: raise SystemExit('No references found near known 7.2.14 deck root')
+
           candidates=[]
-          for r in source:
-              fi=b14.func_index_for(r[0]); fs=b14.funcs[fi]
-              print(f'\n7.2.14 xref ins=0x{r[0]:x} target=0x{r[1]:x} kind={r[2]} {r[3]} {r[4]}')
+          for ref in source:
+              fi=b14.func_index(ref[0]); fs=b14.funcs[fi]
+              print(f'\n7.2.14 ref ins=0x{ref[0]:x} target=0x{ref[1]:x} rva=0x{ref[1]-IMAGE_BASE:08X} kind={ref[2]}')
               print(f'  function={fs.name} start=0x{fs.addr:x}')
-              same=b16.func_by_name.get(fs.name,[])
+              same=b16.by_name.get(fs.name,[])
               if not same:
-                  print('  7.2.16 same function: MISSING'); continue
-              ins14,refs14=b14.function_payload(fi)
-              li=next((j for j,x in enumerate(ins14) if x.address==r[0]),None)
+                  print('  7.2.16 same symbol missing'); continue
+              ins14,seq14=b14.disasm_norm(fi)
+              local14=next((i for i,x in enumerate(ins14) if x.address==ref[0]),None)
               for fj in same:
-                  ins16,refs16=b16.function_payload(fj)
-                  seq14=[b14.norm(x) for x in ins14]
-                  seq16=[b16.norm(x) for x in ins16]
-                  sm=difflib.SequenceMatcher(None,seq14,seq16,autojunk=False)
+                  ins16,seq16=b16.disasm_norm(fj)
+                  matcher=difflib.SequenceMatcher(None,seq14,seq16,autojunk=False)
                   mapped=[]
-                  for block in sm.get_matching_blocks():
-                      if block.a <= li < block.a+block.size:
-                          mapped.append(block.b+(li-block.a))
-                  print(f'  7.2.16 function start=0x{b16.funcs[fj].addr:x} ins14={len(ins14)} ins16={len(ins16)} ratio={sm.ratio():.4f} mapped={mapped}')
-                  refmap={idx:rr for idx,rr in refs16 if idx is not None}
+                  for block in matcher.get_matching_blocks():
+                      if local14 is not None and block.a<=local14<block.a+block.size:
+                          mapped.append(block.b+(local14-block.a))
+                  refs16=b16.refs_for(fj)
+                  by_ins={}
+                  for rr in refs16: by_ins.setdefault(rr[0],[]).append(rr)
+                  print(f'  7.2.16 function=0x{b16.funcs[fj].addr:x} ratio={matcher.ratio():.4f} mapped={mapped} refs={len(refs16)}')
                   for m in mapped:
-                      for k in range(max(0,m-3),min(len(ins16),m+4)):
-                          rr=refmap.get(k)
-                          if rr:
-                              print(f'    mapped_ref idx={k} ins=0x{rr[0]:x} target=0x{rr[1]:x} rva=0x{rr[1]-IMAGE_BASE:08x} kind={rr[2]} {rr[3]} {rr[4]}')
-                              if 0x04D00000 <= rr[1]-IMAGE_BASE <= 0x04F10000:
-                                  candidates.append(rr[1])
-          from collections import Counter
+                      for k in range(max(0,m-5),min(len(ins16),m+6)):
+                          for rr in by_ins.get(ins16[k].address,[]):
+                              rva=rr[1]-IMAGE_BASE
+                              print(f'    mapped-near idx={k} ins=0x{rr[0]:x} target=0x{rr[1]:x} rva=0x{rva:08X} kind={rr[2]}')
+                              if 0x04D00000<=rva<=0x04F10000: candidates.append(rr[1])
+                  # Also print data refs in the high global region for this function.
+                  for rr in refs16:
+                      rva=rr[1]-IMAGE_BASE
+                      if 0x04D00000<=rva<=0x04F10000:
+                          print(f'    global-ref ins=0x{rr[0]:x} rva=0x{rva:08X} kind={rr[2]}')
           print('\nCANDIDATE_COUNTS')
           for addr,n in Counter(candidates).most_common(): print(f'0x{addr-IMAGE_BASE:08X} count={n}')
-          if not source: raise SystemExit('No static xref found to known 7.2.14 deck root')
           PY
           python3 /tmp/trace-rb-xrefs.py | tee /tmp/rb-offset-evidence/deck-xrefs.txt
 
@@ -235,6 +258,7 @@ jobs:
           } > "$report"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git pull --rebase origin main
           git add "$report"
-          git commit -m 'chore(data): record 7.2.16 deck-root xrefs'
+          git commit -m 'chore(data): record optimized 7.2.16 deck xrefs'
           git push
