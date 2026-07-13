@@ -1,0 +1,104 @@
+name: analyze-rekordbox-merged-globals
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/analyze-rekordbox-merged-globals.yml
+
+permissions:
+  contents: write
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Align preserved merged-global sequences
+        shell: bash
+        run: |
+          set -euo pipefail
+          old=/tmp/full-evidence.txt
+          git show 5bde2cd92d19cd01c9ad35af331463307d83560e:docs/data/rekordbox-7.2.16-offset-evidence.txt > "$old"
+          python3 - <<'PY' > docs/data/rekordbox-7.2.16-merged-alignment.txt
+          from pathlib import Path
+          from difflib import SequenceMatcher
+
+          lines=Path('/tmp/full-evidence.txt').read_text().splitlines()
+          lists={'7.2.14':[],'7.2.16':[]}
+          current=None
+          for line in lines:
+              if line.startswith('=== rekordbox 7.2.14 ==='): current='7.2.14'; continue
+              if line.startswith('=== rekordbox 7.2.16 ==='): current='7.2.16'; continue
+              if line.startswith('=== 7.2.14 symbols'): current=None
+              if current and '__MergedGlobals' in line:
+                  p=line.split()
+                  try: addr=int(p[0],16)
+                  except (ValueError,IndexError): continue
+                  lists[current].append((addr,p[1],p[2]))
+
+          a=lists['7.2.14']; b=lists['7.2.16']
+          known_root=0x104E0BFE0
+          known_symbol=0x104E0BFF8
+          center=next(i for i,x in enumerate(a) if x[0]==known_symbol)
+
+          # Tokenize each interval by gap, symbol type, and numbered suffix class.
+          def toks(rows):
+              out=[]
+              for i in range(len(rows)-1):
+                  gap=rows[i+1][0]-rows[i][0]
+                  name=rows[i][2]
+                  suffix=name.split('.',1)[1] if '.' in name else ''
+                  # Preserve exact numbered suffixes; they are highly discriminative.
+                  out.append((gap,rows[i][1],suffix))
+              return out
+          ta=toks(a); tb=toks(b)
+
+          def score_at(j,radius):
+              la=max(0,center-radius); ra=min(len(ta),center+radius)
+              lb=max(0,j-(center-la)); rb=min(len(tb),j+(ra-center))
+              aa=ta[la:ra]; bb=tb[lb:rb]
+              # Compare exact rich tokens and gap-only tokens separately.
+              rich=SequenceMatcher(None,aa,bb,autojunk=False).ratio()
+              gaps=SequenceMatcher(None,[x[0] for x in aa],[x[0] for x in bb],autojunk=False).ratio()
+              return rich,gaps,len(aa),len(bb)
+
+          candidates=[]
+          for j,row in enumerate(b):
+              rva=row[0]-0x100000000
+              if not (0x04D00000 <= rva <= 0x04ED0000):
+                  continue
+              r100=score_at(j,100); r250=score_at(j,250); r500=score_at(j,500)
+              combined=0.20*r100[1]+0.30*r250[1]+0.50*r500[1]
+              candidates.append((combined,j,row,r100,r250,r500))
+          candidates.sort(reverse=True,key=lambda x:x[0])
+
+          print('# Rekordbox 7.2.16 merged-global sequence alignment')
+          print(f'rows_7_2_14={len(a)} rows_7_2_16={len(b)}')
+          print(f'known_7_2_14_root=0x{known_root-0x100000000:08X}')
+          print(f'known_7_2_14_nearest_symbol_index={center} symbol_rva=0x{known_symbol-0x100000000:08X} root_delta=-0x18')
+          print('\nTOP_CANDIDATES')
+          for rank,(combined,j,row,r100,r250,r500) in enumerate(candidates[:30],1):
+              symbol_rva=row[0]-0x100000000
+              root_rva=symbol_rva-0x18
+              print(f'{rank:02d} index={j} symbol=0x{symbol_rva:08X} root_if_minus_18=0x{root_rva:08X} combined={combined:.6f} gap100={r100[1]:.6f} gap250={r250[1]:.6f} gap500={r500[1]:.6f} rich500={r500[0]:.6f} type={row[1]} name={row[2]}')
+
+          print('\nCURRENT_ORDINAL_GUESS')
+          row=b[center]
+          print(f'index={center} symbol=0x{row[0]-0x100000000:08X} root_if_minus_18=0x{row[0]-0x100000000-0x18:08X}')
+          PY
+
+      - name: Commit alignment report
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git pull --rebase origin main
+          git add docs/data/rekordbox-7.2.16-merged-alignment.txt
+          git commit -m 'chore(data): record 7.2.16 merged-global alignment'
+          git push
