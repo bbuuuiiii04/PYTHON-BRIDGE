@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: spec
-last_verified_commit: d5bfaa4
+last_verified_commit: 9998bcd
 last_verified_date: 2026-07-13
 validation_scope: >
   Current macOS USB launcher design reconciled to the landed M1/M2 code and
@@ -21,8 +21,10 @@ validation_scope: >
   script with in-script backup restore (software-tested; disposable clone
   lab-proven; live /Applications apply remains operator-gated and does not
   claim attach/foreign-Mac reads are fixed). Frozen Info.plist declares
-  NSAppBundlesUsageDescription (implemented/software-tested); App Management
-  grant + osascript escalation remains live-unvalidated. make_stick stamps
+  NSAppBundlesUsageDescription (implemented/software-tested). Frozen Patch
+  Rekordbox confirmation/result dialogs use native AppKit rather than bare
+  `osascript display dialog`; App Management grant + admin osascript escalation
+  remains live-unvalidated. make_stick stamps
   build GENERATION into CFBundleShortVersionString/CFBundleVersion (fallback
   0.0.1 outside make_stick). Packaging components remain software-tested;
   stock foreign-Mac attach remains live-unvalidated / unknown.
@@ -392,7 +394,10 @@ in the installed location, not the stick.
   (implemented/software-tested). Admin-password escalation alone is not enough;
   whether granting App Management to rebuilt RBSS Bridge covers the existing
   `osascript` → authtrampoline path is still **live-unvalidated** — do not claim
-  friend-Mac patch works yet. AWR-222 honesty unchanged.
+  friend-Mac patch works yet. The frozen Patch Rekordbox consent/result modal is
+  native AppKit (not a bare `osascript display dialog`), so it can reach consent
+  before that admin escalation; the physical modal and App Management gate still
+  need live evidence. AWR-222 honesty unchanged.
 - **Dependency manifest gap (re-swept 2026-07-09, `confirmed`):** `pyproject.toml` declares
   only `mido, pyobjc-framework-Cocoa, pyrekordbox, python-osc, zeroconf` (+ optional
   spectral/analysis extras: `librosa`, `soundfile`, `numpy`, `scipy`) and has ZERO diff since

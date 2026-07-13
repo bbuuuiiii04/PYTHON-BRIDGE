@@ -25,10 +25,7 @@ THIS MODIFIES A THIRD-PARTY APP, so it is deliberately conservative:
   * **guarded** — only ever touches a bundle whose id is ``com.pioneerdj.rekordboxdj``;
   * **fail-closed + verified** — deep+strict ``codesign --verify``, then re-reads
     get-task-allow; on signing failure the same admin script restores the
-    pre-sign backup (or keeps it and names the path if restore fails);
-  * **reversible** via the retained pre-sign backup, or by reinstalling/updating
-    Rekordbox (a RB update reverts the patch — expected; re-run this after an
-    update).
+    temporary pre-sign copy (kept only if restore fails or cannot be confirmed).
 
 CLI:
     python3 -m rb_ss_bridge_v2.rekordbox_patch --check
@@ -40,15 +37,18 @@ The menubar / frozen app uses run_interactive_gui() (macOS dialogs), never the C
 from __future__ import annotations
 
 import argparse
+import ctypes
 import fcntl
-import json
 import os
 import plistlib
+import re
+import select
 import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -374,10 +374,10 @@ class PatchResult:
     commands: list[list[str]] | None = None
 
 
-# A "runner" runs one argv and returns (returncode, stderr). When the runner is
-# ``run_via_admin``, apply_patch instead builds one privileged root-bundle script
-# via ``run_shell_via_admin`` so the operator sees a single password prompt.
-# Verify + entitlement re-read are read-only and always run in-process.
+# A "runner" runs one argv and returns (returncode, stderr). The two privileged
+# runners below receive one combined root-bundle script so a failure restores in
+# the same authorization session. Verify + entitlement re-read stay read-only and
+# always run in-process.
 
 def _default_runner(argv: list[str]) -> tuple[int, str]:
     try:
@@ -506,6 +506,163 @@ def run_shell_via_admin(script_text: str, timeout: int = 1800) -> tuple[int, str
             pass
 
 
+_NATIVE_ADMIN_EXIT = "RBSS_NATIVE_RC:"
+_AUTHORIZATION_CANCELED = -60006
+
+
+class _AuthorizationItem(ctypes.Structure):
+    _fields_ = [
+        ("name", ctypes.c_char_p),
+        ("value_length", ctypes.c_uint32),
+        ("value", ctypes.c_void_p),
+        ("flags", ctypes.c_uint32),
+    ]
+
+
+class _AuthorizationRights(ctypes.Structure):
+    _fields_ = [
+        ("count", ctypes.c_uint32),
+        ("items", ctypes.POINTER(_AuthorizationItem)),
+    ]
+
+
+def parse_native_admin_exit(output: str) -> tuple[int, str] | None:
+    """Split the wrapper's final exit marker from native-admin command output."""
+    match = re.search(rf"(?:^|\n){re.escape(_NATIVE_ADMIN_EXIT)}(\d+)\s*\Z", output)
+    if match is None:
+        return None
+    return int(match.group(1)), output[:match.start()].rstrip()
+
+
+def run_shell_via_native_authorization(
+    script_text: str, timeout: int = 1800,
+) -> tuple[int, str]:
+    """Run a root shell script via the calling app's native macOS authorization.
+
+    Unlike an ``osascript`` escalation, this keeps the responsible application as
+    RBSS Bridge, so its App Management grant can update a protected app bundle.
+    The outer wrapper owns the exit marker because the inner sign/restore script
+    deliberately calls ``exit`` on failure.
+    """
+    if sys.platform != "darwin":
+        return 1, "native admin authorization is available only on macOS"
+    payload_path = None
+    wrapper_path = None
+    auth = ctypes.c_void_p()
+    pipe = ctypes.c_void_p()
+    security = None
+    libc = None
+    try:
+        with tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False) as fh:
+            fh.write(script_text)
+            if not script_text.endswith("\n"):
+                fh.write("\n")
+            payload_path = fh.name
+        os.chmod(payload_path, 0o700)
+        with tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False) as fh:
+            fh.write("#!/bin/sh\nexec 2>&1\nPATH=/usr/bin:/bin:/usr/sbin:/sbin\n")
+            fh.write(f"/bin/sh {shlex.quote(payload_path)}\n")
+            fh.write(f'rc=$?; printf "\\n{_NATIVE_ADMIN_EXIT}%s\\n" "$rc"\n')
+            wrapper_path = fh.name
+        os.chmod(wrapper_path, 0o700)
+
+        security = ctypes.CDLL("/System/Library/Frameworks/Security.framework/Security")
+        libc = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+        security.AuthorizationCreate.argtypes = [
+            ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32,
+            ctypes.POINTER(ctypes.c_void_p),
+        ]
+        security.AuthorizationCreate.restype = ctypes.c_int32
+        security.AuthorizationCopyRights.argtypes = [
+            ctypes.c_void_p, ctypes.POINTER(_AuthorizationRights), ctypes.c_void_p,
+            ctypes.c_uint32, ctypes.c_void_p,
+        ]
+        security.AuthorizationCopyRights.restype = ctypes.c_int32
+        security.AuthorizationExecuteWithPrivileges.argtypes = [
+            ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint32,
+            ctypes.POINTER(ctypes.c_char_p), ctypes.POINTER(ctypes.c_void_p),
+        ]
+        security.AuthorizationExecuteWithPrivileges.restype = ctypes.c_int32
+        security.AuthorizationFree.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        libc.fileno.argtypes = [ctypes.c_void_p]
+        libc.fileno.restype = ctypes.c_int
+        libc.fclose.argtypes = [ctypes.c_void_p]
+        libc.fclose.restype = ctypes.c_int
+
+        status = security.AuthorizationCreate(None, None, 0, ctypes.byref(auth))
+        if status:
+            return 1, f"native admin authorization setup failed (OSStatus {status})"
+        tool = b"/bin/sh"
+        tool_value = ctypes.create_string_buffer(tool)
+        item = _AuthorizationItem(
+            b"system.privilege.admin", len(tool),
+            ctypes.cast(tool_value, ctypes.c_void_p), 0,
+        )
+        rights = _AuthorizationRights(1, ctypes.pointer(item))
+        status = security.AuthorizationCopyRights(
+            auth, ctypes.byref(rights), None, 0x3, None,
+        )
+        if status:
+            if status == _AUTHORIZATION_CANCELED:
+                return 1, "User canceled native admin authorization."
+            return 1, f"native admin authorization was not granted (OSStatus {status})"
+        argv = (ctypes.c_char_p * 2)(wrapper_path.encode(), None)
+        # ponytail: use the still-present native API because a signed SMJobBless
+        # helper cannot ship from this ad-hoc USB build; replace it only when the
+        # project gains a distributable signed privileged helper.
+        status = security.AuthorizationExecuteWithPrivileges(
+            auth, tool, 0, argv, ctypes.byref(pipe),
+        )
+        if status:
+            return 1, f"native admin command could not start (OSStatus {status})"
+        if not pipe.value:
+            return 1, "native admin command did not provide an output pipe"
+        chunks: list[bytes] = []
+        deadline = time.monotonic() + timeout
+        fd = libc.fileno(pipe)
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return 1, f"native admin command timed out after {timeout}s"
+            ready, _, _ = select.select([fd], [], [], remaining)
+            if not ready:
+                return 1, f"native admin command timed out after {timeout}s"
+            chunk = os.read(fd, 65536)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        output = b"".join(chunks).decode("utf-8", errors="replace")
+        parsed = parse_native_admin_exit(output)
+        if parsed is None:
+            return 1, output + "\nNative admin command did not return an exit marker."
+        return parsed
+    except (OSError, ValueError, ctypes.ArgumentError) as exc:
+        return 1, f"native admin escalation failed: {exc}"
+    finally:
+        if pipe.value and libc is not None:
+            try:
+                libc.fclose(pipe)
+            except OSError:
+                pass
+        if auth.value and security is not None:
+            try:
+                security.AuthorizationFree(auth, 0)
+            except OSError:
+                pass
+        for path in (wrapper_path, payload_path):
+            if path:
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
+
+
+def run_via_native_authorization(argv: list[str]) -> tuple[int, str]:
+    """Native-authorize one root command; used for a post-sign restore if needed."""
+    script = "exec " + " ".join(shlex.quote(a) for a in argv) + "\n"
+    return run_shell_via_native_authorization(script, timeout=600)
+
+
 def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
     """Re-sign ``app`` ad-hoc with get-task-allow, fail-closed and verified.
 
@@ -578,10 +735,14 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
         sign_argv = argvs[0]
         steps = [(sign_argv[-1], sign_argv)]
 
-        use_admin_script = runner is run_via_admin
-        if use_admin_script:
+        admin_shell_runner = (
+            run_shell_via_native_authorization
+            if runner is run_via_native_authorization
+            else run_shell_via_admin if runner is run_via_admin else None
+        )
+        if admin_shell_runner is not None:
             script = build_sign_restore_script(steps, app, backup)
-            rc, err = run_shell_via_admin(script)
+            rc, err = admin_shell_runner(script)
             if rc != 0:
                 if is_user_cancel(err):
                     # Operator dismissed the admin prompt: the privileged script
@@ -598,16 +759,14 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
                 cmd_note = f" Failed command: {' '.join(sign_argv)}."
                 am_hint = app_management_block_hint(err, app)
                 am_tail = f" {am_hint}" if am_hint else ""
-                # Retain the backup after any failed apply as operator evidence,
-                # even when in-script restore reported OK (safer than today's
-                # successful-restore cleanup until the operator confirms launch).
                 if restore_state == "ok":
+                    _cleanup_backup(backup)
                     return PatchResult(
                         False, "failed",
                         f"codesign failed on {component}.{cmd_note}{detail_tail} "
                         "Rekordbox was restored from the pre-signing backup in "
-                        "the same admin step and should still be launchable. "
-                        f"Backup retained at {backup.parent}.{am_tail}",
+                        "the same admin step and the temporary copy was removed. "
+                        f"Rekordbox should still be launchable.{am_tail}",
                         command=sign_argv, commands=argvs,
                     )
                 if restore_state == "fail":
@@ -652,7 +811,7 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
         # confirms that by relaunching Rekordbox.) Any failure restores the backup.
         # Never skip restore merely because verify happens to pass after a failure:
         # sign-failure restore already ran in-script (admin) or via _fail_restored.
-        restore_runner = run_via_admin if use_admin_script else (runner or _default_runner)
+        restore_runner = runner if admin_shell_runner is not None else (runner or _default_runner)
         try:
             verify = subprocess.run(
                 ["codesign", "--verify", "--deep", "--strict", str(app)],
@@ -684,15 +843,14 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
                 "no change took effect.",
                 sign_argv,
             )
+        _cleanup_backup(backup)
         return PatchResult(
             True, "patched",
             "Rekordbox target patched. RELAUNCH Rekordbox and confirm it opens. "
             "A positive get-task-allow check proves the target patch only; it "
             "does not prove a live attach. Stock foreign-Mac attach after "
             "patch + deep verify + GTA=true + relaunch is live-unvalidated / "
-            "unknown. "
-            f"The original app is kept at {backup.parent}; purging RBSS Bridge "
-            "does not remove it.",
+            "unknown. The temporary pre-sign copy was removed after verification.",
             command=sign_argv, commands=argvs,
         )
     finally:
@@ -701,24 +859,46 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
 
 # ── macOS GUI flow (menubar / frozen-app dispatch) ───────────────────────────
 
-def _osascript(script: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["osascript", "-e", script], capture_output=True, text=True,
-                          timeout=600, env=sanitized_system_env(os.environ))
+def _native_alert(message: str, buttons: tuple[str, ...]) -> str | None:
+    """Show one native modal and return its button title.
+
+    The frozen ``--patch-rekordbox`` child is itself a windowed app.  A bare
+    ``osascript display dialog`` can fail before consent in that child, whereas
+    the bundle already ships PyObjC/AppKit for its menubar.  Import lazily so
+    headless patch/check paths never load AppKit.
+    """
+    from AppKit import (  # type: ignore
+        NSAlert,
+        NSAlertFirstButtonReturn,
+        NSApplication,
+        NSApplicationActivationPolicyRegular,
+    )
+
+    app = NSApplication.sharedApplication()
+    app.setActivationPolicy_(NSApplicationActivationPolicyRegular)
+    app.activateIgnoringOtherApps_(True)
+    alert = NSAlert.alloc().init()
+    alert.setMessageText_("RBSS Bridge")
+    alert.setInformativeText_(message)
+    for button in buttons:
+        alert.addButtonWithTitle_(button)
+    index = int(alert.runModal()) - int(NSAlertFirstButtonReturn)
+    return buttons[index] if 0 <= index < len(buttons) else None
 
 
 def _gui_notify(message: str) -> None:
-    # Modal OK dialog — a one-shot result the operator should actually see.
-    _osascript(f'display dialog {json.dumps(message)} buttons {{"OK"}} '
-               f'default button "OK" with title "RBSS Bridge"')
+    try:
+        _native_alert(message, ("OK",))
+    except Exception:
+        pass
 
 
 def _gui_confirm(message: str) -> bool:
     try:
-        p = _osascript(f'display dialog {json.dumps(message)} buttons {{"Cancel", "Apply Patch"}} '
-                       f'default button "Cancel" with title "RBSS Bridge"')
-    except subprocess.SubprocessError:
+        # First/return-key button stays Cancel; only the explicit second choice signs.
+        return _native_alert(message, ("Cancel", "Apply Patch")) == "Apply Patch"
+    except Exception:
         return False
-    return p.returncode == 0 and "Apply Patch" in (p.stdout or "")
 
 
 def run_interactive_gui() -> int:
@@ -759,7 +939,7 @@ def run_interactive_gui() -> int:
         "admin password."
     ):
         return 1
-    result = apply_patch(app, dry_run=False, runner=run_via_admin)
+    result = apply_patch(app, dry_run=False, runner=run_via_native_authorization)
     _gui_notify(result.message)
     return 0 if result.ok else 1
 
@@ -773,7 +953,7 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--dry-run", action="store_true", help="show the exact command without modifying anything")
     g.add_argument("--apply", action="store_true", help="apply the patch (Rekordbox must be quit)")
     ap.add_argument("--admin", action="store_true",
-                    help="prompt for your admin password (osascript) instead of requiring sudo")
+                    help="prompt for your admin password with native macOS authorization")
     args = ap.parse_args(argv)
 
     app = find_rekordbox()
@@ -788,7 +968,11 @@ def main(argv: list[str] | None = None) -> int:
         if input("Type YES to proceed: ").strip() != "YES":
             print("Aborted.")
             return 1
-        result = apply_patch(app, dry_run=False, runner=(run_via_admin if args.admin else None))
+        result = apply_patch(
+            app,
+            dry_run=False,
+            runner=(run_via_native_authorization if args.admin else None),
+        )
     elif args.dry_run:
         result = apply_patch(app, dry_run=True)
     else:  # --check (default)

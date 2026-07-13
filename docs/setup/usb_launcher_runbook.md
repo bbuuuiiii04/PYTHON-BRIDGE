@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: d5bfaa4
+last_verified_commit: 9998bcd
 last_verified_date: 2026-07-13
 validation_scope: >
   Current USB builder, frozen launcher, native install/purge, target
@@ -15,8 +15,9 @@ validation_scope: >
   is one root-bundle ad-hoc codesign (no --deep, no nested re-sign) under one
   admin script with in-script restore (software-tested; disposable clone
   lab-proven; live apply still operator-gated). Frozen Info.plist declares
-  NSAppBundlesUsageDescription for App Management; grant + osascript
-  escalation path remains live-unvalidated (do not claim friend-Mac patch
+  NSAppBundlesUsageDescription for App Management; frozen confirmation/result
+  dialogs are native AppKit while the admin escalation remains osascript. The
+  App Management grant + admin escalation path remains live-unvalidated (do not claim friend-Mac patch
   works yet). A dormant Accessibility MEASUREMENT probe is
   implemented/software-tested and not executed (not a reader; no menu item;
   no runtime wiring). The separate RB7216 Patch Rekordbox menubar action sits
@@ -301,9 +302,12 @@ carries the secrets it shipped with.
   Frozen `Info.plist` now declares `NSAppBundlesUsageDescription` (App
   Management usage string; software-tested). A live root-only apply hit
   System Policy `Operation not permitted` under `/Applications`; an admin
-  password alone is not enough. Whether granting App Management to a rebuilt
-  frozen RBSS Bridge covers the existing `osascript` → authtrampoline path
-  remains **live-unvalidated** — do not claim friend-Mac patch works yet.
+  password alone is not enough. The frozen Patch Rekordbox consent/result modal
+  uses native AppKit rather than bare `osascript display dialog`, so it can reach
+  the explicit patch choice before admin escalation. Whether granting App
+  Management to a rebuilt frozen RBSS Bridge covers the remaining admin
+  `osascript` → authtrampoline path remains **live-unvalidated** — do not claim
+  friend-Mac patch works yet.
   AWR-224/229 are selecting and verifying the complete macOS-12 wheel set.
   AWR-225's partial-install retry is implemented. These remain software-only
   until a clean foreign-Mac run.
