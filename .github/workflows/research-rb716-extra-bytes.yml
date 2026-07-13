@@ -1,0 +1,130 @@
+name: research-rb716-extra-bytes
+
+on:
+  push:
+    branches:
+      - research/rb-7.2.16-mixer-offsets
+    paths:
+      - .github/workflows/research-rb716-extra-bytes.yml
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/rb-7.2.16-mixer-offsets
+
+      - name: Download, verify, and extract arm64 binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/rb716-extra
+          for spec in \
+            '7.2.11|20260225160351|df2b3ad99553fa267dbc6f4cc4945d419d13bd620dbeb92f1501eef622d3d000' \
+            '7.2.16|20260708182003|b1007870c5560fb0bfb56c75a125b80df4d413b6d3afca1935be8b1cb4613a99'; do
+            IFS='|' read -r version stamp sha <<< "$spec"
+            zip="/tmp/rb716-extra/${version}.zip"
+            curl --fail --location --retry 3 --retry-all-errors -o "$zip" \
+              "https://cdn.rekordbox.com/files/${stamp}/Install_rekordbox_${version//./_}.pkg_.zip"
+            echo "$sha  $zip" | shasum -a 256 -c -
+            work="/tmp/rb716-extra/${version}"
+            mkdir -p "$work/zip"
+            ditto -x -k "$zip" "$work/zip"
+            pkg="$(find "$work/zip" -name '*.pkg' -print -quit)"
+            pkgutil --expand-full "$pkg" "$work/pkg"
+            bin="$(find "$work/pkg" -type f -path '*/rekordbox.app/Contents/MacOS/rekordbox' -print -quit)"
+            lipo "$bin" -thin arm64 -output "$work/rekordbox-arm64"
+            nm -n --defined-only "$work/rekordbox-arm64" > "$work/nm.txt"
+          done
+
+      - name: Extract function bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/rb716-extra/extract.py <<'PY'
+          import json,struct
+          from pathlib import Path
+          LC_SEGMENT_64=0x19
+          TARGETS=[
+            '__ZN17InputChannelGraph7addTrimEv',
+            '__ZN17InputChannelGraph8addEqIsoEv',
+            '__ZN17InputChannelGraph15addChannelFaderEv',
+            '__ZN17InputChannelGraph19addCrossFaderAssignEv',
+            '__ZN17InputChannelGraph26addCrossFaderVolumeControlEv',
+            '__ZN17InputChannelGraph13addEffectUnitE17EffectPosition_id',
+            '__ZNK17InputChannelGraph15getTrimPositionEv',
+            '__ZNK17InputChannelGraph13getEqPositionE14EEq_Iso_Band_t',
+            '__ZNK17InputChannelGraph23getChannelFaderPositionEv',
+            '__ZNK17InputChannelGraph21getCrossFaderPositionEv',
+            '__ZN4Trim12setParameterEjf','__ZNK4Trim12getParameterEj',
+            '__ZN16CrossFaderAssign12setParameterEjf','__ZNK16CrossFaderAssign12getParameterEj',
+            '__ZN23RekordboxDJMultiFxLayer12setParameterEfi','__ZNK23RekordboxDJMultiFxLayer12getParameterEi',
+            '__ZN23RekordboxDJMultiFxLayer17setEffectMixRatioEf','__ZN23RekordboxDJMultiFxLayer16setEffectPercentEf',
+            '__ZN24RekordboxDJSingleFxLayer12setParameterEfi','__ZNK24RekordboxDJSingleFxLayer12getParameterEi',
+            '__ZN24RekordboxDJSingleFxLayer17setEffectMixRatioEf',
+            '__ZN15EffectLayerBase12selectEffectEi','__ZN15EffectLayerBase11startEffectEv',
+            '__ZN15EffectLayerBase10stopEffectEv','__ZNK15EffectLayerBase10isEffectOnEv',
+            '__ZNK15EffectLayerBase14getCurrentFxIdEv',
+            '__ZN20RekordboxMultiFxUnit11createLayerEv','__ZN21RekordboxSingleFxUnit11createLayerEv',
+            '__ZN11DjMixerUnit23setChannelFaderPositionE19EMixerChannelLine_tf',
+            '__ZNK11DjMixerUnit23getChannelFaderPositionE19EMixerChannelLine_t',
+            '__ZN11DjMixerUnit13setEqPositionE19EMixerChannelLine_t14EEq_Iso_Band_tf',
+            '__ZNK11DjMixerUnit13getEqPositionE19EMixerChannelLine_t14EEq_Iso_Band_t',
+            '__ZN11DjMixerUnit15setTrimPositionE19EMixerChannelLine_tf',
+            '__ZNK11DjMixerUnit15getTrimPositionE19EMixerChannelLine_t',
+            '__ZN11DjMixerUnit21setCrossFaderPositionEf','__ZNK11DjMixerUnit21getCrossFaderPositionEv',
+          ]
+          def text(data):
+            magic,_,_,_,ncmds,_,_,_=struct.unpack_from('<IiiIIIII',data,0)
+            if magic!=0xFEEDFACF: raise RuntimeError(hex(magic))
+            off=32
+            for _ in range(ncmds):
+              cmd,sz=struct.unpack_from('<II',data,off)
+              if cmd==LC_SEGMENT_64:
+                vals=struct.unpack_from('<II16sQQQQiiII',data,off); n=vals[9]; so=off+72
+                for _ in range(n):
+                  s=struct.unpack_from('<16s16sQQ8I',data,so)
+                  sn=s[0].split(b'\0',1)[0]; sg=s[1].split(b'\0',1)[0]
+                  if sn==b'__text' and sg==b'__TEXT': return s[2],s[3],s[4]
+                  so+=80
+              off+=sz
+            raise RuntimeError('no text')
+          def syms(path):
+            r=[]
+            for line in path.read_text(errors='replace').splitlines():
+              p=line.split(' ',2)
+              if len(p)!=3 or p[1] not in ('t','T'): continue
+              try:a=int(p[0],16)
+              except:continue
+              r.append((a,p[2]))
+            return sorted(r)
+          out={}
+          for v in ('7.2.11','7.2.16'):
+            root=Path('/tmp/rb716-extra')/v; data=(root/'rekordbox-arm64').read_bytes()
+            ta,ts,fo=text(data); rows=syms(root/'nm.txt'); addresses=sorted(set(a for a,_ in rows)); by={}
+            for a,n in rows: by.setdefault(n,a)
+            funcs={}
+            for n in TARGETS:
+              if n not in by: funcs[n]={'missing':True}; continue
+              a=by[n]; end=next((x for x in addresses if x>a),ta+ts); end=min(end,a+0x6000,ta+ts)
+              start=fo+(a-ta); blob=data[start:start+end-a]
+              funcs[n]={'address':a,'end':end,'size':len(blob),'hex':blob.hex()}
+            out[v]={'functions':funcs}
+          Path('/tmp/rb716-extra/extra-function-bytes.json').write_text(json.dumps(out,indent=2,sort_keys=True))
+          PY
+          python3 /tmp/rb716-extra/extract.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rb716-extra-function-bytes
+          path: /tmp/rb716-extra/extra-function-bytes.json
+          if-no-files-found: error
+          retention-days: 2
