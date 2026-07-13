@@ -1,0 +1,95 @@
+name: research-rb716-final-bytes
+
+on:
+  push:
+    branches:
+      - research/rb-7.2.16-mixer-offsets
+    paths:
+      - .github/workflows/research-rb716-final-bytes.yml
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/rb-7.2.16-mixer-offsets
+      - name: Get official binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/rbfinal
+          for spec in \
+            '7.2.11|20260225160351|df2b3ad99553fa267dbc6f4cc4945d419d13bd620dbeb92f1501eef622d3d000' \
+            '7.2.16|20260708182003|b1007870c5560fb0bfb56c75a125b80df4d413b6d3afca1935be8b1cb4613a99'; do
+            IFS='|' read -r v stamp sha <<< "$spec"
+            z="/tmp/rbfinal/$v.zip"
+            curl --fail --location --retry 3 --retry-all-errors -o "$z" \
+              "https://cdn.rekordbox.com/files/$stamp/Install_rekordbox_${v//./_}.pkg_.zip"
+            echo "$sha  $z" | shasum -a 256 -c -
+            w="/tmp/rbfinal/$v"; mkdir -p "$w/z"; ditto -x -k "$z" "$w/z"
+            p="$(find "$w/z" -name '*.pkg' -print -quit)"; pkgutil --expand-full "$p" "$w/p"
+            b="$(find "$w/p" -type f -path '*/rekordbox.app/Contents/MacOS/rekordbox' -print -quit)"
+            lipo "$b" -thin arm64 -output "$w/bin"; nm -n --defined-only "$w/bin" > "$w/nm"
+          done
+      - name: Extract wrapper bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/rbfinal/e.py <<'PY'
+          import json,struct
+          from pathlib import Path
+          T=[
+          '__ZN5EqIsoC2Edi','__ZN5EqIso12setParameterEjf','__ZNK5EqIso12getParameterEj',
+          '__ZN4TrimC2EdiNS_12EMonoralModeE','__ZN4Trim12setParameterEjf','__ZNK4Trim12getParameterEj',
+          '__ZN16CrossFaderAssignC2Edi','__ZN16CrossFaderAssign12setParameterEjf','__ZNK16CrossFaderAssign12getParameterEj',
+          '__ZN15EffectLayerBaseC2EPN6rbxfrm21AudioThreadCallbackerEPNS0_10BPMManagerE',
+          '__ZN23RekordboxDJMultiFxLayerC2EPN6rbxfrm21AudioThreadCallbackerEPNS0_10BPMManagerE',
+          '__ZN24RekordboxDJSingleFxLayerC2EPN6rbxfrm21AudioThreadCallbackerEPNS0_10BPMManagerE',
+          '__ZN23RekordboxDjColorFxLayerC2EPN6rbxfrm21AudioThreadCallbackerEPNS0_10BPMManagerE']
+          def text(d):
+            _,_,_,_,nc,_,_,_=struct.unpack_from('<IiiIIIII',d,0); o=32
+            for _ in range(nc):
+              c,s=struct.unpack_from('<II',d,o)
+              if c==0x19:
+                q=struct.unpack_from('<II16sQQQQiiII',d,o); so=o+72
+                for _ in range(q[9]):
+                  x=struct.unpack_from('<16s16sQQ8I',d,so)
+                  if x[0].split(b'\0')[0]==b'__text' and x[1].split(b'\0')[0]==b'__TEXT': return x[2],x[3],x[4]
+                  so+=80
+              o+=s
+          def syms(p):
+            r=[]
+            for l in p.read_text(errors='replace').splitlines():
+              x=l.split(' ',2)
+              if len(x)!=3 or x[1] not in ('t','T'): continue
+              try:a=int(x[0],16)
+              except:continue
+              r.append((a,x[2]))
+            return sorted(r)
+          O={}
+          for v in ('7.2.11','7.2.16'):
+            r=Path('/tmp/rbfinal')/v; d=(r/'bin').read_bytes(); ta,ts,fo=text(d); ss=syms(r/'nm'); aa=sorted(set(a for a,_ in ss)); by={}
+            for a,n in ss:by.setdefault(n,a)
+            F={}
+            for n in T:
+              if n not in by:F[n]={'missing':True};continue
+              a=by[n]; e=next((z for z in aa if z>a),ta+ts); e=min(e,a+0x5000,ta+ts); st=fo+a-ta
+              F[n]={'address':a,'size':e-a,'hex':d[st:st+e-a].hex()}
+            O[v]={'functions':F}
+          Path('/tmp/rbfinal/final-wrapper-bytes.json').write_text(json.dumps(O,indent=2,sort_keys=True))
+          PY
+          python3 /tmp/rbfinal/e.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rb716-final-wrapper-bytes
+          path: /tmp/rbfinal/final-wrapper-bytes.json
+          if-no-files-found: error
+          retention-days: 2
