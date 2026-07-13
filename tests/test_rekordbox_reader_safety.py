@@ -201,9 +201,10 @@ class VersionStringNormalizationTests(unittest.TestCase):
 
 
 class PerVersionFieldPresenceTests(unittest.TestCase):
-    def test_mixer_cfx_only_on_7_2_11(self) -> None:
+    def test_mixer_cfx_only_on_supported_versions(self) -> None:
+        mixer_cfx_versions = {"7.2.11", "7.2.16"}
         for ver, t in all_offsets().items():
-            if ver == "7.2.11":
+            if ver in mixer_cfx_versions:
                 self.assertIsNotNone(t.mixer_deck1_upfader_raw)
                 self.assertIsNotNone(t.cfx_deck1_filter_param0)
             else:

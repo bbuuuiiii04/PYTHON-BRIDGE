@@ -16,7 +16,8 @@ from rb_ss_bridge_v2.rb_offsets import (
 )
 
 
-EXPECTED_VERSIONS = {"7.2.8", "7.2.10", "7.2.11", "7.2.13", "7.2.14"}
+EXPECTED_VERSIONS = {"7.2.8", "7.2.10", "7.2.11", "7.2.13", "7.2.14", "7.2.16"}
+_MIXER_CFX_VERSIONS = frozenset({"7.2.11", "7.2.16"})
 
 
 class EmbeddedTableTests(unittest.TestCase):
@@ -128,12 +129,104 @@ class V7211ChainTests(unittest.TestCase):
         )
 
     def test_other_versions_have_no_cfx_chains(self) -> None:
-        # Feature inert by construction off 7.2.11.
-        for ver in ("7.2.8", "7.2.10", "7.2.13", "7.2.14"):
+        # Feature inert by construction off the mixer/CFX versions.
+        for ver in EXPECTED_VERSIONS - _MIXER_CFX_VERSIONS:
             v = load_offsets_for_version(ver)
             assert v is not None
             self.assertIsNone(v.cfx_deck1_filter_param0, msg=ver)
             self.assertIsNone(v.cfx_deck2_unit_channel, msg=ver)
+
+
+class V7216ChainTests(unittest.TestCase):
+    """Pin the exact RB 7.2.16 chain values (parity with 7.2.11 groups)."""
+
+    def setUp(self) -> None:
+        v = load_offsets_for_version("7.2.16")
+        assert v is not None
+        self.v: RBOffsetVersion = v
+
+    def test_master_chain(self) -> None:
+        self.assertEqual(
+            self.v.master_deck,
+            ChainEntry(hops=(0x04EE71D8, 0x20, 0x278), final_off=0x124),
+        )
+
+    def test_per_deck_bpm_chains(self) -> None:
+        for d, off in enumerate([0x0, 0x8, 0x10, 0x18]):
+            self.assertEqual(
+                self.v.bpm_per_deck[d],
+                ChainEntry(hops=(0x04EA17A0, off, 0x2C8), final_off=0x188),
+                msg=f"deck {d}",
+            )
+
+    def test_per_deck_live_pos_chains(self) -> None:
+        for d, off in enumerate([0x0, 0x8, 0x10, 0x18]):
+            self.assertEqual(
+                self.v.live_pos_per_deck[d],
+                ChainEntry(hops=(0x04EA17A0, off, 0x2C8), final_off=0x120),
+                msg=f"deck {d}",
+            )
+
+    def test_per_deck_track_info_uses_explicit_per_deck_hops(self) -> None:
+        expected = [
+            ChainEntry(hops=(0x04EA17A0, 0x0,  0x270, 0x38, 0x88, 0x28, 0xF0), final_off=0x0),
+            ChainEntry(hops=(0x04EA17A0, 0x8,  0x270, 0x38, 0x70, 0x28, 0xF0), final_off=0x0),
+            ChainEntry(hops=(0x04EA17A0, 0x10, 0x270, 0x38, 0x48, 0x28, 0xF0), final_off=0x0),
+            ChainEntry(hops=(0x04EA17A0, 0x18, 0x270, 0x38, 0x48, 0x28, 0xF0), final_off=0x0),
+        ]
+        self.assertEqual(list(self.v.track_info_per_deck), expected)
+
+    def test_per_deck_anlz_chains(self) -> None:
+        for d, off in enumerate([0x8, 0x10, 0x18, 0x20]):
+            self.assertEqual(
+                self.v.anlz_path_per_deck[d],
+                ChainEntry(hops=(0x04EE7C08, off), final_off=0x3F0),
+                msg=f"deck {d}",
+            )
+
+    def test_named_mixer_chains(self) -> None:
+        self.assertEqual(
+            self.v.mixer_deck1_upfader_raw,
+            ChainEntry(hops=(0x04EE5758, 0xA8, 0x458, 0, 0x2C8, 0, 0x470), final_off=0x30),
+        )
+        self.assertEqual(
+            self.v.mixer_deck2_upfader_raw,
+            ChainEntry(hops=(0x04EE5758, 0xA8, 0x458, 0, 0x2C8, 8, 0x470), final_off=0x30),
+        )
+        self.assertEqual(
+            self.v.mixer_deck1_low_raw,
+            ChainEntry(hops=(0x04EE5758, 0xA8, 0x458, 0, 0x2C8, 0, 0x460, 0x30), final_off=0x38),
+        )
+        self.assertEqual(
+            self.v.mixer_deck2_low_raw,
+            ChainEntry(hops=(0x04EE5758, 0xA8, 0x458, 0, 0x2C8, 8, 0x460, 0x30), final_off=0x38),
+        )
+
+    def test_named_cfx_chains(self) -> None:
+        self.assertEqual(
+            self.v.cfx_deck1_filter_param0,
+            ChainEntry(hops=(0x04EE5758, 0xA8, 0x458, 0, 0x2C8, 0, 0x480, 0, 0x1E0, 0, 0x88, 0), final_off=0xE8),
+        )
+        self.assertEqual(
+            self.v.cfx_deck2_filter_param0,
+            ChainEntry(hops=(0x04EE5758, 0xA8, 0x458, 0, 0x2C8, 8, 0x480, 0, 0x1E0, 0, 0x88, 0), final_off=0xE8),
+        )
+        self.assertEqual(
+            self.v.cfx_deck1_selected_id,
+            ChainEntry(hops=(0x04EE5758, 0xA8, 0x458, 0, 0x2C8, 0, 0x480, 0, 0x1E0, 0, 0x88, 0), final_off=0x70),
+        )
+        self.assertEqual(
+            self.v.cfx_deck2_selected_id,
+            ChainEntry(hops=(0x04EE5758, 0xA8, 0x458, 0, 0x2C8, 8, 0x480, 0, 0x1E0, 0, 0x88, 0), final_off=0x70),
+        )
+        self.assertEqual(
+            self.v.cfx_deck1_unit_channel,
+            ChainEntry(hops=(0x04EE5758, 0xA8, 0x458, 0, 0x2C8, 0, 0x480, 0, 0x1E0, 0), final_off=0xD0),
+        )
+        self.assertEqual(
+            self.v.cfx_deck2_unit_channel,
+            ChainEntry(hops=(0x04EE5758, 0xA8, 0x458, 0, 0x2C8, 8, 0x480, 0, 0x1E0, 0), final_off=0xD0),
+        )
 
 
 _MINI = """\
