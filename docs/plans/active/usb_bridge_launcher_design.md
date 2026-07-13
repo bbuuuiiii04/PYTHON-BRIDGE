@@ -1,19 +1,23 @@
 ---
 doc_status: current
 truth_level: spec
-last_verified_commit: 4f49eb2
-last_verified_date: 2026-07-12
+last_verified_commit: b925885
+last_verified_date: 2026-07-13
 validation_scope: >
   Current macOS USB launcher design reconciled to the landed M1/M2 code and two
   failed physical foreign-Mac attempts. AWR-222 confirms that the current ad-hoc
   target-only Rekordbox patch does not provide stock-macOS caller authorization.
   A dormant Accessibility MEASUREMENT probe (`--probe-rekordbox-accessibility`)
   is implemented/software-tested and not executed; it is not a reader and does
-  not change bridge behavior. make_stick stamps build GENERATION into
+  not change bridge behavior. `rekordbox_patch.py` now plans deepest-first
+  inside-out signing under one admin script with in-script backup restore
+  (software-tested; live apply remains an operator-gated experimental
+  hypothesis and does not claim libssl/attach/foreign-Mac reads are fixed).
+  make_stick stamps build GENERATION into
   CFBundleShortVersionString/CFBundleVersion (fallback 0.0.1 outside make_stick).
   Packaging components remain software-tested; foreign-Mac live reads remain
   unsupported.
-work_status: implementation partial; packaging/install UX landed; AWR-222 AX measurement probe implemented/software-tested/not executed; foreign-Mac live Rekordbox input still blocked pending operator live gate + E3 acceptance
+work_status: implementation partial; packaging/install UX landed; AWR-222 AX measurement probe implemented/software-tested/not executed; rekordbox_patch inside-out/one-admin recovery implemented/software-tested/hardware-unvalidated; foreign-Mac live Rekordbox input still blocked pending operator live gate + E3 acceptance
 relates_to: cross_platform_portability_plan.md, track_identity_move_invariance_design.md, awr222_ax_probe_sol_spec_2026_07_12.md
 ---
 
@@ -347,6 +351,18 @@ in the installed location, not the stick.
   the target patch and improves feedback. Replacement-reader candidates must be
   measured before this design selects one; invasive SIP changes are not a guest
   setup strategy.
+- **Rekordbox target patch signing (software-tested / hardware-unvalidated).**
+  `rekordbox_patch.py` no longer uses one-shot `codesign --deep`. It plans
+  deepest-first nested Mach-O / nested-bundle signing (preserve existing
+  entitlements/identifier/flags/runtime on nested items), signs the main app
+  last with only the generated `get-task-allow` entitlements plist, runs the
+  full sequence under **one** administrator shell script, and restores the
+  pre-sign backup inside that same script on any signing failure (component
+  named via `RBSS_SIGN_FAIL:<path>`). Post-sign check is
+  `codesign --verify --deep --strict`. This is an **experimental hypothesis**
+  for the previously observed `libssl.3.dylib` deep-sign internal error — it is
+  **not** live proof that libssl signing, `task_for_pid` attach, or foreign-Mac
+  reads work. Operator-gated live `--apply` only; AWR-222 honesty unchanged.
 - **Dependency manifest gap (re-swept 2026-07-09, `confirmed`):** `pyproject.toml` declares
   only `mido, pyobjc-framework-Cocoa, pyrekordbox, python-osc, zeroconf` (+ optional
   spectral/analysis extras: `librosa`, `soundfile`, `numpy`, `scipy`) and has ZERO diff since

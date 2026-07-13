@@ -1,18 +1,20 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 4f49eb2
-last_verified_date: 2026-07-12
+last_verified_commit: b925885
+last_verified_date: 2026-07-13
 validation_scope: >
   Current USB builder, frozen launcher, native install/purge, target
   Rekordbox patch, and software tests. Two physical foreign-Mac attempts failed
   to produce live Rekordbox reads. AWR-222 is a confirmed authorization blocker:
   current ad-hoc target-only signing is not a supported stock-macOS task_for_pid
-  path. A dormant Accessibility MEASUREMENT probe is implemented/software-tested
-  and not executed (not a reader; no menu item; no live AX/TCC/USB evidence).
-  make_stick stamps GENERATION into Info.plist (fallback 0.0.1). No
-  install.command/purge.command helpers. SOFTWARE-VALIDATED COMPONENTS ONLY /
-  FOREIGN-MAC LIVE READS UNSUPPORTED.
+  path. Rekordbox patch signing is now inside-out under one admin script with
+  in-script restore (software-tested; live apply / libssl / attach still
+  operator-unvalidated). A dormant Accessibility MEASUREMENT probe is
+  implemented/software-tested and not executed (not a reader; no menu item; no
+  live AX/TCC/USB evidence). make_stick stamps GENERATION into Info.plist
+  (fallback 0.0.1). No install.command/purge.command helpers.
+  SOFTWARE-VALIDATED COMPONENTS ONLY / FOREIGN-MAC LIVE READS UNSUPPORTED.
 ---
 
 # USB Bridge Launcher — Runbook (M1 build · M2 install/PURGE)
@@ -264,10 +266,13 @@ carries the secrets it shipped with.
   it, Govee/SoundSwitch discovery just finds nothing. There is no clean signal to
   surface; if the rig is silent and reads are OK, check System Settings → Privacy →
   Local Network for "RBSS Bridge".
-- **Open packaging safety follow-ups:** AWR-223 now fails closed and keeps its
-  original-app backup through native Purge. AWR-224/229 are selecting and
-  verifying the complete macOS-12 wheel set. AWR-225's partial-install retry is
-  implemented. These remain software-only until a clean foreign-Mac run.
+- **Open packaging safety follow-ups:** AWR-223 now fails closed, keeps its
+  original-app backup through native Purge, and (2026-07-13) signs Rekordbox
+  inside-out under **one** admin script with in-script restore on signing
+  failure (software-tested only — does **not** prove libssl signing, attach, or
+  foreign-Mac reads). AWR-224/229 are selecting and verifying the complete
+  macOS-12 wheel set. AWR-225's partial-install retry is implemented. These
+  remain software-only until a clean foreign-Mac run.
 
 ## One installation path
 
