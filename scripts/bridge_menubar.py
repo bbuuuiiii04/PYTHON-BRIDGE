@@ -521,8 +521,8 @@ def patch_rb_button_text(in_progress: bool, state: str) -> str:
     """Visible title for the Patch Rekordbox action (pure state table).
 
     'Rekordbox Patched' means only that has_get_task_allow was positively
-    verified on the target — never that the bridge can attach or that live
-    reads work on a stock foreign Mac.
+    verified on the target — never that the bridge has attached or that stock
+    foreign-Mac attach is proven.
     """
     if in_progress:
         return "Patching Rekordbox…"
@@ -999,9 +999,9 @@ def _rb_reads_verdict() -> tuple[str, str]:
     """Check only the Rekordbox target's get-task-allow patch.
 
     The legacy verdict tokens are "enabled" | "not_enabled" | "unknown", but
-    enabled means only "target patch present". It does not prove caller
-    authorization or a live task_for_pid attach. Shells out via codesign and
-    must NEVER run on the AppKit main thread."""
+    enabled means only "target patch present". A positive entitlement proves
+    the target patch only — not a live task_for_pid attach. Shells out via
+    codesign and must NEVER run on the AppKit main thread."""
     try:
         rekordbox_patch = _import_rekordbox_patch()
         app = rekordbox_patch.find_rekordbox()
@@ -2058,10 +2058,12 @@ class BridgeMenuBar(NSObject):
             title = "Rekordbox target patch verified"
             body = (
                 f"The target get-task-allow entitlement is present on {detail}.\n\n"
-                "This does not authorize the bridge caller or prove live reads. "
-                "The current USB package cannot read Rekordbox on a stock "
-                "foreign Mac (AWR-222). On the maintainer Mac, only the running "
-                'bridge log can confirm a live attach; watch for "RB reads blocked".'
+                "That proves the Rekordbox target patch only; it does not prove a "
+                "live attach. Stock Apple-Silicon foreign-Mac attach after a "
+                "successful patch + deep verify + GTA=true + relaunch is "
+                "live-unvalidated / unknown — not a confirmed caller-authorization "
+                "blocker (AWR-222). On this Mac, only the running bridge log can "
+                'confirm a live attach; watch for "RB reads blocked".'
             )
         elif verdict == "not_enabled":
             title = "Rekordbox target patch did not take effect"
@@ -2568,9 +2570,10 @@ class BridgeMenuBar(NSObject):
         _notify(f"Test the Lights: replaying {Path(path).name} — watch the rig.")
 
     def enableRekordboxReads_(self, _sender):
-        # Re-sign the Rekordbox target with get-task-allow. This is necessary on
-        # the maintainer's custom-SIP Mac but does not authorize a stock foreign
-        # Mac caller (AWR-222). The launcher keeps admin UI off the menubar thread.
+        # Re-sign the Rekordbox target with get-task-allow (TimecodeLink-style
+        # target-patch mechanism). Positive entitlement ≠ live attach proof;
+        # stock foreign-Mac attach after clean patch+verify+GTA+relaunch remains
+        # live-unvalidated / unknown (AWR-222). Admin UI stays off the menubar thread.
         if self._patch_rb_in_progress:
             return
         if getattr(sys, "frozen", False):

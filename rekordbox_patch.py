@@ -1,15 +1,21 @@
 """Detect and (with explicit consent) patch the Rekordbox target.
 
-The bridge reads Rekordbox's live state via ``task_for_pid`` (see ``rb_memory.py``),
-which requires authorization on both sides of the attach. This helper changes
-only the TARGET — Rekordbox — by adding ``com.apple.security.get-task-allow``.
-It does not authorize the bridge caller and therefore does not prove or enable
-live reads on a stock foreign Mac (AWR-222).
+The bridge reads Rekordbox's live state via ``task_for_pid`` (see ``rb_memory.py``).
+Target ``com.apple.security.get-task-allow`` is the expected access mechanism and
+matches the TimecodeLink target-patch model (TimecodeLink had no caller
+``cs.debugger`` and used the same ``task_for_pid`` / ``mach_vm_read_overwrite``
+attach). This helper changes only the TARGET — Rekordbox — by adding that
+entitlement. A positive entitlement check proves the Rekordbox target patch
+only; it does not by itself prove a successful live attach or full foreign-Mac
+parity. Stock Apple-Silicon foreign-Mac attach after a successful patch + deep
+verify + GTA=true + relaunch is **live-unvalidated / unknown** — not confirmed
+unsupported, and not a confirmed caller-authorization blocker. Earlier failed
+runs never reached that clean pre-attach state, so they cannot prove caller
+denial. Do not weaken SIP on a guest Mac (AWR-222).
 
 This module re-signs Rekordbox **ad-hoc** with ``get-task-allow`` added
-(preserving its existing entitlements), replicating the signature already present
-and used on the maintainer's primary Mac, whose custom SIP configuration has
-Debugging Restrictions disabled. That local behavior is not portability proof.
+(preserving its existing entitlements). The maintainer Mac has custom SIP with
+Debugging Restrictions disabled; that local behavior is not foreign-Mac proof.
 
 THIS MODIFIES A THIRD-PARTY APP, so it is deliberately conservative:
   * **opt-in** — never runs without explicit operator consent (CLI ``--apply`` /
@@ -711,7 +717,10 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
         return PatchResult(
             True, "patched",
             "Rekordbox target patched. RELAUNCH Rekordbox and confirm it opens. "
-            "This does not prove that the bridge is authorized for live reads. "
+            "A positive get-task-allow check proves the target patch only; it "
+            "does not prove a live attach. Stock foreign-Mac attach after "
+            "patch + deep verify + GTA=true + relaunch is live-unvalidated / "
+            "unknown. "
             f"The original app is kept at {backup.parent}; purging RBSS Bridge "
             "does not remove it.",
             command=final_argv, commands=argvs,
@@ -759,8 +768,8 @@ def run_interactive_gui() -> int:
         return 1
     if already_patched:
         _gui_notify(
-            "The Rekordbox target patch is already present. This does not prove "
-            "that the bridge is authorized for live reads on this Mac."
+            "The Rekordbox target patch is already present. That proves the "
+            "target entitlement only; it does not prove a live attach on this Mac."
         )
         return 0
     running = is_rekordbox_running()
@@ -772,9 +781,12 @@ def run_interactive_gui() -> int:
         return 1
     if not _gui_confirm(
         "Apply the Rekordbox target patch?\n\n"
-        "This re-signs Rekordbox with get-task-allow. It is used on the maintainer "
-        "Mac, but it does not authorize live reads on a stock foreign Mac. A "
-        "Rekordbox update will undo it. You'll be asked for your admin password."
+        "This re-signs Rekordbox with get-task-allow (TimecodeLink-style target "
+        "patch). A positive entitlement proves the patch only, not a live attach. "
+        "Stock foreign-Mac attach after patch + deep verify + GTA=true + relaunch "
+        "is live-unvalidated / unknown — not a confirmed caller-authorization "
+        "blocker. A Rekordbox update will undo it. You'll be asked for your "
+        "admin password."
     ):
         return 1
     result = apply_patch(app, dry_run=False, runner=run_via_admin)
@@ -817,7 +829,10 @@ def main(argv: list[str] | None = None) -> int:
             return 4
         running = is_rekordbox_running()
         print(f"Rekordbox: {app}")
-        print(f"  target get-task-allow present: {'YES (live reads still unverified)' if patched else 'NO'}")
+        print(
+            "  target get-task-allow present: "
+            f"{'YES (target patch only; live attach unproven)' if patched else 'NO'}"
+        )
         print(f"  running now: {'yes' if running else 'no' if running is False else 'unknown (could not verify)'}")
         if running is None:
             return 4

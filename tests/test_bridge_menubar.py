@@ -1483,8 +1483,8 @@ class FrozenDefectHelperTests(BridgeMenubarTests):
         self.assertNotIn("installed", alert.setMessageText_.call_args.args[0].lower())
         self.assertNotIn("installed", body.lower())
         self.assertIn("/Applications/rekordbox 7/rekordbox.app", body)
-        self.assertIn("does not authorize", body)
-        self.assertIn("stock foreign Mac", body)
+        self.assertIn("target patch only", body.lower())
+        self.assertIn("live-unvalidated", body.lower())
         self.assertIn("RB reads blocked", body)
         alert.runModal.assert_called_once_with()
         # Positive entitlement verification still drives disabled "Rekordbox Patched".

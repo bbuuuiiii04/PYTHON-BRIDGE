@@ -287,12 +287,15 @@ Reader live-safety + cross-version extension (AWR reader-safety, 2026-07-10, sof
   + the USB bundle (the table is frozen into the bundle).
 - Pinned by `tests/test_rekordbox_reader_safety.py`.
 
-AWR-222 dormant Accessibility MEASUREMENT probe (2026-07-12):
+AWR-222 dormant Accessibility MEASUREMENT probe (2026-07-12; honesty 2026-07-13):
 - Packaged `--probe-rekordbox-accessibility` → `usb_launcher_ax_probe.py` is
   implemented/software-tested and **not executed**. It is a diagnostic only —
   not a reader, emits no `BridgeEvent`s, does not write `PositionCache`, and is
-  not on the normal menu. No live AX/TCC/USB evidence; AWR-222 remains blocked.
-  Current memory/MTC/OSC readers and active-deck policy are unchanged.
+  not on the normal menu. No live AX/TCC/USB evidence. AX remains dormant, not
+  a selected replacement reader. Target `get-task-allow` is the expected
+  TimecodeLink-style access mechanism; stock Apple-Silicon attach after
+  successful patch + deep verify + GTA=true + relaunch is live-unvalidated /
+  unknown. Current memory/MTC/OSC readers and active-deck policy are unchanged.
 
 USB ANLZ audio-path leading slash (2026-07-12, software-tested):
 - `_device_audio_filepath` now strips a leading `/` on stick-root-relative PPTH

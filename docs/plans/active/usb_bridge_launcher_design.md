@@ -1,25 +1,29 @@
 ---
 doc_status: current
 truth_level: spec
-last_verified_commit: b9b0ae3
+last_verified_commit: ad31edf
 last_verified_date: 2026-07-13
 validation_scope: >
-  Current macOS USB launcher design reconciled to the landed M1/M2 code and two
-  failed physical foreign-Mac attempts. AWR-222 confirms that the current ad-hoc
-  target-only Rekordbox patch does not provide stock-macOS caller authorization.
-  A dormant Accessibility MEASUREMENT probe (`--probe-rekordbox-accessibility`)
-  is implemented/software-tested and not executed; it is not a reader, adds no
-  menu item of its own, and has no runtime wiring. The separate RB7216 Patch
-  Rekordbox menubar action is restored in source/frozen menus (target
-  entitlement only; does not unblock AWR-222). `rekordbox_patch.py` now plans
+  Current macOS USB launcher design reconciled to the landed M1/M2 code and
+  earlier foreign-Mac packaging failures. Target get-task-allow is the expected
+  TimecodeLink-style access mechanism; a positive entitlement proves the
+  Rekordbox target patch only, not a live attach. Stock Apple-Silicon
+  foreign-Mac attach after successful patch + deep verify + GTA=true + relaunch
+  is live-unvalidated / unknown (not confirmed unsupported; not a confirmed
+  caller-authorization blocker). Earlier attempts never reached that clean
+  pre-attach state. A dormant Accessibility MEASUREMENT probe
+  (`--probe-rekordbox-accessibility`) is implemented/software-tested and not
+  executed; it is not a reader, adds no menu item of its own, and has no
+  runtime wiring. The separate RB7216 Patch Rekordbox menubar action is restored
+  in source/frozen menus (target entitlement only). `rekordbox_patch.py` plans
   deepest-first inside-out signing under one admin script with in-script backup
   restore (software-tested; live apply remains an operator-gated experimental
   hypothesis and does not claim libssl/attach/foreign-Mac reads are fixed).
   make_stick stamps build GENERATION into
   CFBundleShortVersionString/CFBundleVersion (fallback 0.0.1 outside make_stick).
-  Packaging components remain software-tested; foreign-Mac live reads remain
-  unsupported.
-work_status: implementation partial; packaging/install UX landed; AWR-222 AX measurement probe implemented/software-tested/not executed; rekordbox_patch inside-out/one-admin recovery implemented/software-tested/hardware-unvalidated; foreign-Mac live Rekordbox input still blocked pending operator live gate + E3 acceptance
+  Packaging components remain software-tested; stock foreign-Mac attach remains
+  live-unvalidated / unknown.
+work_status: implementation partial; packaging/install UX landed; AWR-222 AX measurement probe implemented/software-tested/not executed; rekordbox_patch inside-out/one-admin recovery implemented/software-tested/hardware-unvalidated; target-patch→stock-attach hypothesis reopened by TimecodeLink parity; blocked on stock-SIP live gate evidence, not on a proven impossibility
 relates_to: cross_platform_portability_plan.md, track_identity_move_invariance_design.md, awr222_ax_probe_sol_spec_2026_07_12.md
 ---
 
@@ -27,12 +31,17 @@ relates_to: cross_platform_portability_plan.md, track_identity_move_invariance_d
 
 > **Implementation reality (2026-07-10/11 foreign-Mac fix round, branch `claude/rbss-bridge-install-debug-59yrn6`; see AWR-186).** The first run of the built M2 bundle on a second Mac (macOS 12, Apple Silicon) failed across the board — this design assumed a source/dev host and never captured that the FROZEN bundle must: (a) build against a **python.org universal2, LOW-deployment-target** interpreter — Homebrew's macOS-15 `libpython` hard-binds `_mkfifoat` and crashes on macOS < 15 (`make_stick.sh` now enforces this; **spectral analysis stays REQUIRED**, fail-loud, never dropped); (b) guard the menubar singleton with an **flock**, not argv-`pgrep` (a frozen argv never matches); (c) **surface silent child-process crashes** (bridge start, Rekordbox patch) instead of failing invisibly; (d) point the Laser/LED pads at the **App Support live config**, never the code-signed bundle (a pad Save into the bundle invalidates the signature/TCC grants); (e) resolve `ICON_DIR` and pad assets from the bundle, not `/Users/bbui`. Eight defects fixed, one (unresponsive-menu) refuted. ALL frozen/macOS behavior remains operator-unvalidated.
 
-> **Current blocker (AWR-222, 2026-07-12).** Those packaging fixes do not solve
-> live input. The shipped bridge is ad-hoc signed without caller debugger
-> authorization, while `rekordbox_patch.py` changes only the Rekordbox target.
-> Both physical foreign-Mac attempts failed. The maintainer Mac has custom SIP
-> with Debugging Restrictions disabled, so local success cannot validate a stock
-> guest Mac. Do not rebuild-and-retry or weaken a guest's SIP.
+> **Current AWR-222 status (honesty correction 2026-07-13).** Packaging fixes do
+> not by themselves prove stock foreign-Mac live input. Target
+> `get-task-allow` is the expected TimecodeLink-style mechanism; TimecodeLink
+> itself had no caller `cs.debugger` and used the same Mach attach APIs. A
+> positive entitlement proves the Rekordbox patch only. Stock Apple-Silicon
+> attach after successful patch + deep verify + GTA=true + relaunch is
+> **live-unvalidated / unknown** — not a confirmed caller-authorization
+> blocker. Earlier foreign-Mac packaging failures and the RB7216 apply (failed
+> on `libssl.3.dylib`, GTA left absent) never reached that clean pre-attach
+> state. The maintainer Mac has custom SIP (Debugging Restrictions disabled),
+> so local success is not foreign-Mac proof. Do not weaken a guest's SIP.
 >
 > **Dormant AX measurement probe (implemented/software-tested, not executed).**
 > Packaged dispatch `--probe-rekordbox-accessibility` on `usb_launcher.py` lazily
@@ -40,9 +49,9 @@ relates_to: cross_platform_portability_plan.md, track_identity_move_invariance_d
 > measurement diagnostic only — not a reader; the dormant AX measurement probe
 > itself adds no menu item and no runtime wiring; no live AX/TCC/USB evidence yet.
 > The separate RB7216 **Patch Rekordbox** action is intentionally restored in both
-> source/frozen menus; it targets only the Rekordbox entitlement and does not
-> unblock AWR-222/stock foreign-Mac reads. AWR-222 remains blocked until the
-> separate operator live gate and E3 semantic matrix pass.
+> source/frozen menus; it targets only the Rekordbox entitlement. AWR-222 remains
+> open on the stock-SIP live gate (and AX E3 matrix), not on a proven
+> impossibility of the target-patch path.
 
 Approved design (2026-07-04). This is the Mac-only "USB-ify" concretization of the portability
 work; the Windows/cross-platform half is deferred. Reviewed + revised 2026-07-04, twice and
@@ -349,13 +358,17 @@ in the installed location, not the stick.
   direction, name source, consumer, foreign-Mac strategy). Default strategy: bridge-created
   virtual ports (Stream Deck precedent); "enable IAC in Audio MIDI Setup" is runbook fallback
   only, never a code path (it would fork the launch path Mac-only — portability ruling).
-- **Memory grant — confirmed blocker (AWR-222).** The current setup re-signs only
-  Rekordbox ad-hoc with `get-task-allow`; the frozen bridge is also ad-hoc and
-  carries no caller debugger entitlement. That is not a supported stock-macOS
-  `task_for_pid` path, and both physical attempts failed. AWR-221 verifies only
-  the target patch and improves feedback. Replacement-reader candidates must be
-  measured before this design selects one; invasive SIP changes are not a guest
-  setup strategy.
+- **Memory grant — live-unvalidated on stock SIP (AWR-222).** The current setup
+  re-signs only Rekordbox ad-hoc with `get-task-allow` (TimecodeLink-style
+  target patch); the frozen bridge is also ad-hoc and carries no caller
+  debugger entitlement. That is the expected target-patch model, not by itself
+  proof that stock attach is impossible. Positive entitlement proves the
+  target patch only. Stock Apple-Silicon attach after successful patch + deep
+  verify + GTA=true + relaunch remains live-unvalidated / unknown; earlier
+  physical attempts and the RB7216 apply never reached that clean pre-attach
+  state. AWR-221 verifies only the target patch and improves feedback. Do not
+  weaken guest SIP. AX remains a dormant measurement probe, not a selected
+  replacement reader, unless a green-GTA + red-attach stock-SIP result appears.
 - **Rekordbox target patch signing (software-tested / hardware-unvalidated).**
   `rekordbox_patch.py` no longer uses one-shot `codesign --deep`. It plans
   deepest-first nested Mach-O / nested-bundle signing (preserve existing

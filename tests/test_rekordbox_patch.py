@@ -692,7 +692,9 @@ class InteractiveGuiTests(unittest.TestCase):
              mock.patch.object(rp, "_gui_notify"):
             self.assertEqual(rp.run_interactive_gui(), 1)
         ap.assert_not_called()  # no consent -> no modification
-        self.assertIn("does not authorize", confirm.call_args[0][0].lower())
+        confirm_text = confirm.call_args[0][0].lower()
+        self.assertIn("live-unvalidated", confirm_text)
+        self.assertIn("not a confirmed caller-authorization", confirm_text)
 
     def test_confirmed_applies_via_admin(self) -> None:
         with mock.patch.object(rp, "find_rekordbox", return_value=APP), \

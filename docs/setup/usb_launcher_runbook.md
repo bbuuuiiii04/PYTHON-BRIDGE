@@ -1,33 +1,41 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: b9b0ae3
+last_verified_commit: ad31edf
 last_verified_date: 2026-07-13
 validation_scope: >
   Current USB builder, frozen launcher, native install/purge, target
-  Rekordbox patch, and software tests. Two physical foreign-Mac attempts failed
-  to produce live Rekordbox reads. AWR-222 is a confirmed authorization blocker:
-  current ad-hoc target-only signing is not a supported stock-macOS task_for_pid
-  path. Rekordbox patch signing is now inside-out under one admin script with
-  in-script restore (software-tested; live apply / libssl / attach still
-  operator-unvalidated). A dormant Accessibility MEASUREMENT probe is
-  implemented/software-tested and not executed (not a reader; the probe itself
-  adds no menu item and no runtime wiring; no live AX/TCC/USB evidence). The
-  separate RB7216 Patch Rekordbox menubar action is restored in source/frozen
-  menus (target entitlement only; does not unblock AWR-222). make_stick stamps
-  GENERATION into Info.plist (fallback 0.0.1). No install.command/purge.command
-  helpers. SOFTWARE-VALIDATED COMPONENTS ONLY / FOREIGN-MAC LIVE READS
-  UNSUPPORTED.
+  Rekordbox patch, and software tests. Target get-task-allow is the expected
+  TimecodeLink-style access mechanism. A positive entitlement proves the
+  Rekordbox target patch only — not a live attach. Stock Apple-Silicon
+  foreign-Mac attach after successful patch + deep verify + GTA=true +
+  relaunch is live-unvalidated / unknown (not confirmed unsupported; not a
+  confirmed caller-authorization blocker). Earlier foreign-Mac and RB7216
+  attempts never reached that clean pre-attach state. Rekordbox patch signing
+  is inside-out under one admin script with in-script restore (software-tested;
+  live apply / libssl / attach still operator-unvalidated). A dormant
+  Accessibility MEASUREMENT probe is implemented/software-tested and not
+  executed (not a reader; no menu item; no runtime wiring). The separate
+  RB7216 Patch Rekordbox menubar action is restored in source/frozen menus
+  (target entitlement only). make_stick stamps GENERATION into Info.plist
+  (fallback 0.0.1). No install.command/purge.command helpers.
+  SOFTWARE-VALIDATED COMPONENTS ONLY / STOCK FOREIGN-MAC ATTACH
+  LIVE-UNVALIDATED / UNKNOWN.
 ---
 
 # USB Bridge Launcher — Runbook (M1 build · M2 install/PURGE)
 
-> **STOP before another foreign-Mac build or show test (AWR-222, 2026-07-12).**
-> The app and installer can be packaged, but the current frozen bridge cannot
-> obtain live Rekordbox memory reads on a stock foreign Mac. Both physical tests
-> failed. **Patch Rekordbox** verifies only a patch on the Rekordbox target;
-> it does not authorize the bridge caller. Rebuilding the same package will not
-> change this. Do not weaken SIP or improvise signing on a guest Mac.
+> **Pause before another foreign-Mac show test (AWR-222 honesty, 2026-07-13).**
+> Packaging can ship, but stock Apple-Silicon foreign-Mac attach after a
+> successful patch + deep verify + GTA=true + relaunch is still
+> **live-unvalidated / unknown** — not confirmed unsupported. Target
+> `get-task-allow` matches the TimecodeLink model; a positive check proves the
+> Rekordbox patch only, not a live attach. Earlier foreign-Mac packaging
+> failures and the RB7216 apply (failed on `libssl.3.dylib`, GTA absent) never
+> reached that clean pre-attach state, so they cannot prove caller denial.
+> Do not weaken SIP on a guest Mac. The next decisive gate is that ordered
+> stock-SIP live run; only a `task_for_pid` denial after every prior step
+> passes may be classified as caller attach denial.
 
 What M1 delivers: a double-clickable macOS app (`RBSS Bridge.app`, shipped as
 `RBSS Bridge.dmg`) that carries its own Python and the whole `rb_ss_bridge_v2`
@@ -138,8 +146,9 @@ approval and a rebuilt/installed app that includes the probe. Do not treat this
 mode as supported, operational, validated, or a replacement reader. The dormant
 AX measurement probe itself adds no menu item and no runtime wiring. The separate
 RB7216 **Patch Rekordbox** action is intentionally restored in both source/frozen
-menus; it targets only the Rekordbox entitlement and does not unblock
-AWR-222/stock foreign-Mac reads.
+menus; it targets only the Rekordbox entitlement. Positive entitlement ≠ live
+attach proof; stock foreign-Mac attach after clean patch+verify+GTA+relaunch
+remains live-unvalidated / unknown.
 
 **Frozen menubar lifecycle (Task 3 choice):** launch-on-click, no auto-restart.
 The menubar owns the bridge as its OWN child process (spawns `--run-bridge`, keeps
@@ -261,11 +270,16 @@ carries the secrets it shipped with.
   `[bundle]` extra + spec `hiddenimports`; the maintainer's Homebrew Python already
   has it, but the clean build venv needs it or scripted/autoloop selection silently
   dies on the guest.
-- **Read authorization is not solved (AWR-222).** The bridge bundle is ad-hoc
-  signed without caller authorization; patching only Rekordbox with
-  `get-task-allow` does not create a supported stock-macOS `task_for_pid` path.
-  The menubar may surface `RB reads blocked`, but its target-patch status is not
-  proof that live reads are enabled. `unsupported_version` and transient
+- **Target patch is not yet a proven stock-Mac attach (AWR-222).** Target
+  `get-task-allow` is the expected TimecodeLink-style access mechanism. The
+  bridge bundle is still ad-hoc signed without caller debugger entitlement;
+  that fact alone does **not** prove stock attach is impossible. A positive
+  menubar/target entitlement check proves the Rekordbox patch only — not a
+  live `task_for_pid` attach. Stock Apple-Silicon foreign-Mac attach after
+  successful patch + deep verify + GTA=true + relaunch remains
+  live-unvalidated / unknown. Earlier failed runs never reached that state.
+  The menubar may surface `RB reads blocked`, but that is not by itself proof
+  of caller denial after a clean GTA path. `unsupported_version` and transient
   `attach_failed` are not standing menubar reasons today; inspect the bridge log.
 - **KNOWN LIMITATION — Local Network (TCC) denial is not detected.** macOS has no
   Python-visible API for the Local Network permission state, so if the guest denies
@@ -292,11 +306,16 @@ The stick ships no `.command` installers and no duplicate payload. Open
 The installed menubar owns **Purge RBSS Bridge…**. Older manifests created by
 the retired shell helpers remain readable so native Purge can clean them safely.
 
-## Operator parity run (PAUSED by AWR-222)
+## Operator parity run (PAUSED pending stock-SIP live gate)
 
-Do not start this physical run until the foreign-Mac reader authority is
-redesigned and the replacement has its own explicit test approval. The table
-remains the later acceptance checklist; it is not a current instruction to retry.
+Do not treat earlier foreign-Mac packaging failures or the RB7216
+`libssl.3.dylib` apply failure as proof that stock attach is impossible —
+neither reached patch OK → deep verify OK → main GTA=true → relaunch before
+attach. Resume the physical attach gate only as an ordered stock-SIP
+Apple-Silicon live run (patch → deep verify → GTA=true → relaunch → attach).
+Do not weaken guest SIP. Only a `task_for_pid` denial after every prior step
+passes may be classified as caller attach denial. The table remains the later
+acceptance checklist.
 
 | Check | Expected | Pass? |
 |---|---|---|
@@ -312,13 +331,14 @@ remains the later acceptance checklist; it is not a current instruction to retry
 | Laser output | laser scenes fire | ☐ |
 | LED / Govee frames | realtime frames render (frame-engine child alive) | ☐ |
 | Stream Deck | pads live | ☐ |
-| **Memory reads** | **BLOCKED:** current package cannot establish supported stock-macOS caller authorization (AWR-222) | ☐ |
+| **Memory reads** | **LIVE-UNVALIDATED / UNKNOWN** on stock SIP until ordered patch + deep verify + GTA=true + relaunch + attach (AWR-222); do not classify as confirmed caller denial beforehand | ☐ |
 | Test the Lights | recorded session drives the rig; refuses while Rekordbox open | ☐ |
 
-**Memory-read STOP rule:** already fired on both physical attempts. Do not
-improvise entitlements, weaken SIP, or repeat the same build. Resume only after
-AWR-222 selects and software-proves a replacement reader path and the operator
-approves a new test session.
+**Memory-read STOP rule:** earlier physical attempts failed, but they are not
+proof of post-GTA caller denial. Do not improvise entitlements or weaken SIP
+on a guest Mac. Resume only with the ordered stock-SIP live gate above; treat
+AX as a dormant measurement probe, not a selected replacement reader, unless
+that gate shows green-GTA + red-attach.
 
 Evidence class until this table is green: **SOFTWARE-VALIDATED ONLY /
 HARDWARE-UNVALIDATED**.
