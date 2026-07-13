@@ -32,7 +32,7 @@ jobs:
             'b1007870c5560fb0bfb56c75a125b80df4d413b6d3afca1935be8b1cb4613a99' /tmp/rb-installers/rb-7.2.16.zip \
             | shasum -a 256 -c -
 
-      - name: Extract binaries and app bundles
+      - name: Extract arm64 binaries
         shell: bash
         run: |
           set -euo pipefail
@@ -43,14 +43,12 @@ jobs:
             pkg="$(find "$work/zip" \( -type d -o -type f \) -name '*.pkg' -print -quit)"
             test -n "$pkg"
             pkgutil --expand-full "$pkg" "$work/pkg-expanded"
-            app="$(find "$work/pkg-expanded" -type d -path '*/rekordbox.app' -print -quit)"
-            test -n "$app"
-            ditto "$app" "$work/rekordbox.app"
-            binary="$work/rekordbox.app/Contents/MacOS/rekordbox"
-            test -f "$binary"
-            cp "$binary" "$work/rekordbox"
-            chmod +x "$work/rekordbox"
-            file "$work/rekordbox"
+            binary="$(find "$work/pkg-expanded" -type f -path '*/rekordbox.app/Contents/MacOS/rekordbox' -print -quit)"
+            test -n "$binary"
+            cp "$binary" "$work/rekordbox-universal"
+            lipo "$binary" -thin arm64 -output "$work/rekordbox-arm64"
+            chmod +x "$work/rekordbox-arm64"
+            file "$work/rekordbox-arm64"
           done
 
       - name: Derive symbol-backed anchors
@@ -59,10 +57,9 @@ jobs:
           set -euo pipefail
           mkdir -p /tmp/rb-offset-evidence
           for version in 7.2.14 7.2.16; do
-            binary="/tmp/rb-${version}/rekordbox"
+            binary="/tmp/rb-${version}/rekordbox-universal"
             {
               echo "=== rekordbox ${version} ==="
-              file "$binary"
               shasum -a 256 "$binary"
               python3 tools/rekordbox_derive_offsets.py --binary "$binary"
               echo '=== anchor symbols ==='
@@ -71,187 +68,155 @@ jobs:
             nm -arch arm64 -n --defined-only "$binary" > "/tmp/rb-offset-evidence/${version}-nm.txt"
           done
 
-      - name: Map the merged-global deck root
+      - name: Trace deck-root code references across versions
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY' | tee /tmp/rb-offset-evidence/deck-root-map.txt
+          python3 -m pip install --quiet capstone==5.0.6
+          cat > /tmp/trace-rb-xrefs.py <<'PY'
+          from __future__ import annotations
+          import bisect, difflib, re, struct
+          from dataclasses import dataclass
           from pathlib import Path
+          from capstone import Cs, CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN
+          from capstone.arm64 import ARM64_INS_ADRP, ARM64_INS_ADD, ARM64_OP_REG, ARM64_OP_IMM, ARM64_OP_MEM
 
-          def merged(path):
+          LC_SEGMENT_64=0x19
+          IMAGE_BASE=0x100000000
+          KNOWN_14=IMAGE_BASE+0x04E0BFE0
+
+          @dataclass
+          class Sym:
+              addr:int; typ:str; name:str
+
+          def text_section(path:str):
+              data=Path(path).read_bytes()
+              magic,_,_,_,ncmds,_,_,_=struct.unpack_from('<IiiIIIII',data,0)
+              if magic != 0xFEEDFACF: raise RuntimeError(f'bad Mach-O magic {magic:#x}')
+              off=32
+              for _ in range(ncmds):
+                  cmd,cmdsize=struct.unpack_from('<II',data,off)
+                  if cmd==LC_SEGMENT_64:
+                      _,_,segraw,_,_,_,_,_,_,nsects,_=struct.unpack_from('<II16sQQQQiiII',data,off)
+                      so=off+72
+                      for _ in range(nsects):
+                          sectraw,secseg,addr,size,fileoff,*_=struct.unpack_from('<16s16sQQ8I',data,so)
+                          sect=sectraw.split(b'\0',1)[0].decode(); seg=secseg.split(b'\0',1)[0].decode()
+                          if seg=='__TEXT' and sect=='__text':
+                              return addr,data[fileoff:fileoff+size]
+                          so+=80
+                  off+=cmdsize
+              raise RuntimeError('no __TEXT,__text')
+
+          def symbols(path:str):
               out=[]
               for line in Path(path).read_text(errors='replace').splitlines():
                   p=line.split(' ',2)
-                  if len(p)==3 and '__MergedGlobals' in p[2]:
-                      try: out.append((int(p[0],16),p[1],p[2]))
-                      except ValueError: pass
+                  if len(p)!=3: continue
+                  try:a=int(p[0],16)
+                  except ValueError:continue
+                  out.append(Sym(a,p[1],p[2]))
               return out
 
-          base=0x100000000
-          known_root=base+0x04E0BFE0
-          a=merged('/tmp/rb-offset-evidence/7.2.14-nm.txt')
-          b=merged('/tmp/rb-offset-evidence/7.2.16-nm.txt')
-          nearest=min(range(len(a)), key=lambda i: abs(a[i][0]-known_root))
-          aa=a[nearest][0]
-          delta=known_root-aa
-          bb=b[nearest][0]
-          candidate=bb+delta
-          print(f'7.2.14 merged_count={len(a)} 7.2.16 merged_count={len(b)}')
-          print(f'nearest_ordinal={nearest}')
-          print(f'7.2.14 symbol_rva=0x{aa-base:08X} known_root_rva=0x{known_root-base:08X} root_minus_symbol={delta:+#x}')
-          print(f'7.2.16 same_ordinal_symbol_rva=0x{bb-base:08X}')
-          print(f'7.2.16 candidate_deck_root_rva=0x{candidate-base:08X}')
-          assert nearest == 2240
-          assert delta == -0x18
-          assert candidate-base == 0x04E9B670
+          class Binary:
+              def __init__(self,binpath,nmpath):
+                  self.base,self.code=text_section(binpath)
+                  md=Cs(CS_ARCH_ARM64,CS_MODE_LITTLE_ENDIAN); md.detail=True
+                  self.ins=list(md.disasm(self.code,self.base))
+                  self.byaddr={x.address:i for i,x in enumerate(self.ins)}
+                  self.syms=symbols(nmpath)
+                  self.funcs=sorted([s for s in self.syms if s.typ in ('t','T')],key=lambda s:s.addr)
+                  self.faddrs=[s.addr for s in self.funcs]
+                  self.func_by_name={}
+                  for i,s in enumerate(self.funcs): self.func_by_name.setdefault(s.name,[]).append(i)
+                  self.refs=self._refs()
+                  self.refs_by_addr={}
+                  for r in self.refs:self.refs_by_addr.setdefault(r[0],[]).append(r)
+              def func_index_for(self,addr):
+                  i=bisect.bisect_right(self.faddrs,addr)-1
+                  return i if i>=0 else None
+              def func_range(self,i):
+                  start=self.funcs[i].addr
+                  end=self.funcs[i+1].addr if i+1<len(self.funcs) else self.base+len(self.code)
+                  a=bisect.bisect_left([x.address for x in self.ins],start)
+                  b=bisect.bisect_left([x.address for x in self.ins],end)
+                  return a,b
+              def _refs(self):
+                  refs=[]; tracked={}
+                  for idx,ins in enumerate(self.ins):
+                      tracked={r:v for r,v in tracked.items() if idx-v[1] <= 12}
+                      ops=ins.operands
+                      # Memory access based on a recent ADRP/ADD address base.
+                      for op in ops:
+                          if op.type==ARM64_OP_MEM and op.mem.base in tracked:
+                              target=tracked[op.mem.base][0]+op.mem.disp
+                              refs.append((ins.address,target,'mem',ins.mnemonic,ins.op_str))
+                      new=[]
+                      if ins.id==ARM64_INS_ADD and len(ops)>=3 and ops[0].type==ARM64_OP_REG and ops[1].type==ARM64_OP_REG and ops[2].type==ARM64_OP_IMM and ops[1].reg in tracked:
+                          target=tracked[ops[1].reg][0]+ops[2].imm
+                          refs.append((ins.address,target,'add',ins.mnemonic,ins.op_str))
+                          new.append((ops[0].reg,target))
+                      try:_,writes=ins.regs_access()
+                      except Exception:writes=[]
+                      for r in writes:tracked.pop(r,None)
+                      if ins.id==ARM64_INS_ADRP and len(ops)>=2 and ops[0].type==ARM64_OP_REG and ops[1].type==ARM64_OP_IMM:
+                          tracked[ops[0].reg]=(ops[1].imm,idx)
+                      for r,target in new:tracked[r]=(target,idx)
+                  return refs
+              def norm(self,ins):
+                  s=ins.mnemonic+' '+ins.op_str
+                  s=re.sub(r'#-?0x[0-9a-f]+|#-?\d+','#IMM',s)
+                  return s
+              def function_payload(self,i):
+                  a,b=self.func_range(i)
+                  ins=self.ins[a:b]
+                  local={x.address:j for j,x in enumerate(ins)}
+                  refs=[]
+                  for r in self.refs:
+                      if a < len(self.ins) and self.ins[a].address <= r[0] < (self.ins[b].address if b<len(self.ins) else 1<<64):
+                          refs.append((local.get(r[0]),r))
+                  return ins,refs
+
+          b14=Binary('/tmp/rb-7.2.14/rekordbox-arm64','/tmp/rb-offset-evidence/7.2.14-nm.txt')
+          b16=Binary('/tmp/rb-7.2.16/rekordbox-arm64','/tmp/rb-offset-evidence/7.2.16-nm.txt')
+          known=[r for r in b14.refs if r[1]==KNOWN_14]
+          near=[r for r in b14.refs if abs(r[1]-KNOWN_14)<=0x40]
+          print(f'known_root=0x{KNOWN_14:x} exact_xrefs={len(known)} near_xrefs={len(near)}')
+          source=known or near
+          candidates=[]
+          for r in source:
+              fi=b14.func_index_for(r[0]); fs=b14.funcs[fi]
+              print(f'\n7.2.14 xref ins=0x{r[0]:x} target=0x{r[1]:x} kind={r[2]} {r[3]} {r[4]}')
+              print(f'  function={fs.name} start=0x{fs.addr:x}')
+              same=b16.func_by_name.get(fs.name,[])
+              if not same:
+                  print('  7.2.16 same function: MISSING'); continue
+              ins14,refs14=b14.function_payload(fi)
+              li=next((j for j,x in enumerate(ins14) if x.address==r[0]),None)
+              for fj in same:
+                  ins16,refs16=b16.function_payload(fj)
+                  seq14=[b14.norm(x) for x in ins14]
+                  seq16=[b16.norm(x) for x in ins16]
+                  sm=difflib.SequenceMatcher(None,seq14,seq16,autojunk=False)
+                  mapped=[]
+                  for block in sm.get_matching_blocks():
+                      if block.a <= li < block.a+block.size:
+                          mapped.append(block.b+(li-block.a))
+                  print(f'  7.2.16 function start=0x{b16.funcs[fj].addr:x} ins14={len(ins14)} ins16={len(ins16)} ratio={sm.ratio():.4f} mapped={mapped}')
+                  refmap={idx:rr for idx,rr in refs16 if idx is not None}
+                  for m in mapped:
+                      for k in range(max(0,m-3),min(len(ins16),m+4)):
+                          rr=refmap.get(k)
+                          if rr:
+                              print(f'    mapped_ref idx={k} ins=0x{rr[0]:x} target=0x{rr[1]:x} rva=0x{rr[1]-IMAGE_BASE:08x} kind={rr[2]} {rr[3]} {rr[4]}')
+                              if 0x04D00000 <= rr[1]-IMAGE_BASE <= 0x04F10000:
+                                  candidates.append(rr[1])
+          from collections import Counter
+          print('\nCANDIDATE_COUNTS')
+          for addr,n in Counter(candidates).most_common(): print(f'0x{addr-IMAGE_BASE:08X} count={n}')
+          if not source: raise SystemExit('No static xref found to known 7.2.14 deck root')
           PY
-
-      - name: Prepare passive live-chain probe
-        shell: bash
-        run: |
-          cat > /tmp/rb-probe.py <<'PY'
-          import argparse, ctypes, math, re, struct, subprocess
-
-          KERN_SUCCESS=0
-          lib=ctypes.CDLL('/usr/lib/libSystem.B.dylib', use_errno=True)
-          task_self=ctypes.c_uint32.in_dll(lib, 'mach_task_self_')
-          tfp=lib.task_for_pid
-          tfp.restype=ctypes.c_int
-          tfp.argtypes=[ctypes.c_uint32,ctypes.c_int,ctypes.POINTER(ctypes.c_uint32)]
-          vmread=lib.mach_vm_read_overwrite
-          vmread.restype=ctypes.c_int
-          vmread.argtypes=[ctypes.c_uint32,ctypes.c_uint64,ctypes.c_uint64,ctypes.c_uint64,ctypes.POINTER(ctypes.c_uint64)]
-
-          def task_for_pid(pid):
-              out=ctypes.c_uint32(0)
-              kr=tfp(task_self.value,pid,ctypes.byref(out))
-              if kr != KERN_SUCCESS: raise OSError(f'task_for_pid failed kr={kr}')
-              return out.value
-          def read(task,addr,n):
-              buf=(ctypes.c_uint8*n)(); got=ctypes.c_uint64(0)
-              kr=vmread(task,addr,n,ctypes.addressof(buf),ctypes.byref(got))
-              if kr != KERN_SUCCESS or got.value != n: raise OSError(f'read 0x{addr:x}/{n} kr={kr} got={got.value}')
-              return bytes(buf)
-          def u64(t,a): return struct.unpack('<Q',read(t,a,8))[0]
-          def i64(t,a): return struct.unpack('<q',read(t,a,8))[0]
-          def f32(t,a): return struct.unpack('<f',read(t,a,4))[0]
-          def u8(t,a): return read(t,a,1)[0]
-          def base_for(pid):
-              out=subprocess.run(['vmmap','--wide',str(pid)],capture_output=True,text=True,check=True).stdout
-              m=re.search(r'Load Address:\s*0x([0-9a-fA-F]+)',out)
-              if m:return int(m.group(1),16)
-              for line in out.splitlines():
-                  if 'rekordbox' in line and '__TEXT' in line:
-                      m=re.match(r'\s*([0-9a-fA-F]+)-',line)
-                      if m:return int(m.group(1),16)
-              raise RuntimeError('no base')
-          def walk(t,base,hops,final):
-              addr=base; trace=[]
-              for i,hop in enumerate(hops):
-                  loc=addr+hop; ptr=u64(t,loc)
-                  trace.append((i,hop,loc,ptr))
-                  if ptr==0: raise RuntimeError(f'null at hop {i} loc=0x{loc:x}; trace={trace}')
-                  addr=ptr
-              return addr+final,trace
-          def show_chain(t,base,name,hops,final,kind):
-              try:
-                  addr,trace=walk(t,base,hops,final)
-                  if kind=='u8': value=u8(t,addr)
-                  elif kind=='f32': value=f32(t,addr)
-                  elif kind=='i64': value=i64(t,addr)
-                  elif kind=='ptr': value=u64(t,addr)
-                  else: value=read(t,addr,32).hex()
-                  print(f'CHAIN {name} OK final=0x{addr:x} value={value!r}')
-                  for i,h,l,p in trace: print(f'  hop{i} +0x{h:x} @0x{l:x} -> 0x{p:x}')
-                  return True
-              except Exception as e:
-                  print(f'CHAIN {name} FAIL {e}')
-                  return False
-          def score_deck_root(t,base,root):
-              score=0; details=[]
-              for slot in (0,8,0x10,0x18):
-                  try:
-                      p1=u64(t,base+root+slot); p2=u64(t,p1+0x2c8)
-                      bpm=f32(t,p2+0x188); pos=i64(t,p2+0x120)
-                      good=math.isfinite(bpm) and -1.0 <= bpm <= 400.0 and abs(pos) < 10**16
-                      score += 1 if good else 0
-                      details.append(f'slot=0x{slot:x}:p1=0x{p1:x},p2=0x{p2:x},bpm={bpm},pos={pos},good={good}')
-                  except Exception as e: details.append(f'slot=0x{slot:x}:FAIL:{e}')
-              return score,details
-
-          ap=argparse.ArgumentParser(); ap.add_argument('--pid',type=int,required=True); ap.add_argument('--version',required=True)
-          a=ap.parse_args(); t=task_for_pid(a.pid); base=base_for(a.pid)
-          roots={'7.2.14':(0x04E514D8,0x04E0BFE0,0x04E51F08),'7.2.16':(0x04EE71D8,0x04E9B670,0x04EE7C08)}
-          master,deck,anlz=roots[a.version]
-          print(f'VERSION {a.version} pid={a.pid} base=0x{base:x} task={t}')
-          print(f'ROOTS master=0x{master:08x} deck=0x{deck:08x} anlz=0x{anlz:08x}')
-          show_chain(t,base,'master',[master,0x20,0x278],0x124,'u8')
-          track_mid=(0x88,0x70,0x48,0x48)
-          slots=(0,8,0x10,0x18)
-          anlz_slots=(8,0x10,0x18,0x20)
-          for d,(slot,amid,aslot) in enumerate(zip(slots,track_mid,anlz_slots)):
-              show_chain(t,base,f'd{d}.bpm',[deck,slot,0x2c8],0x188,'f32')
-              show_chain(t,base,f'd{d}.pos',[deck,slot,0x2c8],0x120,'i64')
-              show_chain(t,base,f'd{d}.track',[deck,slot,0x270,0x38,amid,0x28,0xf0],0,'bytes')
-              show_chain(t,base,f'd{d}.anlz',[anlz,aslot],0x3f0,'ptr')
-          print('DECK_ROOT_NEIGHBORHOOD')
-          for delta in range(-0x40,0x41,8):
-              score,details=score_deck_root(t,base,deck+delta)
-              if score or delta==0:
-                  print(f'  rva=0x{deck+delta:08x} delta={delta:+#x} score={score}/4')
-                  for x in details: print('   ',x)
-          PY
-
-      - name: Re-sign and live-probe both versions
-        shell: bash
-        continue-on-error: true
-        run: |
-          set -uo pipefail
-          cat > /tmp/rb-entitlements.plist <<'PLIST'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0"><dict>
-            <key>com.apple.security.get-task-allow</key><true/>
-            <key>com.apple.security.cs.disable-library-validation</key><true/>
-            <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
-          </dict></plist>
-          PLIST
-          for version in 7.2.14 7.2.16; do
-            app="/tmp/rb-${version}/rekordbox.app"
-            out="/tmp/rb-offset-evidence/${version}-live.txt"
-            {
-              echo "=== LIVE PROBE ${version} ==="
-              codesign --force --deep --sign - --entitlements /tmp/rb-entitlements.plist "$app"
-              codesign -d --entitlements - "$app" 2>&1
-              "$app/Contents/MacOS/rekordbox" >"/tmp/rb-${version}-stdout.log" 2>&1 &
-              launch_pid=$!
-              pid=''
-              for _ in $(seq 1 60); do
-                pid="$(pgrep -x rekordbox | tail -1 || true)"
-                [[ -n "$pid" ]] && break
-                sleep 1
-              done
-              echo "launch_pid=$launch_pid observed_pid=$pid"
-              if [[ -z "$pid" ]]; then
-                echo 'NO_PROCESS'
-                tail -100 "/tmp/rb-${version}-stdout.log" || true
-              else
-                sleep 15
-                python3 /tmp/rb-probe.py --pid "$pid" --version "$version"
-              fi
-              kill "$launch_pid" 2>/dev/null || true
-              pkill -x rekordbox 2>/dev/null || true
-              pkill -f rekordboxAgent 2>/dev/null || true
-              sleep 3
-            } 2>&1 | tee "$out"
-          done
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: rekordbox-7.2.16-offset-evidence
-          path: /tmp/rb-offset-evidence
-          if-no-files-found: error
-          retention-days: 7
+          python3 /tmp/trace-rb-xrefs.py | tee /tmp/rb-offset-evidence/deck-xrefs.txt
 
       - name: Commit compact evidence report
         shell: bash
@@ -266,14 +231,10 @@ jobs:
             echo
             cat /tmp/rb-offset-evidence/7.2.16-anchors.txt
             echo
-            cat /tmp/rb-offset-evidence/deck-root-map.txt
-            echo
-            cat /tmp/rb-offset-evidence/7.2.14-live.txt 2>/dev/null || true
-            echo
-            cat /tmp/rb-offset-evidence/7.2.16-live.txt 2>/dev/null || true
+            cat /tmp/rb-offset-evidence/deck-xrefs.txt
           } > "$report"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add "$report"
-          git commit -m 'chore(data): record live 7.2.16 chain evidence'
+          git commit -m 'chore(data): record 7.2.16 deck-root xrefs'
           git push
