@@ -1476,14 +1476,18 @@ class FrozenDefectHelperTests(BridgeMenubarTests):
                 {"verdict": "enabled", "detail": "/Applications/rekordbox 7/rekordbox.app"},
                 "",
             )
-        alert.setMessageText_.assert_called_once_with("Rekordbox target patch installed")
+        # Exit 0 may mean already-present; enabled dialog must verify, not claim install.
+        alert.setMessageText_.assert_called_once_with("Rekordbox target patch verified")
         body = alert.setInformativeText_.call_args.args[0]
-        self.assertIn("verified", body)
+        self.assertIn("entitlement is present", body)
+        self.assertNotIn("installed", alert.setMessageText_.call_args.args[0].lower())
+        self.assertNotIn("installed", body.lower())
         self.assertIn("/Applications/rekordbox 7/rekordbox.app", body)
         self.assertIn("does not authorize", body)
         self.assertIn("stock foreign Mac", body)
         self.assertIn("RB reads blocked", body)
         alert.runModal.assert_called_once_with()
+        # Positive entitlement verification still drives disabled "Rekordbox Patched".
         menu.finishRbReadsCheck_.assert_called_once_with("enabled")
 
     def test_show_rb_reads_verdict_absent_says_did_not_take_effect(self) -> None:

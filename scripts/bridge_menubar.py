@@ -2052,9 +2052,12 @@ class BridgeMenuBar(NSObject):
             verdict if verdict in ("enabled", "not_enabled") else "unknown"
         )
         if verdict == "enabled":
-            title = "Rekordbox target patch installed"
+            # Exit 0 covers both a fresh apply and "already present"; never claim
+            # a fresh install. finishRbReadsCheck_ still paints Patched only on
+            # this positive entitlement verdict.
+            title = "Rekordbox target patch verified"
             body = (
-                f"The target patch was verified on {detail}.\n\n"
+                f"The target get-task-allow entitlement is present on {detail}.\n\n"
                 "This does not authorize the bridge caller or prove live reads. "
                 "The current USB package cannot read Rekordbox on a stock "
                 "foreign Mac (AWR-222). On the maintainer Mac, only the running "

@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 3f85dbb
+last_verified_commit: 995ead4
 last_verified_date: 2026-07-13
-validation_scope: software-only; runtime command rail and slim source/frozen menubar inventory tested, including the restored state-aware Patch Rekordbox action (target entitlement only; no live-apply claim); AWR-222 dormant AX probe is packaged dispatch only (no menu item, not executed); native install failure alerts use plain-language copy at the menubar boundary; frozen app and hardware behavior unvalidated
+validation_scope: software-only; runtime command rail and slim source/frozen menubar inventory tested, including the restored state-aware Patch Rekordbox action (target entitlement only; exit-0 enabled dialog uses verification wording, not a fresh-install claim); AWR-222 dormant AX probe is packaged dispatch only (no menu item of its own, not executed); native install failure alerts use plain-language copy at the menubar boundary; frozen app and hardware behavior unvalidated
 ---
 
 # Runtime Commands Subsystem
@@ -123,13 +123,15 @@ SoundSwitch pack-player boundary (T7c/T7e):
   **Rekordbox Patched** (greyed) only after `has_get_task_allow` is positively
   verified on the target; **Patch Rekordbox** (actionable) when absent,
   unknown, or not yet checked; **Patching Rekordbox…** (greyed) while the
-  watched child runs. A positive target entitlement does **not** prove caller
-  authorization, direct reads, or stock foreign-Mac parity (AWR-222 still
-  blocked). The old standing `Rekordbox target patch: …` status row stays
-  absent; Status remains exactly four disabled rows. Operator-visible copy
-  never says "Enable Rekordbox Reads". Signing/recovery code behind the click
-  remains software-tested / hardware-unvalidated — this surface does not claim
-  a live apply.
+  watched child runs. Exit 0 with a watcher-enabled verdict shows **Rekordbox
+  target patch verified** (entitlement present) — never a fresh-install claim —
+  and still only greys **Rekordbox Patched** after that positive check. A
+  positive target entitlement does **not** prove caller authorization, direct
+  reads, or stock foreign-Mac parity (AWR-222 still blocked). The old standing
+  `Rekordbox target patch: …` status row stays absent; Status remains exactly
+  four disabled rows. Operator-visible copy never says "Enable Rekordbox
+  Reads". Signing/recovery code behind the click remains software-tested /
+  hardware-unvalidated — this surface does not claim a live apply.
 - The Rebuild USB item is state-aware like the export item
   (usb_rebuild_button_state_spec_2026_07_12): **No USB Found** (no PIONEER
   mount, greyed), **USB Bridge Rebuilt** (greyed; the stamped stick generation
@@ -149,10 +151,11 @@ SoundSwitch pack-player boundary (T7c/T7e):
   normal Health Check remain absent from both editions. The detailed facts
   remain available in the live log and status JSON; removing menu items does
   not remove their runtime commands.
-- AWR-222 adds no everyday menu item. The dormant Accessibility MEASUREMENT
-  probe is packaged dispatch only (`--probe-rekordbox-accessibility`); it is
-  implemented/software-tested/not executed, not a reader, and does not change
-  the menubar inventory or runtime command rail. AWR-222 remains blocked.
+- AWR-222's dormant Accessibility MEASUREMENT probe adds no menu item and no
+  runtime wiring (`--probe-rekordbox-accessibility` is packaged dispatch only;
+  implemented/software-tested/not executed; not a reader). The separate RB7216
+  **Patch Rekordbox** action above is intentionally restored in both menus and
+  does not unblock AWR-222/stock foreign-Mac reads. AWR-222 remains blocked.
 - Native Install/Update/Retry failure alerts use
   `install_controller.operator_install_failure_message` at the menubar boundary
   only. Technical `failed_step` strings stay in the machine record; the alert
