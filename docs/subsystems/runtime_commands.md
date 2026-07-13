@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 4f49eb2
-last_verified_date: 2026-07-12
-validation_scope: software-only; runtime command rail and slim source/frozen menubar inventory tested; AWR-222 dormant AX probe is packaged dispatch only (no menu item, not executed); native install failure alerts use plain-language copy at the menubar boundary; frozen app and hardware behavior unvalidated
+last_verified_commit: 3f85dbb
+last_verified_date: 2026-07-13
+validation_scope: software-only; runtime command rail and slim source/frozen menubar inventory tested, including the restored state-aware Patch Rekordbox action (target entitlement only; no live-apply claim); AWR-222 dormant AX probe is packaged dispatch only (no menu item, not executed); native install failure alerts use plain-language copy at the menubar boundary; frozen app and hardware behavior unvalidated
 ---
 
 # Runtime Commands Subsystem
@@ -108,13 +108,28 @@ SoundSwitch pack-player boundary (T7c/T7e):
 - The current menubar is intentionally small. `MENU_BLUEPRINT` is pure data and
   one walker builds it. Both editions have the Bridge On/Off control, **Open
   Live Log**, a **Status** submenu with exactly four disabled rows (Bridge,
-  Rekordbox, Lasers, LEDs), and a **Laser Safety** submenu containing
-  **EMERGENCY: Stop All Lasers** and **Resume Lasers**. The safety actions keep
-  their existing `laser_blackout` / `laser_clear_blackout` command behavior.
+  Rekordbox, Lasers, LEDs), a **Laser Safety** submenu containing
+  **EMERGENCY: Stop All Lasers** and **Resume Lasers**, and the restored
+  state-aware **Patch Rekordbox** action. The safety actions keep their
+  existing `laser_blackout` / `laser_clear_blackout` command behavior.
 - The source/main-Mac edition additionally has exactly four operator tools:
   **Laser Pad…**, **LED Pad…**, **SoundSwitch Export…**, and **Rebuild USB
   Bridge…**. The first two live under **Tools**. The frozen/foreign-Mac edition
   hides all four.
+- **Patch Rekordbox** (both editions; user override of the AWR-226/`39a2ffa`
+  slim-menu cut that removed it): dispatches the existing target-patch child
+  only (`--patch-rekordbox`; frozen argv stays `[sys.executable,
+  "--patch-rekordbox"]`, source keeps the usb_launcher argv). Visible titles:
+  **Rekordbox Patched** (greyed) only after `has_get_task_allow` is positively
+  verified on the target; **Patch Rekordbox** (actionable) when absent,
+  unknown, or not yet checked; **Patching Rekordbox…** (greyed) while the
+  watched child runs. A positive target entitlement does **not** prove caller
+  authorization, direct reads, or stock foreign-Mac parity (AWR-222 still
+  blocked). The old standing `Rekordbox target patch: …` status row stays
+  absent; Status remains exactly four disabled rows. Operator-visible copy
+  never says "Enable Rekordbox Reads". Signing/recovery code behind the click
+  remains software-tested / hardware-unvalidated — this surface does not claim
+  a live apply.
 - The Rebuild USB item is state-aware like the export item
   (usb_rebuild_button_state_spec_2026_07_12): **No USB Found** (no PIONEER
   mount, greyed), **USB Bridge Rebuilt** (greyed; the stamped stick generation
@@ -130,10 +145,10 @@ SoundSwitch pack-player boundary (T7c/T7e):
   records the CLICK-time source fingerprint plus the stick's published build
   generation. Menubar UI state still does not prove bridge/watcher process
   state. SoundSwitch status, deck rows, check status, smart-phrasing
-  status/menu, Laser Director menu, Record Session, Test the Lights, normal
-  Health Check, and the Rekordbox target-patch action/status are absent from
-  both editions. The detailed facts remain available in the live log and
-  status JSON; removing menu items does not remove their runtime commands.
+  status/menu, Laser Director menu, Record Session, Test the Lights, and
+  normal Health Check remain absent from both editions. The detailed facts
+  remain available in the live log and status JSON; removing menu items does
+  not remove their runtime commands.
 - AWR-222 adds no everyday menu item. The dormant Accessibility MEASUREMENT
   probe is packaged dispatch only (`--probe-rekordbox-accessibility`); it is
   implemented/software-tested/not executed, not a reader, and does not change
