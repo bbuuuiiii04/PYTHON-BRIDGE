@@ -9,81 +9,82 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: derive-rekordbox-7-2-16
+  cancel-in-progress: true
+
 jobs:
   derive:
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
       - name: Download and verify official installers
+        id: download
+        continue-on-error: true
         shell: bash
         run: |
-          set -euo pipefail
-          mkdir -p /tmp/rb-installers
-          curl --fail --location --retry 3 --retry-all-errors \
-            --output /tmp/rb-installers/rb-7.2.14.zip \
-            'https://cdn.rekordbox.com/files/20260401164249/Install_rekordbox_7_2_14.pkg_.zip'
-          curl --fail --location --retry 3 --retry-all-errors \
-            --output /tmp/rb-installers/rb-7.2.16.zip \
-            'https://cdn.rekordbox.com/files/20260708182003/Install_rekordbox_7_2_16.pkg_.zip'
-          printf '%s  %s\n' \
-            '82e23297ef8dd555a3d134bc57f9a36a22f715f4972c059706f6d1d3e300c020' /tmp/rb-installers/rb-7.2.14.zip \
-            'b1007870c5560fb0bfb56c75a125b80df4d413b6d3afca1935be8b1cb4613a99' /tmp/rb-installers/rb-7.2.16.zip \
-            | shasum -a 256 -c -
+          set -o pipefail
+          mkdir -p /tmp/rb-installers /tmp/rb-offset-evidence
+          {
+            curl --fail --location --retry 3 --retry-all-errors \
+              --output /tmp/rb-installers/rb-7.2.14.zip \
+              'https://cdn.rekordbox.com/files/20260401164249/Install_rekordbox_7_2_14.pkg_.zip'
+            curl --fail --location --retry 3 --retry-all-errors \
+              --output /tmp/rb-installers/rb-7.2.16.zip \
+              'https://cdn.rekordbox.com/files/20260708182003/Install_rekordbox_7_2_16.pkg_.zip'
+            printf '%s  %s\n' \
+              '82e23297ef8dd555a3d134bc57f9a36a22f715f4972c059706f6d1d3e300c020' /tmp/rb-installers/rb-7.2.14.zip \
+              'b1007870c5560fb0bfb56c75a125b80df4d413b6d3afca1935be8b1cb4613a99' /tmp/rb-installers/rb-7.2.16.zip \
+              | shasum -a 256 -c -
+          } 2>&1 | tee /tmp/rb-offset-evidence/download.txt
 
-      - name: Extract arm64 binaries
+      - name: Extract and derive
+        id: derive
+        if: steps.download.outcome == 'success'
+        continue-on-error: true
         shell: bash
         run: |
-          set -euo pipefail
-          for version in 7.2.14 7.2.16; do
-            work="/tmp/rb-${version}"
-            mkdir -p "$work/zip"
-            ditto -x -k "/tmp/rb-installers/rb-${version}.zip" "$work/zip"
-            pkg="$(find "$work/zip" \( -type d -o -type f \) -name '*.pkg' -print -quit)"
-            test -n "$pkg"
-            pkgutil --expand-full "$pkg" "$work/pkg-expanded"
-            binary="$(find "$work/pkg-expanded" -type f -path '*/rekordbox.app/Contents/MacOS/rekordbox' -print -quit)"
-            test -n "$binary"
-            cp "$binary" "$work/rekordbox-universal"
-            lipo "$binary" -thin arm64 -output "$work/rekordbox-arm64"
-            chmod +x "$work/rekordbox-arm64"
-            file "$work/rekordbox-arm64"
-          done
+          set -o pipefail
+          {
+            for version in 7.2.14 7.2.16; do
+              work="/tmp/rb-${version}"
+              mkdir -p "$work/zip"
+              ditto -x -k "/tmp/rb-installers/rb-${version}.zip" "$work/zip"
+              pkg="$(find "$work/zip" \( -type d -o -type f \) -name '*.pkg' -print -quit)"
+              test -n "$pkg"
+              pkgutil --expand-full "$pkg" "$work/pkg-expanded"
+              binary="$(find "$work/pkg-expanded" -type f -path '*/rekordbox.app/Contents/MacOS/rekordbox' -print -quit)"
+              test -n "$binary"
+              cp "$binary" "$work/rekordbox-universal"
+              lipo "$binary" -thin arm64 -output "$work/rekordbox-arm64"
+              chmod +x "$work/rekordbox-arm64"
+              echo "=== ${version} ==="
+              file "$work/rekordbox-arm64"
+              shasum -a 256 "$work/rekordbox-universal"
+              python3 tools/rekordbox_derive_offsets.py --binary "$work/rekordbox-universal"
+              nm -arch arm64 -n --defined-only "$work/rekordbox-universal" > "/tmp/rb-offset-evidence/${version}-nm.txt"
+            done
+          } 2>&1 | tee /tmp/rb-offset-evidence/derive.txt
 
-      - name: Derive symbol-backed anchors
+      - name: Trace matching-function global references
+        id: xrefs
+        if: steps.derive.outcome == 'success'
+        continue-on-error: true
         shell: bash
         run: |
-          set -euo pipefail
-          mkdir -p /tmp/rb-offset-evidence
-          for version in 7.2.14 7.2.16; do
-            binary="/tmp/rb-${version}/rekordbox-universal"
-            {
-              echo "=== rekordbox ${version} ==="
-              shasum -a 256 "$binary"
-              python3 tools/rekordbox_derive_offsets.py --binary "$binary"
-              echo '=== anchor symbols ==='
-              nm -arch arm64 -n --defined-only "$binary" | grep -E '__ZN15ApplicationMode15singletonHolderE|__ZN6browse21LoadedContentsManager15singletonHolderE|__ZN8djengine10DjEngineIF15singletonHolderE'
-            } | tee "/tmp/rb-offset-evidence/${version}-anchors.txt"
-            nm -arch arm64 -n --defined-only "$binary" > "/tmp/rb-offset-evidence/${version}-nm.txt"
-          done
-
-      - name: Trace deck-root references in matching functions
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 -m pip install --quiet capstone==5.0.6
           cat > /tmp/trace-rb-xrefs.py <<'PY'
           from __future__ import annotations
-          import bisect, difflib, re, struct
+          import bisect, struct, traceback
           from dataclasses import dataclass
           from pathlib import Path
-          from collections import Counter
-          from capstone import Cs, CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN
 
           LC_SEGMENT_64=0x19
           IMAGE_BASE=0x100000000
           KNOWN_ROOT=IMAGE_BASE+0x04E0BFE0
+          GLOBAL_LO=IMAGE_BASE+0x04B00000
+          GLOBAL_HI=IMAGE_BASE+0x04F10000
 
           @dataclass
           class Sym:
@@ -91,18 +92,18 @@ jobs:
 
           def macho_text(path:str):
               data=Path(path).read_bytes()
-              magic,_,_,_,ncmds,_,_,_=struct.unpack_from('<IiiIIIII',data,0)
-              if magic != 0xFEEDFACF: raise RuntimeError(f'bad Mach-O magic {magic:#x}')
+              hdr=struct.unpack_from('<IiiIIIII',data,0)
+              if hdr[0] != 0xFEEDFACF: raise RuntimeError(f'bad Mach-O magic {hdr[0]:#x}')
               off=32
-              for _ in range(ncmds):
+              for _ in range(hdr[4]):
                   cmd,cmdsize=struct.unpack_from('<II',data,off)
                   if cmd==LC_SEGMENT_64:
-                      _,_,_,_,_,_,_,_,_,nsects,_=struct.unpack_from('<II16sQQQQiiII',data,off)
+                      seg=struct.unpack_from('<II16sQQQQiiII',data,off)
                       so=off+72
-                      for _ in range(nsects):
-                          sec,seg,addr,size,fileoff,*_=struct.unpack_from('<16s16sQQ8I',data,so)
-                          sec=sec.split(b'\0',1)[0].decode(); seg=seg.split(b'\0',1)[0].decode()
-                          if seg=='__TEXT' and sec=='__text': return addr,data[fileoff:fileoff+size]
+                      for _ in range(seg[9]):
+                          sec=struct.unpack_from('<16s16sQQ8I',data,so)
+                          sn=sec[0].split(b'\0',1)[0]; sg=sec[1].split(b'\0',1)[0]
+                          if sn==b'__text' and sg==b'__TEXT': return sec[2],data[sec[4]:sec[4]+sec[3]]
                           so+=80
                   off+=cmdsize
               raise RuntimeError('missing __TEXT,__text')
@@ -118,147 +119,120 @@ jobs:
               return out
 
           def sext(v,bits):
-              sign=1<<(bits-1)
-              return (v^sign)-sign
+              s=1<<(bits-1); return (v^s)-s
 
-          def adrp_page(word,pc):
+          def adrp(word,pc):
               if word & 0x9F000000 != 0x90000000: return None
-              immlo=(word>>29)&3; immhi=(word>>5)&0x7ffff
-              imm=sext((immhi<<2)|immlo,21)<<12
-              return (pc & ~0xfff)+imm,word&31
+              imm=sext((((word>>5)&0x7ffff)<<2)|((word>>29)&3),21)<<12
+              return (pc&~0xfff)+imm,word&31
 
-          def scan_refs(text_addr: int, code: bytes, start_addr: int|None=None, end_addr: int|None=None, page_filter: int|None=None):
-              lo=max(0,((start_addr or text_addr)-text_addr)//4)
-              hi=min(len(code)//4,((end_addr or (text_addr+len(code)))-text_addr+3)//4)
+          def scan(text,code,start=None,end=None,page=None):
               words=memoryview(code).cast('I')
-              refs=[]
-              for idx in range(lo,hi):
-                  pc=text_addr+idx*4; ap=adrp_page(words[idx],pc)
-                  if not ap: continue
-                  page,rd=ap
-                  if page_filter is not None and page!=page_filter: continue
-                  tracked={rd:page}
-                  for j in range(idx+1,min(idx+13,hi)):
-                      w=words[j]; ipc=text_addr+j*4
-                      # ADD/SUB immediate class. Only ADD is useful for address formation.
-                      if w & 0x7F000000 == 0x11000000 and ((w>>30)&1)==0:
+              lo=max(0,((start or text)-text)//4)
+              hi=min(len(words),((end or (text+len(code)))-text+3)//4)
+              out=[]
+              for i in range(lo,hi):
+                  pc=text+i*4; a=adrp(words[i],pc)
+                  if not a: continue
+                  pg,rd=a
+                  if page is not None and pg!=page: continue
+                  tracked={rd:pg}
+                  for j in range(i+1,min(i+13,hi)):
+                      w=words[j]; ipc=text+j*4
+                      # ADD immediate.
+                      if w&0x7F000000==0x11000000 and ((w>>30)&1)==0:
                           rn=(w>>5)&31; dst=w&31
                           if rn in tracked:
-                              imm12=(w>>10)&0xfff; shift=(w>>22)&1
-                              target=tracked[rn]+(imm12<<(12 if shift else 0))
-                              refs.append((ipc,target,'add'))
-                              tracked[dst]=target
-                      # Load/store unsigned-immediate class; size controls scale.
-                      if w & 0x3B000000 == 0x39000000:
+                              val=tracked[rn]+(((w>>10)&0xfff)<<(12 if ((w>>22)&1) else 0))
+                              out.append((ipc,val,'add')); tracked[dst]=val
+                      # Unsigned-immediate load/store.
+                      if w&0x3B000000==0x39000000:
                           rn=(w>>5)&31
                           if rn in tracked:
-                              imm12=(w>>10)&0xfff; scale=1<<((w>>30)&3)
-                              refs.append((ipc,tracked[rn]+imm12*scale,'mem_uimm'))
-                      # Load/store unscaled immediate class.
-                      if w & 0x3B200C00 == 0x38000000:
+                              val=tracked[rn]+((w>>10)&0xfff)*(1<<((w>>30)&3))
+                              out.append((ipc,val,'mem_uimm'))
+                      # Unscaled load/store.
+                      if w&0x3B200C00==0x38000000:
                           rn=(w>>5)&31
                           if rn in tracked:
-                              imm9=sext((w>>12)&0x1ff,9)
-                              refs.append((ipc,tracked[rn]+imm9,'mem_unscaled'))
-                      # A new ADRP or obvious register-producing instruction invalidates dst.
-                      nap=adrp_page(w,ipc)
-                      if nap: tracked[nap[1]]=nap[0]
-              # Dedupe, preserving order.
-              seen=set(); out=[]
-              for r in refs:
-                  if r not in seen: seen.add(r); out.append(r)
-              return out
+                              out.append((ipc,tracked[rn]+sext((w>>12)&0x1ff,9),'mem_unscaled'))
+                      na=adrp(w,ipc)
+                      if na: tracked[na[1]]=na[0]
+              seen=set(); dedup=[]
+              for r in out:
+                  if r not in seen: seen.add(r); dedup.append(r)
+              return dedup
 
-          class Binary:
-              def __init__(self,binpath,nmpath):
-                  self.text,self.code=macho_text(binpath)
-                  self.syms=parse_nm(nmpath)
-                  self.funcs=sorted([s for s in self.syms if s.typ in ('t','T')],key=lambda s:s.addr)
-                  self.faddrs=[s.addr for s in self.funcs]
-                  self.by_name={}
-                  for i,s in enumerate(self.funcs): self.by_name.setdefault(s.name,[]).append(i)
-              def func_index(self,addr): return bisect.bisect_right(self.faddrs,addr)-1
-              def bounds(self,i):
-                  return self.funcs[i].addr,(self.funcs[i+1].addr if i+1<len(self.funcs) else self.text+len(self.code))
-              def bytes_for(self,i):
-                  a,b=self.bounds(i); return a,self.code[a-self.text:b-self.text]
-              def disasm_norm(self,i):
-                  a,blob=self.bytes_for(i)
-                  md=Cs(CS_ARCH_ARM64,CS_MODE_LITTLE_ENDIAN)
-                  ins=list(md.disasm(blob,a))
-                  seq=[]
-                  for x in ins:
-                      s=x.mnemonic+' '+x.op_str
-                      s=re.sub(r'#-?0x[0-9a-f]+|#-?\d+','#IMM',s)
-                      seq.append(s)
-                  return ins,seq
-              def refs_for(self,i):
-                  a,b=self.bounds(i); return scan_refs(self.text,self.code,a,b)
+          class Bin:
+              def __init__(self,binary,nm):
+                  self.text,self.code=macho_text(binary)
+                  self.funcs=sorted([s for s in parse_nm(nm) if s.typ in ('t','T')],key=lambda s:s.addr)
+                  self.addrs=[s.addr for s in self.funcs]
+                  self.names={}
+                  for i,s in enumerate(self.funcs): self.names.setdefault(s.name,[]).append(i)
+              def fi(self,addr): return bisect.bisect_right(self.addrs,addr)-1
+              def bounds(self,i): return self.funcs[i].addr,(self.funcs[i+1].addr if i+1<len(self.funcs) else self.text+len(self.code))
+              def refs(self,i):
+                  a,b=self.bounds(i)
+                  return [r for r in scan(self.text,self.code,a,b) if GLOBAL_LO<=r[1]<=GLOBAL_HI]
 
-          b14=Binary('/tmp/rb-7.2.14/rekordbox-arm64','/tmp/rb-offset-evidence/7.2.14-nm.txt')
-          b16=Binary('/tmp/rb-7.2.16/rekordbox-arm64','/tmp/rb-offset-evidence/7.2.16-nm.txt')
-          raw14=scan_refs(b14.text,b14.code,page_filter=KNOWN_ROOT&~0xfff)
-          near=[r for r in raw14 if abs(r[1]-KNOWN_ROOT)<=0x80]
-          exact=[r for r in near if r[1]==KNOWN_ROOT]
-          print(f'known_root=0x{KNOWN_ROOT:x} page_scan_refs={len(raw14)} near={len(near)} exact={len(exact)}')
-          source=exact or near
-          if not source: raise SystemExit('No references found near known 7.2.14 deck root')
-
-          candidates=[]
-          for ref in source:
-              fi=b14.func_index(ref[0]); fs=b14.funcs[fi]
-              print(f'\n7.2.14 ref ins=0x{ref[0]:x} target=0x{ref[1]:x} rva=0x{ref[1]-IMAGE_BASE:08X} kind={ref[2]}')
-              print(f'  function={fs.name} start=0x{fs.addr:x}')
-              same=b16.by_name.get(fs.name,[])
-              if not same:
-                  print('  7.2.16 same symbol missing'); continue
-              ins14,seq14=b14.disasm_norm(fi)
-              local14=next((i for i,x in enumerate(ins14) if x.address==ref[0]),None)
-              for fj in same:
-                  ins16,seq16=b16.disasm_norm(fj)
-                  matcher=difflib.SequenceMatcher(None,seq14,seq16,autojunk=False)
-                  mapped=[]
-                  for block in matcher.get_matching_blocks():
-                      if local14 is not None and block.a<=local14<block.a+block.size:
-                          mapped.append(block.b+(local14-block.a))
-                  refs16=b16.refs_for(fj)
-                  by_ins={}
-                  for rr in refs16: by_ins.setdefault(rr[0],[]).append(rr)
-                  print(f'  7.2.16 function=0x{b16.funcs[fj].addr:x} ratio={matcher.ratio():.4f} mapped={mapped} refs={len(refs16)}')
-                  for m in mapped:
-                      for k in range(max(0,m-5),min(len(ins16),m+6)):
-                          for rr in by_ins.get(ins16[k].address,[]):
-                              rva=rr[1]-IMAGE_BASE
-                              print(f'    mapped-near idx={k} ins=0x{rr[0]:x} target=0x{rr[1]:x} rva=0x{rva:08X} kind={rr[2]}')
-                              if 0x04D00000<=rva<=0x04F10000: candidates.append(rr[1])
-                  # Also print data refs in the high global region for this function.
-                  for rr in refs16:
-                      rva=rr[1]-IMAGE_BASE
-                      if 0x04D00000<=rva<=0x04F10000:
-                          print(f'    global-ref ins=0x{rr[0]:x} rva=0x{rva:08X} kind={rr[2]}')
-          print('\nCANDIDATE_COUNTS')
-          for addr,n in Counter(candidates).most_common(): print(f'0x{addr-IMAGE_BASE:08X} count={n}')
+          try:
+              a=Bin('/tmp/rb-7.2.14/rekordbox-arm64','/tmp/rb-offset-evidence/7.2.14-nm.txt')
+              b=Bin('/tmp/rb-7.2.16/rekordbox-arm64','/tmp/rb-offset-evidence/7.2.16-nm.txt')
+              page_refs=scan(a.text,a.code,page=KNOWN_ROOT&~0xfff)
+              source=[r for r in page_refs if r[1]==KNOWN_ROOT]
+              near=[r for r in page_refs if abs(r[1]-KNOWN_ROOT)<=0x80]
+              if not source: source=near
+              print(f'known=0x{KNOWN_ROOT:x} page_refs={len(page_refs)} exact={sum(r[1]==KNOWN_ROOT for r in page_refs)} near={len(near)}')
+              if not source: raise RuntimeError('no known-root xref decoded')
+              votes=[]
+              for ref in source:
+                  ai=a.fi(ref[0]); sym=a.funcs[ai]
+                  ar=a.refs(ai)
+                  exact_indices=[i for i,r in enumerate(ar) if r[0]==ref[0] and r[1]==ref[1]]
+                  print(f'\nSOURCE ins=0x{ref[0]:x} kind={ref[2]} function={sym.name} start=0x{sym.addr:x}')
+                  print(f'7.2.14 high_refs={len(ar)} exact_indices={exact_indices}')
+                  for i,r in enumerate(ar):
+                      if any(abs(i-x)<=5 for x in exact_indices): print(f'  A[{i}] rel=0x{r[0]-sym.addr:x} rva=0x{r[1]-IMAGE_BASE:08X} {r[2]}')
+                  for bi in b.names.get(sym.name,[]):
+                      bs=b.funcs[bi]; br=b.refs(bi)
+                      print(f'7.2.16 function start=0x{bs.addr:x} high_refs={len(br)}')
+                      for idx in exact_indices:
+                          for j in range(max(0,idx-5),min(len(br),idx+6)):
+                              r=br[j]
+                              print(f'  B[{j}] rel=0x{r[0]-bs.addr:x} rva=0x{r[1]-IMAGE_BASE:08X} {r[2]}')
+                          if idx<len(br): votes.append(br[idx][1])
+              from collections import Counter
+              print('\nSAME_ORDINAL_VOTES')
+              for addr,n in Counter(votes).most_common(): print(f'0x{addr-IMAGE_BASE:08X} count={n}')
+          except Exception:
+              traceback.print_exc()
+              raise
           PY
-          python3 /tmp/trace-rb-xrefs.py | tee /tmp/rb-offset-evidence/deck-xrefs.txt
+          set -o pipefail
+          python3 /tmp/trace-rb-xrefs.py 2>&1 | tee /tmp/rb-offset-evidence/xrefs.txt
 
-      - name: Commit compact evidence report
+      - name: Commit diagnostic report
+        if: always()
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p /tmp/rb-offset-evidence
           report='docs/data/rekordbox-7.2.16-offset-evidence.txt'
           {
-            echo '# Generated by .github/workflows/derive-rekordbox-7-2-16.yml'
-            echo '# Official installer hashes verified before extraction.'
+            echo '# Temporary 7.2.16 derivation evidence'
+            echo "run_id=${GITHUB_RUN_ID} run_attempt=${GITHUB_RUN_ATTEMPT} sha=${GITHUB_SHA}"
+            echo "download_outcome=${{ steps.download.outcome }} derive_outcome=${{ steps.derive.outcome }} xrefs_outcome=${{ steps.xrefs.outcome }}"
             echo
-            cat /tmp/rb-offset-evidence/7.2.14-anchors.txt
-            echo
-            cat /tmp/rb-offset-evidence/7.2.16-anchors.txt
-            echo
-            cat /tmp/rb-offset-evidence/deck-xrefs.txt
+            for f in download derive xrefs; do
+              echo "=== ${f} ==="
+              cat "/tmp/rb-offset-evidence/${f}.txt" 2>/dev/null || echo '(no output)'
+              echo
+            done
           } > "$report"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git pull --rebase origin main
           git add "$report"
-          git commit -m 'chore(data): record optimized 7.2.16 deck xrefs'
+          git commit -m 'chore(data): record diagnostic 7.2.16 xrefs' || exit 0
           git push
