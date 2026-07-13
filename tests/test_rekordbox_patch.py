@@ -9,6 +9,7 @@ import io
 import plistlib
 import shlex
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -145,6 +146,175 @@ class SignPlanPureSeamTests(unittest.TestCase):
         self.assertEqual(rp.parse_restore_marker("RBSS_RESTORE_FAIL"), "fail")
         self.assertIsNone(rp.parse_restore_marker("RBSS_SIGN_OK"))
         self.assertIsNone(rp.parse_sign_fail_component("RBSS_SIGN_OK"))
+
+    def test_planner_order_nested_preserve_metadata_final_entitlements(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            app = Path(tmp) / "rekordbox.app"
+            macos = app / "Contents" / "MacOS"
+            nested_app_macos = (
+                app / "Contents" / "Frameworks" / "Helper.app" / "Contents" / "MacOS"
+            )
+            fw_dir = app / "Contents" / "Frameworks"
+            macos.mkdir(parents=True)
+            nested_app_macos.mkdir(parents=True)
+            (app / "Contents" / "Info.plist").write_bytes(
+                plistlib.dumps({
+                    "CFBundleIdentifier": REKORDBOX_BUNDLE_ID,
+                    "CFBundleExecutable": "rekordbox",
+                })
+            )
+            main_exe = macos / "rekordbox"
+            main_exe.write_bytes(b"\x00")
+            shallow_dylib = fw_dir / "shallow.dylib"
+            shallow_dylib.write_bytes(b"\x00")
+            deep_dylib = nested_app_macos / "helper"
+            deep_dylib.write_bytes(b"\x00")
+            nested_app = app / "Contents" / "Frameworks" / "Helper.app"
+            symlink_macho = fw_dir / "link.dylib"
+            symlink_macho.symlink_to(shallow_dylib)
+
+            mach_o = {deep_dylib, shallow_dylib, main_exe}
+
+            def probe(path: Path) -> str:
+                return "Mach-O 64-bit executable" if path in mach_o else "ASCII text"
+
+            paths = rp.iter_signable_code_paths(app, file_probe=probe)
+            self.assertNotIn(main_exe, paths)
+            self.assertNotIn(symlink_macho, paths)
+            self.assertIn(nested_app, paths)
+            self.assertIn(deep_dylib, paths)
+            self.assertIn(shallow_dylib, paths)
+
+            ents = Path(tmp) / "e.plist"
+            ents.write_text("ents")
+            argvs = rp.plan_codesign_argvs(app, ents, file_probe=probe)
+            targets = [a[-1] for a in argvs[:-1]]
+            # Deepest first: nested helper path before shallower framework dylib.
+            self.assertLess(targets.index(str(deep_dylib)), targets.index(str(shallow_dylib)))
+            for nested_argv in argvs[:-1]:
+                self.assertIn("--preserve-metadata=entitlements,identifier,flags,runtime", nested_argv)
+                self.assertNotIn("--deep", nested_argv)
+                self.assertNotIn("--entitlements", nested_argv)
+            final = argvs[-1]
+            self.assertEqual(final[-1], str(app))
+            self.assertIn("--entitlements", final)
+            self.assertNotIn("--deep", final)
+            self.assertNotIn("--preserve-metadata=entitlements,identifier,flags,runtime", final)
+
+    def test_missing_bundle_executable_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            app = Path(tmp) / "rekordbox.app"
+            (app / "Contents").mkdir(parents=True)
+            (app / "Contents" / "Info.plist").write_bytes(
+                plistlib.dumps({"CFBundleIdentifier": REKORDBOX_BUNDLE_ID})
+            )
+            with self.assertRaises(rp.SignPlanError):
+                rp.plan_codesign_argvs(app, Path(tmp) / "e.plist", file_probe=lambda p: "")
+
+
+class InsideOutApplyTests(unittest.TestCase):
+    """Task 3: ordered non-admin execution + one-admin failure markers."""
+
+    def test_non_admin_runs_steps_in_order_stops_and_restores_once(self) -> None:
+        calls: list[list[str]] = []
+        plan = [
+            ["codesign", "--force", "--sign", "-",
+             "--preserve-metadata=entitlements,identifier,flags,runtime",
+             "/tmp/nested/libssl.3.dylib"],
+            ["codesign", "--force", "--sign", "-",
+             "--preserve-metadata=entitlements,identifier,flags,runtime",
+             "/tmp/nested/other.dylib"],
+            codesign_argv(APP, Path("/tmp/e.plist")),
+        ]
+
+        def runner(argv):
+            calls.append(list(argv))
+            if "libssl.3.dylib" in argv[-1]:
+                return 0, ""
+            return 1, "codesign: boom"
+
+        restore = mock.Mock(return_value=True)
+        with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
+             mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
+             mock.patch.object(rp, "read_entitlements", return_value={}), \
+             mock.patch.object(rp, "plan_codesign_argvs", return_value=plan), \
+             mock.patch.object(rp, "_snapshot_app", return_value=Path("/tmp/bk/rekordbox.app")), \
+             mock.patch.object(rp, "_restore_app", restore), \
+             mock.patch.object(rp, "_cleanup_backup"):
+            r = apply_patch(APP, dry_run=False, runner=runner)
+        self.assertFalse(r.ok)
+        self.assertEqual(r.action, "failed")
+        self.assertEqual(len(calls), 2)  # stopped at first failure after one success
+        self.assertIn("libssl.3.dylib", calls[0][-1])
+        self.assertIn("other.dylib", calls[1][-1])
+        restore.assert_called_once()
+        self.assertIn("other.dylib", r.message)
+
+    def test_admin_sign_fail_names_component_and_skips_second_restore(self) -> None:
+        restore = mock.Mock(return_value=True)
+        err = (
+            "RBSS_SIGNING:/tmp/fake/libssl.3.dylib\n"
+            "RBSS_SIGN_FAIL:/tmp/fake/libssl.3.dylib\n"
+            "RBSS_RESTORE_OK\n"
+        )
+        with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
+             mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
+             mock.patch.object(rp, "read_entitlements", return_value={}), \
+             mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan), \
+             mock.patch.object(rp, "_snapshot_app", return_value=Path("/tmp/bk/rekordbox.app")), \
+             mock.patch.object(rp, "_restore_app", restore), \
+             mock.patch.object(rp, "_cleanup_backup"), \
+             mock.patch.object(rp, "run_shell_via_admin", return_value=(1, err)) as shell:
+            r = apply_patch(APP, dry_run=False, runner=rp.run_via_admin)
+        self.assertFalse(r.ok)
+        self.assertEqual(r.action, "failed")
+        self.assertIn("libssl.3.dylib", r.message)
+        self.assertIn("same admin step", r.message.lower())
+        self.assertIn("/tmp/bk", r.message)
+        restore.assert_not_called()
+        shell.assert_called_once()
+
+    def test_admin_cancel_cleans_backup_no_restore(self) -> None:
+        restore = mock.Mock(return_value=True)
+        cleanup = mock.Mock()
+        with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
+             mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
+             mock.patch.object(rp, "read_entitlements", return_value={}), \
+             mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan), \
+             mock.patch.object(rp, "_snapshot_app", return_value=Path("/tmp/bk/rekordbox.app")), \
+             mock.patch.object(rp, "_restore_app", restore), \
+             mock.patch.object(rp, "_cleanup_backup", cleanup), \
+             mock.patch.object(
+                 rp, "run_shell_via_admin",
+                 return_value=(1, "User canceled. (-128)"),
+             ):
+            r = apply_patch(APP, dry_run=False, runner=rp.run_via_admin)
+        self.assertFalse(r.ok)
+        self.assertEqual(r.action, "refused")
+        self.assertIn("cancel", r.message.lower())
+        restore.assert_not_called()
+        cleanup.assert_called_once()
+
+    def test_admin_restore_fail_keeps_backup_path(self) -> None:
+        restore = mock.Mock(return_value=True)
+        err = (
+            "RBSS_SIGN_FAIL:/tmp/fake/libssl.3.dylib\n"
+            "RBSS_RESTORE_FAIL\n"
+        )
+        with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
+             mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
+             mock.patch.object(rp, "read_entitlements", return_value={}), \
+             mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan), \
+             mock.patch.object(rp, "_snapshot_app", return_value=Path("/tmp/bk/rekordbox.app")), \
+             mock.patch.object(rp, "_restore_app", restore), \
+             mock.patch.object(rp, "_cleanup_backup"), \
+             mock.patch.object(rp, "run_shell_via_admin", return_value=(1, err)):
+            r = apply_patch(APP, dry_run=False, runner=rp.run_via_admin)
+        self.assertFalse(r.ok)
+        self.assertIn("libssl.3.dylib", r.message)
+        self.assertIn("backed up at", r.message.lower())
+        self.assertIn("/tmp/bk", r.message)
+        restore.assert_not_called()
 
 
 def _proc(returncode=0, stdout=b"", stderr=""):
