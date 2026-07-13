@@ -34,8 +34,8 @@ Per-version chain ordering:
     [1 + 4*deck + 2]   trackInfo (500 B packed string) → readBytes(500)
     [1 + 4*deck + 3]   ANLZ filename → readPointer + readString
 
-deck_count is fixed at 4 across all 5 macOS-arm64 versions in the YAML
-(7.2.8, 7.2.10, 7.2.11, 7.2.13, 7.2.14).
+deck_count is fixed at 4 across all 6 macOS-arm64 versions in the YAML
+(7.2.8, 7.2.10, 7.2.11, 7.2.13, 7.2.14, 7.2.16).
 """
 from __future__ import annotations
 
@@ -155,6 +155,36 @@ CFX_D2_UNIT_CHANNEL  04E16EE8 A8 458 0 2C8 8 480 0 1E0 0 D0
 04D8AA18 18 2C8 120
 04D8AA18 18 270 38 48 28 F0 4
 04DD0708 20 3F0 0
+
+
+7.2.16
+04EE71D8 20 278 124
+04EA17A0 0 2C8 188
+04EA17A0 0 2C8 120
+04EA17A0 0 270 38 88 28 F0 0
+04EE7C08 8 3F0
+04EA17A0 8 2C8 188
+04EA17A0 8 2C8 120
+04EA17A0 8 270 38 70 28 F0 0
+04EE7C08 10 3F0
+04EA17A0 10 2C8 188
+04EA17A0 10 2C8 120
+04EA17A0 10 270 38 48 28 F0 0
+04EE7C08 18 3F0
+04EA17A0 18 2C8 188
+04EA17A0 18 2C8 120
+04EA17A0 18 270 38 48 28 F0 0
+04EE7C08 20 3F0
+MIXER_D1_UPFADER_RAW 04EE5758 A8 458 0 2C8 0 470 30
+MIXER_D2_UPFADER_RAW 04EE5758 A8 458 0 2C8 8 470 30
+MIXER_D1_LOW_RAW     04EE5758 A8 458 0 2C8 0 460 30 38
+MIXER_D2_LOW_RAW     04EE5758 A8 458 0 2C8 8 460 30 38
+CFX_D1_FILTER_PARAM0 04EE5758 A8 458 0 2C8 0 480 0 1E0 0 88 0 E8
+CFX_D2_FILTER_PARAM0 04EE5758 A8 458 0 2C8 8 480 0 1E0 0 88 0 E8
+CFX_D1_SELECTED_ID   04EE5758 A8 458 0 2C8 0 480 0 1E0 0 88 0 70
+CFX_D2_SELECTED_ID   04EE5758 A8 458 0 2C8 8 480 0 1E0 0 88 0 70
+CFX_D1_UNIT_CHANNEL  04EE5758 A8 458 0 2C8 0 480 0 1E0 0 D0
+CFX_D2_UNIT_CHANNEL  04EE5758 A8 458 0 2C8 8 480 0 1E0 0 D0
 """
 
 
@@ -187,7 +217,7 @@ class RBOffsetVersion:
     mixer_deck2_upfader_raw: Optional[ChainEntry] = None
     mixer_deck1_low_raw: Optional[ChainEntry] = None
     mixer_deck2_low_raw: Optional[ChainEntry] = None
-    # CFX FILTER tracking (AWR-173) — independent optional group, 7.2.11 only.
+    # CFX FILTER tracking (AWR-173) — independent optional group, 7.2.11 and 7.2.16.
     # Tracking-only: never feeds active-deck authority or mixer validity.
     cfx_deck1_filter_param0: Optional[ChainEntry] = None
     cfx_deck2_filter_param0: Optional[ChainEntry] = None
