@@ -351,7 +351,11 @@ def _default_runner(argv: list[str]) -> tuple[int, str]:
         return 1, f"codesign did not run: {exc}"
 
 
-def _failed_without_backup(reason: str, argv: list[str]) -> "PatchResult":
+def _failed_without_backup(
+    reason: str,
+    argv: list[str],
+    commands: list[list[str]] | None = None,
+) -> "PatchResult":
     """Report a failed mutation without pretending the target was restored."""
     return PatchResult(
         False,
@@ -360,6 +364,7 @@ def _failed_without_backup(reason: str, argv: list[str]) -> "PatchResult":
         + " No Rekordbox backup was made by request. Do not assume it will launch; "
         "reinstall or update Rekordbox if a subsequent signature check fails.",
         command=argv,
+        commands=commands,
     )
 
 
@@ -639,58 +644,31 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
             else run_shell_via_admin if runner is run_via_admin else None
         )
         if admin_shell_runner is not None:
-            script = build_sign_restore_script(steps, app, backup)
+            script = build_sign_script(steps)
             rc, err = admin_shell_runner(script)
             if rc != 0:
                 if is_user_cancel(err):
-                    # Operator dismissed the admin prompt: the privileged script
-                    # never ran, Rekordbox is untouched. Clean abort — do NOT
-                    # restore (that would pop a second admin prompt).
-                    _cleanup_backup(backup)
+                    # Operator dismissed the authorization prompt before the
+                    # privileged signing script ran.
                     return PatchResult(False, "refused",
                                        "Cancelled — Rekordbox was not modified.",
                                        command=sign_argv, commands=argvs)
                 component = parse_sign_fail_component(err) or str(app)
-                restore_state = parse_restore_marker(err)
                 detail = _codesign_fail_detail(err)
                 detail_tail = f" Detail: {detail}" if detail else ""
                 cmd_note = f" Failed command: {' '.join(sign_argv)}."
                 am_hint = app_management_block_hint(err, app)
                 am_tail = f" {am_hint}" if am_hint else ""
-                if restore_state == "ok":
-                    _cleanup_backup(backup)
-                    return PatchResult(
-                        False, "failed",
-                        f"codesign failed on {component}.{cmd_note}{detail_tail} "
-                        "Rekordbox was restored from the pre-signing backup in "
-                        "the same admin step and the temporary copy was removed. "
-                        f"Rekordbox should still be launchable.{am_tail}",
-                        command=sign_argv, commands=argvs,
-                    )
-                if restore_state == "fail":
-                    return PatchResult(
-                        False, "failed",
-                        f"codesign failed on {component}.{cmd_note}{detail_tail} "
-                        "Automatic restore failed — your original Rekordbox is "
-                        f"backed up at {backup.parent}; copy it back over {app} "
-                        f"to recover (no reinstall needed).{am_tail}",
-                        command=sign_argv, commands=argvs,
-                    )
-                return PatchResult(
-                    False, "failed",
-                    f"codesign failed on {component}.{cmd_note}{detail_tail} "
-                    "The restore result could not be confirmed from the admin "
-                    f"script output. A verified pre-sign backup is retained at "
-                    f"{backup.parent}; copy it back over {app} if Rekordbox will "
-                    f"not launch (no reinstall needed).{am_tail}",
-                    command=sign_argv, commands=argvs,
+                failed = _failed_without_backup(
+                    f"codesign failed on {component}.{cmd_note}{detail_tail}{am_tail}",
+                    sign_argv, argvs,
                 )
+                return failed
         else:
             active_runner = runner or _default_runner
             rc, err = active_runner(sign_argv)
             if rc != 0:
                 if is_user_cancel(err):
-                    _cleanup_backup(backup)
                     return PatchResult(False, "refused",
                                        "Cancelled — Rekordbox was not modified.",
                                        command=sign_argv, commands=argvs)
@@ -698,18 +676,16 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
                 if "not permitted" in err.lower() or "permission denied" in err.lower():
                     hint = (" (needs admin — run with sudo, or use --admin / "
                             "the menubar which prompt for your password)")
-                return _fail_restored(
-                    app, backup, active_runner,
+                failed = _failed_without_backup(
                     f"codesign failed on {sign_argv[-1]}{hint}: {err.strip()}.",
-                    sign_argv,
+                    sign_argv, argvs,
                 )
+                return failed
 
         # Verify the re-sign is structurally valid AND the entitlement took. (This
         # cannot prove Rekordbox LAUNCHES / that task_for_pid works — the operator
-        # confirms that by relaunching Rekordbox.) Any failure restores the backup.
-        # Never skip restore merely because verify happens to pass after a failure:
-        # sign-failure restore already ran in-script (admin) or via _fail_restored.
-        restore_runner = runner if admin_shell_runner is not None else (runner or _default_runner)
+        # confirms that by relaunching Rekordbox.) The operator declined a
+        # full-bundle backup, so failure reports are intentionally not recovery claims.
         try:
             verify = subprocess.run(
                 ["codesign", "--verify", "--deep", "--strict", str(app)],
@@ -717,42 +693,40 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
                 env=sanitized_system_env(os.environ),
             )
         except (OSError, subprocess.SubprocessError) as exc:
-            return _fail_restored(
-                app, backup, restore_runner,
-                f"could not verify the re-sign ({exc}).", sign_argv,
-            )
+            failed = _failed_without_backup(
+                f"could not verify the re-sign ({exc}).", sign_argv, argvs)
+            return failed
         if verify.returncode != 0:
-            return _fail_restored(
-                app, backup, restore_runner,
+            failed = _failed_without_backup(
                 "the re-sign did not verify: " + verify.stderr.strip() + ".",
-                sign_argv,
-            )
+                sign_argv, argvs)
+            return failed
         try:
             target_patched = has_get_task_allow(app)
         except EntitlementsReadError as exc:
-            return _fail_restored(
-                app, backup, restore_runner,
-                f"the re-sign could not be verified safely ({exc}).", sign_argv,
-            )
+            failed = _failed_without_backup(
+                f"the re-sign could not be verified safely ({exc}).", sign_argv, argvs)
+            return failed
         if not target_patched:
-            return _fail_restored(
-                app, backup, restore_runner,
+            failed = _failed_without_backup(
                 "the re-sign succeeded but get-task-allow is still absent — "
-                "no change took effect.",
-                sign_argv,
-            )
-        _cleanup_backup(backup)
+                "no change took effect.", sign_argv, argvs)
+            return failed
         return PatchResult(
             True, "patched",
             "Rekordbox target patched. RELAUNCH Rekordbox and confirm it opens. "
             "A positive get-task-allow check proves the target patch only; it "
             "does not prove a live attach. Stock foreign-Mac attach after "
             "patch + deep verify + GTA=true + relaunch is live-unvalidated / "
-            "unknown. The temporary pre-sign copy was removed after verification.",
+            "unknown. No full Rekordbox backup was created.",
             command=sign_argv, commands=argvs,
         )
     finally:
         lock_fh.close()  # releases the flock
+        try:
+            ents_path.unlink()
+        except OSError:
+            pass
 
 
 # ── macOS GUI flow (menubar / frozen-app dispatch) ───────────────────────────
