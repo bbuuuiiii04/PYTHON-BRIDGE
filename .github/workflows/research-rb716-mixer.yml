@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   inventory:
@@ -98,19 +98,12 @@ jobs:
           PY
           cat /tmp/rb716-research/report.txt
 
-      - name: Commit report to research branch
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p docs/data
-          if [ -f /tmp/rb716-research/report.txt ]; then
-            cp /tmp/rb716-research/report.txt docs/data/tmp-rb716-mixer-symbol-inventory.txt
-          else
-            printf 'inventory job failed before report generation\n' > docs/data/tmp-rb716-mixer-symbol-inventory.txt
-          fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add docs/data/tmp-rb716-mixer-symbol-inventory.txt
-          git commit -m 'research: record rb 7.2.16 mixer symbol inventory' || exit 0
-          git push origin HEAD:research/rb-7.2.16-mixer-offsets
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rb716-mixer-symbol-inventory
+          path: |
+            /tmp/rb716-research/report.txt
+            /tmp/rb716-research/7.2.11-nm.txt
+            /tmp/rb716-research/7.2.16-nm.txt
+          if-no-files-found: error
+          retention-days: 2
