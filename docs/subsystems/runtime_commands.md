@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 995ead4
+last_verified_commit: b9b0ae3
 last_verified_date: 2026-07-13
 validation_scope: software-only; runtime command rail and slim source/frozen menubar inventory tested, including the restored state-aware Patch Rekordbox action (target entitlement only; exit-0 enabled dialog uses verification wording, not a fresh-install claim); AWR-222 dormant AX probe is packaged dispatch only (no menu item of its own, not executed); native install failure alerts use plain-language copy at the menubar boundary; frozen app and hardware behavior unvalidated
 ---
