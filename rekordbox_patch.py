@@ -403,15 +403,17 @@ class PatchResult:
     action: str            # "already_patched" | "would_patch" | "patched" | "refused" | "failed"
     message: str
     command: list[str] | None = None
+    commands: list[list[str]] | None = None
 
 
-# A "runner" runs the codesign re-sign command and returns (returncode, stderr).
-# The re-sign is the ONLY step needing write access to /Applications; verify +
-# re-read are read-only and always run in-process.
+# A "runner" runs one argv and returns (returncode, stderr). When the runner is
+# ``run_via_admin``, apply_patch instead builds one privileged multi-step script
+# via ``run_shell_via_admin`` so the operator sees a single password prompt.
+# Verify + entitlement re-read are read-only and always run in-process.
 
 def _default_runner(argv: list[str]) -> tuple[int, str]:
     try:
-        # 600s: a --deep re-sign of the ~2.4 GB universal Rekordbox bundle.
+        # 600s per component; full admin plan uses run_shell_via_admin (1800s).
         p = subprocess.run(argv, capture_output=True, text=True, timeout=600,
                            env=sanitized_system_env(os.environ))
         return p.returncode, p.stderr or ""
@@ -572,12 +574,21 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
     with tempfile.NamedTemporaryFile("wb", suffix=".plist", delete=False) as fh:
         plistlib.dump(merged, fh)
         ents_path = Path(fh.name)
-    argv = codesign_argv(app, ents_path)
 
     if dry_run:
-        return PatchResult(True, "would_patch",
-                           "Dry run — Rekordbox NOT modified. This command would add get-task-allow.",
-                           command=argv)
+        try:
+            argvs = plan_codesign_argvs(app, ents_path)
+        except SignPlanError as exc:
+            return PatchResult(False, "refused", f"Could not plan a safe re-sign ({exc}).")
+        final_argv = argvs[-1]
+        plan_lines = "\n".join(f"  {' '.join(a)}" for a in argvs)
+        return PatchResult(
+            True, "would_patch",
+            "Dry run — Rekordbox NOT modified. Inside-out sign plan "
+            f"({len(argvs)} step(s), deepest nested first, main app last):\n{plan_lines}",
+            command=final_argv,
+            commands=argvs,
+        )
 
     # Exclusive lock so a double-click / two concurrent runs can't interleave two
     # `codesign --force` writes on the same bundle (which would corrupt it).
@@ -598,48 +609,113 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
                                "re-signing — refusing rather than risk leaving it unlaunchable. "
                                "Free up space and try again.")
 
-        rc, err = (runner or _default_runner)(argv)
-        if rc != 0:
-            if is_user_cancel(err):
-                # Operator dismissed the admin prompt: codesign never ran, Rekordbox
-                # is untouched. Clean abort — do NOT restore (that would pop a second
-                # admin prompt and falsely claim a recovery).
-                _cleanup_backup(backup)
-                return PatchResult(False, "refused",
-                                   "Cancelled — Rekordbox was not modified.", command=argv)
-            hint = ""
-            if "not permitted" in err.lower() or "permission denied" in err.lower():
-                hint = " (needs admin — run with sudo, or use --admin / the menubar which prompt for your password)"
-            return _fail_restored(app, backup, runner, f"codesign failed{hint}: {err.strip()}.", argv)
+        try:
+            argvs = plan_codesign_argvs(app, ents_path)
+        except SignPlanError as exc:
+            _cleanup_backup(backup)
+            return PatchResult(False, "refused", f"Could not plan a safe re-sign ({exc}).")
+        final_argv = argvs[-1]
+        steps = [(argv[-1], argv) for argv in argvs]
+
+        use_admin_script = runner is run_via_admin
+        if use_admin_script:
+            script = build_sign_restore_script(steps, app, backup)
+            rc, err = run_shell_via_admin(script)
+            if rc != 0:
+                if is_user_cancel(err):
+                    # Operator dismissed the admin prompt: the privileged script
+                    # never ran, Rekordbox is untouched. Clean abort — do NOT
+                    # restore (that would pop a second admin prompt).
+                    _cleanup_backup(backup)
+                    return PatchResult(False, "refused",
+                                       "Cancelled — Rekordbox was not modified.",
+                                       command=final_argv, commands=argvs)
+                component = parse_sign_fail_component(err) or "unknown component"
+                restore_state = parse_restore_marker(err)
+                # Retain the backup after any failed apply as operator evidence,
+                # even when in-script restore reported OK (safer than today's
+                # successful-restore cleanup until the operator confirms launch).
+                if restore_state == "ok":
+                    return PatchResult(
+                        False, "failed",
+                        f"codesign failed on {component}. Rekordbox was restored "
+                        "from the pre-signing backup in the same admin step and "
+                        f"should still be launchable. Backup retained at {backup.parent}.",
+                        command=final_argv, commands=argvs,
+                    )
+                return PatchResult(
+                    False, "failed",
+                    f"codesign failed on {component}. Automatic restore failed — "
+                    f"your original Rekordbox is backed up at {backup.parent}; "
+                    f"copy it back over {app} to recover (no reinstall needed).",
+                    command=final_argv, commands=argvs,
+                )
+        else:
+            active_runner = runner or _default_runner
+            for step_argv in argvs:
+                rc, err = active_runner(step_argv)
+                if rc != 0:
+                    if is_user_cancel(err):
+                        _cleanup_backup(backup)
+                        return PatchResult(False, "refused",
+                                           "Cancelled — Rekordbox was not modified.",
+                                           command=final_argv, commands=argvs)
+                    hint = ""
+                    if "not permitted" in err.lower() or "permission denied" in err.lower():
+                        hint = (" (needs admin — run with sudo, or use --admin / "
+                                "the menubar which prompt for your password)")
+                    failed_path = step_argv[-1]
+                    return _fail_restored(
+                        app, backup, active_runner,
+                        f"codesign failed on {failed_path}{hint}: {err.strip()}.",
+                        final_argv,
+                    )
 
         # Verify the re-sign is structurally valid AND the entitlement took. (This
         # cannot prove Rekordbox LAUNCHES / that task_for_pid works — the operator
         # confirms that by relaunching Rekordbox.) Any failure restores the backup.
+        # Never skip restore merely because verify happens to pass after a failure:
+        # sign-failure restore already ran in-script (admin) or via _fail_restored.
+        restore_runner = run_via_admin if use_admin_script else (runner or _default_runner)
         try:
-            verify = subprocess.run(["codesign", "--verify", "--strict", str(app)],
-                                    capture_output=True, text=True, timeout=180,
-                                    env=sanitized_system_env(os.environ))
+            verify = subprocess.run(
+                ["codesign", "--verify", "--deep", "--strict", str(app)],
+                capture_output=True, text=True, timeout=180,
+                env=sanitized_system_env(os.environ),
+            )
         except (OSError, subprocess.SubprocessError) as exc:
-            return _fail_restored(app, backup, runner, f"could not verify the re-sign ({exc}).", argv)
+            return _fail_restored(
+                app, backup, restore_runner,
+                f"could not verify the re-sign ({exc}).", final_argv,
+            )
         if verify.returncode != 0:
-            return _fail_restored(app, backup, runner,
-                                  "the re-sign did not verify: " + verify.stderr.strip() + ".", argv)
+            return _fail_restored(
+                app, backup, restore_runner,
+                "the re-sign did not verify: " + verify.stderr.strip() + ".",
+                final_argv,
+            )
         try:
             target_patched = has_get_task_allow(app)
         except EntitlementsReadError as exc:
             return _fail_restored(
-                app, backup, runner,
-                f"the re-sign could not be verified safely ({exc}).", argv,
+                app, backup, restore_runner,
+                f"the re-sign could not be verified safely ({exc}).", final_argv,
             )
         if not target_patched:
-            return _fail_restored(app, backup, runner,
-                                  "the re-sign succeeded but get-task-allow is still absent — no change took effect.",
-                                  argv)
-        return PatchResult(True, "patched",
-                           "Rekordbox target patched. RELAUNCH Rekordbox and confirm it opens. "
-                           "This does not prove that the bridge is authorized for live reads. "
-                           f"The original app is kept at {backup.parent}; purging RBSS Bridge does not remove it.",
-                           command=argv)
+            return _fail_restored(
+                app, backup, restore_runner,
+                "the re-sign succeeded but get-task-allow is still absent — "
+                "no change took effect.",
+                final_argv,
+            )
+        return PatchResult(
+            True, "patched",
+            "Rekordbox target patched. RELAUNCH Rekordbox and confirm it opens. "
+            "This does not prove that the bridge is authorized for live reads. "
+            f"The original app is kept at {backup.parent}; purging RBSS Bridge "
+            "does not remove it.",
+            command=final_argv, commands=argvs,
+        )
     finally:
         lock_fh.close()  # releases the flock
 
@@ -724,7 +800,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if args.apply:
-        print(f"About to RE-SIGN {app} ad-hoc (deep) to add get-task-allow.")
+        print(f"About to RE-SIGN {app} ad-hoc (inside-out) to add get-task-allow.")
         print("  - This modifies Rekordbox (a Rekordbox update will revert it).")
         print("  - Quit Rekordbox first. You may be asked for your admin password.")
         if input("Type YES to proceed: ").strip() != "YES":

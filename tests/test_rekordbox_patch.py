@@ -25,6 +25,19 @@ from rb_ss_bridge_v2.rekordbox_patch import (  # noqa: E402
 APP = Path("/Applications/rekordbox 7/rekordbox.app")
 
 
+def _fake_plan(app, ents_path, **_kwargs):
+    """One-step final-only plan — keeps legacy apply tests off the real tree."""
+    return [codesign_argv(app, Path(ents_path))]
+
+
+def _proc(returncode=0, stdout=b"", stderr=""):
+    m = mock.Mock()
+    m.returncode = returncode
+    m.stdout = stdout
+    m.stderr = stderr
+    return m
+
+
 class ParseEntitlementsTests(unittest.TestCase):
     def test_parses_plist_with_get_task_allow(self) -> None:
         data = plistlib.dumps({GET_TASK_ALLOW: True, "other": "x"})
@@ -206,11 +219,14 @@ class ApplyPatchGuardTests(unittest.TestCase):
         with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
              mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
              mock.patch.object(rp, "read_entitlements", return_value={}), \
+             mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan), \
              mock.patch.object(rp.subprocess, "run") as run:
             r = apply_patch(APP, dry_run=True)
         self.assertTrue(r.ok)
         self.assertEqual(r.action, "would_patch")
         self.assertIsNotNone(r.command)
+        self.assertIsNotNone(r.commands)
+        self.assertNotIn("--deep", r.command)
         run.assert_not_called()  # NOTHING executed in dry-run
 
 
@@ -220,6 +236,7 @@ class ApplyPatchRunTests(unittest.TestCase):
              mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
              mock.patch.object(rp, "read_entitlements", return_value={}), \
              mock.patch.object(rp, "has_get_task_allow", return_value=after_has_gta), \
+             mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan), \
              mock.patch.object(rp, "_snapshot_app", return_value=Path("/tmp/rbss_bk/rekordbox.app")), \
              mock.patch.object(rp, "_restore_app", return_value=True), \
              mock.patch.object(rp, "_cleanup_backup"), \
@@ -240,6 +257,7 @@ class ApplyPatchRunTests(unittest.TestCase):
              mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
              mock.patch.object(rp, "read_entitlements", return_value={}), \
              mock.patch.object(rp, "has_get_task_allow", return_value=True), \
+             mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan), \
              mock.patch.object(
                  rp, "_snapshot_app",
                  return_value=Path("/tmp/backups/backup_1/rekordbox.app"),
@@ -275,6 +293,7 @@ class ApplyPatchRunTests(unittest.TestCase):
         with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
              mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
              mock.patch.object(rp, "read_entitlements", return_value={}), \
+             mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan), \
              mock.patch.object(rp, "_snapshot_app", return_value=Path("/tmp/rbss_bk/rekordbox.app")), \
              mock.patch.object(rp, "_restore_app", return_value=True), \
              mock.patch.object(rp, "_cleanup_backup"), \
@@ -290,6 +309,7 @@ class ApplyPatchRunTests(unittest.TestCase):
              mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
              mock.patch.object(rp, "read_entitlements", return_value={}), \
              mock.patch.object(rp, "_snapshot_app", return_value=None), \
+             mock.patch.object(rp, "plan_codesign_argvs", side_effect=AssertionError("planned with no backup")), \
              mock.patch.object(rp.subprocess, "run", side_effect=AssertionError("re-signed with no backup")):
             r = apply_patch(APP, dry_run=False, runner=lambda argv: (0, ""))
         self.assertFalse(r.ok)
@@ -300,6 +320,7 @@ class ApplyPatchRunTests(unittest.TestCase):
         with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
              mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
              mock.patch.object(rp, "read_entitlements", return_value={}), \
+             mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan), \
              mock.patch.object(rp, "_snapshot_app", return_value=Path("/tmp/bk/rekordbox.app")), \
              mock.patch.object(rp, "_restore_app", return_value=True) as restore, \
              mock.patch.object(rp, "_cleanup_backup"):
@@ -313,6 +334,7 @@ class ApplyPatchRunTests(unittest.TestCase):
         with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
              mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
              mock.patch.object(rp, "read_entitlements", return_value={}), \
+             mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan), \
              mock.patch.object(rp, "_snapshot_app", return_value=Path("/tmp/bk/rekordbox.app")), \
              mock.patch.object(rp, "_restore_app", return_value=False):
             r = apply_patch(APP, dry_run=False, runner=lambda argv: (1, "boom"))
@@ -333,6 +355,7 @@ class ApplyPatchRunTests(unittest.TestCase):
         with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
              mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
              mock.patch.object(rp, "read_entitlements", return_value={}), \
+             mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan), \
              mock.patch.object(rp, "_snapshot_app", return_value=Path("/tmp/bk/rekordbox.app")), \
              mock.patch.object(rp, "_restore_app", side_effect=lambda *a: restore_calls.append(a) or True), \
              mock.patch.object(rp, "_cleanup_backup"):
@@ -359,6 +382,7 @@ class ApplyPatchRunTests(unittest.TestCase):
         with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
              mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
              mock.patch.object(rp, "read_entitlements", return_value={}), \
+             mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan), \
              mock.patch.object(
                  rp, "has_get_task_allow",
                  side_effect=EntitlementsReadError("malformed output"),
@@ -406,6 +430,7 @@ class RunnerSeamTests(unittest.TestCase):
              mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
              mock.patch.object(rp, "read_entitlements", return_value={}), \
              mock.patch.object(rp, "has_get_task_allow", return_value=True), \
+             mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan), \
              mock.patch.object(rp, "_snapshot_app", return_value=Path("/tmp/rbss_bk/rekordbox.app")), \
              mock.patch.object(rp, "_restore_app", return_value=True), \
              mock.patch.object(rp, "_cleanup_backup"), \
