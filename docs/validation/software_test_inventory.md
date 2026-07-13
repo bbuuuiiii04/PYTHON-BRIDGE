@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 4f49eb2
-last_verified_date: 2026-07-12
-validation_scope: software-validated only; hardware-unvalidated in repo evidence
+last_verified_commit: 9edb035
+last_verified_date: 2026-07-13
+validation_scope: software-validated only; Rekordbox 7.2.16 direct-reader offset row software-tested (four roots STATIC-CONFIRMED; interior hops CANDIDATE from 7.2.14 deck + 7.2.11 mixer/CFX layout; live-unvalidated); hardware-unvalidated in repo evidence
 ---
 
 # Software Test Inventory
@@ -36,7 +36,7 @@ python -m pytest tests
 | Area | What to look for in `tests/` | Notes |
 | --- | --- | --- |
 | Core bridge | state manager, models, smart phrasing, integration tests | verifies software behavior only. Smart-drop selector tests cover cluster collapse, exact-64 raw gaps, intro/outro trimming, and breakdown-selection parity. |
-| Rekordbox reader live-safety (AWR reader cross-version) | `tests/test_rekordbox_reader_safety.py`: the emit-boundary tempo clamp (`clamp_emit_bpm` bounds garbage/NaN/high BPM in `send_bpm`/`send_beat`/`send_deck_load` and the scanner-follow + autoloop + `os2l_injector` paths), the direct-read BPM cap `_RB_BPM_READ_MAX`, unknown-version fail-closed (inert reader `_offs is None`; scanner 40..250 `_valid_bpm` gate), version-string normalization edges, per-version MIXER/CFX presence, and the offline version-extension tool (`tools/rekordbox_derive_offsets.py` reproduces the 7.2.11 anchors from symbols and fails closed on a missing/ambiguous symbol or implausible RVA) | pure-function + fake-conn tests; they prove the value clamps and the symbol-derivation math, NOT that a real garbage memory read occurs live, that beat-locked flash is driven on hardware, or that a future version's binary is symbolized the same way (only 7.2.11's binary is on disk) |
+| Rekordbox reader live-safety (AWR reader cross-version) | `tests/test_rekordbox_reader_safety.py`: the emit-boundary tempo clamp (`clamp_emit_bpm` bounds garbage/NaN/high BPM in `send_bpm`/`send_beat`/`send_deck_load` and the scanner-follow + autoloop + `os2l_injector` paths), the direct-read BPM cap `_RB_BPM_READ_MAX`, unknown-version fail-closed (inert reader `_offs is None`; scanner 40..250 `_valid_bpm` gate), version-string normalization edges, per-version MIXER/CFX presence (populated only on `{7.2.11, 7.2.16}`), and the offline version-extension tool (`tools/rekordbox_derive_offsets.py` reproduces the 7.2.11 anchors from symbols and fails closed on a missing/ambiguous symbol or implausible RVA) | pure-function + fake-conn tests; they prove the value clamps and the symbol-derivation math, NOT that a real garbage memory read occurs live, that beat-locked flash is driven on hardware, or that a future version's binary is symbolized the same way (only 7.2.11's binary is on disk). 7.2.16 is software-tested / live-unvalidated. |
 | USB local-twin + foreign-import resolution (AWR-207/AWR-209) | `tests/test_filepath_resolver_usb_twin.py` (17 cases), existing beatgrid/hotcue resolver suites, the AWR-207 end-to-end phrase proof, and local/local-twin ANLZ handoff pins in `tests/test_smart_transitions.py` | Pure DeviceSQL/comparator/fake-DB/event-payload tests prove exact mirror matching, PDB-assisted cross-analysis, and fail-closed conflict/duplicate/missing-analysis behavior. The real mounted PDB parser spot is read-only. These do not prove room-visible lighting, a real foreign re-analysis, or AWR-211 foreign-laptop portability. |
 | Portable lighting sidecar runtime source (AWR-211) | `tests/test_filepath_resolver_sidecar.py`, `tests/test_awr211_sidecar_phrase_e2e.py`, `tests/test_smart_transitions.py`, and the 257-test resolver/phrase/StateManager/pack-driver focused round | Proves schema-v1 validation, revalidated mounted+installed discovery, rebuild/unplug/replug, identical-root deduplication, conflicting-generation fail-closed behavior, exact/tag identity, local-first chaining, full payload parity, v4-before-cache, and smart-rearm phrase handoff with spectral and LED-v2 disabled. The real MINK sidecar-only desk harness proves read-only data flow, not live foreign-Mac state, a two-USB Rekordbox session, or room-visible lighting. |
 | USB foreign-Mac live-reader authorization (AWR-222) | Dormant AX MEASUREMENT probe: `tests/test_usb_launcher_ax_probe.py` (fake facades only — no ApplicationServices/TCC/Rekordbox/lsof/App Support/`/Volumes` execution); dispatch pins in `tests/test_usb_launcher.py`; lock/spec pins in `tests/test_make_stick.py`. Current-code audit neighbors remain `packaging/sign.sh`, `rekordbox_patch.py`, `rb_memory.py`. | **Probe implemented/software-tested/not executed.** Tests prove dispatch isolation, preflight refusals, permission prompt gating, BFS caps, sanitizer canaries, private `0600`/`0700` modes, token stability, sidecar abstention, process-wide `lsof` non-assignment, cadence unmeasured-without-reference, and static forbidden-symbol guards. No live AX evidence, no TCC evidence, no USB read, no foreign-Mac parity claim. AWR-222 remains blocked. Normal menu unchanged. Not a reader and not a replacement path until the operator live gate + E3 matrix pass. |
@@ -240,8 +240,10 @@ contract-globbed tooling under `tools/`, literal/star glob behavior, and the
 The active-deck authority implementation is covered by focused software tests:
 
 - `tests/test_rb_offsets.py` covers named optional mixer offset parsing, exact
-  labels, duplicate/malformed/partial required label fail-closed behavior, and
-  unknown/anonymous trailing line rejection for authority.
+  labels, duplicate/malformed/partial required label fail-closed behavior,
+  unknown/anonymous trailing line rejection for authority, and the RB7216
+  exact 7.2.16 master/deck/mixer/CFX chain pins plus the 7.2.11 literal
+  regression (software-tested; live-unvalidated).
 - `tests/test_rb_state_reader.py` covers finite range-checked mixer f32 reads,
   valid endpoints, concrete invalid reasons, direct-master refresh and
   invalidation, raw Deck C/D no-aliasing, transport-unavailable fail-closed
@@ -273,10 +275,11 @@ Enttec, or hardware-visible output.
 The CFX FILTER tracking read and the LED filter-sweep overlay are covered by
 pure software tests (mach/live/socket-free):
 
-- `tests/test_rb_offsets.py` covers the CFX 7.2.11 chain group (exact chains),
-  the other-versions-are-None inertness, and CFX/mixer group independence in both
-  directions (a malformed CFX group never disables a healthy mixer group and vice
-  versa), plus anonymous-trailing-line rejection with CFX present.
+- `tests/test_rb_offsets.py` covers the CFX 7.2.11 and 7.2.16 chain groups
+  (exact chains), the other-versions-are-None inertness, and CFX/mixer group
+  independence in both directions (a malformed CFX group never disables a
+  healthy mixer group and vice versa), plus anonymous-trailing-line rejection
+  with CFX present.
 - `tests/test_rb_state_reader.py::CfxTickTests` covers valid CFX readings, the
   `wrong_effect` / `unit_channel_mismatch` / `non_finite` / `out_of_range` /
   `unreadable` reasons, per-deck independence (deck 1 valid while deck 2 is

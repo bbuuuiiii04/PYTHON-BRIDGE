@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 4f49eb2
-last_verified_date: 2026-07-12
+last_verified_commit: 9edb035
+last_verified_date: 2026-07-13
 validation_scope: software-only
 ---
 
@@ -70,7 +70,9 @@ Implementation notes:
   `_tick_mixer`'s reads tuple, enter `_authoritative_kinds`, or trigger a resolver
   rerun. The `_tick_mixer` whole-snapshot invalidation (any failed read ⇒ mixer
   invalid) is the trap CFX avoids by living in its own tick/event/snapshot. CFX
-  chains are 7.2.11-only; keep every other version `None` so the feature is inert.
+  chains exist for 7.2.11 and 7.2.16; keep every other version `None` so the
+  feature is inert. RB7216 7.2.16 roots are STATIC-CONFIRMED; interior hops are
+  CANDIDATE from 7.2.14 deck + 7.2.11 mixer/CFX and remain live-unvalidated.
   If you touch this, re-verify the isolation pin
   (`tests/test_rb_state_reader.py`, `CfxTickTests.test_isolation_broken_cfx_keeps_mixer_valid`)
   and the CFX/mixer parser-independence cases in `tests/test_rb_offsets.py`.

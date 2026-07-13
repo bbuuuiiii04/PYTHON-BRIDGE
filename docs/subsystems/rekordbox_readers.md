@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 4f49eb2
-last_verified_date: 2026-07-12
-validation_scope: software-only plus Rekordbox 7.2.11 passive mixer RE evidence routing; AWR-157 deck-2 chain freshness gating software-tested; AWR-160 phantom track-load stability gate software-tested; AWR-207/AWR-209/AWR-211 USB local-twin, foreign-import, portable-sidecar refresh, and phrase-worker handoff software-tested; USB ANLZ PPTH leading-slash stick-root-relative paths accepted by `_device_audio_filepath` (software-tested); AWR-222 dormant AX measurement probe implemented/software-tested/not executed (not a reader); hardware-output unvalidated
+last_verified_commit: 9edb035
+last_verified_date: 2026-07-13
+validation_scope: software-only plus Rekordbox 7.2.11 passive mixer RE evidence routing; Rekordbox 7.2.16 direct-reader offset row software-tested (four roots STATIC-CONFIRMED; interior hops CANDIDATE from 7.2.14 deck + 7.2.11 mixer/CFX layout; live-unvalidated); AWR-157 deck-2 chain freshness gating software-tested; AWR-160 phantom track-load stability gate software-tested; AWR-207/AWR-209/AWR-211 USB local-twin, foreign-import, portable-sidecar refresh, and phrase-worker handoff software-tested; USB ANLZ PPTH leading-slash stick-root-relative paths accepted by `_device_audio_filepath` (software-tested); AWR-222 dormant AX measurement probe implemented/software-tested/not executed (not a reader); hardware-output unvalidated
 ---
 
 # Rekordbox Readers
@@ -24,11 +24,16 @@ Purpose:
   `docs/plans/active/rekordbox_mixer_active_deck_re_spec.md`, and
   `docs/architecture/active_deck_authority.md`.
 - Read the CFX FILTER knob (param0 + selected-effect-id + unit-channel) for
-  decks 1/2 as **tracking/status only** (AWR-173, RB 7.2.11 chains only,
+  decks 1/2 as **tracking/status only** (AWR-173, RB 7.2.11 and 7.2.16 chains,
   `implemented` / `software-tested` / `hardware-unvalidated`). This is the first
   runtime consumer of the mixer RE evidence and drives the LED filter-sweep
   overlay in `led_govee`. It is fully isolated from mixer authority (see the
   isolation rule below) and inert on every other RB version by construction.
+- Rekordbox 7.2.16 direct-reader support (RB7216) is software-tested at parity
+  with 7.2.11 for master/BPM/position/track/ANLZ decks 1-4, Deck 1/2 mixer
+  upfader+LOW/BASS, and Deck 1/2 CFX FILTER tracking. Four roots are
+  STATIC-CONFIRMED; interior hops are CANDIDATE carried from the 7.2.14 deck
+  layout and 7.2.11 mixer/CFX layout. Live-unvalidated; not cleared for live use.
 - Resolve USB-device-tree loads to their unique local-library twin on the
   operator's laptop (AWR-207), including the local ANLZ/PSSI source needed for
   phrase parsing. Foreign-laptop portability is the separate AWR-208 program.
@@ -255,7 +260,7 @@ CFX FILTER tracking (AWR-173) — the isolation rule:
   `tests/test_rb_state_reader.py` (`CfxTickTests.test_isolation_broken_cfx_keeps_mixer_valid`).
   The `_tick_mixer` whole-snapshot invalidation (any read fails ⇒ mixer invalid)
   is exactly the trap CFX must never join.
-- CFX chains exist for RB 7.2.11 only; every other version leaves the six fields
+- CFX chains exist for RB 7.2.11 and 7.2.16 only; every other version leaves the six fields
   `None`, so `_tick_cfx` emits nothing and the feature is inert.
 
 Reader live-safety + cross-version extension (AWR reader-safety, 2026-07-10, software-tested):
