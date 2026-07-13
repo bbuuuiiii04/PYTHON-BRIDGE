@@ -272,6 +272,38 @@ def is_user_cancel(stderr: str) -> bool:
     return "user canceled" in s or "user cancelled" in s or "(-128)" in s
 
 
+def app_management_block_hint(
+    err: str,
+    app: Path,
+    *,
+    frozen: bool | None = None,
+) -> str:
+    """Guidance when System Policy App Management blocked an /Applications write.
+
+    Only for ``Operation not permitted`` against a target under ``/Applications``.
+    Frozen vs source wording differs; unrelated sign failures return ``""``.
+    """
+    if "operation not permitted" not in (err or "").lower():
+        return ""
+    app_s = str(app)
+    if not (app_s == "/Applications" or app_s.startswith("/Applications/")):
+        return ""
+    if frozen is None:
+        frozen = bool(getattr(sys, "frozen", False))
+    if frozen:
+        return (
+            "macOS blocked updating Rekordbox (App Management). "
+            "Open System Settings \u2192 Privacy & Security \u2192 App Management, "
+            "turn on RBSS Bridge, then try Patch Rekordbox again. "
+            "An admin password alone is not enough."
+        )
+    return (
+        "macOS blocked updating Rekordbox (App Management). "
+        "Use the RBSS Bridge app build that requests App Management permission, "
+        "then try Patch Rekordbox again."
+    )
+
+
 # ── On-machine inspection (read-only) ────────────────────────────────────────
 
 def find_rekordbox(app_paths: tuple[Path, ...] | None = None) -> Path | None:
@@ -564,6 +596,8 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
                 detail = _codesign_fail_detail(err)
                 detail_tail = f" Detail: {detail}" if detail else ""
                 cmd_note = f" Failed command: {' '.join(sign_argv)}."
+                am_hint = app_management_block_hint(err, app)
+                am_tail = f" {am_hint}" if am_hint else ""
                 # Retain the backup after any failed apply as operator evidence,
                 # even when in-script restore reported OK (safer than today's
                 # successful-restore cleanup until the operator confirms launch).
@@ -573,7 +607,7 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
                         f"codesign failed on {component}.{cmd_note}{detail_tail} "
                         "Rekordbox was restored from the pre-signing backup in "
                         "the same admin step and should still be launchable. "
-                        f"Backup retained at {backup.parent}.",
+                        f"Backup retained at {backup.parent}.{am_tail}",
                         command=sign_argv, commands=argvs,
                     )
                 if restore_state == "fail":
@@ -582,7 +616,7 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
                         f"codesign failed on {component}.{cmd_note}{detail_tail} "
                         "Automatic restore failed — your original Rekordbox is "
                         f"backed up at {backup.parent}; copy it back over {app} "
-                        "to recover (no reinstall needed).",
+                        f"to recover (no reinstall needed).{am_tail}",
                         command=sign_argv, commands=argvs,
                     )
                 return PatchResult(
@@ -591,7 +625,7 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
                     "The restore result could not be confirmed from the admin "
                     f"script output. A verified pre-sign backup is retained at "
                     f"{backup.parent}; copy it back over {app} if Rekordbox will "
-                    "not launch (no reinstall needed).",
+                    f"not launch (no reinstall needed).{am_tail}",
                     command=sign_argv, commands=argvs,
                 )
         else:

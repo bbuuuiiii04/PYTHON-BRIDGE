@@ -14,14 +14,17 @@ validation_scope: >
   attempts never reached that clean pre-attach state. Rekordbox patch signing
   is one root-bundle ad-hoc codesign (no --deep, no nested re-sign) under one
   admin script with in-script restore (software-tested; disposable clone
-  lab-proven; live apply still operator-gated). A dormant Accessibility
-  MEASUREMENT probe is implemented/software-tested and not executed (not a
-  reader; no menu item; no runtime wiring). The separate RB7216 Patch
-  Rekordbox menubar action sits in the maintenance block with Export/Rebuild
-  (target entitlement only; always visible; Export/Rebuild source-only).
-  make_stick stamps GENERATION into Info.plist (fallback 0.0.1). No
-  install.command/purge.command helpers. SOFTWARE-VALIDATED COMPONENTS ONLY /
-  STOCK FOREIGN-MAC ATTACH LIVE-UNVALIDATED / UNKNOWN.
+  lab-proven; live apply still operator-gated). Frozen Info.plist declares
+  NSAppBundlesUsageDescription for App Management; grant + osascript
+  escalation path remains live-unvalidated (do not claim friend-Mac patch
+  works yet). A dormant Accessibility MEASUREMENT probe is
+  implemented/software-tested and not executed (not a reader; no menu item;
+  no runtime wiring). The separate RB7216 Patch Rekordbox menubar action sits
+  in the maintenance block with Export/Rebuild (target entitlement only;
+  always visible; Export/Rebuild source-only). make_stick stamps GENERATION
+  into Info.plist (fallback 0.0.1). No install.command/purge.command helpers.
+  SOFTWARE-VALIDATED COMPONENTS ONLY / STOCK FOREIGN-MAC ATTACH
+  LIVE-UNVALIDATED / UNKNOWN.
 ---
 
 # USB Bridge Launcher — Runbook (M1 build · M2 install/PURGE)
@@ -295,6 +298,12 @@ carries the secrets it shipped with.
   (software-tested; disposable clone lab-proven — does **not** by itself prove
   live `/Applications` apply, attach, or foreign-Mac reads). Restore reporting
   distinguishes `RBSS_RESTORE_OK` / `RBSS_RESTORE_FAIL` / missing marker.
+  Frozen `Info.plist` now declares `NSAppBundlesUsageDescription` (App
+  Management usage string; software-tested). A live root-only apply hit
+  System Policy `Operation not permitted` under `/Applications`; an admin
+  password alone is not enough. Whether granting App Management to a rebuilt
+  frozen RBSS Bridge covers the existing `osascript` → authtrampoline path
+  remains **live-unvalidated** — do not claim friend-Mac patch works yet.
   AWR-224/229 are selecting and verifying the complete macOS-12 wheel set.
   AWR-225's partial-install retry is implemented. These remain software-only
   until a clean foreign-Mac run.

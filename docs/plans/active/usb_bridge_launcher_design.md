@@ -20,11 +20,13 @@ validation_scope: >
   root-bundle ad-hoc codesign (no --deep, no nested re-sign) under one admin
   script with in-script backup restore (software-tested; disposable clone
   lab-proven; live /Applications apply remains operator-gated and does not
-  claim attach/foreign-Mac reads are fixed). make_stick stamps build GENERATION
-  into CFBundleShortVersionString/CFBundleVersion (fallback 0.0.1 outside
-  make_stick). Packaging components remain software-tested; stock foreign-Mac
-  attach remains live-unvalidated / unknown.
-work_status: implementation partial; packaging/install UX landed; AWR-222 AX measurement probe implemented/software-tested/not executed; rekordbox_patch root-only/one-admin recovery implemented/software-tested/hardware-unvalidated; target-patch→stock-attach hypothesis reopened by TimecodeLink parity; blocked on stock-SIP live gate evidence, not on a proven impossibility
+  claim attach/foreign-Mac reads are fixed). Frozen Info.plist declares
+  NSAppBundlesUsageDescription (implemented/software-tested); App Management
+  grant + osascript escalation remains live-unvalidated. make_stick stamps
+  build GENERATION into CFBundleShortVersionString/CFBundleVersion (fallback
+  0.0.1 outside make_stick). Packaging components remain software-tested;
+  stock foreign-Mac attach remains live-unvalidated / unknown.
+work_status: implementation partial; packaging/install UX landed; AWR-222 AX measurement probe implemented/software-tested/not executed; rekordbox_patch root-only/one-admin recovery + App Management Info.plist declaration implemented/software-tested/hardware-unvalidated; target-patch→stock-attach hypothesis reopened by TimecodeLink parity; blocked on stock-SIP live gate evidence, not on a proven impossibility
 relates_to: cross_platform_portability_plan.md, track_identity_move_invariance_design.md, awr222_ax_probe_sol_spec_2026_07_12.md
 ---
 
@@ -384,7 +386,13 @@ in the installed location, not the stick.
   `codesign --verify --deep --strict` plus positive main `get-task-allow`.
   Disposable-clone lab evidence: root-only passes deep+strict and GTA=true
   while preserving nested Pioneer CDHashes. Live `/Applications` apply remains
-  operator-gated; AWR-222 honesty unchanged.
+  operator-gated; a 2026-07-13 root-only live attempt failed with System Policy
+  `Operation not permitted` (App Management / `kTCCServiceSystemPolicyAppBundles`).
+  Frozen packaging now declares `NSAppBundlesUsageDescription`
+  (implemented/software-tested). Admin-password escalation alone is not enough;
+  whether granting App Management to rebuilt RBSS Bridge covers the existing
+  `osascript` → authtrampoline path is still **live-unvalidated** — do not claim
+  friend-Mac patch works yet. AWR-222 honesty unchanged.
 - **Dependency manifest gap (re-swept 2026-07-09, `confirmed`):** `pyproject.toml` declares
   only `mido, pyobjc-framework-Cocoa, pyrekordbox, python-osc, zeroconf` (+ optional
   spectral/analysis extras: `librosa`, `soundfile`, `numpy`, `scipy`) and has ZERO diff since

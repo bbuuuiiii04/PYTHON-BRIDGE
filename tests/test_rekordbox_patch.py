@@ -559,6 +559,88 @@ class ApplyPatchRunTests(unittest.TestCase):
         self.assertEqual(called, [])  # never ran codesign while another holds the lock
 
 
+class AppManagementHintTests(unittest.TestCase):
+    def test_frozen_applications_operation_not_permitted(self) -> None:
+        hint = rp.app_management_block_hint(
+            "codesign: Operation not permitted", APP, frozen=True,
+        )
+        self.assertIn("App Management", hint)
+        self.assertIn("System Settings", hint)
+        self.assertIn("RBSS Bridge", hint)
+        self.assertIn("admin password alone is not enough", hint)
+        self.assertNotIn("Use the RBSS Bridge app build", hint)
+
+    def test_source_applications_operation_not_permitted(self) -> None:
+        hint = rp.app_management_block_hint(
+            "codesign: Operation not permitted", APP, frozen=False,
+        )
+        self.assertIn("App Management", hint)
+        self.assertIn("RBSS Bridge app build that requests App Management", hint)
+        self.assertNotIn("System Settings", hint)
+        self.assertNotIn("admin password alone", hint)
+
+    def test_irrelevant_errors_and_non_applications_targets_are_silent(self) -> None:
+        self.assertEqual(
+            rp.app_management_block_hint("codesign: boom", APP, frozen=True),
+            "",
+        )
+        self.assertEqual(
+            rp.app_management_block_hint(
+                "Operation not permitted",
+                Path("/tmp/rekordbox.app"),
+                frozen=True,
+            ),
+            "",
+        )
+        self.assertEqual(
+            rp.app_management_block_hint(
+                "permission denied", APP, frozen=True,
+            ),
+            "",
+        )
+
+    def test_admin_operation_not_permitted_appends_source_hint(self) -> None:
+        err = (
+            f"RBSS_SIGN_FAIL:{APP}\n"
+            "RBSS_RESTORE_OK\n"
+            f"{APP}: Operation not permitted\n"
+        )
+        with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
+             mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
+             mock.patch.object(rp, "read_entitlements", return_value={}), \
+             mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan), \
+             mock.patch.object(rp, "_snapshot_app", return_value=Path("/tmp/bk/rekordbox.app")), \
+             mock.patch.object(rp, "_restore_app"), \
+             mock.patch.object(rp, "_cleanup_backup"), \
+             mock.patch.object(rp, "run_shell_via_admin", return_value=(1, err)), \
+             mock.patch.object(rp.sys, "frozen", False, create=True):
+            r = apply_patch(APP, dry_run=False, runner=rp.run_via_admin)
+        self.assertFalse(r.ok)
+        self.assertEqual(r.action, "failed")
+        self.assertIn("App Management", r.message)
+        self.assertIn("RBSS Bridge app build that requests App Management", r.message)
+        self.assertNotIn("admin password alone is not enough", r.message)
+
+    def test_admin_unrelated_sign_fail_omits_app_management_hint(self) -> None:
+        err = (
+            f"RBSS_SIGN_FAIL:{APP}\n"
+            "RBSS_RESTORE_OK\n"
+            "codesign: boom\n"
+        )
+        with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
+             mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
+             mock.patch.object(rp, "read_entitlements", return_value={}), \
+             mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan), \
+             mock.patch.object(rp, "_snapshot_app", return_value=Path("/tmp/bk/rekordbox.app")), \
+             mock.patch.object(rp, "_restore_app"), \
+             mock.patch.object(rp, "_cleanup_backup"), \
+             mock.patch.object(rp, "run_shell_via_admin", return_value=(1, err)):
+            r = apply_patch(APP, dry_run=False, runner=rp.run_via_admin)
+        self.assertFalse(r.ok)
+        self.assertIn("boom", r.message)
+        self.assertNotIn("App Management", r.message)
+
+
 class RunnerSeamTests(unittest.TestCase):
     def test_apply_patch_uses_custom_runner_for_codesign(self) -> None:
         calls = []

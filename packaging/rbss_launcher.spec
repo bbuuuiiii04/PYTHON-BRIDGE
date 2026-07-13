@@ -122,6 +122,10 @@ app = BUNDLE(
             "RBSS Bridge finds SoundSwitch and Govee lights on your local network.",
         "NSAppleEventsUsageDescription":
             "RBSS Bridge opens Terminal to show its read-only live log.",
+        "NSAppBundlesUsageDescription": (
+            "RBSS Bridge needs permission to update Rekordbox's app bundle only when "
+            "you choose Patch Rekordbox, so it can enable lighting reads."
+        ),
         "CFBundleName": "RBSS Bridge",
         "CFBundleDisplayName": "RBSS Bridge",
         # The locked native dependency set floors at macOS 12.3; declare it so an

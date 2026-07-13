@@ -25,6 +25,15 @@ class DispatchTests(unittest.TestCase):
         self.assertIn('"NSAppleEventsUsageDescription"', spec)
         self.assertIn("opens Terminal to show its read-only live log", spec)
 
+    def test_bundle_declares_app_management_reason(self) -> None:
+        spec = (
+            Path(__file__).resolve().parents[1] / "packaging" / "rbss_launcher.spec"
+        ).read_text(encoding="utf-8")
+        self.assertIn('"NSAppBundlesUsageDescription"', spec)
+        self.assertIn("update Rekordbox's app bundle only when", spec)
+        self.assertIn("you choose Patch Rekordbox", spec)
+        self.assertIn("enable lighting reads", spec)
+
     def test_no_args_runs_menubar(self) -> None:
         with mock.patch.object(usb_launcher, "_run_menubar", return_value=0) as menubar:
             self.assertEqual(usb_launcher.main([]), 0)

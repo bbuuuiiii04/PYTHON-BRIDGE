@@ -3,7 +3,7 @@ doc_status: current
 truth_level: code-verified
 last_verified_commit: d5bfaa4
 last_verified_date: 2026-07-13
-validation_scope: software-only; runtime command rail and slim source/frozen menubar inventory tested, including the state-aware Patch Rekordbox action in the maintenance block with Export/Rebuild (target entitlement only; exit-0 enabled dialog uses verification wording, not a fresh-install claim; stock foreign-Mac attach live-unvalidated / unknown); AWR-222 dormant AX probe is packaged dispatch only (no menu item of its own, not executed); native install failure alerts use plain-language copy at the menubar boundary; frozen app and hardware behavior unvalidated
+validation_scope: software-only; runtime command rail and slim source/frozen menubar inventory tested, including the state-aware Patch Rekordbox action in the maintenance block with Export/Rebuild (target entitlement only; exit-0 enabled dialog uses verification wording, not a fresh-install claim; stock foreign-Mac attach live-unvalidated / unknown; App Management Info.plist declaration + patcher guidance software-tested, grant/escalation live-unvalidated); AWR-222 dormant AX probe is packaged dispatch only (no menu item of its own, not executed); native install failure alerts use plain-language copy at the menubar boundary; frozen app and hardware behavior unvalidated
 ---
 
 # Runtime Commands Subsystem
@@ -131,7 +131,11 @@ SoundSwitch pack-player boundary (T7c/T7e):
   and still only greys **Rekordbox Patched** after that positive check. A
   positive target entitlement proves the Rekordbox patch only — not a live
   attach or full stock foreign-Mac parity (AWR-222 stock attach remains
-  live-unvalidated / unknown). The old standing
+  live-unvalidated / unknown). macOS App Management can block
+  `/Applications` writes even after an admin password; the frozen app declares
+  `NSAppBundlesUsageDescription`, and the patcher surfaces App Management
+  guidance on that failure class only — grant + `osascript` escalation remain
+  live-unvalidated (do not claim friend-Mac patch works yet). The old standing
   `Rekordbox target patch: …` status row stays absent; Status remains exactly
   four disabled rows. Operator-visible copy never says "Enable Rekordbox
   Reads". Signing/recovery code behind the click remains software-tested /
