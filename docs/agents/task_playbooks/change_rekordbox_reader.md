@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 59364bc
-last_verified_date: 2026-07-09
+last_verified_commit: 4f49eb2
+last_verified_date: 2026-07-12
 validation_scope: software-only
 ---
 

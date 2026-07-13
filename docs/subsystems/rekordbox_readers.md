@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: e5c6397
+last_verified_commit: 4f49eb2
 last_verified_date: 2026-07-12
-validation_scope: software-only plus Rekordbox 7.2.11 passive mixer RE evidence routing; AWR-157 deck-2 chain freshness gating software-tested; AWR-160 phantom track-load stability gate software-tested; AWR-207/AWR-209/AWR-211 USB local-twin, foreign-import, portable-sidecar refresh, and phrase-worker handoff software-tested; AWR-222 dormant AX measurement probe implemented/software-tested/not executed (not a reader); hardware-output unvalidated
+validation_scope: software-only plus Rekordbox 7.2.11 passive mixer RE evidence routing; AWR-157 deck-2 chain freshness gating software-tested; AWR-160 phantom track-load stability gate software-tested; AWR-207/AWR-209/AWR-211 USB local-twin, foreign-import, portable-sidecar refresh, and phrase-worker handoff software-tested; USB ANLZ PPTH leading-slash stick-root-relative paths accepted by `_device_audio_filepath` (software-tested); AWR-222 dormant AX measurement probe implemented/software-tested/not executed (not a reader); hardware-output unvalidated
 ---
 
 # Rekordbox Readers
@@ -288,3 +288,12 @@ AWR-222 dormant Accessibility MEASUREMENT probe (2026-07-12):
   not a reader, emits no `BridgeEvent`s, does not write `PositionCache`, and is
   not on the normal menu. No live AX/TCC/USB evidence; AWR-222 remains blocked.
   Current memory/MTC/OSC readers and active-deck policy are unchanged.
+
+USB ANLZ audio-path leading slash (2026-07-12, software-tested):
+- `_device_audio_filepath` now strips a leading `/` on stick-root-relative PPTH
+  tags (`/Contents/...`) before joining under the ANLZ mount — same rule as
+  `tools/spectral_stick_sweep.py`. `..` / drive-letter escapes and symlink-out
+  still fail closed. `_read_device_pdb_track` still requires an absolute
+  `/Volumes/<mount>/PIONEER/...` anlz path to locate export.pdb (root-relative
+  `/PIONEER/...` alone is not a mount locator — fail closed by design).
+  Pinned in `tests/test_filepath_resolver_sidecar.py`.

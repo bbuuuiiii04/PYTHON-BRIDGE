@@ -30,7 +30,12 @@ from typing import Any, Callable, Mapping, Sequence
 BRIDGE_BUNDLE_ID = "com.bbui.rb-ss-bridge-v2"
 REKORDBOX_BUNDLE_ID = "com.pioneerdj.rekordboxdj"
 APP_NAME = "RBSS Bridge.app"
-EXPECTED_BUNDLE_VERSION = "0.0.1"
+# Fallback when the app was built outside make_stick. make_stick stamps the
+# build-manifest GENERATION (e.g. 39a2ffa5c770-20260712T225252Z) into Info.plist.
+FALLBACK_BUNDLE_VERSION = "0.0.1"
+_GENERATION_VERSION_RE = re.compile(
+    r"^[0-9a-f]{12}-\d{8}T\d{6}Z(?:-dirty)?$"
+)
 BRIDGE_LOCK_PATH = "/tmp/rb_ss_bridge_v2.lock"
 SHAREABLE_SCHEMA_VERSION = 1
 
@@ -553,6 +558,12 @@ def read_bridge_live_pid(lock_path: str = BRIDGE_LOCK_PATH) -> int | None:
     return pid
 
 
+def bundle_version_ok(version: str) -> bool:
+    """Accept make_stick GENERATION stamps or the outside-make_stick fallback."""
+    text = str(version or "").strip()
+    return text == FALLBACK_BUNDLE_VERSION or bool(_GENERATION_VERSION_RE.fullmatch(text))
+
+
 def classify_install_path(bundle_path: str, *, frozen: bool | None = None) -> str:
     lowered = bundle_path.replace("\\", "/")
     if "/AppTranslocation/" in lowered:
@@ -608,7 +619,7 @@ def preflight_bundle(deps: ProbeDeps) -> tuple[BundleInfo | None, str | None]:
     if installed in {"dmg", "translocated", "source"}:
         return None, f"install_class_{installed}"
     info.installed_class = installed
-    if info.version != EXPECTED_BUNDLE_VERSION:
+    if not bundle_version_ok(info.version):
         return None, "bundle_version_mismatch"
     return info, None
 

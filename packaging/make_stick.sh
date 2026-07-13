@@ -618,8 +618,15 @@ else
             fail "locked macOS 12.3 build environment setup failed; no app or DMG was produced."
         }
     fi
-    "$VENV/bin/pyinstaller" packaging/rbss_launcher.spec \
+    RBSS_GENERATION="$GENERATION" "$VENV/bin/pyinstaller" packaging/rbss_launcher.spec \
         --noconfirm --distpath dist --workpath build
+    # Stamp the same generation into Info.plist again before signing so a
+    # PyInstaller/env miss cannot ship the fallback 0.0.1 against a real
+    # build-manifest generation. No-op when the values already match.
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $GENERATION" \
+        "dist/RBSS Bridge.app/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $GENERATION" \
+        "dist/RBSS Bridge.app/Contents/Info.plist"
     rm -rf build                                   # delete the intermediate (disk)
     bash packaging/sign.sh "dist/RBSS Bridge.app"
     # Strip any quarantine so a foreign Mac's Gatekeeper doesn't second-guess the

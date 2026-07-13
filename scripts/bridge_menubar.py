@@ -2299,6 +2299,7 @@ class BridgeMenuBar(NSObject):
                 INCOMPLETE_MARKER_NAME,
                 MANIFEST_NAME,
                 install_action_title,
+                operator_install_failure_message,
             )
 
             self._install_action_title = install_action_title(
@@ -2310,9 +2311,9 @@ class BridgeMenuBar(NSObject):
             alert = NSAlert.alloc().init()
             alert.setMessageText_("Install didn't finish")
             alert.setInformativeText_(
-                f"Failed step: {payload.get('failed_step') or 'unknown'}. "
-                "Nothing is half-broken: the app keeps running from the installer "
-                "disk, and the install record lists exactly what was copied."
+                operator_install_failure_message(
+                    str(payload.get("failed_step") or "")
+                )
             )
             alert.addButtonWithTitle_("OK")
             alert.runModal()

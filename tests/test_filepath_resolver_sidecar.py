@@ -162,6 +162,26 @@ class DeviceAudioFilepathTests(unittest.TestCase):
                 )
             self.assertEqual(path, str((mount / "MUSIC" / "Folder" / "song.wav").resolve()))
 
+    def test_device_audio_path_accepts_leading_slash_usb_root_relative(self) -> None:
+        """ANLZ PPTH often stores /Contents/...; must join under the stick mount."""
+        with TemporaryDirectory() as tmp:
+            volumes = Path(tmp)
+            mount = volumes / "TEST_STICK"
+            (mount / "PIONEER" / "ANLZ").mkdir(parents=True)
+            (mount / "Contents" / "Music").mkdir(parents=True)
+            song = mount / "Contents" / "Music" / "song.wav"
+            song.write_bytes(b"x")
+            anlz_path = str(mount / "PIONEER" / "ANLZ" / "ANLZ0000.DAT")
+            with patch.object(resolver, "_VOLUMES_ROOT", volumes):
+                path = self._device_path(anlz_path, "/Contents/Music/song.wav")
+            self.assertEqual(path, str(song.resolve()))
+
+    def test_read_device_pdb_track_requires_volumes_absolute_anlz(self) -> None:
+        """Root-relative /PIONEER/... is not a mount locator — fail closed (not a miss)."""
+        self.assertIsNone(resolver._read_device_pdb_track(
+            "/PIONEER/USBANLZ/P018/000086A0/ANLZ0000.DAT"
+        ))
+
     def test_device_audio_path_rejects_escapes_and_outside_symlink(self) -> None:
         with TemporaryDirectory() as tmp:
             volumes = Path(tmp)
@@ -173,10 +193,15 @@ class DeviceAudioFilepathTests(unittest.TestCase):
             (mount / "MUSIC" / "escape").symlink_to(outside, target_is_directory=True)
             anlz_path = str(mount / "PIONEER" / "ANLZ" / "ANLZ0000.DAT")
             with patch.object(resolver, "_VOLUMES_ROOT", volumes):
-                for parsed_path in ("../outside.wav", "/tmp/outside.wav", "C:/outside.wav", "MUSIC/escape/song.wav"):
+                # Leading-slash absolute FS paths become mount-relative after strip;
+                # true escapes remain .., drive letters, and symlink-out.
+                for parsed_path in ("../outside.wav", "C:/outside.wav", "MUSIC/escape/song.wav"):
                     with self.subTest(parsed_path=parsed_path):
                         self.assertEqual(self._device_path(anlz_path, parsed_path), "")
-
+                # /tmp/outside.wav strips to tmp/outside.wav under the mount — not /tmp.
+                stripped = self._device_path(anlz_path, "/tmp/outside.wav")
+                self.assertTrue(stripped.startswith(str(mount.resolve())))
+                self.assertNotEqual(stripped, "/tmp/outside.wav")
 
 class SidecarResolutionTests(unittest.TestCase):
     def setUp(self) -> None:

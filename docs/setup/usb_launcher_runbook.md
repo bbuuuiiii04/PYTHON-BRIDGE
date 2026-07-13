@@ -1,16 +1,18 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: e5c6397
+last_verified_commit: 4f49eb2
 last_verified_date: 2026-07-12
 validation_scope: >
-  Current USB builder, frozen launcher, native/shell install and purge, target
+  Current USB builder, frozen launcher, native install/purge, target
   Rekordbox patch, and software tests. Two physical foreign-Mac attempts failed
   to produce live Rekordbox reads. AWR-222 is a confirmed authorization blocker:
   current ad-hoc target-only signing is not a supported stock-macOS task_for_pid
   path. A dormant Accessibility MEASUREMENT probe is implemented/software-tested
   and not executed (not a reader; no menu item; no live AX/TCC/USB evidence).
-  SOFTWARE-VALIDATED COMPONENTS ONLY / FOREIGN-MAC LIVE READS UNSUPPORTED.
+  make_stick stamps GENERATION into Info.plist (fallback 0.0.1). No
+  install.command/purge.command helpers. SOFTWARE-VALIDATED COMPONENTS ONLY /
+  FOREIGN-MAC LIVE READS UNSUPPORTED.
 ---
 
 # USB Bridge Launcher — Runbook (M1 build · M2 install/PURGE)
@@ -80,15 +82,16 @@ One command from the repo root, with the renamed stick mounted:
 ```bash
 bash packaging/make_stick.sh /Volumes/<stick>
 ```
-It runs the whole chain: PyInstaller build → `sign.sh` → DMG **built from a
-staging dir so the DMG carries both `RBSS Bridge.app` and `RBSS_payload/`**
+It runs the whole chain: PyInstaller build → stamp `GENERATION` into the app's
+Info.plist → `sign.sh` → DMG **built from a staging dir so the DMG carries
+`RBSS Bridge.app` plus an embedded `RBSS_payload/`**
 (the pre-warmed spectral cache from App Support + the home-parity files:
 `govee.env`, `laser_director.json`, `led_look_director.json`,
 `soundswitch_pack_player.json`, `laser_color_map.json` — secrets-on-stick is
-operator-approved, AWR-186), then ships the DMG + the two stick `.command`
-helpers into the stick's **`RBSS BRIDGE USB/` folder** (the operator's layout,
-2026-07-09) and refreshes the folder's sibling `RBSS_payload/` so the interim
-helpers and the native installer never drift apart (M2 review fix). It refuses
+operator-approved, AWR-186), then ships **only** `RBSS Bridge.dmg` (+ stick
+`lighting_sidecar/` when the exporter runs). There are **no** `install.command` /
+`purge.command` helpers — native in-app Install/Update/Retry and Purge are the
+only install/removal path (AWR-226). It refuses
 any target volume without `PIONEER/` (wrong stick), stages only under
 `mktemp -d` (never the repo tree), skips absent payload files with a note, and
 aborts naming the step if a source exists but is unreadable — including a

@@ -8,12 +8,23 @@ signed and wrapped in a DMG downstream -- see docs/setup/usb_launcher_runbook.md
 PyInstaller specifics are [assumed] until the build proves them; verify against
 the installed PyInstaller (6.21.0 on Python 3.14.6, Task 0). Only *.example.json
 configs are bundled -- never the gitignored live configs or govee.env secrets.
+
+Bundle version: make_stick.sh exports RBSS_GENERATION into this process so
+CFBundleShortVersionString/CFBundleVersion match the build manifest generation
+(e.g. 39a2ffa5c770-20260712T225252Z). Outside make_stick, fall back to 0.0.1.
 """
 import glob
 import os
 import sys
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+
+# Prefer the make_stick generation; keep a sane fallback for ad-hoc PyInstaller.
+_BUNDLE_VERSION = (
+    os.environ.get("RBSS_GENERATION")
+    or os.environ.get("RBSS_BUNDLE_VERSION")
+    or "0.0.1"
+).strip() or "0.0.1"
 
 REPO_ROOT = os.path.abspath(os.path.join(SPECPATH, os.pardir))
 PARENT = os.path.abspath(os.path.join(REPO_ROOT, os.pardir))
@@ -117,7 +128,7 @@ app = BUNDLE(
         # older-macOS guest gets Finder's clean "requires macOS 12.3 or later"
         # instead of a raw dyld crash. Real version (not 0.0.0) so upgrades compare.
         "LSMinimumSystemVersion": "12.3",
-        "CFBundleShortVersionString": "0.0.1",
-        "CFBundleVersion": "0.0.1",
+        "CFBundleShortVersionString": _BUNDLE_VERSION,
+        "CFBundleVersion": _BUNDLE_VERSION,
     },
 )

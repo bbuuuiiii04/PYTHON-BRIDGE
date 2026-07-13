@@ -1866,12 +1866,15 @@ class NativeInstallGateTests(BridgeMenubarTests):
              patch("rb_ss_bridge_v2.install_controller.install_action_title",
                    return_value="Retry Installation…") as title:
             bridge_menubar.BridgeMenuBar.finishInstall_.callable(
-                menu, {"ok": False, "failed_step": "copy failed"}
+                menu, {"ok": False, "failed_step": "create target folders (PermissionError)"}
             )
         title.assert_called_once()
         menu.install_item.setTitle_.assert_called_once_with("Retry Installation…")
         menu.install_item.setEnabled_.assert_called_once_with(True)
-
+        text = alert.setInformativeText_.call_args.args[0]
+        self.assertNotIn("PermissionError", text)
+        self.assertNotIn("Failed step:", text)
+        self.assertIn("What to do:", text)
 
 class PortableLogAndUsbUpdateTests(BridgeMenubarTests):
     def test_log_argv_source_and_frozen_never_needs_host_python(self) -> None:

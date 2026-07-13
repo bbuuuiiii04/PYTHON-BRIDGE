@@ -103,6 +103,74 @@ class InstallResult:
     notes: list[str] = field(default_factory=list)
 
 
+def operator_install_failure_message(failed_step: str) -> str:
+    """Plain-language install failure for the operator alert only.
+
+    ``failed_step`` stays technical in the machine record / InstallResult.
+    This translator never changes failure semantics — display only.
+    """
+    step = (failed_step or "").strip() or "unknown"
+    lower = step.casefold()
+
+    if lower.startswith("create target folders"):
+        what = (
+            "This Mac wouldn't let RBSS Bridge create its Applications or "
+            "Application Support folders"
+        )
+        next_step = (
+            "Check that you can write to ~/Applications and "
+            "~/Library/Application Support, then try Install again"
+        )
+    elif lower.startswith("mark install unfinished"):
+        what = "RBSS Bridge couldn't start the install record on this Mac"
+        next_step = (
+            "Check free space and write permission under Application Support, "
+            "then choose Retry"
+        )
+    elif "build manifest" in lower or "package build manifest" in lower:
+        what = "The installer disk's package check failed (missing or bad build record)"
+        next_step = (
+            "Re-copy a fresh RBSS Bridge.dmg from the stick, open that copy, "
+            "and try Install again"
+        )
+    elif lower.startswith("check free disk") or "insufficient free disk" in lower:
+        what = "This Mac does not have enough free disk space for a safe install"
+        next_step = "Free several gigabytes on the system disk, then try again"
+    elif lower.startswith("stage complete install"):
+        what = "Copying the app and its lighting files into place failed"
+        next_step = (
+            "Quit other installers, confirm disk space, then choose Retry. "
+            "Nothing was left half-installed"
+        )
+    elif lower.startswith("commit install"):
+        what = "The final switch to the new install didn't finish"
+        next_step = (
+            "Choose Retry Installation. The previous install (if any) stays "
+            "usable until Retry succeeds"
+        )
+    elif "integrity" in lower:
+        what = "A copied file didn't match the package checksum"
+        next_step = (
+            "The stick copy may be damaged — re-copy the DMG from the stick "
+            "and Install again"
+        )
+    elif "midi binding" in lower or "bindings are malformed" in lower:
+        what = "The Stream Deck binding file in the package is unreadable"
+        next_step = "Rebuild the USB stick (or re-export bindings), then Install again"
+    elif lower.startswith("unexpected error"):
+        what = "Install stopped on an unexpected error"
+        next_step = "Choose Retry. If it keeps failing, rebuild the USB stick"
+    else:
+        what = "Install didn't finish"
+        next_step = "Choose Retry Installation from the menu"
+
+    return (
+        f"{what}.\n\nWhat to do: {next_step}.\n\n"
+        "Nothing is half-broken: this copy keeps running from the installer "
+        "disk, and the install record still lists exactly what was copied."
+    )
+
+
 def _iter_files(root: Path) -> list[Path]:
     return sorted(p for p in root.rglob("*") if p.is_file())
 

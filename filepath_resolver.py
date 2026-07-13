@@ -640,9 +640,13 @@ def _device_audio_filepath(anlz_path: str) -> str:
     except (ImportError, OSError, KeyError, TypeError, ValueError):
         return ""
     relative = relative.replace("\\", "/")
+    # Rekordbox USB PPTH tags are stick-root-relative and often carry a leading
+    # slash (/Contents/...). Strip it so join stays under the mount — same rule
+    # as tools/spectral_stick_sweep.py. Absolute-drive and .. escapes still fail.
+    if relative.startswith("/"):
+        relative = relative.lstrip("/")
     if (
         not relative
-        or relative.startswith("/")
         or re.match(r"^[A-Za-z]:", relative)
         or ".." in relative.split("/")
     ):

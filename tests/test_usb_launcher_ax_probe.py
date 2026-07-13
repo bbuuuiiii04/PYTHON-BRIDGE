@@ -76,7 +76,7 @@ def make_deps(
     frozen: bool = True,
     bundle_id: str = probe.BRIDGE_BUNDLE_ID,
     bundle_path: str | None = None,
-    version: str = probe.EXPECTED_BUNDLE_VERSION,
+    version: str = probe.FALLBACK_BUNDLE_VERSION,
     installed_class: str = "installed",
     signing: str = "ad_hoc",
     bridge_pid: int | None = None,
@@ -257,6 +257,20 @@ def make_deps(
     deps.retained_elements = retained  # type: ignore[attr-defined]
     deps._counter = counter  # type: ignore[attr-defined]
     return deps
+
+
+class BundleVersionGateTests(unittest.TestCase):
+    def test_fallback_and_generation_shapes_accepted(self) -> None:
+        self.assertTrue(probe.bundle_version_ok("0.0.1"))
+        self.assertTrue(
+            probe.bundle_version_ok("39a2ffa5c770-20260712T225252Z")
+        )
+        self.assertTrue(
+            probe.bundle_version_ok("39a2ffa5c770-20260712T225252Z-dirty")
+        )
+        self.assertFalse(probe.bundle_version_ok(""))
+        self.assertFalse(probe.bundle_version_ok("1.2.3"))
+        self.assertFalse(probe.bundle_version_ok("not-a-generation"))
 
 
 class DispatchTests(unittest.TestCase):

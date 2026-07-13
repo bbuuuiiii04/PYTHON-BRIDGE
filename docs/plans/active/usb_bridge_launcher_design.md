@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: spec
-last_verified_commit: e5c6397
+last_verified_commit: 4f49eb2
 last_verified_date: 2026-07-12
 validation_scope: >
   Current macOS USB launcher design reconciled to the landed M1/M2 code and two
@@ -9,8 +9,10 @@ validation_scope: >
   target-only Rekordbox patch does not provide stock-macOS caller authorization.
   A dormant Accessibility MEASUREMENT probe (`--probe-rekordbox-accessibility`)
   is implemented/software-tested and not executed; it is not a reader and does
-  not change bridge behavior. Packaging components remain software-tested;
-  foreign-Mac live reads remain unsupported.
+  not change bridge behavior. make_stick stamps build GENERATION into
+  CFBundleShortVersionString/CFBundleVersion (fallback 0.0.1 outside make_stick).
+  Packaging components remain software-tested; foreign-Mac live reads remain
+  unsupported.
 work_status: implementation partial; packaging/install UX landed; AWR-222 AX measurement probe implemented/software-tested/not executed; foreign-Mac live Rekordbox input still blocked pending operator live gate + E3 acceptance
 relates_to: cross_platform_portability_plan.md, track_identity_move_invariance_design.md, awr222_ax_probe_sol_spec_2026_07_12.md
 ---

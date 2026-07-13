@@ -536,5 +536,29 @@ class FrozenStatePathTests(unittest.TestCase):
         self.assertEqual(cfg.store_path, "local/state/led_identity_v2.json")
 
 
+class OperatorInstallFailureMessageTests(unittest.TestCase):
+    def test_technical_failed_step_stays_out_of_operator_text(self) -> None:
+        msg = ic.operator_install_failure_message(
+            "create target folders (PermissionError)"
+        )
+        self.assertNotIn("PermissionError", msg)
+        self.assertNotIn("create target folders", msg)
+        self.assertIn("What to do:", msg)
+        self.assertIn("Applications", msg)
+
+    def test_unknown_step_still_gives_retry_guidance(self) -> None:
+        msg = ic.operator_install_failure_message("weird internal token")
+        self.assertIn("What to do:", msg)
+        self.assertIn("Retry", msg)
+        self.assertNotIn("Failed step:", msg)
+
+    def test_insufficient_disk_maps_to_free_space(self) -> None:
+        msg = ic.operator_install_failure_message(
+            "insufficient free disk for a rollback-safe update"
+        )
+        self.assertIn("free disk", msg.casefold())
+        self.assertIn("What to do:", msg)
+
+
 if __name__ == "__main__":
     unittest.main()

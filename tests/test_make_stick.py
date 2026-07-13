@@ -259,6 +259,24 @@ class MakeStickTests(unittest.TestCase):
             source,
         )
 
+    def test_spec_and_make_stick_inject_generation_into_info_plist(self):
+        spec = SPEC.read_text(encoding="utf-8")
+        script = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('os.environ.get("RBSS_GENERATION")', spec)
+        self.assertIn('or "0.0.1"', spec)
+        self.assertIn('CFBundleShortVersionString": _BUNDLE_VERSION', spec)
+        self.assertIn('CFBundleVersion": _BUNDLE_VERSION', spec)
+        self.assertIn('RBSS_GENERATION="$GENERATION"', script)
+        self.assertIn("PlistBuddy", script)
+        self.assertIn("Set :CFBundleShortVersionString $GENERATION", script)
+        self.assertIn("Set :CFBundleVersion $GENERATION", script)
+        # Sign still runs after the stamp.
+        py_idx = script.index('RBSS_GENERATION="$GENERATION" "$VENV/bin/pyinstaller"')
+        buddy_idx = script.index("Set :CFBundleShortVersionString $GENERATION")
+        sign_idx = script.index('bash packaging/sign.sh "dist/RBSS Bridge.app"')
+        self.assertLess(py_idx, buddy_idx)
+        self.assertLess(buddy_idx, sign_idx)
+
     def test_bundle_native_files_must_not_exceed_deployment_target(self):
         fake_bin = Path(self.tmp.name) / "compat-tools"
         fake_bin.mkdir()

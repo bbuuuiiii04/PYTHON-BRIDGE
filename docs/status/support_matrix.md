@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: e5c6397
+last_verified_commit: 4f49eb2
 last_verified_date: 2026-07-12
-validation_scope: software-validated only plus Rekordbox 7.2.11 passive mixer RE evidence routing; AWR-157 blank-role hold + reader freshness software-tested; AWR-160 phantom track-load stability gate software-tested; AWR-161 LED round 3 software-tested; AWR-222 dormant AX measurement probe implemented/software-tested/not executed (not a reader); hardware-unvalidated in repo evidence
+validation_scope: software-validated only plus Rekordbox 7.2.11 passive mixer RE evidence routing; AWR-157 blank-role hold + reader freshness software-tested; AWR-160 phantom track-load stability gate software-tested; AWR-161 LED round 3 software-tested; AWR-222 dormant AX measurement probe implemented/software-tested/not executed (not a reader); USB ANLZ PPTH leading-slash stick-root paths software-tested; hardware-unvalidated in repo evidence
 ---
 
 

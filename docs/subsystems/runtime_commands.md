@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: e5c6397
+last_verified_commit: 4f49eb2
 last_verified_date: 2026-07-12
-validation_scope: software-only; runtime command rail and slim source/frozen menubar inventory tested; AWR-222 dormant AX probe is packaged dispatch only (no menu item, not executed); frozen app and hardware behavior unvalidated
+validation_scope: software-only; runtime command rail and slim source/frozen menubar inventory tested; AWR-222 dormant AX probe is packaged dispatch only (no menu item, not executed); native install failure alerts use plain-language copy at the menubar boundary; frozen app and hardware behavior unvalidated
 ---
 
 # Runtime Commands Subsystem
@@ -138,6 +138,10 @@ SoundSwitch pack-player boundary (T7c/T7e):
   probe is packaged dispatch only (`--probe-rekordbox-accessibility`); it is
   implemented/software-tested/not executed, not a reader, and does not change
   the menubar inventory or runtime command rail. AWR-222 remains blocked.
+- Native Install/Update/Retry failure alerts use
+  `install_controller.operator_install_failure_message` at the menubar boundary
+  only. Technical `failed_step` strings stay in the machine record; the alert
+  says what happened and what to try next (no `PermissionError`-style tokens).
 - **Restart Menubar** replaces Quit everywhere. It launches a fresh menubar
   after a short delay and closes only the old menubar process; it does not stop
   or restart the bridge. There is no ordinary Quit item. Child start failures
