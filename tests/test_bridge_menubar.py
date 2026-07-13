@@ -1053,9 +1053,23 @@ class BridgeMenubarTests(unittest.TestCase):
         self.assertNotIn("quit_item", attrs)
 
     def test_menu_blueprint_has_only_essential_status_and_no_dead_controls(self) -> None:
+        # Locked inventory: Status submenu holds exactly four disabled rows
+        # (Bridge / Rekordbox / Lasers / LEDs). No top-level status_item, and
+        # the removed everyday controls stay absent from MENU_BLUEPRINT.
         bridge_menubar = self._import_module()
-        status = next(e for e in bridge_menubar.MENU_BLUEPRINT if e[1] == "status_item")
+        status = next(
+            e for e in bridge_menubar.MENU_BLUEPRINT if e[1] == "status_submenu_item"
+        )
+        self.assertEqual(status[0], "submenu")
+        self.assertEqual(status[2], "Status")
         self.assertEqual(status[4], (("status_rows", "status_rows", 4, None),))
+        flat = self._flatten_blueprint(bridge_menubar.MENU_BLUEPRINT)
+        attrs = [e[1] for e in flat if e[1]]
+        self.assertNotIn("status_item", attrs)
+        self.assertEqual(
+            [e for e in flat if e[0] == "status_rows"],
+            [("status_rows", "status_rows", 4, None)],
+        )
         text = repr(bridge_menubar.MENU_BLUEPRINT)
         for forbidden in (
             "Smart Phrasing", "Laser Director", "LED Engine v2", "Rekordbox Target Patch",
