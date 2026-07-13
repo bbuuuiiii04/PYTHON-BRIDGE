@@ -17,7 +17,7 @@ permissions:
 jobs:
   inventory:
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
         with:
@@ -96,13 +96,124 @@ jobs:
           for name in sorted(set(mb)-set(ma)):
               bb,tb=mb[name]; print(f'{bb:016x} {tb} {name}')
           PY
-          cat /tmp/rb716-research/report.txt
+
+      - name: Compare mixer object-layout functions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet capstone==5.0.6
+          cat > /tmp/rb716-research/compare_layout.py <<'PY'
+          from __future__ import annotations
+          import re, struct, hashlib
+          from pathlib import Path
+          from capstone import Cs, CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN
+
+          LC_SEGMENT_64=0x19
+          TARGET = re.compile(
+              r'(DjEngineIF.*(getAudioGraph|getDjSystem|setChannelFader|setEqualizer|setDigitalTrim|setCrossFader|setChannelFx)|'
+              r'DjUnitAudioGraph.*getMixerControl|DjMixerUnit.*(setChannelFx|setChannelFader|setEqualizer|setDigitalTrim|setCrossFader)|'
+              r'InputChannelGraph.*(setChannelFaderPosition|getChannelFaderPosition|setEqPosition|setTrimPosition|setCrossFaderPosition|selectCrossFaderAssign|setEffectUnit|addChannelFader|addEqIso|addTrim|addCrossFaderVolumeControl)|'
+              r'ChannelFader.*(setParameter|getParameter)|EqualizerNXS2.*(setParameter|getParameter)|'
+              r'FxUnitProcessor.*(addFxUnit|getFxUnit)|RekordboxDjColorFx(Unit|Layer).*(setParameter|selectFx|startEffect|setChannel)|'
+              r'ColorFxFilterDjm900NXS2|CrossFaderVolumeControl|DigitalTrim|BeatFxUnit|RekordboxDjBeatFx)', re.I)
+
+          def macho_text(path):
+              data=Path(path).read_bytes()
+              magic,_,_,_,ncmds,_,_,_=struct.unpack_from('<IiiIIIII',data,0)
+              if magic != 0xFEEDFACF: raise RuntimeError(f'bad Mach-O {magic:#x}')
+              off=32
+              for _ in range(ncmds):
+                  cmd,cmdsize=struct.unpack_from('<II',data,off)
+                  if cmd==LC_SEGMENT_64:
+                      _,_,_,_,_,_,_,_,_,nsects,_=struct.unpack_from('<II16sQQQQiiII',data,off)
+                      so=off+72
+                      for _ in range(nsects):
+                          sec,seg,addr,size,fileoff,*_=struct.unpack_from('<16s16sQQ8I',data,so)
+                          sec=sec.split(b'\0',1)[0].decode(); seg=seg.split(b'\0',1)[0].decode()
+                          if seg=='__TEXT' and sec=='__text':
+                              return addr,bytes(data[fileoff:fileoff+size])
+                          so+=80
+                  off+=cmdsize
+              raise RuntimeError('missing text')
+
+          def nm_rows(path):
+              rows=[]
+              for line in Path(path).read_text(errors='replace').splitlines():
+                  p=line.split(' ',2)
+                  if len(p)!=3: continue
+                  try:a=int(p[0],16)
+                  except ValueError: continue
+                  if p[1] in ('t','T'): rows.append((a,p[2]))
+              rows.sort()
+              return rows
+
+          class Bin:
+              def __init__(self, version):
+                  self.version=version
+                  self.base,self.text=macho_text(f'/tmp/rb716-research/{version}-arm64')
+                  self.rows=nm_rows(f'/tmp/rb716-research/{version}-nm.txt')
+                  self.by_name={}
+                  for i,(a,n) in enumerate(self.rows): self.by_name.setdefault(n,[]).append(i)
+              def blob(self, i):
+                  a,n=self.rows[i]
+                  j=i+1
+                  while j<len(self.rows) and self.rows[j][0]==a: j+=1
+                  end=self.rows[j][0] if j<len(self.rows) else self.base+len(self.text)
+                  end=min(end,a+0x4000,self.base+len(self.text))
+                  return a,self.text[a-self.base:end-self.base]
+
+          def disasm(addr, blob):
+              md=Cs(CS_ARCH_ARM64,CS_MODE_LITTLE_ENDIAN)
+              return list(md.disasm(blob,addr))
+
+          def normalize(ins):
+              op=ins.op_str
+              if ins.mnemonic.startswith('b') or ins.mnemonic in ('bl','adr','adrp'):
+                  op=re.sub(r'0x[0-9a-f]+','<target>',op)
+              op=re.sub(r'0x1[0-9a-f]{8,}','<addr>',op)
+              return f'{ins.mnemonic} {op}'.strip()
+
+          def mem_disps(insns):
+              vals=[]
+              for ins in insns:
+                  for m in re.finditer(r'\[(?:x\d+|sp)(?:,\s*#(-?0x[0-9a-f]+|-?\d+))?',ins.op_str):
+                      if m.group(1):
+                          vals.append((ins.mnemonic,int(m.group(1),0),ins.op_str))
+              return vals
+
+          a=Bin('7.2.11'); b=Bin('7.2.16')
+          common=sorted(set(a.by_name)&set(b.by_name))
+          selected=[n for n in common if TARGET.search(n)]
+          print(f'target_functions={len(selected)}')
+          for name in selected:
+              ia=a.by_name[name][0]; ib=b.by_name[name][0]
+              aa,ba=a.blob(ia); ab,bb=b.blob(ib)
+              da=disasm(aa,ba); db=disasm(ab,bb)
+              na=[normalize(x) for x in da]; nb=[normalize(x) for x in db]
+              raw_equal=ba==bb
+              norm_equal=na==nb
+              md_a=mem_disps(da); md_b=mem_disps(db)
+              print('\nFUNCTION',name)
+              print(f'  7.2.11=0x{aa:x} size={len(ba)} sha={hashlib.sha256(ba).hexdigest()[:16]}')
+              print(f'  7.2.16=0x{ab:x} size={len(bb)} sha={hashlib.sha256(bb).hexdigest()[:16]} delta={ab-aa:+#x}')
+              print(f'  raw_equal={raw_equal} normalized_equal={norm_equal}')
+              print('  mem_disps_7.2.11=' + repr(md_a))
+              print('  mem_disps_7.2.16=' + repr(md_b))
+              if not norm_equal:
+                  print('  --- disasm 7.2.11 ---')
+                  for x in da: print(f'    {x.address:016x}: {x.mnemonic:8s} {x.op_str}')
+                  print('  --- disasm 7.2.16 ---')
+                  for x in db: print(f'    {x.address:016x}: {x.mnemonic:8s} {x.op_str}')
+          PY
+          python3 /tmp/rb716-research/compare_layout.py > /tmp/rb716-research/layout-report.txt
+          cat /tmp/rb716-research/layout-report.txt
 
       - uses: actions/upload-artifact@v4
         with:
-          name: rb716-mixer-symbol-inventory
+          name: rb716-mixer-research
           path: |
             /tmp/rb716-research/report.txt
+            /tmp/rb716-research/layout-report.txt
             /tmp/rb716-research/7.2.11-nm.txt
             /tmp/rb716-research/7.2.16-nm.txt
           if-no-files-found: error
