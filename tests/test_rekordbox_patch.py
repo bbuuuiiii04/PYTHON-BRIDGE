@@ -105,7 +105,7 @@ class CodesignArgvTests(unittest.TestCase):
 
 
 class SignPlanPureSeamTests(unittest.TestCase):
-    """Root-only plan + admin-script marker seams (no nested walk)."""
+    """Root-only plan + privileged-sign-script seams (no nested walk)."""
 
     def test_plan_is_exactly_one_root_bundle_command(self) -> None:
         ents = Path("/tmp/e.plist")
@@ -120,22 +120,18 @@ class SignPlanPureSeamTests(unittest.TestCase):
             ["app", "entitlements_path"],
         )
 
-    def test_build_sign_restore_script_markers_and_mid_failure_restore(self) -> None:
+    def test_build_sign_script_has_no_backup_or_restore_step(self) -> None:
         app = Path("/Applications/rekordbox 7/rekordbox.app")
-        backup = Path("/tmp/backup dir/rekordbox.app")
         steps = [
             (str(app),
              ["codesign", "--force", "--sign", "-",
               "--entitlements", "/tmp/e.plist", str(app)]),
         ]
-        script = rp.build_sign_restore_script(steps, app, backup)
+        script = rp.build_sign_script(steps)
         self.assertTrue(script.startswith("#!/bin/sh\n"))
         self.assertIn(f"RBSS_SIGNING:{app}", script)
         self.assertIn(f"RBSS_SIGN_FAIL:{app}", script)
-        self.assertIn("RBSS_RESTORE_OK", script)
-        self.assertIn("RBSS_RESTORE_FAIL", script)
         self.assertIn("RBSS_SIGN_OK", script)
-        self.assertIn(shlex.quote(str(backup)), script)
         self.assertIn(shlex.quote(str(app)), script)
         fail_idx = script.index(f"RBSS_SIGN_FAIL:{app}")
         ok_idx = script.index("RBSS_SIGN_OK")
@@ -144,16 +140,12 @@ class SignPlanPureSeamTests(unittest.TestCase):
         # Exactly one codesign invocation in the script body.
         self.assertEqual(script.count("codesign --force --sign -"), 1)
 
-    def test_parse_sign_fail_and_restore_markers(self) -> None:
+    def test_parse_sign_fail_marker(self) -> None:
         err = (
             f"RBSS_SIGNING:{APP}\n"
             f"RBSS_SIGN_FAIL:{APP}\n"
-            "RBSS_RESTORE_OK\n"
         )
         self.assertEqual(rp.parse_sign_fail_component(err), str(APP))
-        self.assertEqual(rp.parse_restore_marker(err), "ok")
-        self.assertEqual(rp.parse_restore_marker("RBSS_RESTORE_FAIL"), "fail")
-        self.assertIsNone(rp.parse_restore_marker("RBSS_SIGN_OK"))
         self.assertIsNone(rp.parse_sign_fail_component("RBSS_SIGN_OK"))
 
     def test_parse_native_admin_exit_marker(self) -> None:
@@ -167,7 +159,6 @@ class SignPlanPureSeamTests(unittest.TestCase):
     def test_codesign_fail_detail_strips_markers_and_secrets(self) -> None:
         err = (
             f"RBSS_SIGN_FAIL:{APP}\n"
-            "RBSS_RESTORE_OK\n"
             "codesign: internal error in Code Signing subsystem\n"
             "Please enter your password:\n"
         )
@@ -178,23 +169,19 @@ class SignPlanPureSeamTests(unittest.TestCase):
 
 
 class RootOnlyApplyTests(unittest.TestCase):
-    """Single root-bundle execution + one-admin failure markers."""
+    """Single root-bundle execution without a full-bundle backup."""
 
-    def test_non_admin_runs_one_root_command_and_restores_once(self) -> None:
+    def test_non_admin_runs_one_root_command_and_reports_no_backup(self) -> None:
         calls: list[list[str]] = []
 
         def runner(argv):
             calls.append(list(argv))
             return 1, "codesign: boom"
 
-        restore = mock.Mock(return_value=True)
         with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
              mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
              mock.patch.object(rp, "read_entitlements", return_value={}), \
-             mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan), \
-             mock.patch.object(rp, "_snapshot_app", return_value=Path("/tmp/bk/rekordbox.app")), \
-             mock.patch.object(rp, "_restore_app", restore), \
-             mock.patch.object(rp, "_cleanup_backup"):
+             mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan):
             r = apply_patch(APP, dry_run=False, runner=runner)
         self.assertFalse(r.ok)
         self.assertEqual(r.action, "failed")
@@ -202,25 +189,19 @@ class RootOnlyApplyTests(unittest.TestCase):
         self.assertEqual(calls[0][-1], str(APP))
         self.assertIn("--entitlements", calls[0])
         self.assertNotIn("--deep", calls[0])
-        restore.assert_called_once()
+        self.assertIn("no rekordbox backup", r.message.lower())
         self.assertEqual(r.command, calls[0])
 
-    def test_admin_sign_fail_names_command_and_skips_second_restore(self) -> None:
-        restore = mock.Mock(return_value=True)
+    def test_admin_sign_fail_names_command_and_reports_no_backup(self) -> None:
         err = (
             f"RBSS_SIGNING:{APP}\n"
             f"RBSS_SIGN_FAIL:{APP}\n"
-            "RBSS_RESTORE_OK\n"
             "codesign: boom\n"
         )
-        cleanup = mock.Mock()
         with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
              mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
              mock.patch.object(rp, "read_entitlements", return_value={}), \
              mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan), \
-             mock.patch.object(rp, "_snapshot_app", return_value=Path("/tmp/bk/rekordbox.app")), \
-             mock.patch.object(rp, "_restore_app", restore), \
-             mock.patch.object(rp, "_cleanup_backup", cleanup), \
              mock.patch.object(rp, "run_shell_via_admin", return_value=(1, err)) as shell:
             r = apply_patch(APP, dry_run=False, runner=rp.run_via_admin)
         self.assertFalse(r.ok)
@@ -229,26 +210,16 @@ class RootOnlyApplyTests(unittest.TestCase):
         self.assertIn("Failed command:", r.message)
         self.assertIn("--entitlements", r.message)
         self.assertNotIn("--deep", r.message)
-        self.assertIn("same admin step", r.message.lower())
-        self.assertIn("restored", r.message.lower())
-        self.assertIn("temporary copy was removed", r.message.lower())
-        self.assertNotIn("/tmp/bk", r.message)
+        self.assertIn("no rekordbox backup", r.message.lower())
         self.assertIn("boom", r.message)
-        restore.assert_not_called()
-        cleanup.assert_called_once()
         shell.assert_called_once()
         self.assertEqual(r.command[-1], str(APP))
 
-    def test_admin_cancel_cleans_backup_no_restore(self) -> None:
-        restore = mock.Mock(return_value=True)
-        cleanup = mock.Mock()
+    def test_admin_cancel_is_clean_abort(self) -> None:
         with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
              mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
              mock.patch.object(rp, "read_entitlements", return_value={}), \
              mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan), \
-             mock.patch.object(rp, "_snapshot_app", return_value=Path("/tmp/bk/rekordbox.app")), \
-             mock.patch.object(rp, "_restore_app", restore), \
-             mock.patch.object(rp, "_cleanup_backup", cleanup), \
              mock.patch.object(
                  rp, "run_shell_via_admin",
                  return_value=(1, "User canceled. (-128)"),
@@ -257,48 +228,6 @@ class RootOnlyApplyTests(unittest.TestCase):
         self.assertFalse(r.ok)
         self.assertEqual(r.action, "refused")
         self.assertIn("cancel", r.message.lower())
-        restore.assert_not_called()
-        cleanup.assert_called_once()
-
-    def test_admin_restore_fail_keeps_backup_path(self) -> None:
-        restore = mock.Mock(return_value=True)
-        err = (
-            f"RBSS_SIGN_FAIL:{APP}\n"
-            "RBSS_RESTORE_FAIL\n"
-        )
-        with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
-             mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
-             mock.patch.object(rp, "read_entitlements", return_value={}), \
-             mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan), \
-             mock.patch.object(rp, "_snapshot_app", return_value=Path("/tmp/bk/rekordbox.app")), \
-             mock.patch.object(rp, "_restore_app", restore), \
-             mock.patch.object(rp, "_cleanup_backup"), \
-             mock.patch.object(rp, "run_shell_via_admin", return_value=(1, err)):
-            r = apply_patch(APP, dry_run=False, runner=rp.run_via_admin)
-        self.assertFalse(r.ok)
-        self.assertIn(str(APP), r.message)
-        self.assertIn("Automatic restore failed", r.message)
-        self.assertIn("backed up at", r.message.lower())
-        self.assertIn("/tmp/bk", r.message)
-        restore.assert_not_called()
-
-    def test_admin_missing_restore_marker_is_unconfirmed_not_fail(self) -> None:
-        restore = mock.Mock(return_value=True)
-        err = f"RBSS_SIGN_FAIL:{APP}\n"
-        with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
-             mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
-             mock.patch.object(rp, "read_entitlements", return_value={}), \
-             mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan), \
-             mock.patch.object(rp, "_snapshot_app", return_value=Path("/tmp/bk/rekordbox.app")), \
-             mock.patch.object(rp, "_restore_app", restore), \
-             mock.patch.object(rp, "_cleanup_backup"), \
-             mock.patch.object(rp, "run_shell_via_admin", return_value=(1, err)):
-            r = apply_patch(APP, dry_run=False, runner=rp.run_via_admin)
-        self.assertFalse(r.ok)
-        self.assertIn("could not be confirmed", r.message.lower())
-        self.assertNotIn("Automatic restore failed", r.message)
-        self.assertIn("/tmp/bk", r.message)
-        restore.assert_not_called()
 
 
 class ApplyPatchGuardTests(unittest.TestCase):
@@ -313,16 +242,14 @@ class ApplyPatchGuardTests(unittest.TestCase):
         with mock.patch.object(rp.subprocess, "run", side_effect=rp.subprocess.TimeoutExpired("pgrep", 10)):
             self.assertIsNone(rp.is_rekordbox_running())
 
-    def test_running_state_uncertainty_refuses_before_snapshot_or_signing(self) -> None:
+    def test_running_state_uncertainty_refuses_before_signing(self) -> None:
         runner = mock.Mock()
         with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
-             mock.patch.object(rp, "is_rekordbox_running", return_value=None), \
-             mock.patch.object(rp, "_snapshot_app") as snapshot:
+             mock.patch.object(rp, "is_rekordbox_running", return_value=None):
             result = apply_patch(APP, dry_run=False, runner=runner)
         self.assertFalse(result.ok)
         self.assertEqual(result.action, "refused")
         self.assertIn("could not tell", result.message.lower())
-        snapshot.assert_not_called()
         runner.assert_not_called()
 
     def test_entitlement_read_failure_refuses_before_signing(self) -> None:
@@ -332,12 +259,11 @@ class ApplyPatchGuardTests(unittest.TestCase):
              mock.patch.object(
                  rp, "read_entitlements",
                  side_effect=EntitlementsReadError("malformed output"),
-             ), mock.patch.object(rp, "_snapshot_app") as snapshot:
+            ):
             r = apply_patch(APP, dry_run=False, runner=runner)
         self.assertFalse(r.ok)
         self.assertEqual(r.action, "refused")
         self.assertIn("none are stripped", r.message.lower())
-        snapshot.assert_not_called()
         runner.assert_not_called()
 
     def test_refuses_non_rekordbox_bundle(self) -> None:
@@ -383,173 +309,71 @@ class ApplyPatchGuardTests(unittest.TestCase):
 
 
 class ApplyPatchRunTests(unittest.TestCase):
-    def _apply(self, run_side_effect, after_has_gta):
+    def _apply(self, verify, after_has_gta):
         with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
              mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
              mock.patch.object(rp, "read_entitlements", return_value={}), \
              mock.patch.object(rp, "has_get_task_allow", return_value=after_has_gta), \
              mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan), \
-             mock.patch.object(rp, "_snapshot_app", return_value=Path("/tmp/rbss_bk/rekordbox.app")), \
-             mock.patch.object(rp, "_restore_app", return_value=True), \
-             mock.patch.object(rp, "_cleanup_backup"), \
-             mock.patch.object(rp.subprocess, "run", side_effect=run_side_effect):
-            return apply_patch(APP, dry_run=False)
+             mock.patch.object(rp.subprocess, "run", return_value=verify):
+            return apply_patch(APP, dry_run=False, runner=lambda argv: (0, ""))
 
-    def test_success(self) -> None:
-        r = self._apply([_proc(0), _proc(0)], after_has_gta=True)  # codesign ok, verify ok
+    def test_success_does_not_make_a_full_backup(self) -> None:
+        r = self._apply(_proc(0), after_has_gta=True)
         self.assertTrue(r.ok)
         self.assertEqual(r.action, "patched")
         self.assertIn("does not prove", r.message.lower())
-        self.assertNotIn("will read", r.message.lower())
-        self.assertIn("temporary pre-sign copy was removed", r.message.lower())
+        self.assertIn("no full rekordbox backup", r.message.lower())
+        self.assertFalse(hasattr(rp, "_snapshot_app"))
 
-    def test_success_removes_temporary_backup(self) -> None:
-        cleanup = mock.Mock()
-        with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
-             mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
-             mock.patch.object(rp, "read_entitlements", return_value={}), \
-             mock.patch.object(rp, "has_get_task_allow", return_value=True), \
-             mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan), \
-             mock.patch.object(
-                 rp, "_snapshot_app",
-                 return_value=Path("/tmp/backups/backup_1/rekordbox.app"),
-             ), mock.patch.object(rp, "_cleanup_backup", cleanup), \
-             mock.patch.object(rp.subprocess, "run", return_value=_proc(0)):
-            r = apply_patch(APP, dry_run=False, runner=lambda argv: (0, ""))
-        self.assertTrue(r.ok)
-        cleanup.assert_called_once_with(Path("/tmp/backups/backup_1/rekordbox.app"))
-        self.assertIn("temporary pre-sign copy was removed", r.message.lower())
-
-    def test_backup_root_is_outside_bridge_app_support(self) -> None:
-        self.assertEqual(rp.BACKUP_ROOT.name, "RBSS Rekordbox Backups")
-        self.assertNotIn("RBSS Bridge", rp.BACKUP_ROOT.parts)
-
-    def test_codesign_failure_restores_and_stays_launchable(self) -> None:
-        r = self._apply([_proc(1, stderr="not permitted")], after_has_gta=False)
+    def test_verify_failure_reports_no_recovery_claim(self) -> None:
+        r = self._apply(_proc(1, stderr="invalid signature"), after_has_gta=True)
         self.assertFalse(r.ok)
         self.assertEqual(r.action, "failed")
-        self.assertIn("admin", r.message.lower())         # permission hint surfaced
-        self.assertIn("launchable", r.message.lower())    # restored, NOT told to reinstall
-        self.assertNotIn("reinstall", r.message.lower())
-
-    def test_verify_failure_restores_and_stays_launchable(self) -> None:
-        r = self._apply([_proc(0), _proc(1, stderr="invalid signature")], after_has_gta=True)
-        self.assertFalse(r.ok)
-        self.assertIn("launchable", r.message.lower())
-        self.assertNotIn("reinstall", r.message.lower())
+        self.assertIn("no rekordbox backup", r.message.lower())
+        self.assertIn("reinstall or update", r.message.lower())
+        self.assertNotIn("launchable", r.message.lower())
 
     def test_verify_subprocess_error_is_failed_not_crash(self) -> None:
-        # codesign ok (via runner), but the verify subprocess.run RAISES -> caught,
-        # backup restored, never left claiming "patched".
         with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
              mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
              mock.patch.object(rp, "read_entitlements", return_value={}), \
              mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan), \
-             mock.patch.object(rp, "_snapshot_app", return_value=Path("/tmp/rbss_bk/rekordbox.app")), \
-             mock.patch.object(rp, "_restore_app", return_value=True), \
-             mock.patch.object(rp, "_cleanup_backup"), \
              mock.patch.object(rp.subprocess, "run", side_effect=OSError("boom")):
             r = apply_patch(APP, dry_run=False, runner=lambda argv: (0, ""))
         self.assertFalse(r.ok)
-        self.assertEqual(r.action, "failed")
-        self.assertIn("launchable", r.message.lower())
+        self.assertIn("no rekordbox backup", r.message.lower())
 
-    def test_refuses_when_no_disk_for_backup(self) -> None:
-        # No safe backup -> refuse; NEVER re-sign (would risk an unrecoverable brick).
+    def test_codesign_failure_reports_no_recovery_claim(self) -> None:
         with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
              mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
              mock.patch.object(rp, "read_entitlements", return_value={}), \
-             mock.patch.object(rp, "_snapshot_app", return_value=None), \
-             mock.patch.object(rp, "plan_codesign_argvs", side_effect=AssertionError("planned with no backup")), \
-             mock.patch.object(rp.subprocess, "run", side_effect=AssertionError("re-signed with no backup")):
-            r = apply_patch(APP, dry_run=False, runner=lambda argv: (0, ""))
-        self.assertFalse(r.ok)
-        self.assertEqual(r.action, "refused")
-        self.assertIn("disk", r.message.lower())
-
-    def test_restores_on_codesign_failure(self) -> None:
-        with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
-             mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
-             mock.patch.object(rp, "read_entitlements", return_value={}), \
-             mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan), \
-             mock.patch.object(rp, "_snapshot_app", return_value=Path("/tmp/bk/rekordbox.app")), \
-             mock.patch.object(rp, "_restore_app", return_value=True) as restore, \
-             mock.patch.object(rp, "_cleanup_backup"):
+             mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan):
             r = apply_patch(APP, dry_run=False, runner=lambda argv: (1, "codesign: boom"))
         self.assertFalse(r.ok)
-        self.assertEqual(r.action, "failed")
-        restore.assert_called_once()                      # the backup WAS restored
-        self.assertNotIn("reinstall", r.message.lower())
+        self.assertIn("no rekordbox backup", r.message.lower())
 
-    def test_restore_failure_keeps_backup_and_says_where(self) -> None:
-        with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
-             mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
-             mock.patch.object(rp, "read_entitlements", return_value={}), \
-             mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan), \
-             mock.patch.object(rp, "_snapshot_app", return_value=Path("/tmp/bk/rekordbox.app")), \
-             mock.patch.object(rp, "_restore_app", return_value=False):
-            r = apply_patch(APP, dry_run=False, runner=lambda argv: (1, "boom"))
+    def test_entitlement_did_not_take_reports_no_recovery_claim(self) -> None:
+        r = self._apply(_proc(0), after_has_gta=False)
         self.assertFalse(r.ok)
-        self.assertIn("backed up at", r.message.lower())      # tells operator WHERE
-        self.assertIn("no reinstall needed", r.message.lower())  # explicit: not a reinstall
+        self.assertIn("no rekordbox backup", r.message.lower())
 
-    def test_enough_disk_for_backup_boundary(self) -> None:
-        gb = 1024 ** 3
-        self.assertTrue(rp.enough_disk_for_backup(2 * gb, 3 * gb))    # ~1GB spare over margin
-        self.assertFalse(rp.enough_disk_for_backup(2 * gb, 2 * gb))   # no room for the margin
-        self.assertFalse(rp.enough_disk_for_backup(2 * gb, 1 * gb))   # not even the copy
-
-    def test_user_cancel_is_clean_abort_no_restore(self) -> None:
-        # Operator dismisses the admin prompt -> nonzero + "User canceled" -> refused,
-        # NO restore attempted (codesign never ran; Rekordbox untouched; no 2nd prompt).
-        restore_calls = []
+    def test_user_cancel_is_clean_abort(self) -> None:
         with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
              mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
              mock.patch.object(rp, "read_entitlements", return_value={}), \
-             mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan), \
-             mock.patch.object(rp, "_snapshot_app", return_value=Path("/tmp/bk/rekordbox.app")), \
-             mock.patch.object(rp, "_restore_app", side_effect=lambda *a: restore_calls.append(a) or True), \
-             mock.patch.object(rp, "_cleanup_backup"):
+             mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan):
             r = apply_patch(APP, dry_run=False,
-                            runner=lambda argv: (1, "0:101: execution error: User canceled. (-128)"))
+                            runner=lambda argv: (1, "execution error: User canceled. (-128)"))
         self.assertFalse(r.ok)
         self.assertEqual(r.action, "refused")
-        self.assertIn("cancel", r.message.lower())
-        self.assertEqual(restore_calls, [])  # never restored -> no spurious 2nd admin prompt
 
     def test_is_user_cancel(self) -> None:
-        self.assertTrue(rp.is_user_cancel("execution error: User canceled. (-128)"))
+        self.assertTrue(rp.is_user_cancel("User canceled native admin authorization."))
         self.assertTrue(rp.is_user_cancel("boom (-128)"))
         self.assertFalse(rp.is_user_cancel("codesign: not permitted"))
-        self.assertFalse(rp.is_user_cancel(""))
-
-    def test_entitlement_did_not_take(self) -> None:
-        r = self._apply([_proc(0), _proc(0)], after_has_gta=False)  # verify ok but gta absent
-        self.assertFalse(r.ok)
-        self.assertEqual(r.action, "failed")
-
-    def test_post_sign_entitlement_read_failure_restores(self) -> None:
-        restore = mock.Mock(return_value=True)
-        with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
-             mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
-             mock.patch.object(rp, "read_entitlements", return_value={}), \
-             mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan), \
-             mock.patch.object(
-                 rp, "has_get_task_allow",
-                 side_effect=EntitlementsReadError("malformed output"),
-             ), mock.patch.object(
-                 rp, "_snapshot_app", return_value=Path("/tmp/bk/rekordbox.app"),
-             ), mock.patch.object(rp, "_restore_app", restore), \
-             mock.patch.object(rp, "_cleanup_backup"), \
-             mock.patch.object(rp.subprocess, "run", return_value=_proc(0)):
-            r = apply_patch(APP, dry_run=False, runner=lambda argv: (0, ""))
-        self.assertFalse(r.ok)
-        self.assertEqual(r.action, "failed")
-        restore.assert_called_once()
 
     def test_refuses_when_a_patch_is_already_running(self) -> None:
-        # A concurrent patch (double-click) holds the lock; the second refuses
-        # instead of running a second interleaving codesign --force.
         import fcntl
         import tempfile as _tf
         lock_path = Path(_tf.gettempdir()) / "rbss_rekordbox_patch.lock"
@@ -566,7 +390,7 @@ class ApplyPatchRunTests(unittest.TestCase):
             holder.close()
         self.assertFalse(r.ok)
         self.assertEqual(r.action, "refused")
-        self.assertEqual(called, [])  # never ran codesign while another holds the lock
+        self.assertEqual(called, [])
 
 
 class AppManagementHintTests(unittest.TestCase):
@@ -612,16 +436,12 @@ class AppManagementHintTests(unittest.TestCase):
     def test_admin_operation_not_permitted_appends_source_hint(self) -> None:
         err = (
             f"RBSS_SIGN_FAIL:{APP}\n"
-            "RBSS_RESTORE_OK\n"
             f"{APP}: Operation not permitted\n"
         )
         with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
              mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
              mock.patch.object(rp, "read_entitlements", return_value={}), \
              mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan), \
-             mock.patch.object(rp, "_snapshot_app", return_value=Path("/tmp/bk/rekordbox.app")), \
-             mock.patch.object(rp, "_restore_app"), \
-             mock.patch.object(rp, "_cleanup_backup"), \
              mock.patch.object(rp, "run_shell_via_admin", return_value=(1, err)), \
              mock.patch.object(rp.sys, "frozen", False, create=True):
             r = apply_patch(APP, dry_run=False, runner=rp.run_via_admin)
@@ -634,16 +454,12 @@ class AppManagementHintTests(unittest.TestCase):
     def test_admin_unrelated_sign_fail_omits_app_management_hint(self) -> None:
         err = (
             f"RBSS_SIGN_FAIL:{APP}\n"
-            "RBSS_RESTORE_OK\n"
             "codesign: boom\n"
         )
         with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
              mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
              mock.patch.object(rp, "read_entitlements", return_value={}), \
              mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan), \
-             mock.patch.object(rp, "_snapshot_app", return_value=Path("/tmp/bk/rekordbox.app")), \
-             mock.patch.object(rp, "_restore_app"), \
-             mock.patch.object(rp, "_cleanup_backup"), \
              mock.patch.object(rp, "run_shell_via_admin", return_value=(1, err)):
             r = apply_patch(APP, dry_run=False, runner=rp.run_via_admin)
         self.assertFalse(r.ok)
@@ -664,9 +480,6 @@ class RunnerSeamTests(unittest.TestCase):
              mock.patch.object(rp, "read_entitlements", return_value={}), \
              mock.patch.object(rp, "has_get_task_allow", return_value=True), \
              mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan), \
-             mock.patch.object(rp, "_snapshot_app", return_value=Path("/tmp/rbss_bk/rekordbox.app")), \
-             mock.patch.object(rp, "_restore_app", return_value=True), \
-             mock.patch.object(rp, "_cleanup_backup"), \
              mock.patch.object(rp.subprocess, "run", return_value=_proc(0)):  # verify only
             r = apply_patch(APP, dry_run=False, runner=fake_runner)
         self.assertTrue(r.ok)
@@ -701,20 +514,19 @@ class RunnerSeamTests(unittest.TestCase):
         self.assertIn("rekordbox.app", script)
         self.assertEqual(shell.call_args.kwargs["timeout"], 600)
 
-    def test_native_runner_uses_one_combined_sign_restore_script(self) -> None:
-        err = f"RBSS_SIGN_FAIL:{APP}\nRBSS_RESTORE_OK\ncodesign: boom\n"
+    def test_native_runner_uses_one_combined_sign_script_without_backup(self) -> None:
+        err = f"RBSS_SIGN_FAIL:{APP}\ncodesign: boom\n"
         with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
              mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
              mock.patch.object(rp, "read_entitlements", return_value={}), \
              mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan), \
-             mock.patch.object(rp, "_snapshot_app", return_value=Path("/tmp/bk/rekordbox.app")), \
-             mock.patch.object(rp, "_cleanup_backup"), \
              mock.patch.object(rp, "run_shell_via_native_authorization", return_value=(1, err)) as shell:
             result = apply_patch(APP, dry_run=False, runner=rp.run_via_native_authorization)
         self.assertFalse(result.ok)
-        self.assertIn("same admin step", result.message.lower())
+        self.assertIn("no rekordbox backup", result.message.lower())
         shell.assert_called_once()
-        self.assertIn("RBSS_RESTORE_OK", shell.call_args.args[0])
+        self.assertIn("RBSS_SIGN_FAIL", shell.call_args.args[0])
+        self.assertNotIn("RBSS_RESTORE", shell.call_args.args[0])
 
 
 class InteractiveGuiTests(unittest.TestCase):

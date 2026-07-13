@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 9998bcd
+last_verified_commit: 8de088e
 last_verified_date: 2026-07-13
 validation_scope: >
   Current USB builder, frozen launcher, native install/purge, target
@@ -13,12 +13,14 @@ validation_scope: >
   confirmed caller-authorization blocker). Earlier foreign-Mac and RB7216
   attempts never reached that clean pre-attach state. Rekordbox patch signing
   is one root-bundle ad-hoc codesign (no --deep, no nested re-sign) under one
-  admin script with in-script restore (software-tested; disposable clone
-  lab-proven; live apply still operator-gated). Frozen Info.plist declares
+  native macOS authorization (not osascript; no full Rekordbox backup by
+  operator request). Local `/Applications` RB 7.2.16 apply passed deep+strict
+  verification and GTA inspection; a signed frozen RBSS probe also made a
+  native-authorized inert write/remove in the Rekordbox bundle. Frozen Info.plist declares
   NSAppBundlesUsageDescription for App Management; frozen confirmation/result
-  dialogs are native AppKit while the admin escalation remains osascript. The
-  App Management grant + admin escalation path remains live-unvalidated (do not claim friend-Mac patch
-  works yet). A dormant Accessibility MEASUREMENT probe is
+  dialogs are native AppKit and the admin escalation stays inside RBSS Bridge.
+  This proves the local patch mechanism, not a physical friend-Mac patch or live
+  attach. A dormant Accessibility MEASUREMENT probe is
   implemented/software-tested and not executed (not a reader; no menu item;
   no runtime wiring). The separate RB7216 Patch Rekordbox menubar action sits
   in the maintenance block with Export/Rebuild (target entitlement only;
@@ -268,7 +270,7 @@ carries the secrets it shipped with.
 
 - **arm64 / Apple Silicon only.** The produced `.app` is thin arm64 (pip pulls
   arm64 wheels on Apple Silicon; the spec sets no `target_arch`), floored at macOS
-  11 (`LSMinimumSystemVersion`). It does NOT run on Intel; `make_stick.sh` asserts
+  12.3 (`LSMinimumSystemVersion`). It does NOT run on Intel; `make_stick.sh` asserts
   the built arch with `lipo` and **fails closed** if arm64 is missing. Real Intel
   support would need `target_arch='universal2'` + universal2 wheels for every C
   extension (numba/llvmlite have none for the newest Python) — not pursued.
@@ -292,22 +294,19 @@ carries the secrets it shipped with.
   it, Govee/SoundSwitch discovery just finds nothing. There is no clean signal to
   surface; if the rig is silent and reads are OK, check System Settings → Privacy →
   Local Network for "RBSS Bridge".
-- **Open packaging safety follow-ups:** AWR-223 now fails closed, keeps its
-  original-app backup through native Purge, and (2026-07-13) signs Rekordbox
-  with **one** root-bundle ad-hoc `codesign` (no `--deep`, no nested re-sign)
-  under **one** admin script with in-script restore on signing failure
-  (software-tested; disposable clone lab-proven — does **not** by itself prove
-  live `/Applications` apply, attach, or foreign-Mac reads). Restore reporting
-  distinguishes `RBSS_RESTORE_OK` / `RBSS_RESTORE_FAIL` / missing marker.
-  Frozen `Info.plist` now declares `NSAppBundlesUsageDescription` (App
-  Management usage string; software-tested). A live root-only apply hit
-  System Policy `Operation not permitted` under `/Applications`; an admin
-  password alone is not enough. The frozen Patch Rekordbox consent/result modal
-  uses native AppKit rather than bare `osascript display dialog`, so it can reach
-  the explicit patch choice before admin escalation. Whether granting App
-  Management to a rebuilt frozen RBSS Bridge covers the remaining admin
-  `osascript` → authtrampoline path remains **live-unvalidated** — do not claim
-  friend-Mac patch works yet.
+- **Patch Rekordbox path (AWR-223):** it signs Rekordbox with **one**
+  root-bundle ad-hoc `codesign` (no `--deep`, no nested re-sign), under the
+  RBSS app's native macOS authorization. It does **not** create a full Rekordbox
+  backup, by the operator's instruction. A failure therefore never claims that
+  Rekordbox was restored; reinstall/update Rekordbox if its later signature
+  check fails. Local `/Applications` RB 7.2.16 patch passed deep+strict + GTA
+  verification, and a signed frozen RBSS probe completed a native-authorized
+  inert write/remove in the protected bundle. Frozen `Info.plist` declares
+  `NSAppBundlesUsageDescription`. If macOS blocks the action, enable **RBSS
+  Bridge** in App Management and retry; do not grant Terminal or osascript for
+  this feature. The frozen Patch Rekordbox consent/result modal and admin prompt
+  are native. This is local patch-path evidence only: a friend-Mac physical
+  patch and stock-SIP attach remain unvalidated.
   AWR-224/229 are selecting and verifying the complete macOS-12 wheel set.
   AWR-225's partial-install retry is implemented. These remain software-only
   until a clean foreign-Mac run.
@@ -323,6 +322,26 @@ The stick ships no `.command` installers and no duplicate payload. Open
 
 The installed menubar owns **Purge RBSS Bridge…**. Older manifests created by
 the retired shell helpers remain readable so native Purge can clean them safely.
+
+## Patch Rekordbox on a friend's Mac
+
+This changes only that Mac's Rekordbox target. It does not start the bridge,
+change SIP, or prove memory reads.
+
+1. Quit Rekordbox.
+2. Open the exact installed **RBSS Bridge** app, then choose **Patch Rekordbox**
+   in the maintenance block. It is beside the source-only Export/Rebuild items;
+   on a guest build it remains visible even though those other two are hidden.
+3. Choose **Apply Patch** in the RBSS confirmation, then approve the native
+   macOS admin prompt. If macOS reports App Management blocking the action, open
+   System Settings → Privacy & Security → App Management, enable **RBSS Bridge**,
+   and retry the same action.
+4. A grey **Rekordbox Patched** label means only that `get-task-allow` was read
+   back successfully. Relaunch Rekordbox and confirm it opens.
+
+Do not use Terminal, `osascript`, or a USB rebuild to patch the friend's app.
+There is no retained or temporary full-app Rekordbox backup. A Rekordbox update
+will remove the target patch; repeat this flow after an update.
 
 ## Operator parity run (PAUSED pending stock-SIP live gate)
 

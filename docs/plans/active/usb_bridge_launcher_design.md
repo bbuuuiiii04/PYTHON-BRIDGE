@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: spec
-last_verified_commit: 9998bcd
+last_verified_commit: 8de088e
 last_verified_date: 2026-07-13
 validation_scope: >
   Current macOS USB launcher design reconciled to the landed M1/M2 code and
@@ -17,18 +17,20 @@ validation_scope: >
   runtime wiring. The separate RB7216 Patch Rekordbox menubar action sits in
   the maintenance block with Export/Rebuild (always visible; Export/Rebuild
   source-only; target entitlement only). `rekordbox_patch.py` runs exactly one
-  root-bundle ad-hoc codesign (no --deep, no nested re-sign) under one admin
-  script with in-script backup restore (software-tested; disposable clone
-  lab-proven; live /Applications apply remains operator-gated and does not
-  claim attach/foreign-Mac reads are fixed). Frozen Info.plist declares
+  root-bundle ad-hoc codesign (no --deep, no nested re-sign) under the calling
+  app's native macOS authorization (not osascript; no full Rekordbox backup by
+  operator request). Local `/Applications` RB 7.2.16 apply passed deep+strict
+  verification and GTA inspection; a signed frozen probe app also performed a
+  native-authorized inert write/remove in the Rekordbox bundle. Frozen Info.plist declares
   NSAppBundlesUsageDescription (implemented/software-tested). Frozen Patch
   Rekordbox confirmation/result dialogs use native AppKit rather than bare
-  `osascript display dialog`; App Management grant + admin osascript escalation
-  remains live-unvalidated. make_stick stamps
+  `osascript display dialog`; its native authorization path keeps RBSS Bridge as
+  the App Management requester. This proves the local patch mechanism, not a
+  physical foreign-Mac run or live attach. make_stick stamps
   build GENERATION into CFBundleShortVersionString/CFBundleVersion (fallback
   0.0.1 outside make_stick). Packaging components remain software-tested;
   stock foreign-Mac attach remains live-unvalidated / unknown.
-work_status: implementation partial; packaging/install UX landed; AWR-222 AX measurement probe implemented/software-tested/not executed; rekordbox_patch root-only/one-admin recovery + App Management Info.plist declaration implemented/software-tested/hardware-unvalidated; target-patch→stock-attach hypothesis reopened by TimecodeLink parity; blocked on stock-SIP live gate evidence, not on a proven impossibility
+work_status: implementation partial; packaging/install UX landed; AWR-222 AX measurement probe implemented/software-tested/not executed; rekordbox_patch root-only/native-authorization + App Management Info.plist declaration implemented/software-tested with local patch-path evidence; target-patch→stock-attach hypothesis reopened by TimecodeLink parity; blocked on stock-SIP live gate evidence, not on a proven impossibility
 relates_to: cross_platform_portability_plan.md, track_identity_move_invariance_design.md, awr222_ax_probe_sol_spec_2026_07_12.md
 ---
 
@@ -381,23 +383,23 @@ in the installed location, not the stick.
   root-bundle command:
   `codesign --force --sign - --entitlements <merged.plist> <rekordbox.app>`.
   Nested helpers (including `rekordboxAgent` / crashpad) keep their original
-  Pioneer signatures. The command runs under **one** administrator shell
-  script with in-script backup restore on failure (`RBSS_SIGN_FAIL` /
-  `RBSS_RESTORE_OK` / `RBSS_RESTORE_FAIL`; missing restore marker is reported
-  as unconfirmed, not as a confirmed restore failure). Post-sign check is
-  `codesign --verify --deep --strict` plus positive main `get-task-allow`.
-  Disposable-clone lab evidence: root-only passes deep+strict and GTA=true
-  while preserving nested Pioneer CDHashes. Live `/Applications` apply remains
-  operator-gated; a 2026-07-13 root-only live attempt failed with System Policy
-  `Operation not permitted` (App Management / `kTCCServiceSystemPolicyAppBundles`).
+  Pioneer signatures. The command runs under **one** native macOS authorization
+  session from RBSS Bridge, not an `osascript` helper. The operator explicitly
+  declined a full Rekordbox backup, so failures report no recovery claim rather
+  than copying the whole app. Post-sign check is `codesign --verify --deep
+  --strict` plus positive main `get-task-allow`. Local evidence: RB 7.2.16 at
+  `/Applications` patched successfully, passed deep+strict and GTA=true, and
+  was subsequently observed launched and closed. A separately built, signed
+  frozen RBSS probe used that same native path to create/remove an inert marker
+  in the Rekordbox bundle (no Terminal/osascript responsibility). Earlier root
+  signing through osascript was blocked by App Management.
   Frozen packaging now declares `NSAppBundlesUsageDescription`
-  (implemented/software-tested). Admin-password escalation alone is not enough;
-  whether granting App Management to rebuilt RBSS Bridge covers the existing
-  `osascript` → authtrampoline path is still **live-unvalidated** — do not claim
-  friend-Mac patch works yet. The frozen Patch Rekordbox consent/result modal is
-  native AppKit (not a bare `osascript display dialog`), so it can reach consent
-  before that admin escalation; the physical modal and App Management gate still
-  need live evidence. AWR-222 honesty unchanged.
+  (implemented/software-tested and built-inspected). If macOS blocks a patch,
+  enable **RBSS Bridge** in App Management and retry; granting Terminal or
+  osascript is not part of the shipped route. The frozen Patch Rekordbox
+  consent/result modal is native AppKit, followed by the native macOS admin
+  prompt. A real friend-Mac patch and every stock-SIP live attach remain
+  unvalidated. AWR-222 honesty unchanged.
 - **Dependency manifest gap (re-swept 2026-07-09, `confirmed`):** `pyproject.toml` declares
   only `mido, pyobjc-framework-Cocoa, pyrekordbox, python-osc, zeroconf` (+ optional
   spectral/analysis extras: `librosa`, `soundfile`, `numpy`, `scipy`) and has ZERO diff since
