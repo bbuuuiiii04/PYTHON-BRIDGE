@@ -1,0 +1,130 @@
+name: derive-rekordbox-7-2-16-offsets
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/derive-rekordbox-7-2-16.yml
+
+permissions:
+  contents: read
+
+jobs:
+  derive:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download and verify official installers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/rb-installers
+          curl --fail --location --retry 3 --retry-all-errors \
+            --output /tmp/rb-installers/rb-7.2.14.zip \
+            'https://cdn.rekordbox.com/files/20260401164249/Install_rekordbox_7_2_14.pkg_.zip'
+          curl --fail --location --retry 3 --retry-all-errors \
+            --output /tmp/rb-installers/rb-7.2.16.zip \
+            'https://cdn.rekordbox.com/files/20260708182003/Install_rekordbox_7_2_16.pkg_.zip'
+          printf '%s  %s\n' \
+            '82e23297ef8dd555a3d134bc57f9a36a22f715f4972c059706f6d1d3e300c020' /tmp/rb-installers/rb-7.2.14.zip \
+            'b1007870c5560fb0bfb56c75a125b80df4d413b6d3afca1935be8b1cb4613a99' /tmp/rb-installers/rb-7.2.16.zip \
+            | shasum -a 256 -c -
+
+      - name: Extract application binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          for version in 7.2.14 7.2.16; do
+            work="/tmp/rb-${version}"
+            mkdir -p "$work/zip" "$work/pkg"
+            ditto -x -k "/tmp/rb-installers/rb-${version}.zip" "$work/zip"
+            pkg="$(find "$work/zip" -type d -name '*.pkg' -prune -print -quit)"
+            if [[ -z "$pkg" ]]; then
+              pkg="$(find "$work/zip" -type f -name '*.pkg' -print -quit)"
+            fi
+            test -n "$pkg"
+            pkgutil --expand-full "$pkg" "$work/pkg-expanded"
+            binary="$(find "$work/pkg-expanded" -type f -path '*/rekordbox.app/Contents/MacOS/rekordbox' -print -quit)"
+            test -n "$binary"
+            cp "$binary" "$work/rekordbox"
+            chmod +x "$work/rekordbox"
+            file "$work/rekordbox"
+          done
+
+      - name: Derive anchors and collect symbol evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/rb-offset-evidence
+          for version in 7.2.14 7.2.16; do
+            binary="/tmp/rb-${version}/rekordbox"
+            {
+              echo "=== rekordbox ${version} ==="
+              file "$binary"
+              shasum -a 256 "$binary"
+              python3 tools/rekordbox_derive_offsets.py --binary "$binary"
+              echo
+              echo '=== anchor symbols ==='
+              nm -arch arm64 -n --defined-only "$binary" | grep -E '__ZN15ApplicationMode15singletonHolderE|__ZN6browse21LoadedContentsManager15singletonHolderE|__ZN8djengine10DjEngineIF15singletonHolderE' || true
+              echo
+              echo '=== merged globals ==='
+              nm -arch arm64 -n --defined-only "$binary" | grep '__MergedGlobals' || true
+            } | tee "/tmp/rb-offset-evidence/${version}.txt"
+            nm -arch arm64 -n --defined-only "$binary" > "/tmp/rb-offset-evidence/${version}-nm.txt"
+            otool -arch arm64 -l "$binary" > "/tmp/rb-offset-evidence/${version}-load-commands.txt"
+          done
+
+      - name: Compare symbols around known 7.2.14 deck root
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' | tee /tmp/rb-offset-evidence/symbol-neighborhoods.txt
+          from pathlib import Path
+
+          def parse(path):
+              rows=[]
+              for line in Path(path).read_text(errors='replace').splitlines():
+                  parts=line.split(' ',2)
+                  if len(parts) != 3:
+                      continue
+                  try:
+                      addr=int(parts[0],16)
+                  except ValueError:
+                      continue
+                  rows.append((addr,parts[1],parts[2]))
+              return rows
+
+          base=0x100000000
+          known=base+0x04E0BFE0
+          rows14=parse('/tmp/rb-offset-evidence/7.2.14-nm.txt')
+          rows16=parse('/tmp/rb-offset-evidence/7.2.16-nm.txt')
+
+          def neighborhood(rows, target, radius=0x20000):
+              return [(a,t,n) for a,t,n in rows if abs(a-target) <= radius]
+
+          print('=== 7.2.14 symbols within +/-0x20000 of known deck root 0x04E0BFE0 ===')
+          near14=neighborhood(rows14, known)
+          for a,t,n in near14:
+              print(f'{a:016x} rva={a-base:08x} {t} {n}')
+
+          merged14=[r for r in rows14 if '__MergedGlobals' in r[2]]
+          merged16=[r for r in rows16 if '__MergedGlobals' in r[2]]
+          print('\n=== merged-global ordinal nearest known 7.2.14 deck root ===')
+          for idx,(a,t,n) in enumerate(merged14):
+              if abs(a-known) <= 0x20000:
+                  print(f'ordinal={idx} addr={a:016x} rva={a-base:08x} delta_from_root={a-known:+#x} {t} {n}')
+                  if idx < len(merged16):
+                      b,bt,bn=merged16[idx]
+                      print(f'7.2.16 same ordinal addr={b:016x} rva={b-base:08x} {bt} {bn}')
+
+          print(f'\nmerged counts: 7.2.14={len(merged14)} 7.2.16={len(merged16)}')
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rekordbox-7.2.16-offset-evidence
+          path: /tmp/rb-offset-evidence
+          if-no-files-found: error
+          retention-days: 7
