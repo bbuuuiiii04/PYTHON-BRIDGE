@@ -150,7 +150,17 @@ CFX_D2_UNIT_CHANNEL  04EE5758 A8 458 0 2C8 8 480 0 1E0 0 D0
 **B. File fence (touch ONLY these):**
 - `rb_offsets.py` (the block above)
 - `tests/test_rb_offsets.py` and/or `tests/test_rb_state_reader.py` (new tests, task D)
+- `tests/test_rekordbox_reader_safety.py` (update ONE existing per-version invariant, task D2 — added to the fence after a verified round-1 block; see note)
 - the contract docs in task E. Nothing else. Commit by EXPLICIT PATHS, never `-a`.
+
+> **Fence-widen note (verified at commit 5be388a):** round 1 correctly BLOCKED because
+> `test_mixer_cfx_only_on_7_2_11` lives outside the original fence. That test encodes
+> the OLD invariant "mixer/CFX chains exist only on 7.2.11." Adding 7.2.16 with
+> mixer/CFX legitimately changes that invariant, so the test must be extended (task D2).
+> This is why the safety test is now in-fence. It is a real invariant update from a new
+> supported version — NOT weakening a safety check, and NOT the forbidden "edit tests to
+> pass." No other assert in that file breaks (the unsupported-version and derive-tool
+> asserts still hold).
 
 **C. Tasks, one commit each:**
 1. Add the 7.2.16 block to `rb_offsets.py`.
