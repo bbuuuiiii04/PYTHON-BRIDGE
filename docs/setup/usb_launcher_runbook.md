@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: b925885
+last_verified_commit: b9b0ae3
 last_verified_date: 2026-07-13
 validation_scope: >
   Current USB builder, frozen launcher, native install/purge, target
@@ -11,10 +11,13 @@ validation_scope: >
   path. Rekordbox patch signing is now inside-out under one admin script with
   in-script restore (software-tested; live apply / libssl / attach still
   operator-unvalidated). A dormant Accessibility MEASUREMENT probe is
-  implemented/software-tested and not executed (not a reader; no menu item; no
-  live AX/TCC/USB evidence). make_stick stamps GENERATION into Info.plist
-  (fallback 0.0.1). No install.command/purge.command helpers.
-  SOFTWARE-VALIDATED COMPONENTS ONLY / FOREIGN-MAC LIVE READS UNSUPPORTED.
+  implemented/software-tested and not executed (not a reader; the probe itself
+  adds no menu item and no runtime wiring; no live AX/TCC/USB evidence). The
+  separate RB7216 Patch Rekordbox menubar action is restored in source/frozen
+  menus (target entitlement only; does not unblock AWR-222). make_stick stamps
+  GENERATION into Info.plist (fallback 0.0.1). No install.command/purge.command
+  helpers. SOFTWARE-VALIDATED COMPONENTS ONLY / FOREIGN-MAC LIVE READS
+  UNSUPPORTED.
 ---
 
 # USB Bridge Launcher — Runbook (M1 build · M2 install/PURGE)
@@ -22,7 +25,7 @@ validation_scope: >
 > **STOP before another foreign-Mac build or show test (AWR-222, 2026-07-12).**
 > The app and installer can be packaged, but the current frozen bridge cannot
 > obtain live Rekordbox memory reads on a stock foreign Mac. Both physical tests
-> failed. “Apply Rekordbox Target Patch” verifies only a patch on the Rekordbox target;
+> failed. **Patch Rekordbox** verifies only a patch on the Rekordbox target;
 > it does not authorize the bridge caller. Rebuilding the same package will not
 > change this. Do not weaken SIP or improvise signing on a guest Mac.
 
@@ -128,12 +131,15 @@ One binary, dispatched by its first flag (`usb_launcher.py`):
 | `--run-streamdeck` | the Stream Deck MIDI controller |
 | `--run-frame-engine --fd N` | the headless Govee frame-engine child |
 | `--replay-session <file>` | Test the Lights (below) |
-| `--probe-rekordbox-accessibility` | dormant Rekordbox Accessibility MEASUREMENT probe (AWR-222); never starts the bridge; not a reader; not on the normal menu; software-tested only, not executed in the implementation round |
+| `--probe-rekordbox-accessibility` | dormant Rekordbox Accessibility MEASUREMENT probe (AWR-222); never starts the bridge; not a reader; the probe itself adds no menu item and no runtime wiring; software-tested only, not executed in the implementation round |
 
 **AWR-222 probe (measurement only).** First live run requires explicit operator
 approval and a rebuilt/installed app that includes the probe. Do not treat this
-mode as supported, operational, validated, or a replacement reader. The normal
-menu stays unchanged in this round.
+mode as supported, operational, validated, or a replacement reader. The dormant
+AX measurement probe itself adds no menu item and no runtime wiring. The separate
+RB7216 **Patch Rekordbox** action is intentionally restored in both source/frozen
+menus; it targets only the Rekordbox entitlement and does not unblock
+AWR-222/stock foreign-Mac reads.
 
 **Frozen menubar lifecycle (Task 3 choice):** launch-on-click, no auto-restart.
 The menubar owns the bridge as its OWN child process (spawns `--run-bridge`, keeps

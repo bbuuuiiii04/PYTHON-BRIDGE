@@ -1,17 +1,19 @@
 ---
 doc_status: current
 truth_level: spec
-last_verified_commit: b925885
+last_verified_commit: b9b0ae3
 last_verified_date: 2026-07-13
 validation_scope: >
   Current macOS USB launcher design reconciled to the landed M1/M2 code and two
   failed physical foreign-Mac attempts. AWR-222 confirms that the current ad-hoc
   target-only Rekordbox patch does not provide stock-macOS caller authorization.
   A dormant Accessibility MEASUREMENT probe (`--probe-rekordbox-accessibility`)
-  is implemented/software-tested and not executed; it is not a reader and does
-  not change bridge behavior. `rekordbox_patch.py` now plans deepest-first
-  inside-out signing under one admin script with in-script backup restore
-  (software-tested; live apply remains an operator-gated experimental
+  is implemented/software-tested and not executed; it is not a reader, adds no
+  menu item of its own, and has no runtime wiring. The separate RB7216 Patch
+  Rekordbox menubar action is restored in source/frozen menus (target
+  entitlement only; does not unblock AWR-222). `rekordbox_patch.py` now plans
+  deepest-first inside-out signing under one admin script with in-script backup
+  restore (software-tested; live apply remains an operator-gated experimental
   hypothesis and does not claim libssl/attach/foreign-Mac reads are fixed).
   make_stick stamps build GENERATION into
   CFBundleShortVersionString/CFBundleVersion (fallback 0.0.1 outside make_stick).
@@ -35,9 +37,12 @@ relates_to: cross_platform_portability_plan.md, track_identity_move_invariance_d
 > **Dormant AX measurement probe (implemented/software-tested, not executed).**
 > Packaged dispatch `--probe-rekordbox-accessibility` on `usb_launcher.py` lazily
 > loads `usb_launcher_ax_probe.py` and never starts the bridge. It is a
-> measurement diagnostic only — not a reader, not menu-wired, no live AX/TCC/USB
-> evidence yet. AWR-222 remains blocked until the separate operator live gate and
-> E3 semantic matrix pass. Normal menubar inventory is unchanged.
+> measurement diagnostic only — not a reader; the dormant AX measurement probe
+> itself adds no menu item and no runtime wiring; no live AX/TCC/USB evidence yet.
+> The separate RB7216 **Patch Rekordbox** action is intentionally restored in both
+> source/frozen menus; it targets only the Rekordbox entitlement and does not
+> unblock AWR-222/stock foreign-Mac reads. AWR-222 remains blocked until the
+> separate operator live gate and E3 semantic matrix pass.
 
 Approved design (2026-07-04). This is the Mac-only "USB-ify" concretization of the portability
 work; the Windows/cross-platform half is deferred. Reviewed + revised 2026-07-04, twice and
