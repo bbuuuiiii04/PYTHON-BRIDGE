@@ -517,6 +517,25 @@ def usb_button_enabled(in_progress: bool, state: str, frozen: bool) -> bool:
     return (not in_progress) and (not frozen) and state == "outdated"
 
 
+def patch_rb_button_text(in_progress: bool, state: str) -> str:
+    """Visible title for the Patch Rekordbox action (pure state table).
+
+    'Rekordbox Patched' means only that has_get_task_allow was positively
+    verified on the target — never that the bridge can attach or that live
+    reads work on a stock foreign Mac.
+    """
+    if in_progress:
+        return "Patching Rekordbox…"
+    if state == "enabled":
+        return "Rekordbox Patched"
+    return "Patch Rekordbox"  # absent, unknown, or no cached result yet
+
+
+def patch_rb_button_enabled(in_progress: bool, state: str) -> bool:
+    """Grey only while patching or after a positive entitlement verify."""
+    return (not in_progress) and state != "enabled"
+
+
 def classify_usb_state(
     mount_count: int,
     stick_generation: str | None,
@@ -1248,6 +1267,9 @@ MENU_BLUEPRINT: tuple = (
         ("action", "laser_blackout_item", "EMERGENCY: Stop All Lasers", "laserBlackout:"),
         ("action", "laser_clear_blackout_item", "Resume Lasers", "laserClearBlackout:"),
     )),
+    # User override of the AWR-226 slim-menu cut: restore the target-patch
+    # action (not the old standing status row). Present in both editions.
+    ("action", "patch_rekordbox_item", "Patch Rekordbox", "enableRekordboxReads:"),
     ("sep", "maintenance_sep", None, None),
     ("action", "export_item", "SoundSwitch Export…", "exportFromSS:"),
     ("action", "update_usb_item", "Rebuild USB Bridge…", "updateUsbBridge:"),
@@ -1301,11 +1323,15 @@ class BridgeMenuBar(NSObject):
         self._frozen_streamdeck_proc = None
         self._streamdeck_retry_at = 0.0
         self._adopted_frozen_bridge = False
-        # Rekordbox-reads entitlement row cache (same shape as the export detect
-        # cache: monotonic timestamp + in-progress guard + daemon-thread refresh).
+        # Rekordbox target-patch entitlement cache (same shape as the export
+        # detect cache: monotonic timestamp + in-progress guard + daemon-thread
+        # refresh). _rb_reads_in_progress = background entitlement check;
+        # _patch_rb_in_progress = the patch child is running — keep them distinct
+        # so a periodic refresh cannot overwrite "Patching Rekordbox…".
         self._rb_reads_state = "unknown"
         self._rb_reads_at = 0.0
         self._rb_reads_in_progress = False
+        self._patch_rb_in_progress = False
         # Native install offer + purge (AWR-186 M2) — frozen runs only, so
         # source-run menubars never import install_controller and stay
         # byte-identical. Install offered only when running from the DMG/
@@ -1470,6 +1496,8 @@ class BridgeMenuBar(NSObject):
         self._maybe_detect_export_state()
         self._render_usb_state()
         self._maybe_detect_usb_state()
+        self._render_patch_rb_state()
+        self._maybe_check_rb_reads()
         laser = self._snapshot.get("laser_director", {})
         available = bool(laser.get("available"))
         enabled = bool(laser.get("enabled"))
@@ -1652,6 +1680,18 @@ class BridgeMenuBar(NSObject):
         item = getattr(self, "rb_reads_status_item", None)
         if item is not None:
             item.setTitle_(rb_reads_status_title(self._rb_reads_state))
+        self._render_patch_rb_state()
+
+    def _render_patch_rb_state(self):
+        # Single owner of the Patch Rekordbox title + enabled state. In-progress
+        # wins so a periodic refresh / entitlement completion cannot overwrite
+        # "Patching Rekordbox…" with a stale normal title.
+        if getattr(self, "patch_rekordbox_item", None) is None:
+            return
+        self.patch_rekordbox_item.setTitle_(
+            patch_rb_button_text(self._patch_rb_in_progress, self._rb_reads_state))
+        self.patch_rekordbox_item.setEnabled_(
+            patch_rb_button_enabled(self._patch_rb_in_progress, self._rb_reads_state))
 
     def exportFromSS_(self, _sender):
         if getattr(sys, "frozen", False):
@@ -1955,6 +1995,13 @@ class BridgeMenuBar(NSObject):
             self._usb_detect_at = 0.0  # stick changed — force a fresh detection
             self._usb_mounts_key = None
             self._render_usb_state()
+        if attr == "patch_rekordbox_item":
+            # Every completion path resets the patch busy flag. Exit-0 verify
+            # renders from the verified verdict inside _show_rb_reads_verdict
+            # (never from the exit code alone); other paths re-render now.
+            self._patch_rb_in_progress = False
+            if not payload.get("verify"):
+                self._render_patch_rb_state()
         returncode = payload.get("returncode", 0)
         if returncode == 0:
             verify = payload.get("verify")
@@ -1995,12 +2042,12 @@ class BridgeMenuBar(NSObject):
 
         Native NSAlert, not an osascript notification — TCC can silently hide
         notifications on a foreign Mac. The verdict was computed on the watcher
-        thread; here we only render it and refresh the standing status row.
+        thread; here we only render it and refresh the Patch Rekordbox action.
         Never silent, and never describes the target check as live-read proof."""
         verdict = verify.get("verdict")
         detail = verify.get("detail") or ""
-        # Reuse the row updater (already main-thread here) so the standing
-        # status line is correct the moment the alert shows.
+        # Reuse the entitlement updater (already main-thread here) so the action
+        # title/enabled state is correct the moment the alert shows.
         self.finishRbReadsCheck_(
             verdict if verdict in ("enabled", "not_enabled") else "unknown"
         )
@@ -2521,15 +2568,19 @@ class BridgeMenuBar(NSObject):
         # Re-sign the Rekordbox target with get-task-allow. This is necessary on
         # the maintainer's custom-SIP Mac but does not authorize a stock foreign
         # Mac caller (AWR-222). The launcher keeps admin UI off the menubar thread.
+        if self._patch_rb_in_progress:
+            return
         if getattr(sys, "frozen", False):
             argv = [sys.executable, "--patch-rekordbox"]
         else:
             argv = [sys.executable, str(REPO_ROOT / "usb_launcher.py"), "--patch-rekordbox"]
+        self._patch_rb_in_progress = True
+        self._render_patch_rb_state()
         self._spawn_watched(
             argv,
             label="patch_rekordbox",
-            busy_item_attr="enable_rb_reads_item",
-            busy_title="Applying Rekordbox target patch…",
+            busy_item_attr="patch_rekordbox_item",
+            busy_title="Patching Rekordbox…",
             failure_title="Rekordbox target patch failed",
             # Exit 0 alone doesn't prove the re-sign took: the watcher re-checks
             # the entitlement and the completion dialog reports that verdict.
