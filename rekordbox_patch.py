@@ -23,9 +23,9 @@ THIS MODIFIES A THIRD-PARTY APP, so it is deliberately conservative:
   * **refused while Rekordbox is running** — you re-sign a quit app, then relaunch
     it for the new signature to take effect;
   * **guarded** — only ever touches a bundle whose id is ``com.pioneerdj.rekordboxdj``;
-  * **fail-closed + verified** — deep+strict ``codesign --verify``, then re-reads
-    get-task-allow; on signing failure the same admin script restores the
-    temporary pre-sign copy (kept only if restore fails or cannot be confirmed).
+  * **verified, no app copy** — deep+strict ``codesign --verify``, then re-reads
+    get-task-allow. The operator explicitly declined a full Rekordbox backup,
+    so a failed sign is reported plainly instead of creating one.
 
 CLI:
     python3 -m rb_ss_bridge_v2.rekordbox_patch --check
@@ -44,7 +44,6 @@ import plistlib
 import re
 import select
 import shlex
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -63,9 +62,6 @@ REKORDBOX_BUNDLE_ID = "com.pioneerdj.rekordboxdj"
 # ad-hoc signature on the maintainer's primary Mac. Merged OVER the app's existing
 # entitlements (everything else preserved), so Rekordbox keeps its own capabilities.
 GET_TASK_ALLOW = "com.apple.security.get-task-allow"
-BACKUP_ROOT = (
-    Path.home() / "Library" / "Application Support" / "RBSS Rekordbox Backups"
-)
 ADDED_ENTITLEMENTS: dict[str, bool] = {
     GET_TASK_ALLOW: True,
     "com.apple.security.cs.disable-library-validation": True,
@@ -168,15 +164,12 @@ def plan_codesign_argvs(app: Path, entitlements_path: Path) -> list[list[str]]:
     return [codesign_argv(app, entitlements_path)]
 
 
-def build_sign_restore_script(
-    steps: list[tuple[str, list[str]]], app: Path, backup: Path,
-) -> str:
-    """Build a ``/bin/sh`` script: run the sign step(s), restore on any failure.
+def build_sign_script(steps: list[tuple[str, list[str]]]) -> str:
+    """Build the one privileged root-bundle signing script.
 
-    Assumes the script already runs with administrator privileges (one osascript
-    escalation). Every path/argument is shell-quoted. On codesign failure it
-    restores ``backup`` → ``app`` in-script so recovery does not need a second
-    password prompt. The apply plan is a single root-bundle step.
+    Every path/argument is shell-quoted. The maintainer explicitly rejected
+    full-app backups, so a nonzero sign exits immediately for the caller to
+    report and verify instead of copying Rekordbox on every attempt.
     """
     lines = ["#!/bin/sh"]
     for label, argv in steps:
@@ -190,14 +183,6 @@ def build_sign_restore_script(
         lines.append(
             f"  printf '%s\\n' {shlex.quote('RBSS_SIGN_FAIL:' + label)} >&2"
         )
-        lines.append(
-            f"  ditto {shlex.quote(str(backup))} {shlex.quote(str(app))}"
-        )
-        lines.append("  if [ $? -eq 0 ]; then")
-        lines.append("    printf '%s\\n' 'RBSS_RESTORE_OK' >&2")
-        lines.append("  else")
-        lines.append("    printf '%s\\n' 'RBSS_RESTORE_FAIL' >&2")
-        lines.append("  fi")
         lines.append("  exit \"$rc\"")
         lines.append("fi")
     lines.append("printf '%s\\n' 'RBSS_SIGN_OK' >&2")
@@ -211,20 +196,10 @@ def parse_sign_fail_component(stderr: str) -> str | None:
     for line in (stderr or "").splitlines():
         if line.startswith("RBSS_SIGN_FAIL:"):
             return line[len("RBSS_SIGN_FAIL:"):] or None
-        # osascript may wrap stderr; allow the marker mid-line.
+        # An admin-shell wrapper may wrap stderr; allow the marker mid-line.
         idx = line.find("RBSS_SIGN_FAIL:")
         if idx != -1:
             return line[idx + len("RBSS_SIGN_FAIL:"):] or None
-    return None
-
-
-def parse_restore_marker(stderr: str) -> str | None:
-    """Return ``ok`` / ``fail`` from in-script restore markers, or None."""
-    text = stderr or ""
-    if "RBSS_RESTORE_OK" in text:
-        return "ok"
-    if "RBSS_RESTORE_FAIL" in text:
-        return "fail"
     return None
 
 
@@ -238,8 +213,6 @@ def _codesign_fail_detail(stderr: str) -> str:
         if (
             "RBSS_SIGNING:" in stripped
             or "RBSS_SIGN_FAIL:" in stripped
-            or "RBSS_RESTORE_OK" in stripped
-            or "RBSS_RESTORE_FAIL" in stripped
             or "RBSS_SIGN_OK" in stripped
         ):
             continue
@@ -256,18 +229,8 @@ def _codesign_fail_detail(stderr: str) -> str:
     return joined
 
 
-def enough_disk_for_backup(app_size: int, free: int, margin: int = 500 * 1024 * 1024) -> bool:
-    """True if there is room to copy the whole bundle plus a safety margin. Pure —
-    the test seam for the pre-re-sign disk guard (refuse rather than risk bricking
-    Rekordbox with no restore path)."""
-    return free >= app_size + margin
-
-
 def is_user_cancel(stderr: str) -> bool:
-    """True when an osascript admin escalation was cancelled by the operator
-    (rc -128 / 'User canceled'). Rekordbox was never touched — the trampoline never
-    ran codesign — so this is a CLEAN abort, not a codesign failure that needs a
-    restore (which would pop a spurious second admin prompt). Pure test seam."""
+    """True when an admin authorization was cancelled before signing began."""
     s = (stderr or "").lower()
     return "user canceled" in s or "user cancelled" in s or "(-128)" in s
 
@@ -375,14 +338,12 @@ class PatchResult:
 
 
 # A "runner" runs one argv and returns (returncode, stderr). The two privileged
-# runners below receive one combined root-bundle script so a failure restores in
-# the same authorization session. Verify + entitlement re-read stay read-only and
-# always run in-process.
+# runners below receive one combined root-bundle script. Verify + entitlement
+# re-read stay read-only and always run in-process.
 
 def _default_runner(argv: list[str]) -> tuple[int, str]:
     try:
-        # 600s for the single root-bundle sign; full admin plan uses
-        # run_shell_via_admin (1800s).
+        # 600s for the single root-bundle sign.
         p = subprocess.run(argv, capture_output=True, text=True, timeout=600,
                            env=sanitized_system_env(os.environ))
         return p.returncode, p.stderr or ""
@@ -390,74 +351,16 @@ def _default_runner(argv: list[str]) -> tuple[int, str]:
         return 1, f"codesign did not run: {exc}"
 
 
-# ── Backup / restore (never leave Rekordbox unlaunchable) ────────────────────
-# codesign --force strips the old seal before writing the new one, so a mid-write
-# failure (timeout, disk-full, force-quit) can leave Rekordbox unlaunchable. We
-# snapshot the bundle BEFORE the re-sign (no admin needed — reading /Applications
-# and writing a user temp dir), then restore it on ANY failure, so the operator
-# is never told to reinstall (which on a guest means re-licensing Rekordbox).
-
-def _dir_size(path: Path) -> int:
-    total = 0
-    for p in path.rglob("*"):
-        try:
-            total += p.lstat().st_size
-        except OSError:
-            pass
-    return total
-
-
-def _snapshot_app(app: Path, backup_root: Path = BACKUP_ROOT) -> Path | None:
-    """Copy the bundle to a user temp backup after a free-disk guard. Returns the
-    backup path, or None if there is not enough disk or the copy failed — the
-    caller then REFUSES (never re-sign without a restore path)."""
-    try:
-        app_size = _dir_size(app)
-        backup_root.mkdir(parents=True, exist_ok=True)
-        free = shutil.disk_usage(backup_root).free
-    except OSError:
-        return None
-    if not enough_disk_for_backup(app_size, free):
-        return None
-    backup_dir = None
-    try:
-        backup_dir = Path(tempfile.mkdtemp(prefix="backup_", dir=backup_root))
-        backup = backup_dir / app.name
-        # ditto preserves the bundle's signature/metadata exactly (the point of
-        # the backup); as the user, no admin prompt.
-        subprocess.run(["ditto", str(app), str(backup)], check=True, timeout=1200,
-                       capture_output=True)
-    except (OSError, subprocess.SubprocessError):
-        if backup_dir is not None:
-            shutil.rmtree(backup_dir, ignore_errors=True)
-        return None
-    return backup
-
-
-def _restore_app(app: Path, backup: Path, runner) -> bool:
-    """Restore the backup over the (possibly damaged) bundle, as root via the same
-    runner the re-sign used (one command; codesign --force only rewrites existing
-    signature files, so `ditto backup app` overwrites them back in place). True on
-    success."""
-    rc, _ = (runner or _default_runner)(["ditto", str(backup), str(app)])
-    return rc == 0
-
-
-def _cleanup_backup(backup: Path) -> None:
-    shutil.rmtree(backup.parent, ignore_errors=True)
-
-
-def _fail_restored(app: Path, backup: Path, runner, reason: str, argv: list[str]) -> "PatchResult":
-    """A failure result that first restores Rekordbox from the backup, so the
-    message says 'still launchable' (never 'reinstall'); if the restore itself
-    fails, it keeps the backup and says where it is."""
-    if _restore_app(app, backup, runner):
-        _cleanup_backup(backup)
-        tail = " Rekordbox was restored from a pre-signing backup and is still launchable."
-    else:
-        tail = (f" Automatic restore failed — your original Rekordbox is backed up at "
-                f"{backup.parent}; copy it back over {app} to recover (no reinstall needed).")
-    return PatchResult(False, "failed", reason + tail, command=argv)
+def _failed_without_backup(reason: str, argv: list[str]) -> "PatchResult":
+    """Report a failed mutation without pretending the target was restored."""
+    return PatchResult(
+        False,
+        "failed",
+        reason
+        + " No Rekordbox backup was made by request. Do not assume it will launch; "
+        "reinstall or update Rekordbox if a subsequent signature check fails.",
+        command=argv,
+    )
 
 
 def run_via_admin(argv: list[str]) -> tuple[int, str]:
@@ -466,9 +369,8 @@ def run_via_admin(argv: list[str]) -> tuple[int, str]:
     The command is written to a temp shell script (each arg shell-quoted) and
     osascript only references that fixed, shell-quoted temp path — nothing from
     argv is interpolated into the AppleScript string, so an app/plist path can't
-    inject. Used for single-command restore after a reported sign success when
-    later Python verify/entitlement checks fail. Full sign+restore uses
-    ``run_shell_via_admin`` instead.
+    inject. Kept only for source/legacy callers; the frozen menu uses the native
+    authorization runner below.
     """
     script = "#!/bin/sh\nexec " + " ".join(shlex.quote(a) for a in argv) + "\n"
     return run_shell_via_admin(script, timeout=600)
@@ -478,8 +380,8 @@ def run_shell_via_admin(script_text: str, timeout: int = 1800) -> tuple[int, str
     """Run a full shell script as root behind one osascript admin prompt.
 
     Writes ``script_text`` to a temp file and invokes ``/bin/sh <temp>`` with
-    administrator privileges — one password dialog for the root-bundle sign
-    (and in-script restore on failure). Default timeout is 1800s.
+    administrator privileges — one password dialog for the root-bundle sign.
+    Default timeout is 1800s.
     """
     with tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False) as fh:
         fh.write(script_text)
@@ -541,7 +443,7 @@ def run_shell_via_native_authorization(
 
     Unlike an ``osascript`` escalation, this keeps the responsible application as
     RBSS Bridge, so its App Management grant can update a protected app bundle.
-    The outer wrapper owns the exit marker because the inner sign/restore script
+    The outer wrapper owns the exit marker because the inner signing script
     deliberately calls ``exit`` on failure.
     """
     if sys.platform != "darwin":
@@ -658,7 +560,7 @@ def run_shell_via_native_authorization(
 
 
 def run_via_native_authorization(argv: list[str]) -> tuple[int, str]:
-    """Native-authorize one root command; used for a post-sign restore if needed."""
+    """Native-authorize one root command for CLI callers."""
     script = "exec " + " ".join(shlex.quote(a) for a in argv) + "\n"
     return run_shell_via_native_authorization(script, timeout=600)
 
@@ -703,7 +605,7 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
     if dry_run:
         argvs = plan_codesign_argvs(app, ents_path)
         sign_argv = argvs[0]
-        return PatchResult(
+        result = PatchResult(
             True, "would_patch",
             "Dry run — Rekordbox NOT modified. Root-bundle sign plan "
             f"(exactly 1 codesign command, no nested re-sign):\n"
@@ -711,6 +613,11 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
             command=sign_argv,
             commands=argvs,
         )
+        try:
+            ents_path.unlink()
+        except OSError:
+            pass
+        return result
 
     # Exclusive lock so a double-click / two concurrent runs can't interleave two
     # `codesign --force` writes on the same bundle (which would corrupt it).
@@ -721,15 +628,6 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
         except OSError:
             return PatchResult(False, "refused",
                                "Another Rekordbox patch is already in progress — wait for it to finish.")
-
-        # Snapshot BEFORE any --force write, so any failure below is recoverable.
-        # No snapshot -> refuse (never re-sign without a restore path).
-        backup = _snapshot_app(app)
-        if backup is None:
-            return PatchResult(False, "refused",
-                               "Not enough free disk to safely back up Rekordbox (~2.4 GB) before "
-                               "re-signing — refusing rather than risk leaving it unlaunchable. "
-                               "Free up space and try again.")
 
         argvs = plan_codesign_argvs(app, ents_path)
         sign_argv = argvs[0]
