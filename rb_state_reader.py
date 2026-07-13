@@ -300,8 +300,9 @@ class RBStateReader(threading.Thread):
             self._tick_mixer(task, base)
 
         # AWR-173: CFX FILTER tracking is INDEPENDENT of mixer authority — gated
-        # only on its chains being present (7.2.11). Inert by construction on any
-        # version without CFX chains (no event at all). Never feeds authority.
+        # only on its six named chains being present (currently 7.2.11 and 7.2.16).
+        # Inert by construction on any version without CFX chains (no event at all).
+        # Never feeds authority.
         self._tick_cfx(task, base)
 
         for d in range(offs.deck_count):
@@ -609,8 +610,9 @@ class RBStateReader(threading.Thread):
         """AWR-173: publish a CfxFilterSnapshot for decks 1/2 from the CFX FILTER
         chains. Tracking-only — it never enters _tick_mixer's reads, never touches
         _authoritative_kinds, and never feeds active-deck authority. Inert by
-        construction (no event at all) on any RB version whose CFX chains are
-        absent, so the feature simply does not exist off 7.2.11."""
+        construction (no event at all) on any RB version whose six named CFX chains
+        are absent, so the feature simply does not exist off versions that expose
+        them (currently 7.2.11 and 7.2.16)."""
         offs = self._offs
         assert offs is not None
         decks = (
