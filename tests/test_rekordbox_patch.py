@@ -7,6 +7,7 @@ from __future__ import annotations
 import contextlib
 import io
 import plistlib
+import shlex
 import sys
 import unittest
 from pathlib import Path
@@ -82,14 +83,55 @@ class MergeLogicTests(unittest.TestCase):
 
 
 class CodesignArgvTests(unittest.TestCase):
-    def test_argv_shape_is_deep(self) -> None:
-        # --deep: every nested component is re-signed ad-hoc too, matching the
-        # proven-working all-ad-hoc state (a stock notarized RB won't launch as
-        # ad-hoc-main + Developer-ID/hardened nested).
+    def test_argv_shape_is_final_main_only_no_deep(self) -> None:
+        # Deep one-shot is retired; codesign_argv is the final main-bundle step only.
         argv = codesign_argv(APP, Path("/tmp/e.plist"))
-        self.assertEqual(argv, ["codesign", "--force", "--deep", "--sign", "-",
+        self.assertEqual(argv, ["codesign", "--force", "--sign", "-",
                                 "--entitlements", "/tmp/e.plist", str(APP)])
-        self.assertIn("--deep", argv)
+        self.assertNotIn("--deep", argv)
+
+
+class SignPlanPureSeamTests(unittest.TestCase):
+    """Task 1 pure seams — temp fixtures + injected file_probe only."""
+
+    def test_is_mach_o_uses_injected_probe(self) -> None:
+        self.assertTrue(rp.is_mach_o(Path("/x"), file_probe=lambda p: "Mach-O 64-bit dynamically linked shared library"))
+        self.assertFalse(rp.is_mach_o(Path("/x"), file_probe=lambda p: "ASCII text"))
+
+    def test_build_sign_restore_script_markers_and_mid_failure_restore(self) -> None:
+        app = Path("/Applications/rekordbox 7/rekordbox.app")
+        backup = Path("/tmp/backup dir/rekordbox.app")
+        steps = [
+            ("/tmp/nested/libssl.3.dylib",
+             ["codesign", "--force", "--sign", "-",
+              "--preserve-metadata=entitlements,identifier,flags,runtime",
+              "/tmp/nested/libssl.3.dylib"]),
+            (str(app),
+             ["codesign", "--force", "--sign", "-",
+              "--entitlements", "/tmp/e.plist", str(app)]),
+        ]
+        script = rp.build_sign_restore_script(steps, app, backup)
+        self.assertTrue(script.startswith("#!/bin/sh\n"))
+        self.assertIn("RBSS_SIGNING:/tmp/nested/libssl.3.dylib", script)
+        self.assertIn("RBSS_SIGN_FAIL:/tmp/nested/libssl.3.dylib", script)
+        self.assertIn("RBSS_RESTORE_OK", script)
+        self.assertIn("RBSS_RESTORE_FAIL", script)
+        self.assertIn("RBSS_SIGN_OK", script)
+        self.assertIn(shlex.quote(str(backup)), script)
+        self.assertIn(shlex.quote(str(app)), script)
+        # Mid-list failure exits before later steps run (structure: fail block exits).
+        fail_idx = script.index("RBSS_SIGN_FAIL:/tmp/nested/libssl.3.dylib")
+        ok_idx = script.index("RBSS_SIGN_OK")
+        self.assertLess(fail_idx, ok_idx)
+        self.assertIn('exit "$rc"', script)
+
+    def test_parse_sign_fail_and_restore_markers(self) -> None:
+        err = "RBSS_SIGNING:/tmp/a\nRBSS_SIGN_FAIL:/tmp/fake/libssl.3.dylib\nRBSS_RESTORE_OK\n"
+        self.assertEqual(rp.parse_sign_fail_component(err), "/tmp/fake/libssl.3.dylib")
+        self.assertEqual(rp.parse_restore_marker(err), "ok")
+        self.assertEqual(rp.parse_restore_marker("RBSS_RESTORE_FAIL"), "fail")
+        self.assertIsNone(rp.parse_restore_marker("RBSS_SIGN_OK"))
+        self.assertIsNone(rp.parse_sign_fail_component("RBSS_SIGN_OK"))
 
 
 def _proc(returncode=0, stdout=b"", stderr=""):

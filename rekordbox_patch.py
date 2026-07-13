@@ -17,10 +17,12 @@ THIS MODIFIES A THIRD-PARTY APP, so it is deliberately conservative:
   * **refused while Rekordbox is running** — you re-sign a quit app, then relaunch
     it for the new signature to take effect;
   * **guarded** — only ever touches a bundle whose id is ``com.pioneerdj.rekordboxdj``;
-  * **fail-closed + verified** — ``codesign --verify`` then re-reads get-task-allow;
-    on any failure it reports the step and tells you to reinstall Rekordbox;
-  * **reversible** only by reinstalling/updating Rekordbox (a RB update reverts the
-    patch — expected; re-run this after an update).
+  * **fail-closed + verified** — deep+strict ``codesign --verify``, then re-reads
+    get-task-allow; on signing failure the same admin script restores the
+    pre-sign backup (or keeps it and names the path if restore fails);
+  * **reversible** via the retained pre-sign backup, or by reinstalling/updating
+    Rekordbox (a RB update reverts the patch — expected; re-run this after an
+    update).
 
 CLI:
     python3 -m rb_ss_bridge_v2.rekordbox_patch --check
@@ -142,18 +144,180 @@ def needs_patch(current: dict) -> bool:
     return current.get(GET_TASK_ALLOW) is not True
 
 
+_BUNDLE_SUFFIXES = (".app", ".framework", ".bundle", ".xpc")
+
+
+class SignPlanError(RuntimeError):
+    """The inside-out signing plan could not be built safely."""
+
+
+def _default_file_probe(path: Path) -> str:
+    """``file -b`` output for ``path`` (same detection idea as ``make_stick.sh``)."""
+    try:
+        proc = subprocess.run(
+            ["file", "-b", str(path)],
+            capture_output=True, text=True, timeout=30,
+            env=sanitized_system_env(os.environ),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return proc.stdout or ""
+
+
+def is_mach_o(path: Path, file_probe=None) -> bool:
+    """True when ``file -b`` (or an injected probe) reports a Mach-O file."""
+    probe = file_probe or _default_file_probe
+    try:
+        return "Mach-O" in (probe(path) or "")
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def main_executable_path(app: Path) -> Path:
+    """``Contents/MacOS/<CFBundleExecutable>`` for ``app``, or raise SignPlanError."""
+    info = app / "Contents" / "Info.plist"
+    try:
+        with open(info, "rb") as fh:
+            exe_name = plistlib.load(fh).get("CFBundleExecutable")
+    except (OSError, plistlib.InvalidFileException, ValueError) as exc:
+        raise SignPlanError(
+            f"could not read CFBundleExecutable from {info}: {exc}"
+        ) from exc
+    if not exe_name or not isinstance(exe_name, str):
+        raise SignPlanError(
+            f"{info} is missing CFBundleExecutable; refusing to plan a re-sign"
+        )
+    return app / "Contents" / "MacOS" / exe_name
+
+
+def iter_signable_code_paths(app: Path, *, file_probe=None) -> list[Path]:
+    """Nested bundles + loose Mach-O files under ``app``, excluding the main exe.
+
+    Symlink files are skipped and directory symlinks are not descended into.
+    Nested ``.app`` / ``.framework`` / ``.bundle`` / ``.xpc`` dirs are included
+    (except ``app`` itself). The main executable is omitted — the final main-bundle
+    codesign covers it with the patched entitlements plist.
+    """
+    main_exe = main_executable_path(app)
+    found: list[Path] = []
+    for root, dirnames, filenames in os.walk(app, topdown=True, followlinks=False):
+        root_path = Path(root)
+        # Do not descend into symlink directories.
+        dirnames[:] = [
+            name for name in dirnames
+            if not (root_path / name).is_symlink()
+        ]
+        if root_path != app and root_path.suffix in _BUNDLE_SUFFIXES:
+            if not root_path.is_symlink():
+                found.append(root_path)
+        for name in filenames:
+            path = root_path / name
+            if path.is_symlink():
+                continue
+            if path == main_exe:
+                continue
+            if is_mach_o(path, file_probe=file_probe):
+                found.append(path)
+    return found
+
+
+def plan_codesign_argvs(
+    app: Path, entitlements_path: Path, *, file_probe=None,
+) -> list[list[str]]:
+    """Deepest-first nested sign argv list, then the final main-app argv.
+
+    Nested steps use ``--preserve-metadata`` and never ``--deep`` / ``--entitlements``.
+    Only the final main ``.app`` gets the patched entitlements plist. One-shot
+    ``--deep`` signing is retired (software hypothesis: explicit inside-out may
+    avoid the deep-orchestrator internal error; live proof is operator-gated).
+    """
+    nested = iter_signable_code_paths(app, file_probe=file_probe)
+    nested_sorted = sorted(nested, key=lambda p: (-len(p.parts), str(p)))
+    steps: list[list[str]] = []
+    for path in nested_sorted:
+        steps.append([
+            "codesign", "--force", "--sign", "-",
+            "--preserve-metadata=entitlements,identifier,flags,runtime",
+            str(path),
+        ])
+    steps.append([
+        "codesign", "--force", "--sign", "-",
+        "--entitlements", str(entitlements_path), str(app),
+    ])
+    return steps
+
+
 def codesign_argv(app: Path, entitlements_path: Path) -> list[str]:
-    """The ad-hoc re-sign command. ``--deep`` re-signs EVERY nested component
-    ad-hoc too — frameworks, helper apps (rekordboxAgent.app), dylibs — matching
-    the proven-working state on the maintainer's Mac, where `codesign -dv` shows
-    the main bundle AND every nested item ad-hoc. A stock notarized Rekordbox
-    will NOT launch as ad-hoc-main + Developer-ID/hardened nested, so a top-bundle-
-    only re-sign would produce an unlaunchable app. ``--entitlements`` applies to
-    the main executable, so get-task-allow lands where the bridge attaches."""
+    """Final main-bundle ad-hoc sign argv only (no ``--deep``).
+
+    Nested component argv live in ``plan_codesign_argvs``; the deep one-shot path
+    is retired. ``--entitlements`` applies to the main executable so get-task-allow
+    lands where the bridge attaches.
+    """
     return [
-        "codesign", "--force", "--deep", "--sign", "-",
+        "codesign", "--force", "--sign", "-",
         "--entitlements", str(entitlements_path), str(app),
     ]
+
+
+def build_sign_restore_script(
+    steps: list[tuple[str, list[str]]], app: Path, backup: Path,
+) -> str:
+    """Build a ``/bin/sh`` script: sign steps deepest-first, restore on any failure.
+
+    Assumes the script already runs with administrator privileges (one osascript
+    escalation). Every path/argument is shell-quoted. On codesign failure it
+    restores ``backup`` → ``app`` in-script so recovery does not need a second
+    password prompt.
+    """
+    lines = ["#!/bin/sh"]
+    for label, argv in steps:
+        lines.append(
+            f"printf '%s\\n' {shlex.quote('RBSS_SIGNING:' + label)} >&2"
+        )
+        quoted = " ".join(shlex.quote(a) for a in argv)
+        lines.append(f"{quoted}")
+        lines.append("rc=$?")
+        lines.append("if [ \"$rc\" -ne 0 ]; then")
+        lines.append(
+            f"  printf '%s\\n' {shlex.quote('RBSS_SIGN_FAIL:' + label)} >&2"
+        )
+        lines.append(
+            f"  ditto {shlex.quote(str(backup))} {shlex.quote(str(app))}"
+        )
+        lines.append("  if [ $? -eq 0 ]; then")
+        lines.append("    printf '%s\\n' 'RBSS_RESTORE_OK' >&2")
+        lines.append("  else")
+        lines.append("    printf '%s\\n' 'RBSS_RESTORE_FAIL' >&2")
+        lines.append("  fi")
+        lines.append("  exit \"$rc\"")
+        lines.append("fi")
+    lines.append("printf '%s\\n' 'RBSS_SIGN_OK' >&2")
+    lines.append("exit 0")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def parse_sign_fail_component(stderr: str) -> str | None:
+    """Return the path/label after ``RBSS_SIGN_FAIL:``, or None."""
+    for line in (stderr or "").splitlines():
+        if line.startswith("RBSS_SIGN_FAIL:"):
+            return line[len("RBSS_SIGN_FAIL:"):] or None
+        # osascript may wrap stderr; allow the marker mid-line.
+        idx = line.find("RBSS_SIGN_FAIL:")
+        if idx != -1:
+            return line[idx + len("RBSS_SIGN_FAIL:"):] or None
+    return None
+
+
+def parse_restore_marker(stderr: str) -> str | None:
+    """Return ``ok`` / ``fail`` from in-script restore markers, or None."""
+    text = stderr or ""
+    if "RBSS_RESTORE_OK" in text:
+        return "ok"
+    if "RBSS_RESTORE_FAIL" in text:
+        return "fail"
+    return None
 
 
 def enough_disk_for_backup(app_size: int, free: int, margin: int = 500 * 1024 * 1024) -> bool:
@@ -331,21 +495,38 @@ def run_via_admin(argv: list[str]) -> tuple[int, str]:
     The command is written to a temp shell script (each arg shell-quoted) and
     osascript only references that fixed, shell-quoted temp path — nothing from
     argv is interpolated into the AppleScript string, so an app/plist path can't
-    inject. Used by the menubar and CLI --admin when /Applications isn't writable.
+    inject. Used for single-command restore after a reported sign success when
+    later Python verify/entitlement checks fail. Full sign+restore uses
+    ``run_shell_via_admin`` instead.
     """
     script = "#!/bin/sh\nexec " + " ".join(shlex.quote(a) for a in argv) + "\n"
+    return run_shell_via_admin(script, timeout=600)
+
+
+def run_shell_via_admin(script_text: str, timeout: int = 1800) -> tuple[int, str]:
+    """Run a full shell script as root behind one osascript admin prompt.
+
+    Writes ``script_text`` to a temp file and invokes ``/bin/sh <temp>`` with
+    administrator privileges — one password dialog for the whole multi-step
+    inside-out sign (and in-script restore on failure). Default timeout is
+    1800s for large Frameworks dylibs.
+    """
     with tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False) as fh:
-        fh.write(script)
+        fh.write(script_text)
+        if not script_text.endswith("\n"):
+            fh.write("\n")
         sh_path = fh.name
     try:
         os.chmod(sh_path, 0o755)
         osa = subprocess.run(
             ["osascript", "-e",
              f'do shell script "/bin/sh {shlex.quote(sh_path)}" with administrator privileges'],
-            capture_output=True, text=True, timeout=600,
+            capture_output=True, text=True, timeout=timeout,
             env=sanitized_system_env(os.environ),
         )
-        return osa.returncode, osa.stderr or ""
+        # osascript often puts failure detail in stdout; keep both for markers.
+        err = (osa.stderr or "") + (("\n" + osa.stdout) if osa.stdout else "")
+        return osa.returncode, err
     except (OSError, subprocess.SubprocessError) as exc:
         return 1, f"admin escalation failed: {exc}"
     finally:
