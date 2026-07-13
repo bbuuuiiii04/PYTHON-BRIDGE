@@ -1,0 +1,107 @@
+name: research-rb716-mixer
+
+on:
+  push:
+    branches:
+      - research/rb-7.2.16-mixer-offsets
+    paths:
+      - .github/workflows/research-rb716-mixer.yml
+
+permissions:
+  contents: write
+
+jobs:
+  inventory:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/rb-7.2.16-mixer-offsets
+
+      - name: Download and verify official installers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/rb-installers
+          curl --fail --location --retry 3 --retry-all-errors \
+            -o /tmp/rb-installers/7.2.11.zip \
+            'https://cdn.rekordbox.com/files/20260225160351/Install_rekordbox_7_2_11.pkg_.zip'
+          curl --fail --location --retry 3 --retry-all-errors \
+            -o /tmp/rb-installers/7.2.16.zip \
+            'https://cdn.rekordbox.com/files/20260708182003/Install_rekordbox_7_2_16.pkg_.zip'
+          printf '%s  %s\n' \
+            'df2b3ad99553fa267dbc6f4cc4945d419d13bd620dbeb92f1501eef622d3d000' /tmp/rb-installers/7.2.11.zip \
+            'b1007870c5560fb0bfb56c75a125b80df4d413b6d3afca1935be8b1cb4613a99' /tmp/rb-installers/7.2.16.zip \
+            | shasum -a 256 -c -
+
+      - name: Extract arm64 binaries and symbols
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/rb716-research
+          for version in 7.2.11 7.2.16; do
+            work="/tmp/rb-${version}"
+            mkdir -p "$work/zip"
+            ditto -x -k "/tmp/rb-installers/${version}.zip" "$work/zip"
+            pkg="$(find "$work/zip" -name '*.pkg' -print -quit)"
+            test -n "$pkg"
+            pkgutil --expand-full "$pkg" "$work/pkg"
+            bin="$(find "$work/pkg" -type f -path '*/rekordbox.app/Contents/MacOS/rekordbox' -print -quit)"
+            test -n "$bin"
+            lipo "$bin" -thin arm64 -output "/tmp/rb716-research/${version}-arm64"
+            nm -n --defined-only "/tmp/rb716-research/${version}-arm64" > "/tmp/rb716-research/${version}-nm.txt"
+          done
+
+      - name: Build relevant symbol inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' > /tmp/rb716-research/report.txt
+          from pathlib import Path
+          import re
+
+          pat = re.compile(r'(mixer|fader|equalizer|crossfader|cross_fader|beat.?fx|color.?fx|cfx|digitaltrim|digital.?trim|inputchannelgraph|djunitAudioGraph|djengine|fxunit|fxprocessor|channelgraph)', re.I)
+
+          def rows(version):
+              out=[]
+              for line in Path(f'/tmp/rb716-research/{version}-nm.txt').read_text(errors='replace').splitlines():
+                  parts=line.split(' ',2)
+                  if len(parts)!=3: continue
+                  try: addr=int(parts[0],16)
+                  except ValueError: continue
+                  typ,name=parts[1],parts[2]
+                  if pat.search(name): out.append((addr,typ,name))
+              return out
+
+          a=rows('7.2.11'); b=rows('7.2.16')
+          ma={n:(x,t) for x,t,n in a}; mb={n:(x,t) for x,t,n in b}
+          common=sorted(set(ma)&set(mb))
+          print('OFFICIAL INSTALLERS SHA-256 VERIFIED')
+          print('7.2.11 zip=df2b3ad99553fa267dbc6f4cc4945d419d13bd620dbeb92f1501eef622d3d000')
+          print('7.2.16 zip=b1007870c5560fb0bfb56c75a125b80df4d413b6d3afca1935be8b1cb4613a99')
+          print(f'relevant_symbols 7.2.11={len(a)} 7.2.16={len(b)} common={len(common)}')
+          print('\n=== COMMON RELEVANT SYMBOLS ===')
+          for name in common:
+              aa,ta=ma[name]; bb,tb=mb[name]
+              print(f'{aa:016x} -> {bb:016x} delta={bb-aa:+#x} {ta}/{tb} {name}')
+          print('\n=== 7.2.11-ONLY RELEVANT SYMBOLS ===')
+          for name in sorted(set(ma)-set(mb)):
+              aa,ta=ma[name]; print(f'{aa:016x} {ta} {name}')
+          print('\n=== 7.2.16-ONLY RELEVANT SYMBOLS ===')
+          for name in sorted(set(mb)-set(ma)):
+              bb,tb=mb[name]; print(f'{bb:016x} {tb} {name}')
+          PY
+          cat /tmp/rb716-research/report.txt
+
+      - name: Commit report to research branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p docs/data
+          cp /tmp/rb716-research/report.txt docs/data/tmp-rb716-mixer-symbol-inventory.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/data/tmp-rb716-mixer-symbol-inventory.txt
+          git commit -m 'research: record rb 7.2.16 mixer symbol inventory'
+          git push origin HEAD:research/rb-7.2.16-mixer-offsets
