@@ -1,0 +1,116 @@
+name: research-rb716-layout
+
+on:
+  push:
+    branches:
+      - research/rb-7.2.16-mixer-offsets
+    paths:
+      - .github/workflows/research-rb716-layout.yml
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dump:
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/rb-7.2.16-mixer-offsets
+
+      - name: Download, verify, and extract arm64 binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/rb716-layout
+          for spec in \
+            '7.2.11|20260225160351|df2b3ad99553fa267dbc6f4cc4945d419d13bd620dbeb92f1501eef622d3d000' \
+            '7.2.16|20260708182003|b1007870c5560fb0bfb56c75a125b80df4d413b6d3afca1935be8b1cb4613a99'; do
+            IFS='|' read -r version stamp sha <<< "$spec"
+            zip="/tmp/rb716-layout/${version}.zip"
+            curl --fail --location --retry 3 --retry-all-errors \
+              -o "$zip" "https://cdn.rekordbox.com/files/${stamp}/Install_rekordbox_${version//./_}.pkg_.zip"
+            echo "$sha  $zip" | shasum -a 256 -c -
+            work="/tmp/rb716-layout/${version}"
+            mkdir -p "$work/zip"
+            ditto -x -k "$zip" "$work/zip"
+            pkg="$(find "$work/zip" -name '*.pkg' -print -quit)"
+            pkgutil --expand-full "$pkg" "$work/pkg"
+            bin="$(find "$work/pkg" -type f -path '*/rekordbox.app/Contents/MacOS/rekordbox' -print -quit)"
+            lipo "$bin" -thin arm64 -output "$work/rekordbox-arm64"
+            nm -n --defined-only "$work/rekordbox-arm64" > "$work/nm.txt"
+          done
+
+      - name: Dump exact object-layout functions
+        shell: bash
+        run: |
+          set -u
+          report=/tmp/rb716-layout/layout-disassembly.txt
+          : > "$report"
+          cat > /tmp/rb716-layout/symbols.txt <<'EOF'
+          __ZNK8djengine10DjEngineIF13getAudioGraphEv
+          __ZNK8djengine10DjEngineIF11getDjSystemEv
+          __ZN8djengine10DjEngineIF15setChannelFaderENS_14EnMixerChannelEd
+          __ZN8djengine10DjEngineIF12setEqualizerENS_14EnMixerChannelENS_15EnEqualizerBandEd
+          __ZN8djengine10DjEngineIF14setDigitalTrimENS_14EnMixerChannelEd
+          __ZN8djengine10DjEngineIF13setCrossFaderEd
+          __ZNK6rbxfrm16DjUnitAudioGraph15getMixerControlEi
+          __ZN17InputChannelGraph23setChannelFaderPositionEf
+          __ZN17InputChannelGraph13setEqPositionE14EEq_Iso_Band_tf
+          __ZN17InputChannelGraph15setTrimPositionEf
+          __ZN17InputChannelGraph21setCrossFaderPositionEf
+          __ZN17InputChannelGraph22selectCrossFaderAssignE17ECrossFaderAssign
+          __ZN12ChannelFader12setParameterEjf
+          __ZNK12ChannelFader12getParameterEj
+          __ZN13EqualizerNXS212setParameterEjf
+          __ZNK13EqualizerNXS212getParameterEj
+          __ZN23CrossFaderVolumeControl12setParameterEjf
+          __ZNK23CrossFaderVolumeControl12getParameterEj
+          __ZN15FxUnitProcessor9addFxUnitEP14AbstractFxUniti
+          __ZN23RekordboxDjColorFxLayer12setParameterEfi
+          __ZNK23RekordboxDjColorFxLayer12getParameterEi
+          __ZN31RekordboxDjColorFxUnitContainer12selectEffectEiii
+          __ZNK31RekordboxDjColorFxUnitContainer14getCurrentFxIdEii
+          __ZN31RekordboxDjColorFxUnitContainer11startEffectEii
+          __ZNK31RekordboxDjColorFxUnitContainer10isEffectOnEii
+          __ZN31RekordboxDjColorFxUnitContainer12setParameterEfiii
+          __ZNK31RekordboxDjColorFxUnitContainer12getParameterEiii
+          __ZN29RekordboxMultiFxUnitContainer12selectEffectEiii
+          __ZNK29RekordboxMultiFxUnitContainer14getCurrentFxIdEii
+          __ZN29RekordboxMultiFxUnitContainer11startEffectEii
+          __ZNK29RekordboxMultiFxUnitContainer10isEffectOnEii
+          __ZN29RekordboxMultiFxUnitContainer12setParameterEfiii
+          __ZNK29RekordboxMultiFxUnitContainer12getParameterEiii
+          __ZN29RekordboxMultiFxUnitContainer17setEffectMixRatioEifi
+          EOF
+          sed -i '' 's/^          //' /tmp/rb716-layout/symbols.txt
+
+          for version in 7.2.11 7.2.16; do
+            bin="/tmp/rb716-layout/${version}/rekordbox-arm64"
+            echo "===== VERSION $version =====" >> "$report"
+            while IFS= read -r sym; do
+              [ -n "$sym" ] || continue
+              echo >> "$report"
+              echo "### $sym" >> "$report"
+              grep " $sym$" "/tmp/rb716-layout/${version}/nm.txt" >> "$report" || echo 'NM_MISSING' >> "$report"
+              if xcrun llvm-objdump --version >/dev/null 2>&1; then
+                xcrun llvm-objdump --macho --arch=arm64 --disassemble-symbols="$sym" "$bin" >> "$report" 2>&1 || echo 'LLVM_OBJDUMP_FAILED' >> "$report"
+              else
+                otool -arch arm64 -tvV -p "$sym" "$bin" >> "$report" 2>&1 || echo 'OTOOL_FAILED' >> "$report"
+              fi
+            done < /tmp/rb716-layout/symbols.txt
+          done
+          wc -l "$report"
+          tail -100 "$report"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rb716-layout-disassembly
+          path: /tmp/rb716-layout/layout-disassembly.txt
+          if-no-files-found: error
+          retention-days: 2
