@@ -150,115 +150,12 @@ def needs_patch(current: dict) -> bool:
     return current.get(GET_TASK_ALLOW) is not True
 
 
-_BUNDLE_SUFFIXES = (".app", ".framework", ".bundle", ".xpc")
-
-
-class SignPlanError(RuntimeError):
-    """The inside-out signing plan could not be built safely."""
-
-
-def _default_file_probe(path: Path) -> str:
-    """``file -b`` output for ``path`` (same detection idea as ``make_stick.sh``)."""
-    try:
-        proc = subprocess.run(
-            ["file", "-b", str(path)],
-            capture_output=True, text=True, timeout=30,
-            env=sanitized_system_env(os.environ),
-        )
-    except (OSError, subprocess.SubprocessError):
-        return ""
-    return proc.stdout or ""
-
-
-def is_mach_o(path: Path, file_probe=None) -> bool:
-    """True when ``file -b`` (or an injected probe) reports a Mach-O file."""
-    probe = file_probe or _default_file_probe
-    try:
-        return "Mach-O" in (probe(path) or "")
-    except (OSError, TypeError, ValueError):
-        return False
-
-
-def main_executable_path(app: Path) -> Path:
-    """``Contents/MacOS/<CFBundleExecutable>`` for ``app``, or raise SignPlanError."""
-    info = app / "Contents" / "Info.plist"
-    try:
-        with open(info, "rb") as fh:
-            exe_name = plistlib.load(fh).get("CFBundleExecutable")
-    except (OSError, plistlib.InvalidFileException, ValueError) as exc:
-        raise SignPlanError(
-            f"could not read CFBundleExecutable from {info}: {exc}"
-        ) from exc
-    if not exe_name or not isinstance(exe_name, str):
-        raise SignPlanError(
-            f"{info} is missing CFBundleExecutable; refusing to plan a re-sign"
-        )
-    return app / "Contents" / "MacOS" / exe_name
-
-
-def iter_signable_code_paths(app: Path, *, file_probe=None) -> list[Path]:
-    """Nested bundles + loose Mach-O files under ``app``, excluding the main exe.
-
-    Symlink files are skipped and directory symlinks are not descended into.
-    Nested ``.app`` / ``.framework`` / ``.bundle`` / ``.xpc`` dirs are included
-    (except ``app`` itself). The main executable is omitted — the final main-bundle
-    codesign covers it with the patched entitlements plist.
-    """
-    main_exe = main_executable_path(app)
-    found: list[Path] = []
-    for root, dirnames, filenames in os.walk(app, topdown=True, followlinks=False):
-        root_path = Path(root)
-        # Do not descend into symlink directories.
-        dirnames[:] = [
-            name for name in dirnames
-            if not (root_path / name).is_symlink()
-        ]
-        if root_path != app and root_path.suffix in _BUNDLE_SUFFIXES:
-            if not root_path.is_symlink():
-                found.append(root_path)
-        for name in filenames:
-            path = root_path / name
-            if path.is_symlink():
-                continue
-            if path == main_exe:
-                continue
-            if is_mach_o(path, file_probe=file_probe):
-                found.append(path)
-    return found
-
-
-def plan_codesign_argvs(
-    app: Path, entitlements_path: Path, *, file_probe=None,
-) -> list[list[str]]:
-    """Deepest-first nested sign argv list, then the final main-app argv.
-
-    Nested steps use ``--preserve-metadata`` and never ``--deep`` / ``--entitlements``.
-    Only the final main ``.app`` gets the patched entitlements plist. One-shot
-    ``--deep`` signing is retired (software hypothesis: explicit inside-out may
-    avoid the deep-orchestrator internal error; live proof is operator-gated).
-    """
-    nested = iter_signable_code_paths(app, file_probe=file_probe)
-    nested_sorted = sorted(nested, key=lambda p: (-len(p.parts), str(p)))
-    steps: list[list[str]] = []
-    for path in nested_sorted:
-        steps.append([
-            "codesign", "--force", "--sign", "-",
-            "--preserve-metadata=entitlements,identifier,flags,runtime",
-            str(path),
-        ])
-    steps.append([
-        "codesign", "--force", "--sign", "-",
-        "--entitlements", str(entitlements_path), str(app),
-    ])
-    return steps
-
-
 def codesign_argv(app: Path, entitlements_path: Path) -> list[str]:
-    """Final main-bundle ad-hoc sign argv only (no ``--deep``).
+    """Root-bundle ad-hoc sign argv only (no ``--deep``, no nested re-sign).
 
-    Nested component argv live in ``plan_codesign_argvs``; the deep one-shot path
-    is retired. ``--entitlements`` applies to the main executable so get-task-allow
-    lands where the bridge attaches.
+    One command: sign the ``.app`` with the merged entitlements plist so
+    get-task-allow lands on the main attach target. Nested helpers / frameworks
+    / ``rekordboxAgent`` keep their original Pioneer signatures.
     """
     return [
         "codesign", "--force", "--sign", "-",
@@ -266,15 +163,20 @@ def codesign_argv(app: Path, entitlements_path: Path) -> list[str]:
     ]
 
 
+def plan_codesign_argvs(app: Path, entitlements_path: Path) -> list[list[str]]:
+    """Compatibility seam: exactly one root-bundle codesign argv."""
+    return [codesign_argv(app, entitlements_path)]
+
+
 def build_sign_restore_script(
     steps: list[tuple[str, list[str]]], app: Path, backup: Path,
 ) -> str:
-    """Build a ``/bin/sh`` script: sign steps deepest-first, restore on any failure.
+    """Build a ``/bin/sh`` script: run the sign step(s), restore on any failure.
 
     Assumes the script already runs with administrator privileges (one osascript
     escalation). Every path/argument is shell-quoted. On codesign failure it
     restores ``backup`` → ``app`` in-script so recovery does not need a second
-    password prompt.
+    password prompt. The apply plan is a single root-bundle step.
     """
     lines = ["#!/bin/sh"]
     for label, argv in steps:
@@ -324,6 +226,34 @@ def parse_restore_marker(stderr: str) -> str | None:
     if "RBSS_RESTORE_FAIL" in text:
         return "fail"
     return None
+
+
+def _codesign_fail_detail(stderr: str) -> str:
+    """Short non-secret stderr leftover after stripping RBSS_* markers."""
+    keep: list[str] = []
+    for line in (stderr or "").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if (
+            "RBSS_SIGNING:" in stripped
+            or "RBSS_SIGN_FAIL:" in stripped
+            or "RBSS_RESTORE_OK" in stripped
+            or "RBSS_RESTORE_FAIL" in stripped
+            or "RBSS_SIGN_OK" in stripped
+        ):
+            continue
+        # Never surface password / auth prompt text.
+        low = stripped.lower()
+        if "password" in low or "passwd" in low:
+            continue
+        keep.append(stripped)
+    if not keep:
+        return ""
+    joined = " ".join(keep)
+    if len(joined) > 240:
+        joined = joined[:237] + "..."
+    return joined
 
 
 def enough_disk_for_backup(app_size: int, free: int, margin: int = 500 * 1024 * 1024) -> bool:
@@ -413,13 +343,14 @@ class PatchResult:
 
 
 # A "runner" runs one argv and returns (returncode, stderr). When the runner is
-# ``run_via_admin``, apply_patch instead builds one privileged multi-step script
+# ``run_via_admin``, apply_patch instead builds one privileged root-bundle script
 # via ``run_shell_via_admin`` so the operator sees a single password prompt.
 # Verify + entitlement re-read are read-only and always run in-process.
 
 def _default_runner(argv: list[str]) -> tuple[int, str]:
     try:
-        # 600s per component; full admin plan uses run_shell_via_admin (1800s).
+        # 600s for the single root-bundle sign; full admin plan uses
+        # run_shell_via_admin (1800s).
         p = subprocess.run(argv, capture_output=True, text=True, timeout=600,
                            env=sanitized_system_env(os.environ))
         return p.returncode, p.stderr or ""
@@ -515,9 +446,8 @@ def run_shell_via_admin(script_text: str, timeout: int = 1800) -> tuple[int, str
     """Run a full shell script as root behind one osascript admin prompt.
 
     Writes ``script_text`` to a temp file and invokes ``/bin/sh <temp>`` with
-    administrator privileges — one password dialog for the whole multi-step
-    inside-out sign (and in-script restore on failure). Default timeout is
-    1800s for large Frameworks dylibs.
+    administrator privileges — one password dialog for the root-bundle sign
+    (and in-script restore on failure). Default timeout is 1800s.
     """
     with tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False) as fh:
         fh.write(script_text)
@@ -582,17 +512,14 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
         ents_path = Path(fh.name)
 
     if dry_run:
-        try:
-            argvs = plan_codesign_argvs(app, ents_path)
-        except SignPlanError as exc:
-            return PatchResult(False, "refused", f"Could not plan a safe re-sign ({exc}).")
-        final_argv = argvs[-1]
-        plan_lines = "\n".join(f"  {' '.join(a)}" for a in argvs)
+        argvs = plan_codesign_argvs(app, ents_path)
+        sign_argv = argvs[0]
         return PatchResult(
             True, "would_patch",
-            "Dry run — Rekordbox NOT modified. Inside-out sign plan "
-            f"({len(argvs)} step(s), deepest nested first, main app last):\n{plan_lines}",
-            command=final_argv,
+            "Dry run — Rekordbox NOT modified. Root-bundle sign plan "
+            f"(exactly 1 codesign command, no nested re-sign):\n"
+            f"  {' '.join(sign_argv)}",
+            command=sign_argv,
             commands=argvs,
         )
 
@@ -615,13 +542,9 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
                                "re-signing — refusing rather than risk leaving it unlaunchable. "
                                "Free up space and try again.")
 
-        try:
-            argvs = plan_codesign_argvs(app, ents_path)
-        except SignPlanError as exc:
-            _cleanup_backup(backup)
-            return PatchResult(False, "refused", f"Could not plan a safe re-sign ({exc}).")
-        final_argv = argvs[-1]
-        steps = [(argv[-1], argv) for argv in argvs]
+        argvs = plan_codesign_argvs(app, ents_path)
+        sign_argv = argvs[0]
+        steps = [(sign_argv[-1], sign_argv)]
 
         use_admin_script = runner is run_via_admin
         if use_admin_script:
@@ -635,47 +558,60 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
                     _cleanup_backup(backup)
                     return PatchResult(False, "refused",
                                        "Cancelled — Rekordbox was not modified.",
-                                       command=final_argv, commands=argvs)
-                component = parse_sign_fail_component(err) or "unknown component"
+                                       command=sign_argv, commands=argvs)
+                component = parse_sign_fail_component(err) or str(app)
                 restore_state = parse_restore_marker(err)
+                detail = _codesign_fail_detail(err)
+                detail_tail = f" Detail: {detail}" if detail else ""
+                cmd_note = f" Failed command: {' '.join(sign_argv)}."
                 # Retain the backup after any failed apply as operator evidence,
                 # even when in-script restore reported OK (safer than today's
                 # successful-restore cleanup until the operator confirms launch).
                 if restore_state == "ok":
                     return PatchResult(
                         False, "failed",
-                        f"codesign failed on {component}. Rekordbox was restored "
-                        "from the pre-signing backup in the same admin step and "
-                        f"should still be launchable. Backup retained at {backup.parent}.",
-                        command=final_argv, commands=argvs,
+                        f"codesign failed on {component}.{cmd_note}{detail_tail} "
+                        "Rekordbox was restored from the pre-signing backup in "
+                        "the same admin step and should still be launchable. "
+                        f"Backup retained at {backup.parent}.",
+                        command=sign_argv, commands=argvs,
+                    )
+                if restore_state == "fail":
+                    return PatchResult(
+                        False, "failed",
+                        f"codesign failed on {component}.{cmd_note}{detail_tail} "
+                        "Automatic restore failed — your original Rekordbox is "
+                        f"backed up at {backup.parent}; copy it back over {app} "
+                        "to recover (no reinstall needed).",
+                        command=sign_argv, commands=argvs,
                     )
                 return PatchResult(
                     False, "failed",
-                    f"codesign failed on {component}. Automatic restore failed — "
-                    f"your original Rekordbox is backed up at {backup.parent}; "
-                    f"copy it back over {app} to recover (no reinstall needed).",
-                    command=final_argv, commands=argvs,
+                    f"codesign failed on {component}.{cmd_note}{detail_tail} "
+                    "The restore result could not be confirmed from the admin "
+                    f"script output. A verified pre-sign backup is retained at "
+                    f"{backup.parent}; copy it back over {app} if Rekordbox will "
+                    "not launch (no reinstall needed).",
+                    command=sign_argv, commands=argvs,
                 )
         else:
             active_runner = runner or _default_runner
-            for step_argv in argvs:
-                rc, err = active_runner(step_argv)
-                if rc != 0:
-                    if is_user_cancel(err):
-                        _cleanup_backup(backup)
-                        return PatchResult(False, "refused",
-                                           "Cancelled — Rekordbox was not modified.",
-                                           command=final_argv, commands=argvs)
-                    hint = ""
-                    if "not permitted" in err.lower() or "permission denied" in err.lower():
-                        hint = (" (needs admin — run with sudo, or use --admin / "
-                                "the menubar which prompt for your password)")
-                    failed_path = step_argv[-1]
-                    return _fail_restored(
-                        app, backup, active_runner,
-                        f"codesign failed on {failed_path}{hint}: {err.strip()}.",
-                        final_argv,
-                    )
+            rc, err = active_runner(sign_argv)
+            if rc != 0:
+                if is_user_cancel(err):
+                    _cleanup_backup(backup)
+                    return PatchResult(False, "refused",
+                                       "Cancelled — Rekordbox was not modified.",
+                                       command=sign_argv, commands=argvs)
+                hint = ""
+                if "not permitted" in err.lower() or "permission denied" in err.lower():
+                    hint = (" (needs admin — run with sudo, or use --admin / "
+                            "the menubar which prompt for your password)")
+                return _fail_restored(
+                    app, backup, active_runner,
+                    f"codesign failed on {sign_argv[-1]}{hint}: {err.strip()}.",
+                    sign_argv,
+                )
 
         # Verify the re-sign is structurally valid AND the entitlement took. (This
         # cannot prove Rekordbox LAUNCHES / that task_for_pid works — the operator
@@ -692,27 +628,27 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
         except (OSError, subprocess.SubprocessError) as exc:
             return _fail_restored(
                 app, backup, restore_runner,
-                f"could not verify the re-sign ({exc}).", final_argv,
+                f"could not verify the re-sign ({exc}).", sign_argv,
             )
         if verify.returncode != 0:
             return _fail_restored(
                 app, backup, restore_runner,
                 "the re-sign did not verify: " + verify.stderr.strip() + ".",
-                final_argv,
+                sign_argv,
             )
         try:
             target_patched = has_get_task_allow(app)
         except EntitlementsReadError as exc:
             return _fail_restored(
                 app, backup, restore_runner,
-                f"the re-sign could not be verified safely ({exc}).", final_argv,
+                f"the re-sign could not be verified safely ({exc}).", sign_argv,
             )
         if not target_patched:
             return _fail_restored(
                 app, backup, restore_runner,
                 "the re-sign succeeded but get-task-allow is still absent — "
                 "no change took effect.",
-                final_argv,
+                sign_argv,
             )
         return PatchResult(
             True, "patched",
@@ -723,7 +659,7 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
             "unknown. "
             f"The original app is kept at {backup.parent}; purging RBSS Bridge "
             "does not remove it.",
-            command=final_argv, commands=argvs,
+            command=sign_argv, commands=argvs,
         )
     finally:
         lock_fh.close()  # releases the flock
@@ -812,7 +748,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if args.apply:
-        print(f"About to RE-SIGN {app} ad-hoc (inside-out) to add get-task-allow.")
+        print(f"About to RE-SIGN {app} ad-hoc (root bundle only) to add get-task-allow.")
         print("  - This modifies Rekordbox (a Rekordbox update will revert it).")
         print("  - Quit Rekordbox first. You may be asked for your admin password.")
         if input("Type YES to proceed: ").strip() != "YES":

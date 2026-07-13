@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: ad31edf
+last_verified_commit: d5bfaa4
 last_verified_date: 2026-07-13
-validation_scope: software-only; runtime command rail and slim source/frozen menubar inventory tested, including the restored state-aware Patch Rekordbox action (target entitlement only; exit-0 enabled dialog uses verification wording, not a fresh-install claim; stock foreign-Mac attach live-unvalidated / unknown); AWR-222 dormant AX probe is packaged dispatch only (no menu item of its own, not executed); native install failure alerts use plain-language copy at the menubar boundary; frozen app and hardware behavior unvalidated
+validation_scope: software-only; runtime command rail and slim source/frozen menubar inventory tested, including the state-aware Patch Rekordbox action in the maintenance block with Export/Rebuild (target entitlement only; exit-0 enabled dialog uses verification wording, not a fresh-install claim; stock foreign-Mac attach live-unvalidated / unknown); AWR-222 dormant AX probe is packaged dispatch only (no menu item of its own, not executed); native install failure alerts use plain-language copy at the menubar boundary; frozen app and hardware behavior unvalidated
 ---
 
 # Runtime Commands Subsystem
@@ -109,13 +109,16 @@ SoundSwitch pack-player boundary (T7c/T7e):
   one walker builds it. Both editions have the Bridge On/Off control, **Open
   Live Log**, a **Status** submenu with exactly four disabled rows (Bridge,
   Rekordbox, Lasers, LEDs), a **Laser Safety** submenu containing
-  **EMERGENCY: Stop All Lasers** and **Resume Lasers**, and the restored
-  state-aware **Patch Rekordbox** action. The safety actions keep their
+  **EMERGENCY: Stop All Lasers** and **Resume Lasers**, then a maintenance
+  block: separator → **SoundSwitch Export…** / **Rebuild USB Bridge…**
+  (source-only) → state-aware **Patch Rekordbox** (always visible) → Purge
+  (frozen when available) → **Restart Menubar**. The safety actions keep their
   existing `laser_blackout` / `laser_clear_blackout` command behavior.
 - The source/main-Mac edition additionally has exactly four operator tools:
   **Laser Pad…**, **LED Pad…**, **SoundSwitch Export…**, and **Rebuild USB
-  Bridge…**. The first two live under **Tools**. The frozen/foreign-Mac edition
-  hides all four.
+  Bridge…**. The first two live under **Tools**; Export/Rebuild sit in the
+  maintenance block with Patch. The frozen/foreign-Mac edition hides Tools and
+  Export/Rebuild but keeps the maintenance separator and Patch.
 - **Patch Rekordbox** (both editions; user override of the AWR-226/`39a2ffa`
   slim-menu cut that removed it): dispatches the existing target-patch child
   only (`--patch-rekordbox`; frozen argv stays `[sys.executable,

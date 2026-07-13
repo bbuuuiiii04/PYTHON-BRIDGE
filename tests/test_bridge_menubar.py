@@ -1045,12 +1045,44 @@ class BridgeMenubarTests(unittest.TestCase):
         blueprint = bridge_menubar.MENU_BLUEPRINT
         self.assertEqual(blueprint[-1][1], "restart_item")
         attrs = [e[1] for e in blueprint]
+        # Exact maintenance block order (separator immediately before Export).
+        expected_tail = [
+            "maintenance_sep",
+            "export_item",
+            "update_usb_item",
+            "patch_rekordbox_item",
+            "purge_item",
+            "restart_item",
+        ]
+        self.assertEqual(attrs[-len(expected_tail):], expected_tail)
         last_sep = max(i for i, e in enumerate(blueprint) if e[0] == "sep")
+        export_i = attrs.index("export_item")
+        rebuild_i = attrs.index("update_usb_item")
+        patch_i = attrs.index("patch_rekordbox_item")
         purge_i = attrs.index("purge_item")
         restart_i = attrs.index("restart_item")
-        self.assertLess(last_sep, purge_i)
+        self.assertEqual(last_sep, export_i - 1)
+        self.assertLess(export_i, rebuild_i)
+        self.assertLess(rebuild_i, patch_i)
+        self.assertLess(patch_i, purge_i)
         self.assertLess(purge_i, restart_i)
         self.assertNotIn("quit_item", attrs)
+        # Patch must stay below the maintenance separator (never drift above).
+        self.assertLess(attrs.index("maintenance_sep"), patch_i)
+
+    def test_menu_maintenance_sep_visible_in_source_and_frozen(self) -> None:
+        bridge_menubar = self._import_module()
+        for frozen, purge in ((False, False), (True, False), (True, True)):
+            gates = bridge_menubar._menu_visibility(frozen=frozen, purge=purge)
+            self.assertTrue(
+                gates["maintenance_sep"],
+                f"maintenance_sep must stay visible frozen={frozen} purge={purge}",
+            )
+            # Patch is never gated — always present.
+            self.assertNotIn("patch_rekordbox_item", gates)
+            self.assertEqual(gates["export_item"], not frozen)
+            self.assertEqual(gates["update_usb_item"], not frozen)
+            self.assertEqual(gates["purge_item"], frozen and purge)
 
     def test_menu_blueprint_has_only_essential_status_and_no_dead_controls(self) -> None:
         # Locked inventory: Status submenu holds exactly four disabled rows
@@ -1680,6 +1712,18 @@ class FrozenDefectHelperTests(BridgeMenubarTests):
         self.assertEqual(patch[2], "Patch Rekordbox")
         self.assertEqual(patch[3], "enableRekordboxReads:")
         self.assertNotIn("Enable Rekordbox Reads", repr(bridge_menubar.MENU_BLUEPRINT))
+        # Placement: inside the maintenance block after Export/Rebuild.
+        top_attrs = [e[1] for e in bridge_menubar.MENU_BLUEPRINT]
+        sep_i = top_attrs.index("maintenance_sep")
+        self.assertEqual(
+            top_attrs[sep_i:sep_i + 4],
+            [
+                "maintenance_sep",
+                "export_item",
+                "update_usb_item",
+                "patch_rekordbox_item",
+            ],
+        )
 
     def test_patch_rb_button_text_and_enabled_table(self) -> None:
         bridge_menubar = self._import_module()

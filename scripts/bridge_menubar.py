@@ -1269,10 +1269,12 @@ MENU_BLUEPRINT: tuple = (
     )),
     # User override of the AWR-226 slim-menu cut: restore the target-patch
     # action (not the old standing status row). Present in both editions.
-    ("action", "patch_rekordbox_item", "Patch Rekordbox", "enableRekordboxReads:"),
+    # Maintenance block: Export + Rebuild (source-only) + Patch (always),
+    # then Purge (frozen+available) and Restart Menubar.
     ("sep", "maintenance_sep", None, None),
     ("action", "export_item", "SoundSwitch Export…", "exportFromSS:"),
     ("action", "update_usb_item", "Rebuild USB Bridge…", "updateUsbBridge:"),
+    ("action", "patch_rekordbox_item", "Patch Rekordbox", "enableRekordboxReads:"),
     ("action", "purge_item", "Purge RBSS Bridge…", "purgeBridge:"),
     ("action", "restart_item", "Restart Menubar", "restartMenubar:"),
 )
@@ -1284,7 +1286,9 @@ def _menu_visibility(*, frozen: bool, purge: bool) -> dict[str, bool]:
         "tools_item": not frozen,
         "export_item": not frozen,
         "update_usb_item": not frozen,
-        "maintenance_sep": not frozen or purge,
+        # Patch is always visible, so the maintenance separator stays visible
+        # in frozen mode too (Export/Rebuild still hide; Purge stays gated).
+        "maintenance_sep": True,
         "purge_item": frozen and purge,
     }
 

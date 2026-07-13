@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: ad31edf
+last_verified_commit: d5bfaa4
 last_verified_date: 2026-07-13
 validation_scope: >
   Current USB builder, frozen launcher, native install/purge, target
@@ -12,15 +12,16 @@ validation_scope: >
   relaunch is live-unvalidated / unknown (not confirmed unsupported; not a
   confirmed caller-authorization blocker). Earlier foreign-Mac and RB7216
   attempts never reached that clean pre-attach state. Rekordbox patch signing
-  is inside-out under one admin script with in-script restore (software-tested;
-  live apply / libssl / attach still operator-unvalidated). A dormant
-  Accessibility MEASUREMENT probe is implemented/software-tested and not
-  executed (not a reader; no menu item; no runtime wiring). The separate
-  RB7216 Patch Rekordbox menubar action is restored in source/frozen menus
-  (target entitlement only). make_stick stamps GENERATION into Info.plist
-  (fallback 0.0.1). No install.command/purge.command helpers.
-  SOFTWARE-VALIDATED COMPONENTS ONLY / STOCK FOREIGN-MAC ATTACH
-  LIVE-UNVALIDATED / UNKNOWN.
+  is one root-bundle ad-hoc codesign (no --deep, no nested re-sign) under one
+  admin script with in-script restore (software-tested; disposable clone
+  lab-proven; live apply still operator-gated). A dormant Accessibility
+  MEASUREMENT probe is implemented/software-tested and not executed (not a
+  reader; no menu item; no runtime wiring). The separate RB7216 Patch
+  Rekordbox menubar action sits in the maintenance block with Export/Rebuild
+  (target entitlement only; always visible; Export/Rebuild source-only).
+  make_stick stamps GENERATION into Info.plist (fallback 0.0.1). No
+  install.command/purge.command helpers. SOFTWARE-VALIDATED COMPONENTS ONLY /
+  STOCK FOREIGN-MAC ATTACH LIVE-UNVALIDATED / UNKNOWN.
 ---
 
 # USB Bridge Launcher — Runbook (M1 build · M2 install/PURGE)
@@ -145,10 +146,11 @@ One binary, dispatched by its first flag (`usb_launcher.py`):
 approval and a rebuilt/installed app that includes the probe. Do not treat this
 mode as supported, operational, validated, or a replacement reader. The dormant
 AX measurement probe itself adds no menu item and no runtime wiring. The separate
-RB7216 **Patch Rekordbox** action is intentionally restored in both source/frozen
-menus; it targets only the Rekordbox entitlement. Positive entitlement ≠ live
-attach proof; stock foreign-Mac attach after clean patch+verify+GTA+relaunch
-remains live-unvalidated / unknown.
+RB7216 **Patch Rekordbox** action sits in the maintenance block with
+Export/Rebuild (always visible in both editions; Export/Rebuild source-only); it
+targets only the Rekordbox entitlement. Positive entitlement ≠ live attach
+proof; stock foreign-Mac attach after clean patch+verify+GTA+relaunch remains
+live-unvalidated / unknown.
 
 **Frozen menubar lifecycle (Task 3 choice):** launch-on-click, no auto-restart.
 The menubar owns the bridge as its OWN child process (spawns `--run-bridge`, keeps
@@ -288,11 +290,14 @@ carries the secrets it shipped with.
   Local Network for "RBSS Bridge".
 - **Open packaging safety follow-ups:** AWR-223 now fails closed, keeps its
   original-app backup through native Purge, and (2026-07-13) signs Rekordbox
-  inside-out under **one** admin script with in-script restore on signing
-  failure (software-tested only — does **not** prove libssl signing, attach, or
-  foreign-Mac reads). AWR-224/229 are selecting and verifying the complete
-  macOS-12 wheel set. AWR-225's partial-install retry is implemented. These
-  remain software-only until a clean foreign-Mac run.
+  with **one** root-bundle ad-hoc `codesign` (no `--deep`, no nested re-sign)
+  under **one** admin script with in-script restore on signing failure
+  (software-tested; disposable clone lab-proven — does **not** by itself prove
+  live `/Applications` apply, attach, or foreign-Mac reads). Restore reporting
+  distinguishes `RBSS_RESTORE_OK` / `RBSS_RESTORE_FAIL` / missing marker.
+  AWR-224/229 are selecting and verifying the complete macOS-12 wheel set.
+  AWR-225's partial-install retry is implemented. These remain software-only
+  until a clean foreign-Mac run.
 
 ## One installation path
 
