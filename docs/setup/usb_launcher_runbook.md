@@ -123,6 +123,12 @@ One binary, dispatched by its first flag (`usb_launcher.py`):
 | `--run-streamdeck` | the Stream Deck MIDI controller |
 | `--run-frame-engine --fd N` | the headless Govee frame-engine child |
 | `--replay-session <file>` | Test the Lights (below) |
+| `--probe-rekordbox-accessibility` | dormant Rekordbox Accessibility MEASUREMENT probe (AWR-222); never starts the bridge; not a reader; not on the normal menu; software-tested only, not executed in the implementation round |
+
+**AWR-222 probe (measurement only).** First live run requires explicit operator
+approval and a rebuilt/installed app that includes the probe. Do not treat this
+mode as supported, operational, validated, or a replacement reader. The normal
+menu stays unchanged in this round.
 
 **Frozen menubar lifecycle (Task 3 choice):** launch-on-click, no auto-restart.
 The menubar owns the bridge as its OWN child process (spawns `--run-bridge`, keeps

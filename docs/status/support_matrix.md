@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 59364bc
-last_verified_date: 2026-07-09
-validation_scope: software-validated only plus Rekordbox 7.2.11 passive mixer RE evidence routing; AWR-157 blank-role hold + reader freshness software-tested; AWR-160 phantom track-load stability gate software-tested; AWR-161 LED round 3 software-tested; hardware-unvalidated in repo evidence
+last_verified_commit: e5c6397
+last_verified_date: 2026-07-12
+validation_scope: software-validated only plus Rekordbox 7.2.11 passive mixer RE evidence routing; AWR-157 blank-role hold + reader freshness software-tested; AWR-160 phantom track-load stability gate software-tested; AWR-161 LED round 3 software-tested; AWR-222 dormant AX measurement probe implemented/software-tested/not executed (not a reader); hardware-unvalidated in repo evidence
 ---
 
 
@@ -40,6 +40,7 @@ they add no new hardware or compatibility support claim.
 | Local Rekordbox Collection | local-setup-operational | existing UUID resolver + regression tests | Existing behavior is unchanged. |
 | USB device tree on the operator's laptop (AWR-207/AWR-209) | implemented; software-tested; staged | resolver/PDB suites + StateManager handoff pins + mounted-stick read-only parser spot | Untagged mirror matches require an exact full-grid fingerprint. Cross-analysis imports require one exact-normalized export.pdb title/artist/duration match plus BPM/duration agreement; missing tags, conflicts, duplicates, and missing local analysis stay unresolved. Local UUID behavior and the no-lsof device-miss rule are unchanged. Room-visible behavior activates only after restart and remains unvalidated. |
 | USB device tree on a foreign laptop without the local collection (AWR-211) | implemented; software-tested; staged | 257-test focused resolver/phrase/StateManager/pack-driver round + real MINK sidecar-only desk resolve | Requires a valid schema-v1 lighting sidecar on a mounted stick or in installed App Support. Local DB remains first; sidecar is fallback. Rebuild/unplug/replug and identical mounted+installed copies are covered; different generations fail closed. Phrase handoff is covered with spectral and LED-v2 off. AWR-222 still blocks live Rekordbox state on a stock foreign Mac; real two-USB and room-visible behavior remain operator/hardware gates. |
+| Rekordbox Accessibility MEASUREMENT probe (AWR-222) | implemented/software-tested; not executed; not a reader | `tests/test_usb_launcher_ax_probe.py` + launcher/lock pins | Packaged `--probe-rekordbox-accessibility` only. No menu item, no runtime wiring, no BridgeEvents. No live AX/TCC/USB evidence. AWR-222 remains blocked pending operator live gate + E3 matrix. Not supported/operational/validated as a replacement reader. |
 
 ## Lighting outputs
 

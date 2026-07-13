@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: HEAD-2026-07-12-awr211-worktree
+last_verified_commit: e5c6397
 last_verified_date: 2026-07-12
-validation_scope: software-only plus Rekordbox 7.2.11 passive mixer RE evidence routing; AWR-157 deck-2 chain freshness gating software-tested; AWR-160 phantom track-load stability gate software-tested; AWR-207/AWR-209/AWR-211 USB local-twin, foreign-import, portable-sidecar refresh, and phrase-worker handoff software-tested; hardware-output unvalidated
+validation_scope: software-only plus Rekordbox 7.2.11 passive mixer RE evidence routing; AWR-157 deck-2 chain freshness gating software-tested; AWR-160 phantom track-load stability gate software-tested; AWR-207/AWR-209/AWR-211 USB local-twin, foreign-import, portable-sidecar refresh, and phrase-worker handoff software-tested; AWR-222 dormant AX measurement probe implemented/software-tested/not executed (not a reader); hardware-output unvalidated
 ---
 
 # Rekordbox Readers
@@ -281,3 +281,10 @@ Reader live-safety + cross-version extension (AWR reader-safety, 2026-07-10, sof
   dev-machine tool only (no runtime importers); adding a version = rebuild `rb_offsets.py`
   + the USB bundle (the table is frozen into the bundle).
 - Pinned by `tests/test_rekordbox_reader_safety.py`.
+
+AWR-222 dormant Accessibility MEASUREMENT probe (2026-07-12):
+- Packaged `--probe-rekordbox-accessibility` → `usb_launcher_ax_probe.py` is
+  implemented/software-tested and **not executed**. It is a diagnostic only —
+  not a reader, emits no `BridgeEvent`s, does not write `PositionCache`, and is
+  not on the normal menu. No live AX/TCC/USB evidence; AWR-222 remains blocked.
+  Current memory/MTC/OSC readers and active-deck policy are unchanged.

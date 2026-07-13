@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: HEAD-2026-07-12-usb-worktree
+last_verified_commit: e5c6397
 last_verified_date: 2026-07-12
-validation_scope: software-only; runtime command rail and slim source/frozen menubar inventory tested; frozen app and hardware behavior unvalidated
+validation_scope: software-only; runtime command rail and slim source/frozen menubar inventory tested; AWR-222 dormant AX probe is packaged dispatch only (no menu item, not executed); frozen app and hardware behavior unvalidated
 ---
 
 # Runtime Commands Subsystem
@@ -134,6 +134,10 @@ SoundSwitch pack-player boundary (T7c/T7e):
   Health Check, and the Rekordbox target-patch action/status are absent from
   both editions. The detailed facts remain available in the live log and
   status JSON; removing menu items does not remove their runtime commands.
+- AWR-222 adds no everyday menu item. The dormant Accessibility MEASUREMENT
+  probe is packaged dispatch only (`--probe-rekordbox-accessibility`); it is
+  implemented/software-tested/not executed, not a reader, and does not change
+  the menubar inventory or runtime command rail. AWR-222 remains blocked.
 - **Restart Menubar** replaces Quit everywhere. It launches a fresh menubar
   after a short delay and closes only the old menubar process; it does not stop
   or restart the bridge. There is no ordinary Quit item. Child start failures
