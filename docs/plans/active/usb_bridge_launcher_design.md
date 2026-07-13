@@ -1,15 +1,18 @@
 ---
 doc_status: current
 truth_level: spec
-last_verified_commit: aa7d441
+last_verified_commit: e5c6397
 last_verified_date: 2026-07-12
 validation_scope: >
   Current macOS USB launcher design reconciled to the landed M1/M2 code and two
   failed physical foreign-Mac attempts. AWR-222 confirms that the current ad-hoc
   target-only Rekordbox patch does not provide stock-macOS caller authorization.
-  Packaging components remain software-tested; foreign-Mac live reads are unsupported.
-work_status: implementation partial; packaging/install UX landed, but foreign-Mac live Rekordbox input is blocked by AWR-222 pending a replacement-reader design decision
-relates_to: cross_platform_portability_plan.md, track_identity_move_invariance_design.md
+  A dormant Accessibility MEASUREMENT probe (`--probe-rekordbox-accessibility`)
+  is implemented/software-tested and not executed; it is not a reader and does
+  not change bridge behavior. Packaging components remain software-tested;
+  foreign-Mac live reads remain unsupported.
+work_status: implementation partial; packaging/install UX landed; AWR-222 AX measurement probe implemented/software-tested/not executed; foreign-Mac live Rekordbox input still blocked pending operator live gate + E3 acceptance
+relates_to: cross_platform_portability_plan.md, track_identity_move_invariance_design.md, awr222_ax_probe_sol_spec_2026_07_12.md
 ---
 
 # USB Bridge Launcher — design spec (macOS-only)
@@ -21,8 +24,14 @@ relates_to: cross_platform_portability_plan.md, track_identity_move_invariance_d
 > authorization, while `rekordbox_patch.py` changes only the Rekordbox target.
 > Both physical foreign-Mac attempts failed. The maintainer Mac has custom SIP
 > with Debugging Restrictions disabled, so local success cannot validate a stock
-> guest Mac. Do not rebuild-and-retry or weaken a guest's SIP; the next design
-> step is a measured non-memory input path.
+> guest Mac. Do not rebuild-and-retry or weaken a guest's SIP.
+>
+> **Dormant AX measurement probe (implemented/software-tested, not executed).**
+> Packaged dispatch `--probe-rekordbox-accessibility` on `usb_launcher.py` lazily
+> loads `usb_launcher_ax_probe.py` and never starts the bridge. It is a
+> measurement diagnostic only — not a reader, not menu-wired, no live AX/TCC/USB
+> evidence yet. AWR-222 remains blocked until the separate operator live gate and
+> E3 semantic matrix pass. Normal menubar inventory is unchanged.
 
 Approved design (2026-07-04). This is the Mac-only "USB-ify" concretization of the portability
 work; the Windows/cross-platform half is deferred. Reviewed + revised 2026-07-04, twice and

@@ -1,14 +1,16 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: aa7d441
+last_verified_commit: e5c6397
 last_verified_date: 2026-07-12
 validation_scope: >
   Current USB builder, frozen launcher, native/shell install and purge, target
   Rekordbox patch, and software tests. Two physical foreign-Mac attempts failed
   to produce live Rekordbox reads. AWR-222 is a confirmed authorization blocker:
   current ad-hoc target-only signing is not a supported stock-macOS task_for_pid
-  path. SOFTWARE-VALIDATED COMPONENTS ONLY / FOREIGN-MAC LIVE READS UNSUPPORTED.
+  path. A dormant Accessibility MEASUREMENT probe is implemented/software-tested
+  and not executed (not a reader; no menu item; no live AX/TCC/USB evidence).
+  SOFTWARE-VALIDATED COMPONENTS ONLY / FOREIGN-MAC LIVE READS UNSUPPORTED.
 ---
 
 # USB Bridge Launcher — Runbook (M1 build · M2 install/PURGE)

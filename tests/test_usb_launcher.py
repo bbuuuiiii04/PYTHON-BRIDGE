@@ -65,6 +65,9 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(usb_launcher.main(["--check-deps"]), 0)
         run.assert_called_once_with()
 
+    def test_probe_mode_documented_in_module_docstring(self) -> None:
+        self.assertIn("--probe-rekordbox-accessibility", usb_launcher.__doc__)
+
     def test_check_deps_passes_when_present_and_fails_closed_when_missing(self) -> None:
         # Every required dep is present on the maintainer's Python -> 0.
         self.assertEqual(usb_launcher._run_check_deps(), 0)

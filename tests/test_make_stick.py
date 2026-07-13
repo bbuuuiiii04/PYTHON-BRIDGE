@@ -247,6 +247,9 @@ class MakeStickTests(unittest.TestCase):
             "librosa-0.10.2.post1-py3-none-any.whl",
             "soundfile-0.14.0-py2.py3-none-macosx_11_0_arm64.whl",
             "pyinstaller-6.21.0-py3-none-macosx_10_13_universal2.whl",
+            "pyobjc_framework_applicationservices-12.2.1-cp313-cp313-macosx_10_13_universal2.whl",
+            "pyobjc_framework_quartz-12.2.1-cp313-cp313-macosx_10_13_universal2.whl",
+            "pyobjc_framework_coretext-12.2.1-cp313-cp313-macosx_10_13_universal2.whl",
         ):
             self.assertIn(filename, lock)
         source = SOURCE_LOCK.read_text()

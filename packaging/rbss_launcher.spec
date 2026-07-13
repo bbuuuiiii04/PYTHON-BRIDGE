@@ -38,6 +38,8 @@ hiddenimports += [
     # PyInstaller can miss function-local guarded imports, so pin them.
     "mutagen", "mutagen.id3",
 ]
+# AWR-222 dormant AX measurement probe — narrow ApplicationServices collection only.
+hiddenimports += collect_submodules("ApplicationServices")
 
 # Bundle only example configs (live configs + govee.env are gitignored secrets).
 datas = [

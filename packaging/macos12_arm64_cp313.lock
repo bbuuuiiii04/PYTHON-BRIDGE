@@ -38,7 +38,10 @@ pycparser==3.0 --hash=sha256:b727414169a36b7d524c1c3e31839a521725078d7b2ff038656
 pyinstaller==6.21.0 --hash=sha256:327d132389f37912609e01be62810cf96b5aa95b613903e4b8692e0d12fb0eda  # pyinstaller-6.21.0-py3-none-macosx_10_13_universal2.whl
 pyinstaller-hooks-contrib==2026.6 --hash=sha256:fd13b8ac126b35361175edacd41a0d97080b75dd5f4b594ecefefff969509dd3  # pyinstaller_hooks_contrib-2026.6-py3-none-any.whl
 pyobjc-core==12.2.1 --hash=sha256:af101222762665a4125157906cb4b23f5d5a63d3851d5e0504f72a1eaaa2cfd2  # pyobjc_core-12.2.1-cp313-cp313-macosx_10_13_universal2.whl
+pyobjc-framework-applicationservices==12.2.1 --hash=sha256:8749290f796e6cca341d443769b79329dde5d157bcc4413c1f7fdb68ea4a8e48  # pyobjc_framework_applicationservices-12.2.1-cp313-cp313-macosx_10_13_universal2.whl
 pyobjc-framework-cocoa==12.2.1 --hash=sha256:3b74a78fa7803e547b32e5e8ec1b49987b52fe318383e793bc6cd49b80efbd9f  # pyobjc_framework_cocoa-12.2.1-cp313-cp313-macosx_10_13_universal2.whl
+pyobjc-framework-coretext==12.2.1 --hash=sha256:5c5a3c6e2d905a17efb15572dad97ce582feeab5c3b92537015445e0e0bb46de  # pyobjc_framework_coretext-12.2.1-cp313-cp313-macosx_10_13_universal2.whl
+pyobjc-framework-quartz==12.2.1 --hash=sha256:54c9bc7f507192691841ee4eba5bf36990b259df83ac728efed2d7ea1cd021e4  # pyobjc_framework_quartz-12.2.1-cp313-cp313-macosx_10_13_universal2.whl
 pyproject-metadata==0.12.1 --hash=sha256:f7162d580a96386a8eb096da06215f981f547d1490f03055ef99e323bc2da427  # pyproject_metadata-0.12.1-py3-none-any.whl
 pyrekordbox==0.4.4 --hash=sha256:2de933870126b9a0ef04bea372f1c5934efcfbb2501efb6b47d8ace0e17fb3d8  # pyrekordbox-0.4.4-py3-none-any.whl
 pyserial==3.5 --hash=sha256:c4451db6ba391ca6ca299fb3ec7bae67a5c55dde170964c7a14ceefec02f2cf0  # pyserial-3.5-py2.py3-none-any.whl

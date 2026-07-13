@@ -12,6 +12,8 @@ bundle needs no host Python and no shell:
   --run-log-viewer     → the bundled read-only live log viewer
   --check-deps         → import every required runtime dep; nonzero if any missing
                          (build-time fail-closed guard against a stale bundle)
+  --probe-rekordbox-accessibility → dormant Rekordbox Accessibility MEASUREMENT
+                         probe only (AWR-222); never starts the bridge; not a reader
   --run-frame-engine --fd N → the headless Govee frame-engine child (the frozen
                               re-exec-self target; MUST stay clear of AppKit)
 
@@ -194,9 +196,17 @@ def _run_log_viewer() -> int:
 # excluded here.
 _REQUIRED_BUNDLE_MODULES = (
     "mutagen", "rtmidi", "serial", "PIL", "mido", "objc",
+    "ApplicationServices",
     "pyrekordbox", "pythonosc", "zeroconf", "StreamDeck",
     "numpy", "scipy", "librosa", "soundfile",
 )
+
+
+def _run_rekordbox_accessibility_probe(argv: list[str]) -> int:
+    """Dormant AX measurement probe. Lazy import only; never starts the bridge."""
+    from rb_ss_bridge_v2.usb_launcher_ax_probe import main as probe_main
+
+    return int(probe_main(argv) or 0)
 
 
 def _run_check_deps() -> int:
@@ -263,6 +273,8 @@ def main(argv: list[str] | None = None) -> int:
     mode = args[0]
     if mode == "--run-frame-engine":
         return _run_frame_engine(args[1:])
+    if mode == "--probe-rekordbox-accessibility":
+        return _run_rekordbox_accessibility_probe(args[1:])
     if mode == "--patch-rekordbox":
         return _run_patch_rekordbox()
     if mode == "--run-bridge":
