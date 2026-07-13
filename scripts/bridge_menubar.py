@@ -499,6 +499,158 @@ def export_button_enabled(in_progress: bool, up_to_date: bool, frozen: bool) -> 
     return not in_progress and not up_to_date and not frozen
 
 
+def usb_button_text(in_progress: bool, state: str) -> str:
+    if in_progress:
+        return "Rebuilding USB Bridge…"
+    if state == "no_usb":
+        return "No USB Found"
+    if state == "up_to_date":
+        return "USB Bridge Rebuilt"
+    return "Rebuild USB Bridge…"  # "outdated" or any unknown -> actionable label
+
+
+def usb_button_enabled(in_progress: bool, state: str, frozen: bool) -> bool:
+    """Actionable only on a source run with a mounted, out-of-date stick.
+    Rebuild is maintainer-side like export: the frozen guest bundle hides the
+    item entirely, and every uncertain state resolves to 'outdated' (clickable),
+    never to a false 'up to date'."""
+    return (not in_progress) and (not frozen) and state == "outdated"
+
+
+def classify_usb_state(
+    mount_count: int,
+    stick_generation: str | None,
+    stamp: dict | None,
+    current_fingerprint: str | None,
+) -> str:
+    """Pure decision: 'no_usb' | 'up_to_date' | 'outdated'. Fails toward 'outdated'."""
+    if mount_count == 0:
+        return "no_usb"
+    if mount_count > 1:
+        return "outdated"  # ambiguous; the click handler guides "leave only one"
+    if not stick_generation:
+        return "outdated"  # no complete bridge generation on the stick
+    if not isinstance(stamp, dict) or stamp.get("generation") != stick_generation:
+        return "outdated"  # we did not build this stick (or cold start)
+    if not current_fingerprint:
+        return "outdated"  # cannot prove the sources are unchanged
+    return "up_to_date" if stamp.get("source_fingerprint") == current_fingerprint else "outdated"
+
+
+# ponytail: stat-signature (path+size+mtime_ns), NOT a content hash. Re-analysis and
+# code edits always rewrite mtimes, so this catches every real change in normal use
+# and fails toward "rebuild"; the only miss is an identical-content, identical-mtime
+# rewrite, which does not happen naturally. Upgrade to a content hash only if that
+# ever matters.
+# ponytail: this list mirrors make_stick.sh's staged inputs by hand. If that script's
+# inputs change, update this list (test_bridge_menubar pins the key entries).
+def _usb_source_roots() -> list[Path]:
+    support = Path.home() / "Library" / "Application Support" / "RBSS Bridge"
+    roots: list[Path] = []
+    roots += sorted(REPO_ROOT.glob("*.py"))                       # flat bridge modules
+    roots += [REPO_ROOT / "streamdeck", REPO_ROOT / "scripts"]    # bundled packages
+    roots += [REPO_ROOT / "tools" / "lighting_sidecar_export.py"]  # runs at build time
+    roots += [REPO_ROOT / "pyproject.toml",
+              REPO_ROOT / "packaging" / "rbss_launcher.spec",
+              REPO_ROOT / "packaging" / "sign.sh",
+              REPO_ROOT / "packaging" / "make_stick.sh"]
+    roots += sorted((REPO_ROOT / "packaging").glob("*.lock"))
+    roots += [REPO_ROOT / "config" / name for name in (
+        "laser_director.json", "led_look_director.json",
+        "soundswitch_pack_player.json", "laser_color_map.json")]
+    roots.append(support / "govee.env")
+    roots.append(support / "spectral_cache")                      # big tree — stat only
+    # The exported pack (pack_path from the live config) + canonical Stream Deck
+    # bindings — the same inputs make_stick.sh stages into RBSS_payload/.
+    try:
+        value = json.loads((REPO_ROOT / "config" / "soundswitch_pack_player.json")
+                           .read_text(encoding="utf-8"))
+        pack = value.get("pack_path", "") if isinstance(value, dict) else ""
+        if pack:
+            roots.append(Path(pack))
+    except (OSError, ValueError):
+        pass  # the config file itself is already a root; unreadability surfaces there
+    roots.append(REPO_ROOT / "local" / "soundswitch"
+                 / ".rbss_canonical_pack.midi_bindings.json")
+    return roots
+
+
+def usb_source_signature(roots: list[Path] | None = None) -> str:
+    """Cheap stat signature over every USB-build input (~44 ms measured 2026-07-12
+    over the full root set; daemon-thread only, never per render tick). Never
+    reads file contents. Per-file lstat failures are skipped like
+    _source_stat_signature; an absent root contributes nothing (absence is
+    stable, so it cannot flip the verdict spuriously)."""
+    if roots is None:
+        roots = _usb_source_roots()
+    entries: list[tuple[str, int, int]] = []
+    for root in roots:
+        if root.is_dir():
+            for dirpath, dirs, files in os.walk(root, followlinks=False):
+                dirs.sort()
+                for name in sorted(files):
+                    path = Path(dirpath) / name
+                    try:
+                        st = path.lstat()
+                    except OSError:
+                        continue
+                    entries.append((str(path), st.st_size, st.st_mtime_ns))
+        else:
+            try:
+                st = root.lstat()
+            except OSError:
+                continue
+            entries.append((str(root), st.st_size, st.st_mtime_ns))
+    digest = hashlib.sha256()
+    for name, size, mtime in sorted(entries):
+        digest.update(f"{name}\x00{size}\x00{mtime}\n".encode("utf-8"))
+    return digest.hexdigest()
+
+
+def _usb_stamp_path() -> Path:
+    return (Path.home() / "Library" / "Application Support" / "RBSS Bridge"
+            / ".usb_rebuild_state.json")
+
+
+def read_usb_stamp() -> dict | None:
+    try:
+        with open(_usb_stamp_path(), "r", encoding="utf-8") as fp:
+            data = json.load(fp)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def write_usb_stamp(generation: str, fingerprint: str) -> None:
+    """Atomic write; OSError swallowed HERE ONLY — a stamp we could not write just
+    means the next detection reads None -> 'outdated', which is safe."""
+    path = _usb_stamp_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(
+            json.dumps({"generation": generation, "source_fingerprint": fingerprint}),
+            encoding="utf-8",
+        )
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
+def read_stick_generation(mount: Path) -> str | None:
+    """The published stick's build generation, from the manifest make_stick.sh
+    writes; None on any error (-> 'outdated')."""
+    manifest = (mount / "RBSS BRIDGE USB" / "lighting_sidecar"
+                / ".rbss_build_manifest.json")
+    try:
+        with open(manifest, "r", encoding="utf-8") as fp:
+            data = json.load(fp)
+    except (OSError, json.JSONDecodeError):
+        return None
+    generation = data.get("generation") if isinstance(data, dict) else None
+    return generation if isinstance(generation, str) and generation else None
+
+
 def _artnet_exam_active(status: dict) -> bool:
     # DualTriggerBackend (artnet_truth_check startup only) is the sole source of
     # "midi_link" in the executor's midi status; it's wired once at bridge boot
@@ -1135,6 +1287,14 @@ class BridgeMenuBar(NSObject):
         self._detect_sig = None
         self._detect_at = 0.0
         self._detect_generation = 0
+        # Rebuild-USB item state (mirrors the export item's fields above).
+        self._usb_rebuild_in_progress = False
+        self._usb_state = "outdated"  # safe actionable default until detection resolves
+        self._usb_pending_fingerprint = None  # captured at click time, stamped at finish
+        self._usb_detect_in_progress = False
+        self._usb_mounts_key = None
+        self._usb_detect_at = 0.0
+        self._usb_detect_generation = 0
         self._pack_auto_pending_enabled = None
         self._pack_auto_retried_enabled = None
         self._frozen_bridge_proc = None
@@ -1308,6 +1468,8 @@ class BridgeMenuBar(NSObject):
         self._render_export_state()
         self._auto_set_soundswitch_pack()
         self._maybe_detect_export_state()
+        self._render_usb_state()
+        self._maybe_detect_usb_state()
         laser = self._snapshot.get("laser_director", {})
         available = bool(laser.get("available"))
         enabled = bool(laser.get("enabled"))
@@ -1390,6 +1552,81 @@ class BridgeMenuBar(NSObject):
         self._detect_at = time.monotonic()
         self._detect_in_progress = False
         self._render_export_state()
+
+    def _render_usb_state(self):
+        # Single owner of the rebuild item's title + enabled state. In-progress
+        # wins, so the periodic repaint keeps "Rebuilding…" for the whole build
+        # (the same reason _render_export_state checks _export_in_progress first).
+        if getattr(self, "update_usb_item", None) is None:
+            return
+        frozen = bool(getattr(sys, "frozen", False))
+        self.update_usb_item.setTitle_(
+            usb_button_text(self._usb_rebuild_in_progress, self._usb_state))
+        self.update_usb_item.setEnabled_(
+            usb_button_enabled(self._usb_rebuild_in_progress, self._usb_state, frozen))
+
+    def _maybe_detect_usb_state(self):
+        if getattr(sys, "frozen", False):
+            return  # the rebuild item is hidden on frozen/guest runs
+        if self._usb_rebuild_in_progress or self._usb_detect_in_progress:
+            return
+        # Main-thread throttle stays CHEAP: mount names (one /Volumes iterdir)
+        # plus an age cap. The full stat signature costs ~44 ms over the real
+        # input tree — measured 2026-07-12 — so it runs ONLY on the daemon
+        # thread below; recomputing it here every 1 s render tick would put a
+        # 4% duty cycle on the AppKit main thread (review finding R1). Mount
+        # changes repaint on the next tick; source edits repaint within
+        # DETECT_MAX_AGE_SECONDS. Kept a plain string: it crosses
+        # performSelectorOnMainThread_, and str bridges/compares reliably.
+        # ponytail: a hung network volume under /Volumes would stall this is_dir
+        # probe on the main thread; switch to NSWorkspace volume-mount
+        # notifications if that ever bites (local-USB workflow today).
+        mounts_key = ",".join(p.name for p in pioneer_usb_mounts())
+        fresh_enough = (time.monotonic() - self._usb_detect_at) < DETECT_MAX_AGE_SECONDS
+        if mounts_key == self._usb_mounts_key and fresh_enough:
+            return
+        self._usb_detect_in_progress = True
+        self._usb_detect_generation += 1
+        generation = self._usb_detect_generation
+        threading.Thread(
+            target=self._run_usb_detect, args=(generation, mounts_key), daemon=True).start()
+
+    def _run_usb_detect(self, generation, mounts_key):
+        try:
+            mounts = pioneer_usb_mounts()
+            stick_gen = read_stick_generation(mounts[0]) if len(mounts) == 1 else None
+            verdict = classify_usb_state(
+                len(mounts), stick_gen, read_usb_stamp(), usb_source_signature())
+        except Exception:
+            verdict = "outdated"  # fail toward action, never toward false "rebuilt"
+        self.performSelectorOnMainThread_withObject_waitUntilDone_(
+            "finishUsbDetect:",
+            {"verdict": verdict, "mounts_key": mounts_key, "generation": generation},
+            False,
+        )
+
+    def finishUsbDetect_(self, payload):
+        generation = payload.get("generation") if isinstance(payload, dict) else None
+        if generation != self._usb_detect_generation:
+            return
+        verdict = payload.get("verdict") if isinstance(payload, dict) else "outdated"
+        self._usb_state = verdict if verdict in ("no_usb", "up_to_date") else "outdated"
+        self._usb_mounts_key = payload.get("mounts_key") if isinstance(payload, dict) else None
+        self._usb_detect_at = time.monotonic()
+        self._usb_detect_in_progress = False
+        self._render_usb_state()
+
+    def _record_usb_rebuild_stamp(self):
+        # Stamp the CLICK-TIME fingerprint (never a post-build one: an edit made
+        # during the multi-minute build must leave the verdict "outdated").
+        if not self._usb_pending_fingerprint:
+            return
+        mounts = pioneer_usb_mounts()
+        if len(mounts) != 1:
+            return
+        stick_gen = read_stick_generation(mounts[0])
+        if stick_gen:
+            write_usb_stamp(stick_gen, self._usb_pending_fingerprint)
 
     def _maybe_check_rb_reads(self):
         # Mirrors _maybe_detect_export_state: menu render reads the cached row
@@ -1708,6 +1945,16 @@ class BridgeMenuBar(NSObject):
                 if saved_title is not None:
                     item.setTitle_(saved_title)
                 item.setEnabled_(True)
+        if attr == "update_usb_item":
+            # BEFORE the early returns below, so every completion path (success,
+            # failure, spawn error, signal death) resets the busy flag.
+            self._usb_rebuild_in_progress = False
+            if payload.get("returncode", 0) == 0:
+                self._record_usb_rebuild_stamp()
+            self._usb_pending_fingerprint = None
+            self._usb_detect_at = 0.0  # stick changed — force a fresh detection
+            self._usb_mounts_key = None
+            self._render_usb_state()
         returncode = payload.get("returncode", 0)
         if returncode == 0:
             verify = payload.get("verify")
@@ -2162,6 +2409,12 @@ class BridgeMenuBar(NSObject):
         alert.addButtonWithTitle_("Cancel")
         if alert.runModal() != NSAlertFirstButtonReturn:
             return
+        self._usb_rebuild_in_progress = True
+        # Capture the source fingerprint NOW: stamping a post-build fingerprint
+        # would fold in any edit made DURING the multi-minute build and falsely
+        # mark a stick built from older sources as up to date.
+        self._usb_pending_fingerprint = usb_source_signature()
+        self._render_usb_state()
         self._spawn_watched(
             ["bash", str(REPO_ROOT / "packaging" / "make_stick.sh"), str(mount)],
             label="update_usb_bridge",

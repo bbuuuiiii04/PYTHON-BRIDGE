@@ -2105,6 +2105,168 @@ class PortableLogAndUsbUpdateTests(BridgeMenubarTests):
             alert.setMessageText_.assert_called_once_with(title)
             menu._spawn_watched.assert_not_called()
 
+    # ── Rebuild-USB button state (usb_rebuild_button_state_spec_2026_07_12) ──
+
+    def test_usb_button_text_table(self) -> None:
+        bridge_menubar = self._import_module()
+        text = bridge_menubar.usb_button_text
+        # in_progress wins over every state, so the periodic repaint keeps it
+        for state in ("no_usb", "up_to_date", "outdated", "garbage"):
+            self.assertEqual(text(True, state), "Rebuilding USB Bridge…")
+        self.assertEqual(text(False, "no_usb"), "No USB Found")
+        self.assertEqual(text(False, "up_to_date"), "USB Bridge Rebuilt")
+        self.assertEqual(text(False, "outdated"), "Rebuild USB Bridge…")
+        self.assertEqual(text(False, "garbage"), "Rebuild USB Bridge…")
+
+    def test_usb_button_enabled_table(self) -> None:
+        bridge_menubar = self._import_module()
+        enabled = bridge_menubar.usb_button_enabled
+        self.assertTrue(enabled(False, "outdated", False))
+        self.assertFalse(enabled(True, "outdated", False))   # building
+        self.assertFalse(enabled(False, "outdated", True))   # frozen
+        self.assertFalse(enabled(False, "up_to_date", False))
+        self.assertFalse(enabled(False, "no_usb", False))
+
+    def test_classify_usb_state_table(self) -> None:
+        bridge_menubar = self._import_module()
+        classify = bridge_menubar.classify_usb_state
+        stamp = {"generation": "gen-1", "source_fingerprint": "fp-1"}
+        self.assertEqual(classify(0, "gen-1", stamp, "fp-1"), "no_usb")
+        self.assertEqual(classify(2, "gen-1", stamp, "fp-1"), "outdated")
+        self.assertEqual(classify(1, None, stamp, "fp-1"), "outdated")
+        self.assertEqual(classify(1, "gen-1", None, "fp-1"), "outdated")
+        self.assertEqual(classify(1, "gen-2", stamp, "fp-1"), "outdated")
+        self.assertEqual(classify(1, "gen-1", stamp, None), "outdated")
+        self.assertEqual(classify(1, "gen-1", stamp, "fp-2"), "outdated")
+        self.assertEqual(classify(1, "gen-1", stamp, "fp-1"), "up_to_date")
+
+    def test_usb_source_signature_tracks_changes(self) -> None:
+        bridge_menubar = self._import_module()
+        import os as _os
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tree = root / "cache"
+            tree.mkdir()
+            (tree / "a.json").write_text("{}")
+            single = root / "config.json"
+            single.write_text("{}")
+            roots = [tree, single]
+            first = bridge_menubar.usb_source_signature(roots)
+            self.assertEqual(first, bridge_menubar.usb_source_signature(roots))
+            # mtime bump = change (utime is explicit: same-second writes may not
+            # move mtime_ns on coarse filesystems)
+            _os.utime(single, ns=(1, 1))
+            second = bridge_menubar.usb_source_signature(roots)
+            self.assertNotEqual(first, second)
+            # added file = change; removal returns to the prior signature
+            (tree / "b.json").write_text("{}")
+            third = bridge_menubar.usb_source_signature(roots)
+            self.assertNotEqual(second, third)
+            (tree / "b.json").unlink()
+            self.assertEqual(second, bridge_menubar.usb_source_signature(roots))
+            # absent root contributes nothing (stable, never flips the verdict)
+            self.assertEqual(
+                bridge_menubar.usb_source_signature(roots),
+                bridge_menubar.usb_source_signature(roots + [root / "missing"]),
+            )
+
+    def test_usb_source_roots_pin_build_inputs(self) -> None:
+        # Drift pin: if make_stick.sh's staged inputs change, this list must too.
+        bridge_menubar = self._import_module()
+        roots = {str(p) for p in bridge_menubar._usb_source_roots()}
+        repo = bridge_menubar.REPO_ROOT
+        for expected in (
+            repo / "packaging" / "make_stick.sh",
+            repo / "config" / "laser_director.json",
+            repo / "config" / "led_look_director.json",
+            repo / "config" / "soundswitch_pack_player.json",
+            repo / "config" / "laser_color_map.json",
+        ):
+            self.assertIn(str(expected), roots)
+        self.assertTrue(
+            any(p.endswith("spectral_cache") for p in roots),
+            "spectral_cache missing from USB source roots",
+        )
+
+    def test_usb_stamp_round_trip(self) -> None:
+        bridge_menubar = self._import_module()
+        import os as _os
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(_os.environ, {"HOME": tmp}):
+                self.assertIsNone(bridge_menubar.read_usb_stamp())  # missing
+                bridge_menubar.write_usb_stamp("gen-1", "fp-1")
+                self.assertEqual(
+                    bridge_menubar.read_usb_stamp(),
+                    {"generation": "gen-1", "source_fingerprint": "fp-1"},
+                )
+                bridge_menubar._usb_stamp_path().write_text("not json")
+                self.assertIsNone(bridge_menubar.read_usb_stamp())  # corrupt
+
+    def test_read_stick_generation(self) -> None:
+        bridge_menubar = self._import_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            mount = Path(tmp)
+            self.assertIsNone(bridge_menubar.read_stick_generation(mount))
+            sidecar = mount / "RBSS BRIDGE USB" / "lighting_sidecar"
+            sidecar.mkdir(parents=True)
+            manifest = sidecar / ".rbss_build_manifest.json"
+            manifest.write_text(json.dumps({"generation": "abc-123"}))
+            self.assertEqual(bridge_menubar.read_stick_generation(mount), "abc-123")
+            manifest.write_text(json.dumps({"generation": ""}))
+            self.assertIsNone(bridge_menubar.read_stick_generation(mount))
+            manifest.write_text("corrupt")
+            self.assertIsNone(bridge_menubar.read_stick_generation(mount))
+
+    def test_usb_rebuild_completion_resets_flag_and_stamps_only_on_success(self) -> None:
+        # Every completion path (success, failure, signal death) must reset the
+        # busy flag; the stamp is written on exit 0 ONLY.
+        bridge_menubar = self._import_module()
+        for returncode, expect_stamp in ((0, True), (1, False), (-15, False)):
+            menu = Mock()
+            menu.update_usb_item = Mock()
+            payload = {
+                "busy_item_attr": "update_usb_item",
+                "saved_title": "Rebuild USB Bridge…",
+                "returncode": returncode,
+                "tail": "boom" if returncode > 0 else "",
+                "err_path": "",
+                "success_message": None,
+                "failure_title": "USB Bridge rebuild failed",
+            }
+            alert = Mock()
+            nsalert = Mock()
+            nsalert.alloc.return_value.init.return_value = alert
+            with patch.object(bridge_menubar, "NSAlert", nsalert):
+                bridge_menubar.BridgeMenuBar.finishWatchedChild_.callable(menu, payload)
+            self.assertFalse(menu._usb_rebuild_in_progress)
+            self.assertIsNone(menu._usb_pending_fingerprint)
+            self.assertIsNone(menu._usb_mounts_key)
+            self.assertEqual(menu._usb_detect_at, 0.0)
+            menu._render_usb_state.assert_called_once()
+            if expect_stamp:
+                menu._record_usb_rebuild_stamp.assert_called_once()
+            else:
+                menu._record_usb_rebuild_stamp.assert_not_called()
+
+    def test_record_usb_rebuild_stamp_uses_click_time_fingerprint(self) -> None:
+        # The stamp must carry the fingerprint captured at CLICK time — never a
+        # post-build recompute (an edit during the build must stay "outdated").
+        bridge_menubar = self._import_module()
+        menu = Mock()
+        menu._usb_pending_fingerprint = "fp-click"
+        with patch.object(bridge_menubar, "pioneer_usb_mounts",
+                          return_value=[Path("/Volumes/MINK")]), \
+             patch.object(bridge_menubar, "read_stick_generation",
+                          return_value="gen-9"), \
+             patch.object(bridge_menubar, "write_usb_stamp") as write_stamp:
+            bridge_menubar.BridgeMenuBar._record_usb_rebuild_stamp(menu)
+        write_stamp.assert_called_once_with("gen-9", "fp-click")
+        # no pending fingerprint (e.g. spawn failed before capture) -> no stamp
+        menu._usb_pending_fingerprint = None
+        with patch.object(bridge_menubar, "write_usb_stamp") as write_stamp:
+            bridge_menubar.BridgeMenuBar._record_usb_rebuild_stamp(menu)
+        write_stamp.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -114,7 +114,22 @@ SoundSwitch pack-player boundary (T7c/T7e):
 - The source/main-Mac edition additionally has exactly four operator tools:
   **Laser Pad…**, **LED Pad…**, **SoundSwitch Export…**, and **Rebuild USB
   Bridge…**. The first two live under **Tools**. The frozen/foreign-Mac edition
-  hides all four. SoundSwitch status, deck rows, check status, smart-phrasing
+  hides all four.
+- The Rebuild USB item is state-aware like the export item
+  (usb_rebuild_button_state_spec_2026_07_12): **No USB Found** (no PIONEER
+  mount, greyed), **USB Bridge Rebuilt** (greyed; the stamped stick generation
+  matches AND a stat-signature over the build inputs — bridge sources, the four
+  live configs, `govee.env`, spectral cache, exported pack, Stream Deck
+  bindings — is unchanged since the last button rebuild), **Rebuild USB
+  Bridge…** (actionable; any change, ambiguity, or terminal-side rebuild
+  resolves here — the check never claims "rebuilt" without positive proof), and
+  **Rebuilding USB Bridge…** while `make_stick.sh` runs (the render is
+  in-progress-aware, so the periodic repaint keeps the busy label). Detection
+  runs on a daemon thread (stat-only, no content hashing); the stamp lives at
+  `~/Library/Application Support/RBSS Bridge/.usb_rebuild_state.json` and
+  records the CLICK-time source fingerprint plus the stick's published build
+  generation. Menubar UI state still does not prove bridge/watcher process
+  state. SoundSwitch status, deck rows, check status, smart-phrasing
   status/menu, Laser Director menu, Record Session, Test the Lights, normal
   Health Check, and the Rekordbox target-patch action/status are absent from
   both editions. The detailed facts remain available in the live log and
