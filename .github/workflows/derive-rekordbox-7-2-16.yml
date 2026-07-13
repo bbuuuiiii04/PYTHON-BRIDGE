@@ -12,7 +12,7 @@ permissions:
 jobs:
   derive:
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
 
@@ -32,7 +32,7 @@ jobs:
             'b1007870c5560fb0bfb56c75a125b80df4d413b6d3afca1935be8b1cb4613a99' /tmp/rb-installers/rb-7.2.16.zip \
             | shasum -a 256 -c -
 
-      - name: Extract application binaries
+      - name: Extract binaries and app bundles
         shell: bash
         run: |
           set -euo pipefail
@@ -43,14 +43,17 @@ jobs:
             pkg="$(find "$work/zip" \( -type d -o -type f \) -name '*.pkg' -print -quit)"
             test -n "$pkg"
             pkgutil --expand-full "$pkg" "$work/pkg-expanded"
-            binary="$(find "$work/pkg-expanded" -type f -path '*/rekordbox.app/Contents/MacOS/rekordbox' -print -quit)"
-            test -n "$binary"
+            app="$(find "$work/pkg-expanded" -type d -path '*/rekordbox.app' -print -quit)"
+            test -n "$app"
+            ditto "$app" "$work/rekordbox.app"
+            binary="$work/rekordbox.app/Contents/MacOS/rekordbox"
+            test -f "$binary"
             cp "$binary" "$work/rekordbox"
             chmod +x "$work/rekordbox"
             file "$work/rekordbox"
           done
 
-      - name: Derive anchors and collect symbol evidence
+      - name: Derive symbol-backed anchors
         shell: bash
         run: |
           set -euo pipefail
@@ -62,59 +65,186 @@ jobs:
               file "$binary"
               shasum -a 256 "$binary"
               python3 tools/rekordbox_derive_offsets.py --binary "$binary"
-              echo
               echo '=== anchor symbols ==='
-              nm -arch arm64 -n --defined-only "$binary" | grep -E '__ZN15ApplicationMode15singletonHolderE|__ZN6browse21LoadedContentsManager15singletonHolderE|__ZN8djengine10DjEngineIF15singletonHolderE' || true
-              echo
-              echo '=== merged globals ==='
-              nm -arch arm64 -n --defined-only "$binary" | grep '__MergedGlobals' || true
-            } | tee "/tmp/rb-offset-evidence/${version}.txt"
+              nm -arch arm64 -n --defined-only "$binary" | grep -E '__ZN15ApplicationMode15singletonHolderE|__ZN6browse21LoadedContentsManager15singletonHolderE|__ZN8djengine10DjEngineIF15singletonHolderE'
+            } | tee "/tmp/rb-offset-evidence/${version}-anchors.txt"
             nm -arch arm64 -n --defined-only "$binary" > "/tmp/rb-offset-evidence/${version}-nm.txt"
-            otool -arch arm64 -l "$binary" > "/tmp/rb-offset-evidence/${version}-load-commands.txt"
           done
 
-      - name: Compare symbols around known 7.2.14 deck root
+      - name: Map the merged-global deck root
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY' | tee /tmp/rb-offset-evidence/symbol-neighborhoods.txt
+          python3 - <<'PY' | tee /tmp/rb-offset-evidence/deck-root-map.txt
           from pathlib import Path
 
-          def parse(path):
-              rows=[]
+          def merged(path):
+              out=[]
               for line in Path(path).read_text(errors='replace').splitlines():
-                  parts=line.split(' ',2)
-                  if len(parts) != 3:
-                      continue
-                  try:
-                      addr=int(parts[0],16)
-                  except ValueError:
-                      continue
-                  rows.append((addr,parts[1],parts[2]))
-              return rows
+                  p=line.split(' ',2)
+                  if len(p)==3 and '__MergedGlobals' in p[2]:
+                      try: out.append((int(p[0],16),p[1],p[2]))
+                      except ValueError: pass
+              return out
 
           base=0x100000000
-          known=base+0x04E0BFE0
-          rows14=parse('/tmp/rb-offset-evidence/7.2.14-nm.txt')
-          rows16=parse('/tmp/rb-offset-evidence/7.2.16-nm.txt')
-
-          print('=== 7.2.14 symbols within +/-0x20000 of known deck root 0x04E0BFE0 ===')
-          for a,t,n in rows14:
-              if abs(a-known) <= 0x20000:
-                  print(f'{a:016x} rva={a-base:08x} {t} {n}')
-
-          merged14=[r for r in rows14 if '__MergedGlobals' in r[2]]
-          merged16=[r for r in rows16 if '__MergedGlobals' in r[2]]
-          print('\n=== merged-global ordinal nearest known 7.2.14 deck root ===')
-          for idx,(a,t,n) in enumerate(merged14):
-              if abs(a-known) <= 0x20000:
-                  print(f'ordinal={idx} addr={a:016x} rva={a-base:08x} delta_from_root={a-known:+#x} {t} {n}')
-                  if idx < len(merged16):
-                      b,bt,bn=merged16[idx]
-                      print(f'7.2.16 same ordinal addr={b:016x} rva={b-base:08x} {bt} {bn}')
-
-          print(f'\nmerged counts: 7.2.14={len(merged14)} 7.2.16={len(merged16)}')
+          known_root=base+0x04E0BFE0
+          a=merged('/tmp/rb-offset-evidence/7.2.14-nm.txt')
+          b=merged('/tmp/rb-offset-evidence/7.2.16-nm.txt')
+          nearest=min(range(len(a)), key=lambda i: abs(a[i][0]-known_root))
+          aa=a[nearest][0]
+          delta=known_root-aa
+          bb=b[nearest][0]
+          candidate=bb+delta
+          print(f'7.2.14 merged_count={len(a)} 7.2.16 merged_count={len(b)}')
+          print(f'nearest_ordinal={nearest}')
+          print(f'7.2.14 symbol_rva=0x{aa-base:08X} known_root_rva=0x{known_root-base:08X} root_minus_symbol={delta:+#x}')
+          print(f'7.2.16 same_ordinal_symbol_rva=0x{bb-base:08X}')
+          print(f'7.2.16 candidate_deck_root_rva=0x{candidate-base:08X}')
+          assert nearest == 2240
+          assert delta == -0x18
+          assert candidate-base == 0x04E9B670
           PY
+
+      - name: Prepare passive live-chain probe
+        shell: bash
+        run: |
+          cat > /tmp/rb-probe.py <<'PY'
+          import argparse, ctypes, math, re, struct, subprocess
+
+          KERN_SUCCESS=0
+          lib=ctypes.CDLL('/usr/lib/libSystem.B.dylib', use_errno=True)
+          task_self=ctypes.c_uint32.in_dll(lib, 'mach_task_self_')
+          tfp=lib.task_for_pid
+          tfp.restype=ctypes.c_int
+          tfp.argtypes=[ctypes.c_uint32,ctypes.c_int,ctypes.POINTER(ctypes.c_uint32)]
+          vmread=lib.mach_vm_read_overwrite
+          vmread.restype=ctypes.c_int
+          vmread.argtypes=[ctypes.c_uint32,ctypes.c_uint64,ctypes.c_uint64,ctypes.c_uint64,ctypes.POINTER(ctypes.c_uint64)]
+
+          def task_for_pid(pid):
+              out=ctypes.c_uint32(0)
+              kr=tfp(task_self.value,pid,ctypes.byref(out))
+              if kr != KERN_SUCCESS: raise OSError(f'task_for_pid failed kr={kr}')
+              return out.value
+          def read(task,addr,n):
+              buf=(ctypes.c_uint8*n)(); got=ctypes.c_uint64(0)
+              kr=vmread(task,addr,n,ctypes.addressof(buf),ctypes.byref(got))
+              if kr != KERN_SUCCESS or got.value != n: raise OSError(f'read 0x{addr:x}/{n} kr={kr} got={got.value}')
+              return bytes(buf)
+          def u64(t,a): return struct.unpack('<Q',read(t,a,8))[0]
+          def i64(t,a): return struct.unpack('<q',read(t,a,8))[0]
+          def f32(t,a): return struct.unpack('<f',read(t,a,4))[0]
+          def u8(t,a): return read(t,a,1)[0]
+          def base_for(pid):
+              out=subprocess.run(['vmmap','--wide',str(pid)],capture_output=True,text=True,check=True).stdout
+              m=re.search(r'Load Address:\s*0x([0-9a-fA-F]+)',out)
+              if m:return int(m.group(1),16)
+              for line in out.splitlines():
+                  if 'rekordbox' in line and '__TEXT' in line:
+                      m=re.match(r'\s*([0-9a-fA-F]+)-',line)
+                      if m:return int(m.group(1),16)
+              raise RuntimeError('no base')
+          def walk(t,base,hops,final):
+              addr=base; trace=[]
+              for i,hop in enumerate(hops):
+                  loc=addr+hop; ptr=u64(t,loc)
+                  trace.append((i,hop,loc,ptr))
+                  if ptr==0: raise RuntimeError(f'null at hop {i} loc=0x{loc:x}; trace={trace}')
+                  addr=ptr
+              return addr+final,trace
+          def show_chain(t,base,name,hops,final,kind):
+              try:
+                  addr,trace=walk(t,base,hops,final)
+                  if kind=='u8': value=u8(t,addr)
+                  elif kind=='f32': value=f32(t,addr)
+                  elif kind=='i64': value=i64(t,addr)
+                  elif kind=='ptr': value=u64(t,addr)
+                  else: value=read(t,addr,32).hex()
+                  print(f'CHAIN {name} OK final=0x{addr:x} value={value!r}')
+                  for i,h,l,p in trace: print(f'  hop{i} +0x{h:x} @0x{l:x} -> 0x{p:x}')
+                  return True
+              except Exception as e:
+                  print(f'CHAIN {name} FAIL {e}')
+                  return False
+          def score_deck_root(t,base,root):
+              score=0; details=[]
+              for slot in (0,8,0x10,0x18):
+                  try:
+                      p1=u64(t,base+root+slot); p2=u64(t,p1+0x2c8)
+                      bpm=f32(t,p2+0x188); pos=i64(t,p2+0x120)
+                      good=math.isfinite(bpm) and -1.0 <= bpm <= 400.0 and abs(pos) < 10**16
+                      score += 1 if good else 0
+                      details.append(f'slot=0x{slot:x}:p1=0x{p1:x},p2=0x{p2:x},bpm={bpm},pos={pos},good={good}')
+                  except Exception as e: details.append(f'slot=0x{slot:x}:FAIL:{e}')
+              return score,details
+
+          ap=argparse.ArgumentParser(); ap.add_argument('--pid',type=int,required=True); ap.add_argument('--version',required=True)
+          a=ap.parse_args(); t=task_for_pid(a.pid); base=base_for(a.pid)
+          roots={'7.2.14':(0x04E514D8,0x04E0BFE0,0x04E51F08),'7.2.16':(0x04EE71D8,0x04E9B670,0x04EE7C08)}
+          master,deck,anlz=roots[a.version]
+          print(f'VERSION {a.version} pid={a.pid} base=0x{base:x} task={t}')
+          print(f'ROOTS master=0x{master:08x} deck=0x{deck:08x} anlz=0x{anlz:08x}')
+          show_chain(t,base,'master',[master,0x20,0x278],0x124,'u8')
+          track_mid=(0x88,0x70,0x48,0x48)
+          slots=(0,8,0x10,0x18)
+          anlz_slots=(8,0x10,0x18,0x20)
+          for d,(slot,amid,aslot) in enumerate(zip(slots,track_mid,anlz_slots)):
+              show_chain(t,base,f'd{d}.bpm',[deck,slot,0x2c8],0x188,'f32')
+              show_chain(t,base,f'd{d}.pos',[deck,slot,0x2c8],0x120,'i64')
+              show_chain(t,base,f'd{d}.track',[deck,slot,0x270,0x38,amid,0x28,0xf0],0,'bytes')
+              show_chain(t,base,f'd{d}.anlz',[anlz,aslot],0x3f0,'ptr')
+          print('DECK_ROOT_NEIGHBORHOOD')
+          for delta in range(-0x40,0x41,8):
+              score,details=score_deck_root(t,base,deck+delta)
+              if score or delta==0:
+                  print(f'  rva=0x{deck+delta:08x} delta={delta:+#x} score={score}/4')
+                  for x in details: print('   ',x)
+          PY
+
+      - name: Re-sign and live-probe both versions
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          cat > /tmp/rb-entitlements.plist <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>com.apple.security.get-task-allow</key><true/>
+            <key>com.apple.security.cs.disable-library-validation</key><true/>
+            <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
+          </dict></plist>
+          PLIST
+          for version in 7.2.14 7.2.16; do
+            app="/tmp/rb-${version}/rekordbox.app"
+            out="/tmp/rb-offset-evidence/${version}-live.txt"
+            {
+              echo "=== LIVE PROBE ${version} ==="
+              codesign --force --deep --sign - --entitlements /tmp/rb-entitlements.plist "$app"
+              codesign -d --entitlements - "$app" 2>&1
+              "$app/Contents/MacOS/rekordbox" >"/tmp/rb-${version}-stdout.log" 2>&1 &
+              launch_pid=$!
+              pid=''
+              for _ in $(seq 1 60); do
+                pid="$(pgrep -x rekordbox | tail -1 || true)"
+                [[ -n "$pid" ]] && break
+                sleep 1
+              done
+              echo "launch_pid=$launch_pid observed_pid=$pid"
+              if [[ -z "$pid" ]]; then
+                echo 'NO_PROCESS'
+                tail -100 "/tmp/rb-${version}-stdout.log" || true
+              else
+                sleep 15
+                python3 /tmp/rb-probe.py --pid "$pid" --version "$version"
+              fi
+              kill "$launch_pid" 2>/dev/null || true
+              pkill -x rekordbox 2>/dev/null || true
+              pkill -f rekordboxAgent 2>/dev/null || true
+              sleep 3
+            } 2>&1 | tee "$out"
+          done
 
       - uses: actions/upload-artifact@v4
         with:
@@ -130,16 +260,20 @@ jobs:
           report='docs/data/rekordbox-7.2.16-offset-evidence.txt'
           {
             echo '# Generated by .github/workflows/derive-rekordbox-7-2-16.yml'
-            echo '# Official installer hashes were verified before extraction.'
+            echo '# Official installer hashes verified before extraction.'
             echo
-            cat /tmp/rb-offset-evidence/7.2.14.txt
+            cat /tmp/rb-offset-evidence/7.2.14-anchors.txt
             echo
-            cat /tmp/rb-offset-evidence/7.2.16.txt
+            cat /tmp/rb-offset-evidence/7.2.16-anchors.txt
             echo
-            cat /tmp/rb-offset-evidence/symbol-neighborhoods.txt
+            cat /tmp/rb-offset-evidence/deck-root-map.txt
+            echo
+            cat /tmp/rb-offset-evidence/7.2.14-live.txt 2>/dev/null || true
+            echo
+            cat /tmp/rb-offset-evidence/7.2.16-live.txt 2>/dev/null || true
           } > "$report"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add "$report"
-          git commit -m 'chore(data): record rekordbox 7.2.16 offset evidence'
+          git commit -m 'chore(data): record live 7.2.16 chain evidence'
           git push
