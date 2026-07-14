@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: spec
-last_verified_commit: 187b104
+last_verified_commit: b629b93
 last_verified_date: 2026-07-13
 validation_scope: >
   Current macOS USB launcher design reconciled to the landed M1/M2 code and
@@ -29,8 +29,9 @@ validation_scope: >
   Rekordbox confirmation/result dialogs use native AppKit rather than bare
   `osascript display dialog`; its native authorization path keeps RBSS Bridge as
   the App Management requester. This proves the local patch mechanism, not a
-  physical foreign-Mac run or live attach. make_stick removes AppleDouble
-  transport metadata before hashing, mounts the finished DMG read-only, and
+  physical foreign-Mac run or live attach. make_stick excludes mutable
+  AppleDouble transport metadata from both package and USB-publication hash
+  authority, mounts the finished DMG read-only, and
   runs both deep signature verification and the real installer package
   validator before publication. It also stamps build GENERATION into
   CFBundleShortVersionString/CFBundleVersion (fallback
@@ -78,7 +79,9 @@ relates_to: cross_platform_portability_plan.md, track_identity_move_invariance_d
 > `._*` files and `.DS_Store` are removed before manifest generation; after DMG
 > creation, the builder mounts the final image read-only and requires both the
 > deep signature check and `install_controller._validate_package()` to pass
-> before it can publish to the stick. Native install
+> before it can publish to the stick. The outer FAT publication also removes
+> and ignores mutable AppleDouble companions so later macOS metadata writes do
+> not invalidate the DMG/sidecar manifest. Native install
 > rejects payload symlinks, keeps the Govee file `0600`, and gives conservative
 > guidance if rollback itself fails. These are software proofs only; no physical
 > foreign-Mac patch, attach, installer, or lighting run was performed.

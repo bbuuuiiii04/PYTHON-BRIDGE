@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 187b104
+last_verified_commit: b629b93
 last_verified_date: 2026-07-13
 validation_scope: >
   Current USB builder, frozen launcher, native install/purge, target
@@ -28,8 +28,9 @@ validation_scope: >
   implemented/software-tested and not executed (not a reader; no menu item;
   no runtime wiring). The separate RB7216 Patch Rekordbox menubar action sits
   in the maintenance block with Export/Rebuild (valid target-patch state only;
-  always visible; Export/Rebuild source-only). make_stick removes AppleDouble
-  transport metadata before hashing, stamps GENERATION into Info.plist
+  always visible; Export/Rebuild source-only). make_stick excludes mutable
+  AppleDouble transport metadata from package and outer USB-publication hash
+  authority, stamps GENERATION into Info.plist
   (fallback 0.0.1), and refuses publication unless a read-only mount of the
   finished DMG passes deep signature and native installer-package validation.
   No install.command/purge.command helpers.
@@ -131,6 +132,9 @@ AppleDouble `._*` files and `.DS_Store` from the staged payload, creates the
 DMG, mounts that final image read-only, and runs both
 `codesign --verify --deep --strict` and the same complete manifest/hash/data validator used by native
 Install. Any failure leaves the prior stick generation unchanged.
+The outer FAT publication removes these transport companions before writing its
+own DMG/sidecar manifest and ignores any that macOS recreates later; product
+files remain exact-set and SHA-256 checked.
 
 There is no supported manual build recipe. Use `make_stick.sh`; it owns the
 low-target build environment and the app-plus-payload DMG layout. The retired
