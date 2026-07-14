@@ -4,6 +4,7 @@ All codesign/pgrep calls are mocked; no real re-signing happens.
 """
 from __future__ import annotations
 
+import base64
 import contextlib
 import io
 import plistlib
@@ -163,6 +164,19 @@ class SignPlanPureSeamTests(unittest.TestCase):
         self.assertIn('exit "$rc"', script)
         # Exactly one codesign invocation in the script body.
         self.assertEqual(script.count("codesign --force --sign -"), 1)
+
+    def test_native_sign_script_creates_entitlements_as_root(self) -> None:
+        payload = plistlib.dumps({GET_TASK_ALLOW: True})
+        argv = codesign_argv(APP, Path("/tmp/user-writable-entitlements.plist"))
+        script = rp.build_sign_script(
+            [(str(APP), argv)], entitlements_plist=payload
+        )
+        self.assertIn("/var/tmp/rbss_rekordbox_entitlements.XXXXXX", script)
+        self.assertIn(base64.b64encode(payload).decode("ascii"), script)
+        self.assertIn('"$RBSS_ENTITLEMENTS"', script)
+        self.assertNotIn("/tmp/user-writable-entitlements.plist", script)
+        self.assertIn("umask 077", script)
+        self.assertIn("trap 'rm -f", script)
 
     def test_parse_sign_fail_marker(self) -> None:
         err = (
@@ -538,6 +552,21 @@ class RunnerSeamTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             rp.native_shell_argv("echo before\0echo after")
 
+    def test_patch_lock_refuses_symlink_without_truncating_target(self) -> None:
+        import tempfile
+
+        if not hasattr(rp.os, "O_NOFOLLOW"):
+            self.skipTest("platform has no O_NOFOLLOW")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            victim = root / "victim"
+            victim.write_text("keep")
+            (root / "rbss_rekordbox_patch.lock").symlink_to(victim)
+            with mock.patch.object(rp.tempfile, "gettempdir", return_value=tmp):
+                with self.assertRaises(OSError):
+                    rp.open_patch_lock()
+            self.assertEqual(victim.read_text(), "keep")
+
     def test_native_runner_wraps_one_argv_without_calling_osascript(self) -> None:
         with mock.patch.object(
             rp, "run_shell_via_native_authorization", return_value=(0, "")
@@ -564,6 +593,8 @@ class RunnerSeamTests(unittest.TestCase):
         shell.assert_called_once()
         self.assertIn("RBSS_SIGN_FAIL", shell.call_args.args[0])
         self.assertNotIn("RBSS_RESTORE", shell.call_args.args[0])
+        self.assertNotIn("user-writable-entitlements", shell.call_args.args[0])
+        self.assertIn("$RBSS_ENTITLEMENTS", shell.call_args.args[0])
 
 
 class InteractiveGuiTests(unittest.TestCase):
@@ -635,9 +666,11 @@ class InteractiveGuiTests(unittest.TestCase):
              mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
              mock.patch.object(rp, "_gui_confirm", return_value=False) as confirm, \
              mock.patch.object(rp, "apply_patch") as ap, \
-             mock.patch.object(rp, "_gui_notify"):
+             mock.patch.object(rp, "_gui_notify"), \
+             contextlib.redirect_stderr(io.StringIO()) as stderr:
             self.assertEqual(rp.run_interactive_gui(), 1)
         ap.assert_not_called()  # no consent -> no modification
+        self.assertIn("User canceled", stderr.getvalue())
         confirm_text = confirm.call_args[0][0].lower()
         self.assertIn("live-unvalidated", confirm_text)
         self.assertIn("not a confirmed caller-authorization", confirm_text)

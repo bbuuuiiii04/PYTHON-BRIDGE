@@ -1734,6 +1734,8 @@ class FrozenDefectHelperTests(BridgeMenubarTests):
             self.assertFalse(enabled(True, state))
         self.assertEqual(text(False, "enabled"), "Rekordbox Patched")
         self.assertFalse(enabled(False, "enabled"))
+        self.assertEqual(text(False, "checking"), "Checking Rekordbox…")
+        self.assertFalse(enabled(False, "checking"))
         for state in ("not_enabled", "unknown", "", "garbage"):
             self.assertEqual(text(False, state), "Patch Rekordbox")
             self.assertTrue(enabled(False, state))
@@ -1749,6 +1751,21 @@ class FrozenDefectHelperTests(BridgeMenubarTests):
         bridge_menubar.BridgeMenuBar._render_patch_rb_state(menu)
         menu.patch_rekordbox_item.setTitle_.assert_called_once_with(
             "Patching Rekordbox…"
+        )
+        menu.patch_rekordbox_item.setEnabled_.assert_called_once_with(False)
+
+    def test_render_patch_rb_initial_deep_check_is_not_actionable(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock(
+            patch_rekordbox_item=Mock(),
+            _patch_rb_in_progress=False,
+            _rb_reads_in_progress=True,
+            _rb_reads_at=0.0,
+            _rb_reads_state="unknown",
+        )
+        bridge_menubar.BridgeMenuBar._render_patch_rb_state(menu)
+        menu.patch_rekordbox_item.setTitle_.assert_called_once_with(
+            "Checking Rekordbox…"
         )
         menu.patch_rekordbox_item.setEnabled_.assert_called_once_with(False)
 

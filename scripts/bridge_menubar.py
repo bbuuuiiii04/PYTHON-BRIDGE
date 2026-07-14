@@ -67,7 +67,9 @@ EXPORT_WORKING_DIRECTORY = str(Path(__file__).resolve().parents[2])
 CANONICAL_SOURCE_PROJECT = str(Path("~/Music/SoundSwitch/default.ssproj").expanduser())
 CANONICAL_PACK_DIR = REPO_ROOT / "local" / "soundswitch" / "rbss_canonical_pack"
 DETECT_MAX_AGE_SECONDS = 30.0
-RB_READS_MAX_AGE_SECONDS = 30.0
+# Full deep Rekordbox verification is intentionally background-only and can take
+# tens of seconds on the large app bundle. Recheck occasionally, not every 30 s.
+RB_READS_MAX_AGE_SECONDS = 600.0
 _SIDECAR_SUFFIX = ".source.json"
 
 # Menubar status icons ship WITH the app so a guest Mac (or any non-maintainer
@@ -526,14 +528,16 @@ def patch_rb_button_text(in_progress: bool, state: str) -> str:
     """
     if in_progress:
         return "Patching Rekordbox…"
+    if state == "checking":
+        return "Checking Rekordbox…"
     if state == "enabled":
         return "Rekordbox Patched"
     return "Patch Rekordbox"  # absent, unknown, or no cached result yet
 
 
 def patch_rb_button_enabled(in_progress: bool, state: str) -> bool:
-    """Grey only while patching or after a positive entitlement verify."""
-    return (not in_progress) and state != "enabled"
+    """Grey while checking/patching or after a positive complete verify."""
+    return (not in_progress) and state not in ("enabled", "checking")
 
 
 def classify_usb_state(
@@ -1705,10 +1709,17 @@ class BridgeMenuBar(NSObject):
         # "Patching Rekordbox…" with a stale normal title.
         if getattr(self, "patch_rekordbox_item", None) is None:
             return
+        state = self._rb_reads_state
+        if (
+            self._rb_reads_in_progress
+            and not self._rb_reads_at
+            and state == "unknown"
+        ):
+            state = "checking"
         self.patch_rekordbox_item.setTitle_(
-            patch_rb_button_text(self._patch_rb_in_progress, self._rb_reads_state))
+            patch_rb_button_text(self._patch_rb_in_progress, state))
         self.patch_rekordbox_item.setEnabled_(
-            patch_rb_button_enabled(self._patch_rb_in_progress, self._rb_reads_state))
+            patch_rb_button_enabled(self._patch_rb_in_progress, state))
 
     def exportFromSS_(self, _sender):
         if getattr(sys, "frozen", False):

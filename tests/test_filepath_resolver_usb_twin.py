@@ -26,6 +26,10 @@ from rb_ss_bridge_v2.filepath_resolver import (  # noqa: E402
 _LOCAL_ID = "938c2a63-a637-4000-8000-000000000001"
 _LOCAL_REL = f"PIONEER/USBANLZ/967/{_LOCAL_ID}/ANLZ0000.DAT"
 _LOCAL_PATH = f"/local/share/{_LOCAL_REL}"
+_SPLIT_LOCAL_PATH = (
+    "/Users/bbui/Library/Pioneer/rekordbox/share/PIONEER/USBANLZ/"
+    "7ad/4d7d8-454e-452f-b386-12ae062cd258/ANLZ0000.DAT"
+)
 _USB_PATH = "/Volumes/MINK/PIONEER/USBANLZ/P018/000086A0/ANLZ0000.DAT"
 _GRID = [i * 500.0 for i in range(401)]
 
@@ -121,7 +125,12 @@ def _synthetic_pdb() -> bytes:
 class UsbTwinPureTests(unittest.TestCase):
     def test_device_detection_excludes_local_uuid_paths(self) -> None:
         self.assertFalse(_is_device_export_anlz_path(_LOCAL_PATH))
+        self.assertFalse(_is_device_export_anlz_path(_SPLIT_LOCAL_PATH))
         self.assertTrue(_is_device_export_anlz_path(_USB_PATH))
+        self.assertTrue(_is_device_export_anlz_path(
+            "/Volumes/GUEST/PIONEER/USBANLZ/"
+            "7ad/4d7d8-454e-452f-b386-12ae062cd258/ANLZ0000.DAT"
+        ))
         self.assertTrue(_is_device_export_anlz_path(
             "/PIONEER/USBANLZ/P018/000086A0/ANLZ0000.DAT"
         ))

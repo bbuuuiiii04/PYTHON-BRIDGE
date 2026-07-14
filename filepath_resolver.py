@@ -249,8 +249,19 @@ def _is_device_export_anlz_path(anlz_path: str, captured_id: str = "") -> bool:
     if normalized.startswith("/Volumes/"):
         return True
     if not captured_id:
-        match = re.search(r"USBANLZ/[^/]+/([^/]+)/ANLZ", normalized)
-        captured_id = match.group(1) if match else ""
+        match = re.search(r"USBANLZ/([^/]+)/([^/]+)/ANLZ", normalized)
+        if match:
+            shard, captured_id = match.groups()
+            # Rekordbox 7 can split its local UUID across the two directories:
+            # USBANLZ/<first 3 UUID chars>/<remaining UUID chars>/ANLZ....
+            # Reassemble only this exact local shape. /Volumes paths already
+            # returned above, so a real mounted device stays device-export.
+            reassembled = shard + captured_id
+            if re.fullmatch(r"[0-9a-fA-F]{3}", shard) and re.fullmatch(
+                r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}",
+                reassembled,
+            ):
+                captured_id = reassembled
     return bool(captured_id and not re.fullmatch(
         r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", captured_id,
     ))

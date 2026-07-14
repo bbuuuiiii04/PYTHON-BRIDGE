@@ -37,6 +37,7 @@ The menubar / frozen app uses run_interactive_gui() (macOS dialogs), never the C
 from __future__ import annotations
 
 import argparse
+import base64
 import ctypes
 import fcntl
 import os
@@ -166,7 +167,11 @@ def plan_codesign_argvs(app: Path, entitlements_path: Path) -> list[list[str]]:
     return [codesign_argv(app, entitlements_path)]
 
 
-def build_sign_script(steps: list[tuple[str, list[str]]]) -> str:
+def build_sign_script(
+    steps: list[tuple[str, list[str]]],
+    *,
+    entitlements_plist: bytes | None = None,
+) -> str:
     """Build the one privileged root-bundle signing script.
 
     Every path/argument is shell-quoted. The maintainer explicitly rejected
@@ -174,11 +179,32 @@ def build_sign_script(steps: list[tuple[str, list[str]]]) -> str:
     report and verify instead of copying Rekordbox on every attempt.
     """
     lines = ["#!/bin/sh"]
+    if entitlements_plist is not None:
+        encoded = base64.b64encode(entitlements_plist).decode("ascii")
+        lines.extend([
+            "umask 077",
+            'RBSS_ENTITLEMENTS="$(/usr/bin/mktemp '
+            '/var/tmp/rbss_rekordbox_entitlements.XXXXXX)" || exit 1',
+            'trap \'rm -f "$RBSS_ENTITLEMENTS"\' EXIT',
+            "trap 'exit 1' HUP INT TERM",
+            f"printf '%s' {shlex.quote(encoded)} | /usr/bin/base64 -D "
+            '> "$RBSS_ENTITLEMENTS" || exit 1',
+        ])
     for label, argv in steps:
         lines.append(
             f"printf '%s\\n' {shlex.quote('RBSS_SIGNING:' + label)} >&2"
         )
-        quoted = " ".join(shlex.quote(a) for a in argv)
+        quoted_parts: list[str] = []
+        for index, arg in enumerate(argv):
+            if (
+                entitlements_plist is not None
+                and index > 0
+                and argv[index - 1] == "--entitlements"
+            ):
+                quoted_parts.append('"$RBSS_ENTITLEMENTS"')
+            else:
+                quoted_parts.append(shlex.quote(arg))
+        quoted = " ".join(quoted_parts)
         lines.append(f"{quoted}")
         lines.append("rc=$?")
         lines.append("if [ \"$rc\" -ne 0 ]; then")
@@ -390,6 +416,20 @@ def _failed_without_backup(
         command=argv,
         commands=commands,
     )
+
+
+def open_patch_lock():
+    """Open the per-user patch lock without following or truncating a symlink."""
+    path = Path(tempfile.gettempdir()) / "rbss_rekordbox_patch.lock"
+    flags = os.O_RDWR | os.O_CREAT
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+        return os.fdopen(fd, "w")
+    except Exception:
+        os.close(fd)
+        raise
 
 
 _NATIVE_ADMIN_EXIT = "RBSS_NATIVE_RC:"
@@ -617,9 +657,7 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
     lock_fh = None
     try:
         try:
-            lock_fh = open(
-                Path(tempfile.gettempdir()) / "rbss_rekordbox_patch.lock", "w"
-            )
+            lock_fh = open_patch_lock()
             fcntl.flock(lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as exc:
             return PatchResult(False, "refused",
@@ -636,7 +674,9 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
             else None
         )
         if admin_shell_runner is not None:
-            script = build_sign_script(steps)
+            script = build_sign_script(
+                steps, entitlements_plist=plistlib.dumps(merged)
+            )
             rc, err = admin_shell_runner(script)
             if rc != 0:
                 if is_user_cancel(err):

@@ -541,7 +541,10 @@ class SmartRearmFlagTests(unittest.TestCase):
         })
         resolver = Mock()
         sm.attach_resolver(resolver)
-        local_path = "/local/share/PIONEER/USBANLZ/967/938c2a63-a637-4000-8000-000000000001/ANLZ0000.DAT"
+        local_path = (
+            "/Users/bbui/Library/Pioneer/rekordbox/share/PIONEER/USBANLZ/"
+            "7ad/4d7d8-454e-452f-b386-12ae062cd258/ANLZ0000.DAT"
+        )
         sm._pending_anlz_path[1] = local_path
 
         with patch.object(sm, "_start_anlz_worker") as start_worker:
