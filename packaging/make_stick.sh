@@ -424,6 +424,39 @@ for rel, (size, wanted) in expected.items():
 PY
 }
 
+verify_dmg_package() {
+    local dmg="$1" mount_dir validation_rc=0
+    mount_dir="$(mktemp -d /tmp/rbss_dmg_verify.XXXXXX)" || return 1
+    if ! hdiutil attach -readonly -nobrowse -mountpoint "$mount_dir" "$dmg" >/dev/null; then
+        rmdir "$mount_dir" 2>/dev/null || true
+        return 1
+    fi
+
+    codesign --verify --deep --strict "$mount_dir/RBSS Bridge.app" \
+        || validation_rc=1
+    RBSS_DMG_VERIFY_ROOT="$mount_dir" PYTHONPATH="$REPO_ROOT/.." python3 - <<'PY' \
+        || validation_rc=1
+import os
+from pathlib import Path
+
+from rb_ss_bridge_v2.install_controller import _validate_package
+
+root = Path(os.environ["RBSS_DMG_VERIFY_ROOT"])
+_, manifest = _validate_package(root / "RBSS Bridge.app")
+print(
+    "make_stick: mounted package verified — "
+    f"{len(manifest['files'])} file(s), generation {manifest['generation']}"
+)
+PY
+
+    if ! hdiutil detach "$mount_dir" >/dev/null; then
+        echo "make_stick: could not detach final DMG verification mount '$mount_dir'." >&2
+        validation_rc=1
+    fi
+    rmdir "$mount_dir" 2>/dev/null || true
+    return "$validation_rc"
+}
+
 tree_allocated_bytes() {
     python3 - "$@" <<'PY'
 import os
@@ -729,6 +762,13 @@ cp -R "$SIDECAR_WORK/lighting_sidecar" "$STAGING/RBSS_payload/lighting_sidecar" 
     || fail "step 'sidecar payload copy' failed."
 rm -rf "$SIDECAR_WORK"
 
+# AppleDouble files are transport metadata, not bridge data. APFS DMG creation
+# folds or drops these `._*` companions, so including them in the manifest would
+# make the final mounted package differ from the staging tree and un-installable.
+find "$STAGING/RBSS_payload" -type f \
+    \( -name '._*' -o -name '.DS_Store' \) -delete \
+    || fail "could not remove macOS transport metadata from the staged payload."
+
 PAYLOAD_SYMLINK="$(find "$STAGING/RBSS_payload" -type l -print -quit)"
 [ -z "$PAYLOAD_SYMLINK" ] \
     || fail "payload contains a symbolic link ('$PAYLOAD_SYMLINK'); refusing a package that can escape its DMG."
@@ -758,6 +798,8 @@ DMG="$REPO_ROOT/dist/RBSS Bridge.dmg"
 require_unchanged_clean_source
 hdiutil create -volname "RBSS Bridge" -srcfolder "$STAGING" \
     -ov -format UDZO "$DMG" || fail "step 'DMG create' failed."
+verify_dmg_package "$DMG" \
+    || fail "the final mounted DMG failed signature or install-package validation; refusing to publish it."
 
 # ── 4. ship to the stick — into the operator's folder layout (2026-07-09:
 #      everything bridge lives in "RBSS BRIDGE USB/" at the stick root) ───────

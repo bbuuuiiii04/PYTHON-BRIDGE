@@ -510,6 +510,36 @@ class MakeStickTests(unittest.TestCase):
         # cache + five managed home files + pack + bindings + sidecar + manifest
         self.assertIn("10 payload file(s)", result.stdout)
 
+    def test_appledouble_metadata_is_pruned_before_manifest(self):
+        metadata = self.support / "spectral_cache" / "v4" / "._a.json"
+        metadata.write_text("metadata")
+        pack_metadata = self.pack / "._manifest.json"
+        pack_metadata.write_text("{}")
+
+        result = self._run()
+
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        payload = self.staging / "RBSS_payload"
+        self.assertFalse((payload / "spectral_cache" / "v4" / "._a.json").exists())
+        self.assertFalse((payload / "soundswitch_pack" / "._manifest.json").exists())
+        self.assertTrue((payload / "spectral_cache" / "v4" / "a.json").is_file())
+        manifest = json.loads((payload / "build_manifest.json").read_text())
+        paths = {row["path"] for row in manifest["files"]}
+        self.assertFalse(any(Path(path).name.startswith("._") for path in paths))
+
+    def test_final_mounted_package_is_verified_before_publication(self):
+        ship_logic = SCRIPT.read_text().split("# ── 3. DMG", 1)[1]
+        created = ship_logic.index("hdiutil create")
+        verified = ship_logic.index('verify_dmg_package "$DMG"')
+        published = ship_logic.index('publish_generation "$STICK" "$DMG"')
+        self.assertLess(created, verified)
+        self.assertLess(verified, published)
+        helper = SCRIPT.read_text().split("verify_dmg_package()", 1)[1].split(
+            "tree_allocated_bytes()", 1
+        )[0]
+        self.assertIn("codesign --verify --deep --strict", helper)
+        self.assertIn("_validate_package", helper)
+
     def test_pack_dir_copied_into_payload(self):
         # AWR-186 Track A: pack_path from the live config is copied into the
         # payload so the guest Mac's native pack DMX renderer has the show.
