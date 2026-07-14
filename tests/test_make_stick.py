@@ -356,6 +356,7 @@ class MakeStickTests(unittest.TestCase):
         sidecar = Path(self.tmp.name) / "lighting_sidecar"
         sidecar.mkdir()
         (sidecar / "index.json").write_text("{}")
+        (sidecar / "._index.json").write_text("mutable transport metadata")
 
         command = "publish_generation {} {} {}".format(
             shlex.quote(str(stick)), shlex.quote(str(dmg)), shlex.quote(str(sidecar))
@@ -374,6 +375,38 @@ class MakeStickTests(unittest.TestCase):
         self.assertFalse((old / "install.command").exists())
         self.assertFalse((old / "purge.command").exists())
         self.assertFalse((old / "RBSS_payload").exists())
+        self.assertFalse((old / "lighting_sidecar" / "._index.json").exists())
+
+    def test_manifest_ignores_mutable_transport_metadata(self):
+        root = Path(self.tmp.name) / "manifest-root"
+        root.mkdir()
+        (root / "data.bin").write_text("stable")
+        apple_double = root / "._data.bin"
+        apple_double.write_text("first")
+        ds_store = root / ".DS_Store"
+        ds_store.write_text("first")
+        manifest = root / "manifest.json"
+        command = "write_build_manifest {} {}; verify_build_manifest {} {}".format(
+            shlex.quote(str(root)),
+            shlex.quote(str(manifest)),
+            shlex.quote(str(root)),
+            shlex.quote(str(manifest)),
+        )
+
+        result = self._source_and_run(command)
+
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        value = json.loads(manifest.read_text())
+        self.assertEqual({row["path"] for row in value["files"]}, {"data.bin"})
+        apple_double.write_text("changed after manifest")
+        ds_store.write_text("changed after manifest")
+        (root / "._created_later").write_text("later")
+        verified = self._source_and_run(
+            "verify_build_manifest {} {}".format(
+                shlex.quote(str(root)), shlex.quote(str(manifest))
+            )
+        )
+        self.assertEqual(verified.returncode, 0, verified.stderr + verified.stdout)
 
     def test_transactional_publish_failure_keeps_prior_surface(self):
         stick = Path(self.tmp.name) / "stick-fail"

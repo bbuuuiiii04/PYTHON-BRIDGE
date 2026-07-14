@@ -360,8 +360,21 @@ from pathlib import Path
 
 root = Path(os.environ["RBSS_MANIFEST_ROOT"])
 dest = Path(os.environ["RBSS_MANIFEST_PATH"])
+
+
+def is_transport_metadata(path: Path) -> bool:
+    return any(
+        part == ".DS_Store" or part.startswith("._")
+        for part in path.relative_to(root).parts
+    )
+
+
 files = []
-for path in sorted(p for p in root.rglob("*") if p.is_file() and p != dest):
+for path in sorted(
+    p
+    for p in root.rglob("*")
+    if p.is_file() and p != dest and not is_transport_metadata(p)
+):
     digest = hashlib.sha256()
     with path.open("rb") as fp:
         for chunk in iter(lambda: fp.read(1024 * 1024), b""):
@@ -396,6 +409,12 @@ from pathlib import Path, PurePath
 root = Path(os.environ["RBSS_MANIFEST_ROOT"])
 manifest_path = Path(os.environ["RBSS_MANIFEST_PATH"])
 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+
+def is_transport_parts(parts) -> bool:
+    return any(part == ".DS_Store" or part.startswith("._") for part in parts)
+
+
 expected = {}
 for row in manifest.get("files", []):
     rel = row.get("path") if isinstance(row, dict) else None
@@ -404,6 +423,7 @@ for row in manifest.get("files", []):
         not isinstance(rel, str)
         or pure.is_absolute()
         or ".." in pure.parts
+        or is_transport_parts(pure.parts)
         or rel in expected
         or set(row) != {"path", "size", "sha256"}
     ):
@@ -412,7 +432,11 @@ for row in manifest.get("files", []):
 actual = {
     str(path.relative_to(root))
     for path in root.rglob("*")
-    if path.is_file() and path != manifest_path
+    if (
+        path.is_file()
+        and path != manifest_path
+        and not is_transport_parts(path.relative_to(root).parts)
+    )
 }
 if actual != set(expected):
     raise SystemExit("build manifest file list mismatch")
@@ -515,6 +539,13 @@ publish_generation() {
         rm -rf "$stage"
         fail "step 'sidecar transactional copy' failed; prior stick generation is unchanged."
     fi
+    # FAT stores mutable macOS metadata in AppleDouble companions. They are not
+    # product data and must never be hash authority for the published surface.
+    find "$stage" -type f \( -name '._*' -o -name '.DS_Store' \) -delete \
+        || {
+            rm -rf "$stage"
+            fail "could not remove macOS transport metadata before publication."
+        }
     if ! write_build_manifest "$stage" "$stage/lighting_sidecar/.rbss_build_manifest.json"; then
         rm -rf "$stage"
         fail "step 'publication manifest' failed; prior stick generation is unchanged."
