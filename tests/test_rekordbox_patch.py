@@ -84,7 +84,8 @@ class MergeLogicTests(unittest.TestCase):
         current = {"com.apple.security.device.audio-input": True, "custom": 1}
         merged = build_patched_entitlements(current)
         self.assertIs(merged[GET_TASK_ALLOW], True)
-        self.assertIs(merged["com.apple.security.cs.disable-library-validation"], True)
+        self.assertNotIn("com.apple.security.cs.disable-library-validation", merged)
+        self.assertNotIn("com.apple.security.cs.allow-unsigned-executable-memory", merged)
         self.assertEqual(merged["custom"], 1)                     # preserved
         self.assertIs(merged["com.apple.security.device.audio-input"], True)  # preserved
         self.assertNotIn(GET_TASK_ALLOW, current)                # input untouched
@@ -102,6 +103,29 @@ class CodesignArgvTests(unittest.TestCase):
         self.assertEqual(argv, ["codesign", "--force", "--sign", "-",
                                 "--entitlements", "/tmp/e.plist", str(APP)])
         self.assertNotIn("--deep", argv)
+
+
+class TargetIdentityAndSignatureTests(unittest.TestCase):
+    def test_malformed_info_plist_fails_closed(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            app = Path(tmp) / "rekordbox.app"
+            (app / "Contents").mkdir(parents=True)
+            (app / "Contents" / "Info.plist").write_bytes(b"not a plist")
+            self.assertEqual(rp.bundle_id(app), "")
+
+    def test_valid_target_patch_requires_entitlement_and_signature(self) -> None:
+        with mock.patch.object(rp, "has_get_task_allow", return_value=True), \
+             mock.patch.object(rp, "verify_signature", return_value=(True, "")):
+            self.assertTrue(rp.has_valid_target_patch(APP))
+        with mock.patch.object(rp, "has_get_task_allow", return_value=True), \
+             mock.patch.object(rp, "verify_signature", return_value=(False, "invalid")):
+            self.assertFalse(rp.has_valid_target_patch(APP))
+        with mock.patch.object(rp, "has_get_task_allow", return_value=False), \
+             mock.patch.object(rp, "verify_signature") as verify:
+            self.assertFalse(rp.has_valid_target_patch(APP))
+        verify.assert_not_called()
 
 
 class SignPlanPureSeamTests(unittest.TestCase):
@@ -192,7 +216,7 @@ class RootOnlyApplyTests(unittest.TestCase):
         self.assertIn("no rekordbox backup", r.message.lower())
         self.assertEqual(r.command, calls[0])
 
-    def test_admin_sign_fail_names_command_and_reports_no_backup(self) -> None:
+    def test_native_admin_sign_fail_names_command_and_reports_no_backup(self) -> None:
         err = (
             f"RBSS_SIGNING:{APP}\n"
             f"RBSS_SIGN_FAIL:{APP}\n"
@@ -202,8 +226,8 @@ class RootOnlyApplyTests(unittest.TestCase):
              mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
              mock.patch.object(rp, "read_entitlements", return_value={}), \
              mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan), \
-             mock.patch.object(rp, "run_shell_via_admin", return_value=(1, err)) as shell:
-            r = apply_patch(APP, dry_run=False, runner=rp.run_via_admin)
+             mock.patch.object(rp, "run_shell_via_native_authorization", return_value=(1, err)) as shell:
+            r = apply_patch(APP, dry_run=False, runner=rp.run_via_native_authorization)
         self.assertFalse(r.ok)
         self.assertEqual(r.action, "failed")
         self.assertIn(str(APP), r.message)
@@ -215,16 +239,16 @@ class RootOnlyApplyTests(unittest.TestCase):
         shell.assert_called_once()
         self.assertEqual(r.command[-1], str(APP))
 
-    def test_admin_cancel_is_clean_abort(self) -> None:
+    def test_native_admin_cancel_is_clean_abort(self) -> None:
         with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
              mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
              mock.patch.object(rp, "read_entitlements", return_value={}), \
              mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan), \
              mock.patch.object(
-                 rp, "run_shell_via_admin",
-                 return_value=(1, "User canceled. (-128)"),
+                 rp, "run_shell_via_native_authorization",
+                 return_value=(1, "User canceled native admin authorization."),
              ):
-            r = apply_patch(APP, dry_run=False, runner=rp.run_via_admin)
+            r = apply_patch(APP, dry_run=False, runner=rp.run_via_native_authorization)
         self.assertFalse(r.ok)
         self.assertEqual(r.action, "refused")
         self.assertIn("cancel", r.message.lower())
@@ -282,10 +306,26 @@ class ApplyPatchGuardTests(unittest.TestCase):
     def test_already_patched_is_noop(self) -> None:
         with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
              mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
-             mock.patch.object(rp, "read_entitlements", return_value={GET_TASK_ALLOW: True}):
+             mock.patch.object(rp, "read_entitlements", return_value={GET_TASK_ALLOW: True}), \
+             mock.patch.object(rp, "verify_signature", return_value=(True, "")):
             r = apply_patch(APP, dry_run=False)
         self.assertTrue(r.ok)
         self.assertEqual(r.action, "already_patched")
+
+    def test_get_task_allow_with_invalid_signature_is_repaired(self) -> None:
+        runner = mock.Mock(return_value=(0, ""))
+        with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
+             mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
+             mock.patch.object(rp, "read_entitlements", return_value={GET_TASK_ALLOW: True}), \
+             mock.patch.object(
+                 rp, "verify_signature", side_effect=[(False, "invalid"), (True, "")]
+             ), \
+             mock.patch.object(rp, "has_get_task_allow", return_value=True), \
+             mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan):
+            result = apply_patch(APP, dry_run=False, runner=runner)
+        self.assertTrue(result.ok)
+        self.assertEqual(result.action, "patched")
+        runner.assert_called_once()
 
     def test_dry_run_makes_no_changes(self) -> None:
         with mock.patch.object(rp, "bundle_id", return_value=REKORDBOX_BUNDLE_ID), \
@@ -433,7 +473,7 @@ class AppManagementHintTests(unittest.TestCase):
             "",
         )
 
-    def test_admin_operation_not_permitted_appends_source_hint(self) -> None:
+    def test_native_admin_operation_not_permitted_appends_source_hint(self) -> None:
         err = (
             f"RBSS_SIGN_FAIL:{APP}\n"
             f"{APP}: Operation not permitted\n"
@@ -442,16 +482,16 @@ class AppManagementHintTests(unittest.TestCase):
              mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
              mock.patch.object(rp, "read_entitlements", return_value={}), \
              mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan), \
-             mock.patch.object(rp, "run_shell_via_admin", return_value=(1, err)), \
+             mock.patch.object(rp, "run_shell_via_native_authorization", return_value=(1, err)), \
              mock.patch.object(rp.sys, "frozen", False, create=True):
-            r = apply_patch(APP, dry_run=False, runner=rp.run_via_admin)
+            r = apply_patch(APP, dry_run=False, runner=rp.run_via_native_authorization)
         self.assertFalse(r.ok)
         self.assertEqual(r.action, "failed")
         self.assertIn("App Management", r.message)
         self.assertIn("RBSS Bridge app build that requests App Management", r.message)
         self.assertNotIn("admin password alone is not enough", r.message)
 
-    def test_admin_unrelated_sign_fail_omits_app_management_hint(self) -> None:
+    def test_native_admin_unrelated_sign_fail_omits_app_management_hint(self) -> None:
         err = (
             f"RBSS_SIGN_FAIL:{APP}\n"
             "codesign: boom\n"
@@ -460,8 +500,8 @@ class AppManagementHintTests(unittest.TestCase):
              mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
              mock.patch.object(rp, "read_entitlements", return_value={}), \
              mock.patch.object(rp, "plan_codesign_argvs", side_effect=_fake_plan), \
-             mock.patch.object(rp, "run_shell_via_admin", return_value=(1, err)):
-            r = apply_patch(APP, dry_run=False, runner=rp.run_via_admin)
+             mock.patch.object(rp, "run_shell_via_native_authorization", return_value=(1, err)):
+            r = apply_patch(APP, dry_run=False, runner=rp.run_via_native_authorization)
         self.assertFalse(r.ok)
         self.assertIn("boom", r.message)
         self.assertNotIn("App Management", r.message)
@@ -487,19 +527,16 @@ class RunnerSeamTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)          # runner used for the codesign step
         self.assertIn("codesign", calls[0])
 
-    def test_run_via_admin_builds_safe_osascript(self) -> None:
-        with mock.patch.object(rp.subprocess, "run", return_value=_proc(0)) as run:
-            rc, _ = rp.run_via_admin(["codesign", "--force", "-",
-                                      "/Applications/rekordbox 7/rekordbox.app"])
-        self.assertEqual(rc, 0)
-        argv = run.call_args[0][0]
-        self.assertEqual(argv[0], "osascript")
-        script_arg = argv[-1]
-        self.assertIn("do shell script", script_arg)
-        self.assertIn("administrator privileges", script_arg)
-        # osascript only references a /bin/sh <tempfile>, never the raw codesign args
-        self.assertIn("/bin/sh", script_arg)
-        self.assertNotIn("rekordbox.app", script_arg)
+    def test_native_shell_carries_payload_in_argv_not_a_temp_file(self) -> None:
+        script = "echo safe; codesign '/Applications/odd name.app'\n"
+        argv = rp.native_shell_argv(script)
+        self.assertEqual(argv[0:2], ["/bin/sh", "-c"])
+        self.assertIn('/bin/sh -c "$1"', argv[2])
+        self.assertNotIn(script, argv[2])
+        self.assertEqual(argv[-1], script)
+        self.assertFalse(any("/tmp/" in arg for arg in argv))
+        with self.assertRaises(ValueError):
+            rp.native_shell_argv("echo before\0echo after")
 
     def test_native_runner_wraps_one_argv_without_calling_osascript(self) -> None:
         with mock.patch.object(
@@ -554,7 +591,7 @@ class InteractiveGuiTests(unittest.TestCase):
     def test_unreadable_entitlements_refuses_without_prompt(self) -> None:
         with mock.patch.object(rp, "find_rekordbox", return_value=APP), \
              mock.patch.object(
-                 rp, "has_get_task_allow",
+                 rp, "has_valid_target_patch",
                  side_effect=EntitlementsReadError("codesign failed"),
              ), mock.patch.object(rp, "_gui_notify") as notify, \
              mock.patch.object(rp, "_gui_confirm") as confirm, \
@@ -566,7 +603,7 @@ class InteractiveGuiTests(unittest.TestCase):
 
     def test_already_patched(self) -> None:
         with mock.patch.object(rp, "find_rekordbox", return_value=APP), \
-             mock.patch.object(rp, "has_get_task_allow", return_value=True), \
+             mock.patch.object(rp, "has_valid_target_patch", return_value=True), \
              mock.patch.object(rp, "_gui_notify") as notify:
             self.assertEqual(rp.run_interactive_gui(), 0)
         self.assertIn("already", notify.call_args[0][0].lower())
@@ -574,7 +611,7 @@ class InteractiveGuiTests(unittest.TestCase):
 
     def test_running_refused(self) -> None:
         with mock.patch.object(rp, "find_rekordbox", return_value=APP), \
-             mock.patch.object(rp, "has_get_task_allow", return_value=False), \
+             mock.patch.object(rp, "has_valid_target_patch", return_value=False), \
              mock.patch.object(rp, "is_rekordbox_running", return_value=True), \
              mock.patch.object(rp, "_gui_notify") as notify:
             self.assertEqual(rp.run_interactive_gui(), 1)
@@ -582,7 +619,7 @@ class InteractiveGuiTests(unittest.TestCase):
 
     def test_running_uncertainty_refuses_without_prompt_or_apply(self) -> None:
         with mock.patch.object(rp, "find_rekordbox", return_value=APP), \
-             mock.patch.object(rp, "has_get_task_allow", return_value=False), \
+             mock.patch.object(rp, "has_valid_target_patch", return_value=False), \
              mock.patch.object(rp, "is_rekordbox_running", return_value=None), \
              mock.patch.object(rp, "_gui_notify") as notify, \
              mock.patch.object(rp, "_gui_confirm") as confirm, \
@@ -594,7 +631,7 @@ class InteractiveGuiTests(unittest.TestCase):
 
     def test_cancelled_never_patches(self) -> None:
         with mock.patch.object(rp, "find_rekordbox", return_value=APP), \
-             mock.patch.object(rp, "has_get_task_allow", return_value=False), \
+             mock.patch.object(rp, "has_valid_target_patch", return_value=False), \
              mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
              mock.patch.object(rp, "_gui_confirm", return_value=False) as confirm, \
              mock.patch.object(rp, "apply_patch") as ap, \
@@ -607,7 +644,7 @@ class InteractiveGuiTests(unittest.TestCase):
 
     def test_confirmed_applies_via_native_admin(self) -> None:
         with mock.patch.object(rp, "find_rekordbox", return_value=APP), \
-             mock.patch.object(rp, "has_get_task_allow", return_value=False), \
+             mock.patch.object(rp, "has_valid_target_patch", return_value=False), \
              mock.patch.object(rp, "is_rekordbox_running", return_value=False), \
              mock.patch.object(rp, "_gui_confirm", return_value=True), \
              mock.patch.object(rp, "apply_patch",
@@ -623,6 +660,7 @@ class CliConsentTests(unittest.TestCase):
     def test_check_reports_process_uncertainty(self) -> None:
         with mock.patch.object(rp, "find_rekordbox", return_value=APP), \
              mock.patch.object(rp, "has_get_task_allow", return_value=True), \
+             mock.patch.object(rp, "verify_signature", return_value=(True, "")), \
              mock.patch.object(rp, "is_rekordbox_running", return_value=None), \
              contextlib.redirect_stdout(io.StringIO()) as output:
             rc = rp.main(["--check"])

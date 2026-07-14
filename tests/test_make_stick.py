@@ -12,6 +12,7 @@ import json
 import hashlib
 import os
 import shlex
+import stat
 import subprocess
 import sys
 import tempfile
@@ -489,6 +490,12 @@ class MakeStickTests(unittest.TestCase):
             self.assertTrue(
                 (self.staging / "RBSS_payload" / "home" / name).is_file(), name
             )
+        self.assertEqual(
+            stat.S_IMODE(
+                (self.staging / "RBSS_payload" / "home" / "govee.env").stat().st_mode
+            ),
+            0o600,
+        )
         self.assertTrue(
             (self.staging / "RBSS_payload" / "streamdeck_midi_bindings.json").is_file()
         )
@@ -598,12 +605,28 @@ class MakeStickTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("unreadable", result.stderr)
 
-    def test_refuses_target_without_pioneer_dir(self):
+    def test_refuses_normal_folder_even_if_it_looks_like_a_stick(self):
         fake_stick = Path(self.tmp.name) / "not_a_stick"
-        fake_stick.mkdir()
+        (fake_stick / "PIONEER").mkdir(parents=True)
         result = self._run(str(fake_stick), env_extra={"RBSS_MAKE_STICK_STAGE_ONLY": ""})
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("PIONEER", result.stderr)
+        self.assertIn("not mounted under /Volumes", result.stderr)
+
+    def test_payload_symlink_fails_closed(self):
+        outside = Path(self.tmp.name) / "outside"
+        outside.write_text("outside")
+        (self.support / "spectral_cache" / "escape").symlink_to(outside)
+
+        result = self._run()
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("payload contains a symbolic link", result.stderr)
+
+    def test_real_build_requires_clean_stable_repository(self):
+        script = SCRIPT.read_text()
+        self.assertIn("status --porcelain --untracked-files=normal", script)
+        self.assertIn("repository HEAD changed during the USB build", script)
+        self.assertGreaterEqual(script.count("require_unchanged_clean_source"), 3)
 
     def test_refuses_missing_mount(self):
         result = self._run(

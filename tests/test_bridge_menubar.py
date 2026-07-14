@@ -1680,19 +1680,19 @@ class FrozenDefectHelperTests(BridgeMenubarTests):
         patch_mod.find_rekordbox.return_value = None
         with patch.object(bridge_menubar, "_import_rekordbox_patch", return_value=patch_mod):
             self.assertEqual(bridge_menubar._rb_reads_verdict()[0], "unknown")
-        # Entitlement present / absent.
+        # Valid target patch present / absent.
         patch_mod.find_rekordbox.return_value = Path("/Applications/rekordbox 7/rekordbox.app")
-        patch_mod.has_get_task_allow.return_value = True
+        patch_mod.has_valid_target_patch.return_value = True
         with patch.object(bridge_menubar, "_import_rekordbox_patch", return_value=patch_mod):
             self.assertEqual(
                 bridge_menubar._rb_reads_verdict(),
                 ("enabled", "/Applications/rekordbox 7/rekordbox.app"),
             )
-        patch_mod.has_get_task_allow.return_value = False
+        patch_mod.has_valid_target_patch.return_value = False
         with patch.object(bridge_menubar, "_import_rekordbox_patch", return_value=patch_mod):
             self.assertEqual(bridge_menubar._rb_reads_verdict()[0], "not_enabled")
         # Check itself blowing up -> unknown with the reason, never a raise.
-        patch_mod.has_get_task_allow.side_effect = OSError("codesign missing")
+        patch_mod.has_valid_target_patch.side_effect = OSError("codesign missing")
         with patch.object(bridge_menubar, "_import_rekordbox_patch", return_value=patch_mod):
             verdict, detail = bridge_menubar._rb_reads_verdict()
         self.assertEqual(verdict, "unknown")
@@ -2225,6 +2225,15 @@ class PortableLogAndUsbUpdateTests(BridgeMenubarTests):
         self.assertIn("RBSS Bridge.app", argv[2])
         application.terminate_.assert_called_once_with(menu)
 
+    def test_delayed_detach_keeps_mount_out_of_shell_source(self) -> None:
+        bridge_menubar = self._import_module()
+        mount = '/Volumes/odd"; touch /tmp/should-not-run; #'
+        argv = bridge_menubar.delayed_detach_argv(mount)
+        self.assertEqual(argv[:2], ["/bin/sh", "-c"])
+        self.assertIn('detach "$1"', argv[2])
+        self.assertNotIn(mount, argv[2])
+        self.assertEqual(argv[-1], mount)
+
     def test_frozen_stop_orders_streamdeck_before_owned_or_adopted_bridge(self) -> None:
         bridge_menubar = self._import_module()
         events = []
@@ -2386,12 +2395,19 @@ class PortableLogAndUsbUpdateTests(BridgeMenubarTests):
         repo = bridge_menubar.REPO_ROOT
         for expected in (
             repo / "packaging" / "make_stick.sh",
+            repo / "tools" / "lighting_sidecar_export.py",
+            repo / "tools" / "laser_pad_assets",
+            repo / "tools" / "led_pad_assets",
             repo / "config" / "laser_director.json",
             repo / "config" / "led_look_director.json",
             repo / "config" / "soundswitch_pack_player.json",
             repo / "config" / "laser_color_map.json",
         ):
             self.assertIn(str(expected), roots)
+        self.assertTrue(
+            any(p.endswith(".example.json") for p in roots),
+            "config examples bundled by PyInstaller are missing from USB source roots",
+        )
         self.assertTrue(
             any(p.endswith("spectral_cache") for p in roots),
             "spectral_cache missing from USB source roots",

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import stat
 import sys
 import tempfile
 import unittest
@@ -168,6 +169,9 @@ class PerformInstallTests(unittest.TestCase):
             (self.support / "spectral_cache" / "v4" / "a.json").is_file()
         )
         self.assertTrue((self.support / "govee.env").is_file())
+        self.assertEqual(
+            stat.S_IMODE((self.support / "govee.env").stat().st_mode), 0o600
+        )
         self.assertTrue((self.support / "laser_director.json").is_file())
         self.assertTrue((self.support / "lighting_sidecar" / "index.json").is_file())
         self.assertTrue((self.support / "streamdeck_midi_bindings.json").is_file())
@@ -301,6 +305,36 @@ class PerformInstallTests(unittest.TestCase):
         self.assertIn("integrity check", result.failed_step)
         self.assertTrue((old_app / "Contents" / "old-bin").is_file())
         self.assertTrue((self.support / ic.INCOMPLETE_MARKER_NAME).is_file())
+
+    def test_payload_symlink_is_rejected_before_install(self) -> None:
+        outside = Path(self.tmp.name) / "outside-secret"
+        outside.write_text("outside")
+        (ic.payload_dir(self.bundle) / "spectral_cache" / "escape").symlink_to(outside)
+
+        result = self._install()
+
+        self.assertFalse(result.ok)
+        self.assertIn("symbolic link", result.failed_step)
+        self.assertFalse((self.apps / "RBSS Bridge.app").exists())
+
+    def test_second_staging_directory_failure_cleans_the_first(self) -> None:
+        real_mkdtemp = tempfile.mkdtemp
+        created: list[Path] = []
+
+        def fail_second(*args, **kwargs):
+            if not created:
+                path = Path(real_mkdtemp(*args, **kwargs))
+                created.append(path)
+                return str(path)
+            raise OSError("injected")
+
+        with mock.patch.object(ic.tempfile, "mkdtemp", side_effect=fail_second):
+            result = self._install()
+
+        self.assertFalse(result.ok)
+        self.assertIn("create install staging", result.failed_step)
+        self.assertEqual(len(created), 1)
+        self.assertFalse(created[0].exists())
 
     def test_hash_consistent_but_malformed_bindings_fail_closed(self) -> None:
         bindings = ic.payload_dir(self.bundle) / "streamdeck_midi_bindings.json"
@@ -558,6 +592,14 @@ class OperatorInstallFailureMessageTests(unittest.TestCase):
         )
         self.assertIn("free disk", msg.casefold())
         self.assertIn("What to do:", msg)
+
+    def test_rollback_failure_does_not_claim_installed_copy_is_usable(self) -> None:
+        msg = ic.operator_install_failure_message(
+            "commit install (OSError); support rollback OSError"
+        )
+        self.assertIn("Do not open the installed copy", msg)
+        self.assertIn("installer-disk copy", msg)
+        self.assertNotIn("Nothing is half-broken", msg)
 
 
 if __name__ == "__main__":

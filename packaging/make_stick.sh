@@ -85,11 +85,22 @@ GIT_HEAD="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null)" \
 BUILD_TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 BUILD_TIMESTAMP_COMPACT="$(date -u +%Y%m%dT%H%M%SZ)"
 SOURCE_DIRTY=false
-if [ -n "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no)" ]; then
+if [ -n "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=normal)" ]; then
     SOURCE_DIRTY=true
 fi
 GENERATION="${GIT_HEAD:0:12}-${BUILD_TIMESTAMP_COMPACT}"
 [ "$SOURCE_DIRTY" = false ] || GENERATION="$GENERATION-dirty"
+
+require_unchanged_clean_source() {
+    local current_head current_status
+    current_head="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null)" \
+        || fail "cannot re-read repository generation; refusing to publish."
+    [ "$current_head" = "$GIT_HEAD" ] \
+        || fail "repository HEAD changed during the USB build; refusing to publish mixed sources."
+    current_status="$(git -C "$REPO_ROOT" status --porcelain --untracked-files=normal)"
+    [ -z "$current_status" ] \
+        || fail "repository files changed during the USB build; refusing to publish mixed sources."
+}
 
 version_at_most() {
     awk -v have="$1" -v want="$2" '
@@ -571,7 +582,14 @@ STICK="${1:-}"
 if [ -z "$STAGE_ONLY" ]; then
     [ -n "$STICK" ] || fail "usage: bash packaging/make_stick.sh /Volumes/<stick>"
     [ -d "$STICK" ] || fail "'$STICK' is not a mounted volume."
+    STICK="$(cd "$STICK" && pwd -P)"
+    case "$STICK" in
+        /Volumes/*) ;;
+        *) fail "'$STICK' is not mounted under /Volumes; refusing to write to a normal folder." ;;
+    esac
     [ -d "$STICK/PIONEER" ] || fail "'$STICK' has no PIONEER/ — not the rekordbox-exported stick. Refusing."
+    [ "$SOURCE_DIRTY" = false ] \
+        || fail "repository has tracked or untracked changes; commit or remove them before a real USB build."
     DEST="$STICK/RBSS BRIDGE USB"
 fi
 
@@ -669,6 +687,8 @@ for src in "${HOME_PARITY_FILES[@]}"; do
     cp "$src" "$STAGING/RBSS_payload/home/" \
         || fail "step 'home-parity copy' failed on '${src##*/}' — exists but unreadable."
 done
+chmod 600 "$STAGING/RBSS_payload/home/govee.env" \
+    || fail "could not make the staged Govee credential owner-only."
 
 # The exported SoundSwitch pack itself (the show): read pack_path from the live
 # config and copy the whole dir into the payload, so the guest Mac's native pack
@@ -709,6 +729,10 @@ cp -R "$SIDECAR_WORK/lighting_sidecar" "$STAGING/RBSS_payload/lighting_sidecar" 
     || fail "step 'sidecar payload copy' failed."
 rm -rf "$SIDECAR_WORK"
 
+PAYLOAD_SYMLINK="$(find "$STAGING/RBSS_payload" -type l -print -quit)"
+[ -z "$PAYLOAD_SYMLINK" ] \
+    || fail "payload contains a symbolic link ('$PAYLOAD_SYMLINK'); refusing a package that can escape its DMG."
+
 validate_parity_data \
     "$STAGING/RBSS_payload/home" \
     "$STAGING/RBSS_payload/soundswitch_pack" \
@@ -731,11 +755,13 @@ fi
 
 # ── 3. DMG from the staging dir (runbook command, -srcfolder = staging) ──────
 DMG="$REPO_ROOT/dist/RBSS Bridge.dmg"
+require_unchanged_clean_source
 hdiutil create -volname "RBSS Bridge" -srcfolder "$STAGING" \
     -ov -format UDZO "$DMG" || fail "step 'DMG create' failed."
 
 # ── 4. ship to the stick — into the operator's folder layout (2026-07-09:
 #      everything bridge lives in "RBSS BRIDGE USB/" at the stick root) ───────
+require_unchanged_clean_source
 publish_generation "$STICK" "$DMG" "$STAGING/RBSS_payload/lighting_sidecar"
 
 DMG_SIZE="$(du -h "$DMG" | cut -f1)"

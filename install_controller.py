@@ -139,15 +139,21 @@ def operator_install_failure_message(failed_step: str) -> str:
     elif lower.startswith("stage complete install"):
         what = "Copying the app and its lighting files into place failed"
         next_step = (
-            "Quit other installers, confirm disk space, then choose Retry. "
-            "Nothing was left half-installed"
+            "Quit other installers, confirm disk space, then choose Retry"
         )
     elif lower.startswith("commit install"):
-        what = "The final switch to the new install didn't finish"
-        next_step = (
-            "Choose Retry Installation. The previous install (if any) stays "
-            "usable until Retry succeeds"
-        )
+        if "rollback" in lower:
+            what = "The final install switch failed, and restoring the previous copy also failed"
+            next_step = (
+                "Do not open the installed copy. Keep using this installer-disk "
+                "copy and choose Retry Installation"
+            )
+        else:
+            what = "The final switch to the new install didn't finish"
+            next_step = (
+                "Choose Retry Installation. The previous install (if any) should "
+                "remain usable until Retry succeeds"
+            )
     elif "integrity" in lower:
         what = "A copied file didn't match the package checksum"
         next_step = (
@@ -166,8 +172,8 @@ def operator_install_failure_message(failed_step: str) -> str:
 
     return (
         f"{what}.\n\nWhat to do: {next_step}.\n\n"
-        "Nothing is half-broken: this copy keeps running from the installer "
-        "disk, and the install record still lists exactly what was copied."
+        "The installer-disk copy was not changed, and the install was not "
+        "declared successful."
     )
 
 
@@ -186,6 +192,8 @@ def _sha256(path: Path) -> str:
 def _validate_package(bundle: Path) -> tuple[Path, dict]:
     """Validate the DMG's complete, hash-locked app + payload before copying."""
     payload = payload_dir(bundle)
+    if payload.is_symlink() or any(path.is_symlink() for path in payload.rglob("*")):
+        raise ValueError("package payload contains a symbolic link")
     manifest_path = payload / BUILD_MANIFEST_NAME
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -305,6 +313,7 @@ def _copy_managed_payload(payload: Path, target: Path) -> int:
     for name in ("streamdeck_midi_bindings.json", BUILD_MANIFEST_NAME):
         shutil.copy2(payload / name, target / name)
         installed += 1
+    (target / "govee.env").chmod(0o600)
     return installed
 
 
@@ -438,10 +447,25 @@ def perform_install(
         result.failed_step = "insufficient free disk for a rollback-safe update"
         return result
 
-    app_stage = Path(tempfile.mkdtemp(prefix=f".{bundle.name}.installing-", dir=apps_dir))
-    support_stage = Path(
-        tempfile.mkdtemp(prefix=f".{app_support.name}.installing-", dir=app_support.parent)
-    )
+    app_stage: Path | None = None
+    support_stage: Path | None = None
+    try:
+        app_stage = Path(
+            tempfile.mkdtemp(prefix=f".{bundle.name}.installing-", dir=apps_dir)
+        )
+        support_stage = Path(
+            tempfile.mkdtemp(
+                prefix=f".{app_support.name}.installing-", dir=app_support.parent
+            )
+        )
+    except OSError as exc:
+        result.failed_step = f"create install staging ({type(exc).__name__})"
+        if app_stage is not None:
+            shutil.rmtree(app_stage, ignore_errors=True)
+        if support_stage is not None:
+            shutil.rmtree(support_stage, ignore_errors=True)
+        return result
+    assert app_stage is not None and support_stage is not None
     try:
         app_stage.rmdir()
         shutil.copytree(bundle, app_stage, symlinks=True)
