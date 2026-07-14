@@ -1686,6 +1686,10 @@ class BridgeMenuBar(NSObject):
         if (time.monotonic() - self._rb_reads_at) < RB_READS_MAX_AGE_SECONDS:
             return
         self._rb_reads_in_progress = True
+        # Paint the initial state immediately.  refresh_ rendered once before
+        # reaching this method, so without this repaint a cold launch exposed
+        # an actionable "Patch Rekordbox" label until the next one-second tick.
+        self._render_patch_rb_state()
         threading.Thread(target=self._run_rb_reads_check, daemon=True).start()
 
     def _run_rb_reads_check(self):

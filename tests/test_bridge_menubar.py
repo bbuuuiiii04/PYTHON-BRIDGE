@@ -1637,6 +1637,7 @@ class FrozenDefectHelperTests(BridgeMenubarTests):
         thread.assert_called_once_with(target=menu._run_rb_reads_check, daemon=True)
         thread.return_value.start.assert_called_once_with()
         self.assertTrue(menu._rb_reads_in_progress)
+        menu._render_patch_rb_state.assert_called_once_with()
         # Check already running: never stack a second one.
         with patch.object(bridge_menubar.threading, "Thread") as thread:
             handler(menu)
