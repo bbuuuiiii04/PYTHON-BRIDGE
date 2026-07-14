@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 81f1b15
+last_verified_commit: 3457a1e
 last_verified_date: 2026-07-10
-validation_scope: software-only; RB7216 patch/menu/builder/install hardening and AWR-207 split-local-UUID classifier regression coverage added 2026-07-13; no physical foreign-Mac, bridge, or hardware action
+validation_scope: software-only; RB7216 patch/menu/builder/install hardening, immediate grey initial-check repaint, and AWR-207 split-local-UUID classifier regression coverage added 2026-07-13; no physical foreign-Mac, bridge, or hardware action
 ---
 
 # Tests

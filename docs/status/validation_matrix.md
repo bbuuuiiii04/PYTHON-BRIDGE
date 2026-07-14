@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 81f1b15
+last_verified_commit: 3457a1e
 last_verified_date: 2026-07-13
-validation_scope: software-validated only plus Rekordbox 7.2.11 passive mixer RE evidence routing; Rekordbox 7.2.16 direct-reader offset row software-tested (four roots STATIC-CONFIRMED; interior hops CANDIDATE from 7.2.14 deck + 7.2.11 mixer/CFX layout; live-unvalidated); AWR-157/AWR-160/AWR-161 software-tested; AWR-186 patch/builder/install hardening and AWR-207 split-local-UUID classification software-tested, no hardware action; AWR-222 dormant AX measurement probe implemented/software-tested/not executed; hardware-unvalidated in repo evidence
+validation_scope: software-validated only plus Rekordbox 7.2.11 passive mixer RE evidence routing; Rekordbox 7.2.16 direct-reader offset row software-tested (four roots STATIC-CONFIRMED; interior hops CANDIDATE from 7.2.14 deck + 7.2.11 mixer/CFX layout; live-unvalidated); AWR-157/AWR-160/AWR-161 software-tested; AWR-186 patch/builder/install hardening including the immediate grey menubar initial-check repaint and AWR-207 split-local-UUID classification software-tested, no hardware action; AWR-222 dormant AX measurement probe implemented/software-tested/not executed; hardware-unvalidated in repo evidence
 ---
 
 # Validation Matrix

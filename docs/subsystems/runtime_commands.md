@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 81f1b15
+last_verified_commit: 3457a1e
 last_verified_date: 2026-07-13
-validation_scope: software-only; runtime command rail and slim source/frozen menubar inventory tested, including the state-aware Patch Rekordbox action in the maintenance block with Export/Rebuild (GTA plus deep-strict signature state; initial deep check is grey Checking Rekordbox; stock foreign-Mac attach live-unvalidated / unknown; App Management Info.plist declaration + native authorization guidance software-tested, friend-Mac grant/live apply unvalidated); AWR-222 dormant AX probe is packaged dispatch only (no menu item of its own, not executed); native install failure alerts use conservative plain-language copy at the menubar boundary; frozen app and hardware behavior unvalidated
+validation_scope: software-only; runtime command rail and slim source/frozen menubar inventory tested, including the state-aware Patch Rekordbox action in the maintenance block with Export/Rebuild (GTA plus deep-strict signature state; the first paint during the initial deep check is grey Checking Rekordbox; stock foreign-Mac attach live-unvalidated / unknown; App Management Info.plist declaration + native authorization guidance software-tested, friend-Mac grant/live apply unvalidated); AWR-222 dormant AX probe is packaged dispatch only (no menu item of its own, not executed); native install failure alerts use conservative plain-language copy at the menubar boundary; frozen app and hardware behavior unvalidated
 ---
 
 # Runtime Commands Subsystem
@@ -123,7 +123,7 @@ SoundSwitch pack-player boundary (T7c/T7e):
   slim-menu cut that removed it): dispatches the existing target-patch child
   only (`--patch-rekordbox`; frozen argv stays `[sys.executable,
   "--patch-rekordbox"]`, source keeps the usb_launcher argv). Visible titles:
-  **Checking Rekordbox…** (greyed) during the first background deep-signature
+  **Checking Rekordbox…** (greyed immediately on the first paint) during the first background deep-signature
   check; **Rekordbox Patched** (greyed) only when `get-task-allow` is present
   and `codesign --verify --deep --strict` passes; **Patch Rekordbox**
   (actionable) when absent, invalid, or unknown; **Patching Rekordbox…**
