@@ -67,7 +67,7 @@ class DispatchTests(unittest.TestCase):
     def test_run_log_viewer_calls_bundled_module(self) -> None:
         with mock.patch("rb_ss_bridge_v2.bridge_view.main", return_value=None) as viewer:
             self.assertEqual(usb_launcher._run_log_viewer(), 0)
-        viewer.assert_called_once_with()
+        viewer.assert_called_once_with([])
 
     def test_check_deps_dispatch(self) -> None:
         with mock.patch.object(usb_launcher, "_run_check_deps", return_value=0) as run:

@@ -186,7 +186,7 @@ def _run_log_viewer() -> int:
     """Run the bundled viewer; frozen guests never need a host Python."""
     from rb_ss_bridge_v2.bridge_view import main as viewer_main
 
-    return int(viewer_main() or 0)
+    return int(viewer_main([]) or 0)
 
 
 # Every runtime dependency the bundle MUST carry (import names). Kept as declared:
