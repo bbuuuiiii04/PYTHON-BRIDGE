@@ -199,8 +199,11 @@ SoundSwitch pack-player boundary (T7c/T7e):
 - **Open Live Log** uses frozen self-dispatch (`--run-log-viewer`) in a packaged
   app, so it does not require host Python. Frozen bridge start opens the same
   viewer automatically; the viewer has a stable Terminal marker and duplicate
-  guard. This path is software-tested but the built, windowed PyInstaller app
-  and Terminal interaction remain operator-unvalidated.
+  guard. Frozen bridge stop now calls the same `close_monitor()` path as source
+  stop, so the live log Terminal window closes on both owned-child and
+  adopted-lockfile-pid stops (start still does not close it). This path is
+  software-tested but the built, windowed PyInstaller app and Terminal
+  interaction remain operator-unvalidated.
 - A frozen installed menubar owns the packaged Stream Deck helper alongside the
   bridge. Starting the bridge starts or adopts exactly one helper through
   `/tmp/streamdeck_midi.lock`; stopping an owned or safely adopted bridge stops

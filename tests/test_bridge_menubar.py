@@ -2227,11 +2227,36 @@ class PortableLogAndUsbUpdateTests(BridgeMenubarTests):
         proc = Mock()
         menu._spawn_watched.return_value = proc
         with patch.object(bridge_menubar, "_running_bridge_pid", return_value=None), \
-             patch.object(bridge_menubar, "open_live_log") as open_log:
+             patch.object(bridge_menubar, "open_live_log") as open_log, \
+             patch.object(bridge_menubar, "close_monitor") as close_mon:
             bridge_menubar.BridgeMenuBar._toggle_bridge_frozen(menu)
         self.assertIs(menu._frozen_bridge_proc, proc)
         menu._ensure_frozen_streamdeck.assert_called_once_with()
         open_log.assert_called_once_with()
+        close_mon.assert_not_called()
+
+    def test_frozen_owned_stop_closes_live_log(self) -> None:
+        bridge_menubar = self._import_module()
+        owned = Mock()
+        owned.poll.return_value = None
+        menu = Mock(_frozen_bridge_proc=owned)
+        with patch.object(bridge_menubar, "close_monitor") as close_mon:
+            bridge_menubar.BridgeMenuBar._toggle_bridge_frozen(menu)
+        menu._stop_frozen_streamdeck.assert_called_once_with()
+        menu._stop_frozen_bridge_child.assert_called_once_with()
+        close_mon.assert_called_once_with()
+
+    def test_frozen_adopted_stop_closes_live_log(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock(_frozen_bridge_proc=None)
+        menu._stop_frozen_bridge_child.return_value = False
+        with patch.object(bridge_menubar, "_running_bridge_pid", return_value=91), \
+             patch.object(bridge_menubar.os, "kill") as kill, \
+             patch.object(bridge_menubar, "close_monitor") as close_mon:
+            bridge_menubar.BridgeMenuBar._toggle_bridge_frozen(menu)
+        menu._stop_frozen_streamdeck.assert_called_once_with()
+        kill.assert_called_once_with(91, bridge_menubar.signal.SIGTERM)
+        close_mon.assert_called_once_with()
 
     def test_frozen_streamdeck_supervisor_reuses_or_starts_one_helper(self) -> None:
         bridge_menubar = self._import_module()

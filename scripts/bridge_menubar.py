@@ -2234,6 +2234,7 @@ class BridgeMenuBar(NSObject):
         if owned is not None and owned.poll() is None:
             self._stop_frozen_streamdeck()
             self._stop_frozen_bridge_child()
+            close_monitor()
             return
         self._stop_frozen_bridge_child()  # discard a completed owned handle
         # No owned child, but a bridge from a PREVIOUS menubar may still hold the
@@ -2249,6 +2250,7 @@ class BridgeMenuBar(NSObject):
                 os.kill(adopted, signal.SIGTERM)
             except OSError:
                 pass
+            close_monitor()
             return
         # Not running: spawn one child bridge. If another bridge (source-run or
         # bundled) already holds the flock, the child logs the refusal and exits
