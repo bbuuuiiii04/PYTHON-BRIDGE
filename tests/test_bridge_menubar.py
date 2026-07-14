@@ -944,6 +944,68 @@ class BridgeMenubarTests(unittest.TestCase):
         }
         self.assertEqual(fields(not_degraded)["degraded_reason"], "")
 
+    def test_led_row_surfaces_realtime_send_failure(self) -> None:
+        """Guest-Mac Local Network deny leaves director On but every UDP send
+        fails; last_error already reaches the snapshot — show it on the row."""
+        bridge_menubar = self._import_module()
+        fields = bridge_menubar.led_row_fields
+
+        failing = {
+            "led_look_director": {
+                "enabled": True,
+                "adapter": {
+                    "degraded": False,
+                    "degraded_reason": "",
+                    "realtime": {
+                        "active": True,
+                        "achieved_fps": 0.0,
+                        "active_effect": "razer_pulse",
+                        "last_error": "transport_send_failed",
+                    },
+                },
+            },
+        }
+        self.assertEqual(fields(failing)["degraded_reason"], "sends failing")
+        rows = bridge_menubar.compact_status_lines(failing, ["123"], bridge_state="on")
+        led_text = rows[3].string()
+        self.assertIn("On", led_text)
+        self.assertIn("sends failing", led_text)
+
+        healthy = {
+            "led_look_director": {
+                "enabled": True,
+                "adapter": {
+                    "degraded": False,
+                    "degraded_reason": "",
+                    "realtime": {
+                        "active": True,
+                        "achieved_fps": 59.0,
+                        "active_effect": "razer_pulse",
+                        "last_error": "",
+                    },
+                },
+            },
+        }
+        self.assertEqual(fields(healthy)["degraded_reason"], "")
+        healthy_text = bridge_menubar.compact_status_lines(
+            healthy, ["123"], bridge_state="on"
+        )[3].string()
+        self.assertIn("On", healthy_text)
+        self.assertNotIn("sends failing", healthy_text)
+
+        # Cloud-adapter degraded_reason still wins over realtime last_error.
+        cloud_wins = {
+            "led_look_director": {
+                "enabled": True,
+                "adapter": {
+                    "degraded": True,
+                    "degraded_reason": "circuit_open",
+                    "realtime": {"last_error": "transport_send_failed"},
+                },
+            },
+        }
+        self.assertEqual(fields(cloud_wins)["degraded_reason"], "circuit_open")
+
     def test_led_row_fields_malformed_never_raises(self) -> None:
         bridge_menubar = self._import_module()
         fields = bridge_menubar.led_row_fields

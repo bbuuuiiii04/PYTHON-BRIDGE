@@ -1259,6 +1259,10 @@ def led_row_fields(status: dict) -> dict:
         raw_reason = adapter.get("degraded_reason")
         if isinstance(raw_reason, str):
             degraded_reason = raw_reason
+    if not degraded_reason:
+        raw_err = realtime.get("last_error")
+        if isinstance(raw_err, str) and raw_err:
+            degraded_reason = "sends failing"
     return {
         "state": state,
         "fps": fps,

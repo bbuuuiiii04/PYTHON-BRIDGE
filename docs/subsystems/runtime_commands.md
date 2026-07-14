@@ -113,7 +113,12 @@ SoundSwitch pack-player boundary (T7c/T7e):
   block: separator → **SoundSwitch Export…** / **Rebuild USB Bridge…**
   (source-only) → state-aware **Patch Rekordbox** (always visible) → Purge
   (frozen when available) → **Restart Menubar**. The safety actions keep their
-  existing `laser_blackout` / `laser_clear_blackout` command behavior.
+  existing `laser_blackout` / `laser_clear_blackout` command behavior. The
+  LEDs Status row stays **On** when the director is enabled, but if the cloud
+  adapter has no `degraded_reason` and realtime reports a non-empty
+  `last_error` (for example `transport_send_failed` when macOS Local Network
+  permission denies UDP), the row appends the truncated suffix **sends
+  failing** so a dark room is not painted as healthy green.
 - The source/main-Mac edition additionally has exactly four operator tools:
   **Laser Pad…**, **LED Pad…**, **SoundSwitch Export…**, and **Rebuild USB
   Bridge…**. The first two live under **Tools**; Export/Rebuild sit in the
