@@ -13,8 +13,10 @@ Architecture
 * Reads through pointer chains from a per-version ``RBOffsetVersion`` table
   (see ``rb_offsets.py``), via ``mach_vm_read_overwrite`` (same primitive
   ``rb_memory.py`` already uses).
-* Fail-closed: if the running RB version has no offsets in the table, or the
-  RB pid / base address cannot be resolved, the thread logs once and exits.
+* Fail-closed: if the running RB version has no offsets in the table, the
+  thread logs once and exits. Missing RB pid / base is no longer fatal — the
+  thread waits and retries so a bridge that starts before Rekordbox still
+  attaches once RB is up.
 * Diff against last-seen state to suppress duplicate events. Each emit carries
   ``source='rb_state'`` so downstream logs and fallback gates can distinguish
   direct memory events from OSC/MTC and bridge-local events.
@@ -193,9 +195,41 @@ class RBStateReader(threading.Thread):
         self._candidate_title: dict[int, str] = {}
         self._candidate_ticks: dict[int, int] = {}
         self._phantom_suppressed_count: dict[int, int] = {}
+        self._attached = False
+        self._attached_lock = threading.Lock()
 
     def stop(self) -> None:
         self._stop_event.set()
+        self._set_all_anlz_unavailable()
+        self._set_all_transport_unavailable()
+        self._set_all_track_load_unavailable()
+        self._set_all_master_unavailable()
+
+    def attach_health(self) -> dict:
+        """Operator-facing attach state: ``{'attached': bool}`` (plain bool read)."""
+        with self._attached_lock:
+            return {"attached": bool(self._attached)}
+
+    def _set_attached(self, attached: bool) -> None:
+        with self._attached_lock:
+            self._attached = bool(attached)
+
+    def _clear_attach_cache(self) -> None:
+        """Drop cached pid/base so a stale process is never reused after detach."""
+        self._rb_pid = None
+        self._base = None
+        self._set_attached(False)
+
+    def _pid_gone(self, pid: Optional[int]) -> bool:
+        if pid is None:
+            return True
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return True
+        return False
+
+    def _mark_all_unavailable(self) -> None:
         self._set_all_anlz_unavailable()
         self._set_all_transport_unavailable()
         self._set_all_track_load_unavailable()
@@ -205,60 +239,75 @@ class RBStateReader(threading.Thread):
     def run(self) -> None:
         if os.getenv(_RB_STATE_DISABLE_ENV):
             log.info("RBStateReader disabled via %s", _RB_STATE_DISABLE_ENV)
-            self._set_all_anlz_unavailable()
-            self._set_all_transport_unavailable()
-            self._set_all_track_load_unavailable()
-            self._set_all_master_unavailable()
+            self._mark_all_unavailable()
             return
         if self._offs is None:
             bridge_log.health("rb", "no offsets for current RB version; not starting")
-            self._set_all_anlz_unavailable()
-            self._set_all_transport_unavailable()
-            self._set_all_track_load_unavailable()
-            self._set_all_master_unavailable()
+            self._mark_all_unavailable()
             return
-        try:
-            task, base = self._attach()
-        except Exception:
-            bridge_log.health(
-                "rb", "attach failed; direct events unavailable",
-                lvl=logging.ERROR, exc_info=True,
-            )
-            self._set_all_anlz_unavailable()
-            self._set_all_transport_unavailable()
-            self._set_all_track_load_unavailable()
-            self._set_all_master_unavailable()
-            return
-        bridge_log.health(
-            "rb", "attached to rekordbox pid=%s version=%s (base 0x%x)",
-            self._rb_pid, self._offs.version, base, lvl=logging.INFO,
-        )
 
-        next_tick = self._clock()
+        waiting_logged = False
         with bridge_log.thread_guard("rb-state-reader"):
             while not self._stop_event.is_set():
                 try:
-                    self._tick(task, base)
-                except OSError as exc:
-                    # mach_vm_read_overwrite failed — likely pointer chain broke
-                    # mid-poll (common during track loads). Single-tick error is OK.
-                    log.debug("RBStateReader: tick read error: %s", exc)
+                    task, base = self._attach()
                 except Exception:
-                    log.exception("RBStateReader: tick crashed; sleeping 1 s")
-                    self._sleeper(1.0)
-                    next_tick = self._clock()
+                    self._mark_all_unavailable()
+                    self._clear_attach_cache()
+                    if not waiting_logged:
+                        bridge_log.health(
+                            "rb",
+                            "waiting for rekordbox; direct events paused (retrying)",
+                            lvl=logging.WARNING,
+                        )
+                        waiting_logged = True
+                    else:
+                        log.debug(
+                            "RBStateReader: still waiting for rekordbox; retrying",
+                            exc_info=True,
+                        )
+                    self._stop_event.wait(5.0)
                     continue
-                next_tick += self._period
-                sleep = next_tick - self._clock()
-                if sleep > 0:
-                    self._sleeper(sleep)
-                else:
-                    # Missed deadline; resync rather than spinning
-                    next_tick = self._clock()
-        self._set_all_anlz_unavailable()
-        self._set_all_transport_unavailable()
-        self._set_all_track_load_unavailable()
-        self._set_all_master_unavailable()
+
+                waiting_logged = False
+                self._set_attached(True)
+                bridge_log.health(
+                    "rb", "attached to rekordbox pid=%s version=%s (base 0x%x)",
+                    self._rb_pid, self._offs.version, base, lvl=logging.INFO,
+                )
+
+                next_tick = self._clock()
+                while not self._stop_event.is_set():
+                    try:
+                        self._tick(task, base)
+                    except OSError as exc:
+                        # mach_vm_read_overwrite failed — often a transient chain
+                        # break mid-poll. If the process itself is gone, detach
+                        # and wait for relaunch instead of spinning forever.
+                        if self._pid_gone(self._rb_pid):
+                            bridge_log.health(
+                                "rb", "rekordbox gone; detaching",
+                                lvl=logging.WARNING,
+                            )
+                            self._mark_all_unavailable()
+                            self._clear_attach_cache()
+                            break
+                        log.debug("RBStateReader: tick read error: %s", exc)
+                    except Exception:
+                        log.exception("RBStateReader: tick crashed; sleeping 1 s")
+                        self._sleeper(1.0)
+                        next_tick = self._clock()
+                        continue
+                    next_tick += self._period
+                    sleep = next_tick - self._clock()
+                    if sleep > 0:
+                        self._sleeper(sleep)
+                    else:
+                        # Missed deadline; resync rather than spinning
+                        next_tick = self._clock()
+
+        self._mark_all_unavailable()
+        self._clear_attach_cache()
 
     # ── Attach helpers ───────────────────────────────────────────────────────
     def _attach(self) -> tuple[int, int]:

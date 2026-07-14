@@ -134,6 +134,15 @@ def rekordbox_status(version: str, supported: bool, health: dict) -> dict:
     }
 
 
+def apply_event_reader_waiting_reason(health: dict, *, attached: bool) -> dict:
+    """When memory health has no reason and the direct event reader is not attached,
+    name the wait so the menubar is not silent while RB is still launching."""
+    out = dict(health) if isinstance(health, dict) else {}
+    if not out.get("reason") and not attached:
+        out["reason"] = "waiting_for_rekordbox"
+    return out
+
+
 class StatusWriter(threading.Thread):
     def __init__(
         self,

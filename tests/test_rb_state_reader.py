@@ -1349,29 +1349,29 @@ class HealthTransitionTests(unittest.TestCase):
         self.assertEqual(records[0].levelname, "WARNING")
         self.assertIn("no offsets", records[0].getMessage())
 
-    def test_attach_failure_emits_health_rb_error_with_traceback(self) -> None:
+    def test_attach_failure_waits_and_retries(self) -> None:
         q: queue.Queue = queue.Queue()
-        reader = mod.RBStateReader(q, _make_offsets())
+        reader = mod.RBStateReader(q, _make_offsets(), sleeper=lambda _s: None)
         reader._attach = mock.Mock(side_effect=RuntimeError("synthetic attach failure"))
+        # First wait interrupt: stop so the outer loop exits promptly.
+        reader._stop_event.wait = mock.Mock(side_effect=lambda _t=None: reader._stop_event.set() or True)
         logger, handler, prior_level, records = _capture("health.rb")
         self.addCleanup(logger.setLevel, prior_level)
         self.addCleanup(logger.removeHandler, handler)
 
-        reader.start()
-        reader.join(timeout=1.0)
+        reader.run()
 
-        self.assertFalse(reader.is_alive())
         self.assertEqual(len(records), 1)
-        self.assertEqual(records[0].levelname, "ERROR")
-        self.assertIsNotNone(records[0].exc_info)
-        self.assertIn("attach failed", records[0].getMessage())
+        self.assertEqual(records[0].levelname, "WARNING")
+        self.assertIn("waiting for rekordbox", records[0].getMessage())
+        self.assertGreaterEqual(reader._attach.call_count, 1)
+        self.assertFalse(reader.attach_health()["attached"])
 
     def test_attached_emits_health_rb_info(self) -> None:
         q: queue.Queue = queue.Queue()
-        reader = mod.RBStateReader(q, _make_offsets())
+        reader = mod.RBStateReader(q, _make_offsets(), sleeper=lambda _s: None)
         reader._attach = mock.Mock(return_value=(0xCAFE, 0x100000000))
-        # No tick loop needed for this assertion: stop before run() enters it.
-        reader._stop_event.set()
+        reader._tick = mock.Mock(side_effect=lambda *_a: reader._stop_event.set())
         logger, handler, prior_level, records = _capture("health.rb")
         self.addCleanup(logger.setLevel, prior_level)
         self.addCleanup(logger.removeHandler, handler)
@@ -1381,6 +1381,119 @@ class HealthTransitionTests(unittest.TestCase):
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0].levelname, "INFO")
         self.assertIn("attached", records[0].getMessage())
+
+    def test_attach_retries_then_ticks(self) -> None:
+        """Bridge-before-RB: attach fails twice, then succeeds and ticks."""
+        q: queue.Queue = queue.Queue()
+        reader = mod.RBStateReader(q, _make_offsets(), sleeper=lambda _s: None)
+        reader._stop_event.wait = mock.Mock(return_value=False)
+        attempts = {"n": 0}
+        ticks: list[tuple[int, int]] = []
+
+        def _attach() -> tuple[int, int]:
+            attempts["n"] += 1
+            if attempts["n"] <= 2:
+                raise RuntimeError("rekordbox not up yet")
+            reader._rb_pid = 4242
+            reader._base = 0x100000000
+            return (0xCAFE, 0x100000000)
+
+        def _tick(task: int, base: int) -> None:
+            ticks.append((task, base))
+            reader._stop_event.set()
+
+        reader._attach = _attach
+        reader._tick = _tick
+        reader.run()
+
+        self.assertEqual(attempts["n"], 3)
+        self.assertEqual(ticks, [(0xCAFE, 0x100000000)])
+        self.assertFalse(reader.attach_health()["attached"])  # cleared on exit
+
+    def test_pid_gone_mid_run_detaches_and_reattaches(self) -> None:
+        q: queue.Queue = queue.Queue()
+        reader = mod.RBStateReader(q, _make_offsets(), sleeper=lambda _s: None)
+        reader._stop_event.wait = mock.Mock(return_value=False)
+        attaches = {"n": 0}
+        ticks = {"n": 0}
+        unavailable_marks = {"n": 0}
+        orig_mark = reader._mark_all_unavailable
+
+        def _mark() -> None:
+            unavailable_marks["n"] += 1
+            orig_mark()
+
+        def _attach() -> tuple[int, int]:
+            attaches["n"] += 1
+            reader._rb_pid = 5000 + attaches["n"]
+            reader._base = 0x100000000
+            return (0xCAFE, 0x100000000)
+
+        def _tick(task: int, base: int) -> None:
+            ticks["n"] += 1
+            if ticks["n"] == 1:
+                raise OSError("mach_vm_read_overwrite failed")
+            reader._stop_event.set()
+
+        reader._attach = _attach
+        reader._tick = _tick
+        reader._mark_all_unavailable = _mark
+        with mock.patch.object(mod.os, "kill", side_effect=OSError(3, "No such process")):
+            reader.run()
+
+        self.assertGreaterEqual(attaches["n"], 2)
+        self.assertGreaterEqual(ticks["n"], 2)
+        self.assertGreaterEqual(unavailable_marks["n"], 1)
+        self.assertIsNone(reader._rb_pid)
+        self.assertIsNone(reader._base)
+
+    def test_stop_during_waiting_exits_promptly(self) -> None:
+        import threading
+        import time
+
+        q: queue.Queue = queue.Queue()
+        reader = mod.RBStateReader(q, _make_offsets())
+        reader._attach = mock.Mock(side_effect=RuntimeError("no rekordbox yet"))
+
+        def _stop_soon() -> None:
+            time.sleep(0.05)
+            reader.stop()
+
+        stopper = threading.Thread(target=_stop_soon, daemon=True)
+        stopper.start()
+        t0 = time.monotonic()
+        reader.run()
+        elapsed = time.monotonic() - t0
+        stopper.join(timeout=1.0)
+        self.assertLess(elapsed, 2.0, f"stop() should interrupt the 5s wait; took {elapsed:.2f}s")
+
+    def test_status_merge_waiting_when_event_reader_not_attached(self) -> None:
+        from rb_ss_bridge_v2.runtime_status import (
+            apply_event_reader_waiting_reason,
+            rekordbox_status,
+        )
+
+        waiting = apply_event_reader_waiting_reason(
+            {"reads_ok": True, "reason": ""}, attached=False,
+        )
+        status = rekordbox_status("7.2.16", True, waiting)
+        self.assertEqual(status["reason"], "waiting_for_rekordbox")
+        self.assertTrue(status["reads_ok"])
+
+        attached = apply_event_reader_waiting_reason(
+            {"reads_ok": True, "reason": ""}, attached=True,
+        )
+        self.assertEqual(attached.get("reason") or "", "")
+        self.assertEqual(
+            rekordbox_status("7.2.16", True, attached)["reason"], "",
+        )
+
+        # Memory health reason still wins over the waiting overlay.
+        blocked = apply_event_reader_waiting_reason(
+            {"reads_ok": False, "reason": "reads_blocked"}, attached=False,
+        )
+        self.assertEqual(blocked["reason"], "reads_blocked")
+        self.assertFalse(blocked["reads_ok"])
 
     def test_enqueue_full_emits_health_queue_throttled(self) -> None:
         q: queue.Queue = queue.Queue(maxsize=1)

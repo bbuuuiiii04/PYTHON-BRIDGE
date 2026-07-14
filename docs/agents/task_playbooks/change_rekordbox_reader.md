@@ -64,6 +64,16 @@ Implementation notes:
   (`_note_candidate_discarded`). If you touch this gate, re-verify the
   browse-storm-emits-nothing, FEIN-still-emits, and deck-1/2-symmetry cases
   in `tests/test_rb_state_reader.py`.
+- (AWR-234) `RBStateReader.run()` must retry attach, not exit on the first
+  miss: wrap attach + tick in an outer while-not-stopped loop; on attach
+  failure mark all unavailable, clear cached `_rb_pid`/`_base`, log one
+  WARNING then DEBUG on repeats, and `stop_event.wait(5.0)`; on mid-session
+  process death after a tick `OSError` (`os.kill(pid, 0)` fails) detach the
+  same way and break back to the outer wait. Do not change `_tick` logic,
+  ANLZ_PATH-before-TRACK_LOADED, or enqueue-only emission. Keep
+  `attach_health()` and the status-provider waiting overlay (`waiting_for_rekordbox`
+  only when memory health has no reason). Re-verify the four lifecycle cases
+  in `tests/test_rb_state_reader.py` (`HealthTransitionTests`).
 - (AWR-173) CFX FILTER tracking is **tracking/status only** and MUST stay
   isolated from mixer/active-deck authority. `_tick_cfx` reads its own chains,
   publishes `Ev.CFX_STATE`/`CfxFilterSnapshot`, and must NEVER: join

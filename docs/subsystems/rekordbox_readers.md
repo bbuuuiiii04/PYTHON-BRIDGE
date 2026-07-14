@@ -73,6 +73,15 @@ Runtime flow:
 - Deck 1/2 transport support fails closed: once a transport path was available,
   becoming unreadable emits `PAUSE` with `reason=transport_unavailable`; raw
   Deck C/D transport remains suppressed for resolver eligibility
+- `RBStateReader` attach is retrying, not one-shot (AWR-234): if the bridge
+  starts before Rekordbox is up, the thread marks all direct signals
+  unavailable, logs one WARNING then DEBUG on repeats, clears cached pid/base,
+  waits ~5 s on `stop_event`, and retries. Mid-session process death
+  (`os.kill(pid, 0)` failure after a tick `OSError`) detaches the same way and
+  re-enters the wait/retry loop. `attach_health()` exposes `{'attached': bool}`;
+  when memory health has no reason and the event reader is not attached, status
+  surfaces `reason=waiting_for_rekordbox` (reads_ok unchanged). Tick logic,
+  ANLZ_PATH-before-TRACK_LOADED, and enqueue-only emission are unchanged.
 - `ANLZ_PATH` and `TRACK_LOADED` payloads carry `rb_raw_deck` (the raw RB deck
   index 0-3) so `StateManager` can reject a load surfacing on the idle RB
   sibling of a playing bridge deck (RB decks 1&3 collapse onto bridge deck 1,

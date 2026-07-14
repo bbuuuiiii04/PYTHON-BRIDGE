@@ -98,7 +98,12 @@ from .govee_lan_discovery import resolve_realtime_ip
 from .govee_frame_engine_client import GoveeFrameEngineClient
 from .led_dispatch_coordinator import LEDDispatchCoordinator
 from .personality_resolver import PersonalityResolver, PlaylistCache
-from .runtime_status import CommandReader, StatusWriter, rekordbox_status
+from .runtime_status import (
+    CommandReader,
+    StatusWriter,
+    apply_event_reader_waiting_reason,
+    rekordbox_status,
+)
 from .validation_runner import ValidationRunner
 from .tools.config_reloader import ConfigReloader, HOT_RELOAD_DISABLE_ENV
 
@@ -1528,6 +1533,10 @@ def main() -> None:
     def _rekordbox_status_provider() -> dict:
         reader = _rb_reader_holder.get("reader")
         health = reader.read_health() if reader is not None else {}
+        event_reader = _rb_reader_holder.get("event_reader")
+        if event_reader is not None:
+            attached = bool(event_reader.attach_health().get("attached"))
+            health = apply_event_reader_waiting_reason(health, attached=attached)
         return rekordbox_status(rb_version_for_direct_master or "", _rb_supported, health)
 
     status_writer = StatusWriter(
@@ -1678,6 +1687,8 @@ def main() -> None:
     # Late-bind the reader so the status provider (built above) can report its
     # attach health once it is running.
     _rb_reader_holder["reader"] = mem_reader
+    if rb_state_reader is not None:
+        _rb_reader_holder["event_reader"] = rb_state_reader
 
     # MTC reader — ~25 fps position fallback from RB via IAC Bus 1.
     # Posts TC_UPDATE events for the active deck; state_manager ignores them

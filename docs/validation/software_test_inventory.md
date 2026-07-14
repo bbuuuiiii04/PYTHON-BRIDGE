@@ -236,6 +236,17 @@ contract-globbed tooling under `tools/`, literal/star glob behavior, and the
   its own once the title is already confirmed. Pure seams via the existing
   fake mach-read backend — no mach, no live process.
 
+## Rekordbox Direct Event Reader Attach Retry (AWR-234)
+
+- `tests/test_rb_state_reader.py` (`HealthTransitionTests`) covers the
+  lifecycle fix for one-shot attach death: attach fails twice then succeeds
+  and ticks (thread never dies); mid-run pid disappearance marks signals
+  unavailable, clears cached pid/base, and re-attaches; `stop()` during the
+  waiting phase exits promptly (does not burn the full 5 s wait); and
+  `apply_event_reader_waiting_reason` surfaces `waiting_for_rekordbox` when
+  the event reader is unattached while leaving memory `reads_ok` and any
+  existing memory reason unchanged. Pure mocks — no mach, no live process.
+
 ## Rekordbox Mixer Active-Deck Authority
 
 The active-deck authority implementation is covered by focused software tests:
