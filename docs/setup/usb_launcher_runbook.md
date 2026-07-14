@@ -309,6 +309,16 @@ carries the secrets it shipped with.
   it, Govee/SoundSwitch discovery just finds nothing. There is no clean signal to
   surface; if the rig is silent and reads are OK, check System Settings → Privacy →
   Local Network for "RBSS Bridge".
+- **KNOWN LIMITATION — the IAC Driver is OFF by default on every fresh Mac.** The
+  bridge's MIDI look-selection path (laser scene notes out, pack look selection in,
+  `soundswitch_midi_input.py`) rides on the macOS "IAC Driver Bus 1" app-to-app MIDI
+  bus, and Apple ships it disabled with no API to enable it from software. On a
+  guest Mac the bridge degrades with `iac driver bus 1 not available` (surfaced live
+  on a guest 2026-07-11; LEDs/Govee are unaffected — they never touch MIDI). One-time
+  manual fix per guest Mac: Applications → Utilities → **Audio MIDI Setup** →
+  Window → **Show MIDI Studio** → double-click **IAC Driver** → tick **"Device is
+  online"** (the default bus name "Bus 1" is what the bridge expects — don't rename
+  it). Then restart the bridge.
 - **Patch Rekordbox path (AWR-223):** it signs Rekordbox with **one**
   root-bundle ad-hoc `codesign` (no `--deep`, no nested re-sign), under the
   RBSS app's native macOS authorization. It adds only `get-task-allow`,
