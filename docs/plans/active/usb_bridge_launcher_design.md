@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: spec
-last_verified_commit: 8de088e
+last_verified_commit: 81f1b15
 last_verified_date: 2026-07-13
 validation_scope: >
   Current macOS USB launcher design reconciled to the landed M1/M2 code and
@@ -16,10 +16,13 @@ validation_scope: >
   executed; it is not a reader, adds no menu item of its own, and has no
   runtime wiring. The separate RB7216 Patch Rekordbox menubar action sits in
   the maintenance block with Export/Rebuild (always visible; Export/Rebuild
-  source-only; target entitlement only). `rekordbox_patch.py` runs exactly one
+  source-only; valid target patch only). `rekordbox_patch.py` adds only
+  get-task-allow, preserves existing entitlements, and runs exactly one
   root-bundle ad-hoc codesign (no --deep, no nested re-sign) under the calling
   app's native macOS authorization (not osascript; no full Rekordbox backup by
-  operator request). Local `/Applications` RB 7.2.16 apply passed deep+strict
+  operator request). Its privileged script is carried in argv and creates the
+  entitlement plist root-owned, rather than leaving either pending payload in
+  a user-writable temp file. Local `/Applications` RB 7.2.16 apply passed deep+strict
   verification and GTA inspection; a signed frozen probe app also performed a
   native-authorized inert write/remove in the Rekordbox bundle. Frozen Info.plist declares
   NSAppBundlesUsageDescription (implemented/software-tested). Frozen Patch
@@ -60,6 +63,18 @@ relates_to: cross_platform_portability_plan.md, track_identity_move_invariance_d
 > source-only). It targets only the Rekordbox entitlement. AWR-222 remains
 > open on the stock-SIP live gate (and AX E3 matrix), not on a proven
 > impossibility of the target-patch path.
+
+> **2026-07-13 patch/USB hardening (`81f1b15`, plus installer/builder commit
+> `8cef272`).** The menu's grey **Rekordbox Patched** state now requires both
+> GTA and a deep+strict signature; the initial slow check renders grey
+> **Checking Rekordbox…**, and GTA with an invalid signature remains actionable
+> for repair. The patch adds nothing beyond GTA, uses no full-app backup, and
+> removes user-writable privileged script/entitlement races. Real USB builds
+> require a clean, unchanged HEAD and a `/Volumes/.../PIONEER` target; payload
+> symlinks are refused and the Govee credential is owner-only. Native install
+> rejects payload symlinks, keeps the Govee file `0600`, and gives conservative
+> guidance if rollback itself fails. These are software proofs only; no physical
+> foreign-Mac patch, attach, installer, or lighting run was performed.
 
 Approved design (2026-07-04). This is the Mac-only "USB-ify" concretization of the portability
 work; the Windows/cross-platform half is deferred. Reviewed + revised 2026-07-04, twice and

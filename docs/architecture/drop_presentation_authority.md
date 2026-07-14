@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: operator-authoritative target behavior
-last_verified_commit: HEAD-2026-07-12-awr220
-last_verified_date: 2026-07-12
-validation_scope: behavior contract, implemented and software-tested against it; no live or hardware validation implied
+last_verified_commit: 81f1b15
+last_verified_date: 2026-07-13
+validation_scope: behavior contract, implemented and software-tested against it; AWR-207 path-only correction keeps Rekordbox-7 split local UUID loads on the early phrase-worker path while real `/Volumes` loads remain resolved-time-only; no live or hardware validation implied
 ---
 
 # Drop Presentation Authority
@@ -18,6 +18,12 @@ intentionally updated. Code-grounded design detail lives in
 Sibling authorities: `palette_control_authority.md` (the deck surface),
 `laser_color_authority.md` (laser color), `laser_blackout_authority.md`
 (blackout ownership).
+
+Reader timing note (2026-07-13): `_is_device_export_anlz_path()` now
+reassembles Rekordbox 7's local `first-3 + UUID remainder` directory layout.
+That prevents a local load from being mistaken for USB and delaying its early
+phrase worker. Mounted `/Volumes/...` loads still take the AWR-207 USB rule;
+drop-presentation policy, decisions, and output ownership are otherwise unchanged.
 
 ## Meaning
 

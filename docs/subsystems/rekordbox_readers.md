@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 9edb035
+last_verified_commit: 81f1b15
 last_verified_date: 2026-07-13
-validation_scope: software-only plus Rekordbox 7.2.11 passive mixer RE evidence routing; Rekordbox 7.2.16 direct-reader offset row software-tested (four roots STATIC-CONFIRMED; interior hops CANDIDATE from 7.2.14 deck + 7.2.11 mixer/CFX layout; live-unvalidated); AWR-157 deck-2 chain freshness gating software-tested; AWR-160 phantom track-load stability gate software-tested; AWR-207/AWR-209/AWR-211 USB local-twin, foreign-import, portable-sidecar refresh, and phrase-worker handoff software-tested; USB ANLZ PPTH leading-slash stick-root-relative paths accepted by `_device_audio_filepath` (software-tested); AWR-222 dormant AX measurement probe implemented/software-tested/not executed (not a reader); hardware-output unvalidated
+validation_scope: software-only plus Rekordbox 7.2.11 passive mixer RE evidence routing; Rekordbox 7.2.16 direct-reader offset row software-tested (four roots STATIC-CONFIRMED; interior hops CANDIDATE from 7.2.14 deck + 7.2.11 mixer/CFX layout; live-unvalidated); AWR-157 deck-2 chain freshness gating software-tested; AWR-160 phantom track-load stability gate software-tested; AWR-207/AWR-209/AWR-211 USB local-twin, foreign-import, portable-sidecar refresh, phrase-worker handoff, and Rekordbox-7 split-local-UUID classification software-tested; USB ANLZ PPTH leading-slash stick-root-relative paths accepted by `_device_audio_filepath` (software-tested); AWR-222 dormant AX measurement probe implemented/software-tested/not executed (not a reader); hardware-output unvalidated
 ---
 
 # Rekordbox Readers
@@ -136,7 +136,12 @@ Runtime flow:
   an already-confirmed track is unchanged and immediate — the gate delays
   recognition of a new candidate, it never suppresses a stable state.
 - AWR-207/AWR-209 USB-export resolution (`filepath_resolver.py`): local UUID
-  lookup is unchanged. A device-export miss filters local DB rows by BPM
+  lookup is unchanged. The path-only classifier recognizes both local layouts:
+  a complete UUID directory and Rekordbox 7's split
+  `USBANLZ/<first-3>/<UUID remainder>/ANLZ...` layout. `/Volumes/...` remains a
+  device export before UUID inspection. This keeps the early phrase worker on
+  for local loads while real USB loads still use only the resolved-time worker.
+  A device-export miss filters local DB rows by BPM
   (±0.05) and duration (±2 s), reads ANLZ only for that candidate set, and
   accepts an untagged mirror twin only when the complete beatgrid fingerprint
   is exact. The payload carries local
@@ -206,11 +211,12 @@ Tests:
   Pure seams via the existing fake mach-read backend — no mach, no live
   process.
 - `tests/test_filepath_resolver_usb_twin.py` proves AWR-207/AWR-209 device
-  detection, exact mirror identity, red-team collision abstention, minimal PDB
+  detection (including split local UUID versus the same shape under `/Volumes`),
+  exact mirror identity, red-team collision abstention, minimal PDB
   parsing, copied/referenced imports, cross-analysis matching, conflict and
   duplicate rejection, actionable analysis misses, payload parity, and the
-  no-lsof miss. `tests/test_smart_transitions.py` pins local-path behavior
-  unchanged plus the payload-selected local ANLZ handoff.
+  no-lsof miss. `tests/test_smart_transitions.py` pins the split-local path's
+  early + resolved worker calls plus the payload-selected local ANLZ handoff.
 - `tests/test_filepath_resolver_sidecar.py` proves AWR-211 schema/path guards,
   revalidated multi-mount and installed discovery, rebuild/unplug/replug,
   identical-root deduplication, conflicting-generation rejection,

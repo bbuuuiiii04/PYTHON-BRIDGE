@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: d5bfaa4
+last_verified_commit: 81f1b15
 last_verified_date: 2026-07-13
-validation_scope: software-only; runtime command rail and slim source/frozen menubar inventory tested, including the state-aware Patch Rekordbox action in the maintenance block with Export/Rebuild (target entitlement only; exit-0 enabled dialog uses verification wording, not a fresh-install claim; stock foreign-Mac attach live-unvalidated / unknown; App Management Info.plist declaration + patcher guidance software-tested, grant/escalation live-unvalidated); AWR-222 dormant AX probe is packaged dispatch only (no menu item of its own, not executed); native install failure alerts use plain-language copy at the menubar boundary; frozen app and hardware behavior unvalidated
+validation_scope: software-only; runtime command rail and slim source/frozen menubar inventory tested, including the state-aware Patch Rekordbox action in the maintenance block with Export/Rebuild (GTA plus deep-strict signature state; initial deep check is grey Checking Rekordbox; stock foreign-Mac attach live-unvalidated / unknown; App Management Info.plist declaration + native authorization guidance software-tested, friend-Mac grant/live apply unvalidated); AWR-222 dormant AX probe is packaged dispatch only (no menu item of its own, not executed); native install failure alerts use conservative plain-language copy at the menubar boundary; frozen app and hardware behavior unvalidated
 ---
 
 # Runtime Commands Subsystem
@@ -123,19 +123,21 @@ SoundSwitch pack-player boundary (T7c/T7e):
   slim-menu cut that removed it): dispatches the existing target-patch child
   only (`--patch-rekordbox`; frozen argv stays `[sys.executable,
   "--patch-rekordbox"]`, source keeps the usb_launcher argv). Visible titles:
-  **Rekordbox Patched** (greyed) only after `has_get_task_allow` is positively
-  verified on the target; **Patch Rekordbox** (actionable) when absent,
-  unknown, or not yet checked; **Patching Rekordbox…** (greyed) while the
-  watched child runs. Exit 0 with a watcher-enabled verdict shows **Rekordbox
-  target patch verified** (entitlement present) — never a fresh-install claim —
-  and still only greys **Rekordbox Patched** after that positive check. A
-  positive target entitlement proves the Rekordbox patch only — not a live
+  **Checking Rekordbox…** (greyed) during the first background deep-signature
+  check; **Rekordbox Patched** (greyed) only when `get-task-allow` is present
+  and `codesign --verify --deep --strict` passes; **Patch Rekordbox**
+  (actionable) when absent, invalid, or unknown; **Patching Rekordbox…**
+  (greyed) while the watched child runs. An invalid signature with GTA still
+  present stays actionable so the patch can repair it. Exit 0 still requires
+  that complete target verdict before greying the item. A valid target patch
+  proves the Rekordbox patch only — not a live
   attach or full stock foreign-Mac parity (AWR-222 stock attach remains
   live-unvalidated / unknown). macOS App Management can block
   `/Applications` writes even after an admin password; the frozen app declares
   `NSAppBundlesUsageDescription`, and the patcher surfaces App Management
-  guidance on that failure class only — grant + `osascript` escalation remain
-  live-unvalidated (do not claim friend-Mac patch works yet). The old standing
+  guidance on that failure class only. The shipped route uses RBSS Bridge's
+  native authorization, not Terminal or `osascript`; a physical friend-Mac
+  grant/apply remains live-unvalidated. The old standing
   `Rekordbox target patch: …` status row stays absent; Status remains exactly
   four disabled rows. Operator-visible copy never says "Enable Rekordbox
   Reads". Signing/recovery code behind the click remains software-tested /
@@ -143,8 +145,9 @@ SoundSwitch pack-player boundary (T7c/T7e):
 - The Rebuild USB item is state-aware like the export item
   (usb_rebuild_button_state_spec_2026_07_12): **No USB Found** (no PIONEER
   mount, greyed), **USB Bridge Rebuilt** (greyed; the stamped stick generation
-  matches AND a stat-signature over the build inputs — bridge sources, the four
-  live configs, `govee.env`, spectral cache, exported pack, Stream Deck
+  matches AND a stat-signature over the build inputs — bridge/tool sources,
+  pad assets, config examples, the four live configs, `govee.env`, spectral
+  cache, exported pack, Stream Deck
   bindings — is unchanged since the last button rebuild), **Rebuild USB
   Bridge…** (actionable; any change, ambiguity, or terminal-side rebuild
   resolves here — the check never claims "rebuilt" without positive proof), and
@@ -153,7 +156,9 @@ SoundSwitch pack-player boundary (T7c/T7e):
   runs on a daemon thread (stat-only, no content hashing); the stamp lives at
   `~/Library/Application Support/RBSS Bridge/.usb_rebuild_state.json` and
   records the CLICK-time source fingerprint plus the stick's published build
-  generation. Menubar UI state still does not prove bridge/watcher process
+  generation. A real build also refuses a target outside `/Volumes`, a dirty
+  repo, or a repo whose HEAD/files move during build/publication. Menubar UI
+  state still does not prove bridge/watcher process
   state. SoundSwitch status, deck rows, check status, smart-phrasing
   status/menu, Laser Director menu, Record Session, Test the Lights, and
   normal Health Check remain absent from both editions. The detailed facts
@@ -163,7 +168,7 @@ SoundSwitch pack-player boundary (T7c/T7e):
   runtime wiring (`--probe-rekordbox-accessibility` is packaged dispatch only;
   implemented/software-tested/not executed; not a reader). The separate RB7216
   **Patch Rekordbox** action above is intentionally restored in both menus
-  (target entitlement only). Stock foreign-Mac attach after clean
+  (valid target patch only, not live attach). Stock foreign-Mac attach after clean
   patch+verify+GTA+relaunch remains live-unvalidated / unknown; AX is not the
   selected replacement reader.
 - Native Install/Update/Retry failure alerts use

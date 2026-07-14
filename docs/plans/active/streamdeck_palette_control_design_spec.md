@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified for Packages 2-3 and AWR-121; design-intent for anything still unimplemented
-last_verified_commit: 96923d3
-last_verified_date: 2026-07-08
-validation_scope: Packages 2-3 plus AWR-121 gesture v2 software-tested; hardware-unvalidated
+last_verified_commit: 81f1b15
+last_verified_date: 2026-07-13
+validation_scope: Packages 2-3 plus AWR-121 gesture v2 software-tested; AWR-207 split-local-UUID early phrase-worker correction reverified with no palette/gesture/policy change; hardware-unvalidated
 ---
 
 # Stream Deck Palette Control — Design Spec (pre-handoff)

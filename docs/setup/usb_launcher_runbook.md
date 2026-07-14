@@ -1,11 +1,13 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 8de088e
+last_verified_commit: 81f1b15
 last_verified_date: 2026-07-13
 validation_scope: >
   Current USB builder, frozen launcher, native install/purge, target
-  Rekordbox patch, and software tests. Target get-task-allow is the expected
+  Rekordbox patch, and software tests. The patch adds only target
+  get-task-allow while preserving existing entitlements. A valid menu verdict
+  additionally requires deep+strict signature verification. Target GTA is the expected
   TimecodeLink-style access mechanism. A positive entitlement proves the
   Rekordbox target patch only — not a live attach. Stock Apple-Silicon
   foreign-Mac attach after successful patch + deep verify + GTA=true +
@@ -14,7 +16,9 @@ validation_scope: >
   attempts never reached that clean pre-attach state. Rekordbox patch signing
   is one root-bundle ad-hoc codesign (no --deep, no nested re-sign) under one
   native macOS authorization (not osascript; no full Rekordbox backup by
-  operator request). Local `/Applications` RB 7.2.16 apply passed deep+strict
+  operator request). The native privileged payload is passed in argv and its
+  entitlement plist is created root-owned, closing the password-prompt temp-file
+  race. Local `/Applications` RB 7.2.16 apply passed deep+strict
   verification and GTA inspection; a signed frozen RBSS probe also made a
   native-authorized inert write/remove in the Rekordbox bundle. Frozen Info.plist declares
   NSAppBundlesUsageDescription for App Management; frozen confirmation/result
@@ -23,7 +27,7 @@ validation_scope: >
   attach. A dormant Accessibility MEASUREMENT probe is
   implemented/software-tested and not executed (not a reader; no menu item;
   no runtime wiring). The separate RB7216 Patch Rekordbox menubar action sits
-  in the maintenance block with Export/Rebuild (target entitlement only;
+  in the maintenance block with Export/Rebuild (valid target-patch state only;
   always visible; Export/Rebuild source-only). make_stick stamps GENERATION
   into Info.plist (fallback 0.0.1). No install.command/purge.command helpers.
   SOFTWARE-VALIDATED COMPONENTS ONLY / STOCK FOREIGN-MAC ATTACH
@@ -154,7 +158,7 @@ mode as supported, operational, validated, or a replacement reader. The dormant
 AX measurement probe itself adds no menu item and no runtime wiring. The separate
 RB7216 **Patch Rekordbox** action sits in the maintenance block with
 Export/Rebuild (always visible in both editions; Export/Rebuild source-only); it
-targets only the Rekordbox entitlement. Positive entitlement ≠ live attach
+  targets only the Rekordbox target. Positive patch state ≠ live attach
 proof; stock foreign-Mac attach after clean patch+verify+GTA+relaunch remains
 live-unvalidated / unknown.
 
@@ -296,7 +300,10 @@ carries the secrets it shipped with.
   Local Network for "RBSS Bridge".
 - **Patch Rekordbox path (AWR-223):** it signs Rekordbox with **one**
   root-bundle ad-hoc `codesign` (no `--deep`, no nested re-sign), under the
-  RBSS app's native macOS authorization. It does **not** create a full Rekordbox
+  RBSS app's native macOS authorization. It adds only `get-task-allow`,
+  preserves the target's existing entitlements, passes the privileged script
+  in argv, and creates the signing entitlement plist root-owned under
+  `/var/tmp`. It does **not** create a full Rekordbox
   backup, by the operator's instruction. A failure therefore never claims that
   Rekordbox was restored; reinstall/update Rekordbox if its later signature
   check fails. Local `/Applications` RB 7.2.16 patch passed deep+strict + GTA
@@ -336,12 +343,21 @@ change SIP, or prove memory reads.
    macOS admin prompt. If macOS reports App Management blocking the action, open
    System Settings → Privacy & Security → App Management, enable **RBSS Bridge**,
    and retry the same action.
-4. A grey **Rekordbox Patched** label means only that `get-task-allow` was read
-   back successfully. Relaunch Rekordbox and confirm it opens.
+4. After restart, a grey **Checking Rekordbox…** may appear while the large app
+   is deep-verified. A grey **Rekordbox Patched** means `get-task-allow` is
+   present and the full deep+strict signature passes. **Patch Rekordbox** stays
+   actionable if either check fails, including repair after a partial attempt.
+   Relaunch Rekordbox and confirm it opens.
 
 Do not use Terminal, `osascript`, or a USB rebuild to patch the friend's app.
 There is no retained or temporary full-app Rekordbox backup. A Rekordbox update
 will remove the target patch; repeat this flow after an update.
+
+`make_stick.sh` publishes only to an existing `/Volumes/...` target with
+`PIONEER/`, and a real build refuses tracked/untracked repo dirt or a HEAD/file
+change during the build. Payload symlinks are rejected, `govee.env` is staged
+and installed mode `0600`, and an installer rollback error no longer claims the
+installed copy is safe; retry from the installer-disk copy instead.
 
 ## Operator parity run (PAUSED pending stock-SIP live gate)
 
