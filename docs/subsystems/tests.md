@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 3457a1e
-last_verified_date: 2026-07-10
-validation_scope: software-only; RB7216 patch/menu/builder/install hardening, immediate grey initial-check repaint, and AWR-207 split-local-UUID classifier regression coverage added 2026-07-13; no physical foreign-Mac, bridge, or hardware action
+last_verified_commit: 187b104
+last_verified_date: 2026-07-13
+validation_scope: software-only; RB7216 patch/menu/builder/install hardening, immediate grey initial-check repaint, AppleDouble pruning and final mounted-DMG validation ordering, and AWR-207 split-local-UUID classifier regression coverage added 2026-07-13; no physical foreign-Mac, bridge, or hardware action
 ---
 
 # Tests
@@ -30,6 +30,10 @@ Common commands:
 Coverage expectations:
 - Core/state changes need state manager or integration tests.
 - Runtime command changes need parser/handler tests.
+- USB builder changes need `tests/test_make_stick.py`; final package work must
+  cover AppleDouble metadata removal before manifest creation and keep the
+  mounted-DMG signature/installer validation ordered before publication. Unit
+  tests do not invoke `hdiutil`, so a real build remains the final image proof.
 - Smart-drop/breakdown runtime-command rejection handling is covered in `tests/test_runtime_status.py`
   by callbacks returning `False`, matching the queue-full path in `__main__.py`.
 - Runtime status heartbeat changes need `tests/test_runtime_status.py` coverage for payload shape,

@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-and-config-grounded
-last_verified_commit: 81f1b15
+last_verified_commit: 187b104
 last_verified_date: 2026-07-13
 validation_scope: >
   Current USB builder, frozen launcher, native install/purge, target
@@ -28,8 +28,11 @@ validation_scope: >
   implemented/software-tested and not executed (not a reader; no menu item;
   no runtime wiring). The separate RB7216 Patch Rekordbox menubar action sits
   in the maintenance block with Export/Rebuild (valid target-patch state only;
-  always visible; Export/Rebuild source-only). make_stick stamps GENERATION
-  into Info.plist (fallback 0.0.1). No install.command/purge.command helpers.
+  always visible; Export/Rebuild source-only). make_stick removes AppleDouble
+  transport metadata before hashing, stamps GENERATION into Info.plist
+  (fallback 0.0.1), and refuses publication unless a read-only mount of the
+  finished DMG passes deep signature and native installer-package validation.
+  No install.command/purge.command helpers.
   SOFTWARE-VALIDATED COMPONENTS ONLY / STOCK FOREIGN-MAC ATTACH
   LIVE-UNVALIDATED / UNKNOWN.
 ---
@@ -123,7 +126,11 @@ malformed/unreadable `soundswitch_pack_player.json` or a declared non-empty
 `pack_path` that is not a readable directory (fail closed, so a stick never
 ships claiming success with no show; an absent config or empty `pack_path`
 stays backward-compatible no-pack). Summary line reports DMG size, payload file
-count, stick free space.
+count, stick free space. Before the stick is changed, the builder removes
+AppleDouble `._*` files and `.DS_Store` from the staged payload, creates the
+DMG, mounts that final image read-only, and runs both
+`codesign --verify --deep --strict` and the same complete manifest/hash/data validator used by native
+Install. Any failure leaves the prior stick generation unchanged.
 
 There is no supported manual build recipe. Use `make_stick.sh`; it owns the
 low-target build environment and the app-plus-payload DMG layout. The retired
@@ -372,7 +379,7 @@ acceptance checklist.
 
 | Check | Expected | Pass? |
 |---|---|---|
-| `make_stick.sh <mount>` run | builds, stages, ships; summary prints DMG size / payload count / free space | ☐ |
+| `make_stick.sh <mount>` run | builds, stages, mounts and validates the final DMG, then ships; summary prints DMG size / payload count / free space | ☐ |
 | Native install (guest Mac/user) | DMG-run menubar shows "Install on this Mac…"; confirm → app in `~/Applications`, payload + configs + `govee.env` in App Support, manifest superset written, relaunch + eject offered | ☐ |
 | Installed run = home parity | bridge behaves like the home Mac (Govee cloud up, laser/LED configs live, laser colors mapped, pre-warm hits) | ☐ |
 | Learned stores persist (frozen) | after a run, `~/Library/Application Support/RBSS Bridge/state/` gains/updates the identity + laser-solo stores | ☐ |
