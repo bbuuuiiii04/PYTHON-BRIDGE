@@ -520,8 +520,8 @@ def usb_button_enabled(in_progress: bool, state: str, frozen: bool) -> bool:
 def patch_rb_button_text(in_progress: bool, state: str) -> str:
     """Visible title for the Patch Rekordbox action (pure state table).
 
-    'Rekordbox Patched' means only that has_get_task_allow was positively
-    verified on the target — never that the bridge has attached or that stock
+    'Rekordbox Patched' means get-task-allow is present and the app's full
+    signature verifies — never that the bridge has attached or that stock
     foreign-Mac attach is proven.
     """
     if in_progress:
@@ -565,16 +565,20 @@ def classify_usb_state(
 # inputs change, update this list (test_bridge_menubar pins the key entries).
 def _usb_source_roots() -> list[Path]:
     support = Path.home() / "Library" / "Application Support" / "RBSS Bridge"
+    tools = REPO_ROOT / "tools"
+    config = REPO_ROOT / "config"
     roots: list[Path] = []
     roots += sorted(REPO_ROOT.glob("*.py"))                       # flat bridge modules
     roots += [REPO_ROOT / "streamdeck", REPO_ROOT / "scripts"]    # bundled packages
-    roots += [REPO_ROOT / "tools" / "lighting_sidecar_export.py"]  # runs at build time
+    roots += sorted(tools.glob("*.py"))                           # bundled/build tools
+    roots += [tools / "laser_pad_assets", tools / "led_pad_assets"]
     roots += [REPO_ROOT / "pyproject.toml",
               REPO_ROOT / "packaging" / "rbss_launcher.spec",
               REPO_ROOT / "packaging" / "sign.sh",
               REPO_ROOT / "packaging" / "make_stick.sh"]
     roots += sorted((REPO_ROOT / "packaging").glob("*.lock"))
-    roots += [REPO_ROOT / "config" / name for name in (
+    roots += sorted(config.glob("*.example.json"))
+    roots += [config / name for name in (
         "laser_director.json", "led_look_director.json",
         "soundswitch_pack_player.json", "laser_color_map.json")]
     roots.append(support / "govee.env")
@@ -913,6 +917,15 @@ def installed_relaunch_argv(app_dest: str | os.PathLike[str]) -> list[str]:
     ]
 
 
+def delayed_detach_argv(mount: str | os.PathLike[str]) -> list[str]:
+    """Detach a DMG after this copy exits without interpolating its path."""
+    return [
+        "/bin/sh", "-c",
+        'sleep 1; exec /usr/bin/hdiutil detach "$1" -quiet',
+        "rbss-detach", str(mount),
+    ]
+
+
 def open_browser_url(url: str) -> None:
     subprocess.run(["open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -996,18 +1009,18 @@ def _import_rekordbox_patch():
 
 
 def _rb_reads_verdict() -> tuple[str, str]:
-    """Check only the Rekordbox target's get-task-allow patch.
+    """Check the Rekordbox target entitlement and complete signature.
 
     The legacy verdict tokens are "enabled" | "not_enabled" | "unknown", but
-    enabled means only "target patch present". A positive entitlement proves
-    the target patch only — not a live task_for_pid attach. Shells out via
+    enabled means only "valid target patch present". It still does not prove
+    a live task_for_pid attach. Shells out via
     codesign and must NEVER run on the AppKit main thread."""
     try:
         rekordbox_patch = _import_rekordbox_patch()
         app = rekordbox_patch.find_rekordbox()
         if app is None:
             return "unknown", "Rekordbox app not found in /Applications"
-        if rekordbox_patch.has_get_task_allow(app):
+        if rekordbox_patch.has_valid_target_patch(app):
             return "enabled", str(app)
         return "not_enabled", str(app)
     except Exception as exc:
@@ -2400,7 +2413,7 @@ class BridgeMenuBar(NSObject):
         if mount and response == NSAlertFirstButtonReturn:
             # Detached: the eject can only succeed once this DMG-run copy exits.
             subprocess.Popen(
-                ["/bin/sh", "-c", f'sleep 1; hdiutil detach "{mount}" -quiet'],
+                delayed_detach_argv(mount),
                 start_new_session=True,
             )
         subprocess.Popen(

@@ -58,14 +58,12 @@ REKORDBOX_APP_PATHS: tuple[Path, ...] = (
 )
 REKORDBOX_BUNDLE_ID = "com.pioneerdj.rekordboxdj"
 
-# The entitlements that make the bridge's read work, matching the proven-working
-# ad-hoc signature on the maintainer's primary Mac. Merged OVER the app's existing
-# entitlements (everything else preserved), so Rekordbox keeps its own capabilities.
+# The one entitlement the bridge needs for the target patch. It is merged OVER
+# the app's existing entitlements (everything else preserved), so Rekordbox keeps
+# its own capabilities without RBSS adding unrelated code-signing exceptions.
 GET_TASK_ALLOW = "com.apple.security.get-task-allow"
 ADDED_ENTITLEMENTS: dict[str, bool] = {
     GET_TASK_ALLOW: True,
-    "com.apple.security.cs.disable-library-validation": True,
-    "com.apple.security.cs.allow-unsigned-executable-memory": True,
 }
 
 
@@ -103,6 +101,10 @@ def sanitized_system_env(mapping) -> dict:
 
 class EntitlementsReadError(RuntimeError):
     """The target's entitlements could not be read safely."""
+
+
+class SignatureVerifyError(RuntimeError):
+    """The target's signature could not be checked safely."""
 
 
 def _parse_entitlements_checked(data: bytes) -> tuple[dict, bool]:
@@ -280,7 +282,7 @@ def bundle_id(app: Path) -> str:
     try:
         with open(app / "Contents" / "Info.plist", "rb") as fh:
             return str(plistlib.load(fh).get("CFBundleIdentifier", ""))
-    except OSError:
+    except (OSError, ValueError, TypeError, plistlib.InvalidFileException):
         return ""
 
 
@@ -310,6 +312,28 @@ def has_get_task_allow(app: Path) -> bool:
     return read_entitlements(app).get(GET_TASK_ALLOW) is True
 
 
+def verify_signature(app: Path) -> tuple[bool, str]:
+    """Return deep+strict signature validity and a short failure detail."""
+    try:
+        proc = subprocess.run(
+            ["codesign", "--verify", "--deep", "--strict", str(app)],
+            capture_output=True, text=True, timeout=180,
+            env=sanitized_system_env(os.environ),
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise SignatureVerifyError(f"codesign verify could not run: {exc}") from exc
+    detail = (proc.stderr or proc.stdout or "").strip()
+    return proc.returncode == 0, detail
+
+
+def has_valid_target_patch(app: Path) -> bool:
+    """True only when GTA is present and the complete app signature verifies."""
+    if not has_get_task_allow(app):
+        return False
+    valid, _detail = verify_signature(app)
+    return valid
+
+
 def is_rekordbox_running() -> bool | None:
     """True/False when pgrep knows, None when it cannot be trusted."""
     try:
@@ -337,9 +361,9 @@ class PatchResult:
     commands: list[list[str]] | None = None
 
 
-# A "runner" runs one argv and returns (returncode, stderr). The two privileged
-# runners below receive one combined root-bundle script. Verify + entitlement
-# re-read stay read-only and always run in-process.
+# A "runner" runs one argv and returns (returncode, stderr). The native privileged
+# runner receives one combined root-bundle script. Verify + entitlement re-read
+# stay read-only and always run in-process.
 
 def _default_runner(argv: list[str]) -> tuple[int, str]:
     try:
@@ -366,51 +390,6 @@ def _failed_without_backup(
         command=argv,
         commands=commands,
     )
-
-
-def run_via_admin(argv: list[str]) -> tuple[int, str]:
-    """Run argv as root behind a macOS admin-password prompt (osascript).
-
-    The command is written to a temp shell script (each arg shell-quoted) and
-    osascript only references that fixed, shell-quoted temp path — nothing from
-    argv is interpolated into the AppleScript string, so an app/plist path can't
-    inject. Kept only for source/legacy callers; the frozen menu uses the native
-    authorization runner below.
-    """
-    script = "#!/bin/sh\nexec " + " ".join(shlex.quote(a) for a in argv) + "\n"
-    return run_shell_via_admin(script, timeout=600)
-
-
-def run_shell_via_admin(script_text: str, timeout: int = 1800) -> tuple[int, str]:
-    """Run a full shell script as root behind one osascript admin prompt.
-
-    Writes ``script_text`` to a temp file and invokes ``/bin/sh <temp>`` with
-    administrator privileges — one password dialog for the root-bundle sign.
-    Default timeout is 1800s.
-    """
-    with tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False) as fh:
-        fh.write(script_text)
-        if not script_text.endswith("\n"):
-            fh.write("\n")
-        sh_path = fh.name
-    try:
-        os.chmod(sh_path, 0o755)
-        osa = subprocess.run(
-            ["osascript", "-e",
-             f'do shell script "/bin/sh {shlex.quote(sh_path)}" with administrator privileges'],
-            capture_output=True, text=True, timeout=timeout,
-            env=sanitized_system_env(os.environ),
-        )
-        # osascript often puts failure detail in stdout; keep both for markers.
-        err = (osa.stderr or "") + (("\n" + osa.stdout) if osa.stdout else "")
-        return osa.returncode, err
-    except (OSError, subprocess.SubprocessError) as exc:
-        return 1, f"admin escalation failed: {exc}"
-    finally:
-        try:
-            os.unlink(sh_path)
-        except OSError:
-            pass
 
 
 _NATIVE_ADMIN_EXIT = "RBSS_NATIVE_RC:"
@@ -441,6 +420,24 @@ def parse_native_admin_exit(output: str) -> tuple[int, str] | None:
     return int(match.group(1)), output[:match.start()].rstrip()
 
 
+def native_shell_argv(script_text: str) -> list[str]:
+    """Immutable argv for one native-authorized shell script.
+
+    The script is carried in the child argument vector instead of a user-writable
+    temp file. That closes the password-dialog race where another local process
+    could replace the pending privileged payload before root opened it.
+    """
+    if "\0" in script_text:
+        raise ValueError("native admin script contains a NUL byte")
+    wrapper = (
+        "exec 2>&1\n"
+        "PATH=/usr/bin:/bin:/usr/sbin:/sbin\n"
+        '/bin/sh -c "$1"\n'
+        f'rc=$?; printf "\\n{_NATIVE_ADMIN_EXIT}%s\\n" "$rc"\n'
+    )
+    return ["/bin/sh", "-c", wrapper, "rbss-native", script_text]
+
+
 def run_shell_via_native_authorization(
     script_text: str, timeout: int = 1800,
 ) -> tuple[int, str]:
@@ -453,26 +450,11 @@ def run_shell_via_native_authorization(
     """
     if sys.platform != "darwin":
         return 1, "native admin authorization is available only on macOS"
-    payload_path = None
-    wrapper_path = None
     auth = ctypes.c_void_p()
     pipe = ctypes.c_void_p()
     security = None
     libc = None
     try:
-        with tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False) as fh:
-            fh.write(script_text)
-            if not script_text.endswith("\n"):
-                fh.write("\n")
-            payload_path = fh.name
-        os.chmod(payload_path, 0o700)
-        with tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False) as fh:
-            fh.write("#!/bin/sh\nexec 2>&1\nPATH=/usr/bin:/bin:/usr/sbin:/sbin\n")
-            fh.write(f"/bin/sh {shlex.quote(payload_path)}\n")
-            fh.write(f'rc=$?; printf "\\n{_NATIVE_ADMIN_EXIT}%s\\n" "$rc"\n')
-            wrapper_path = fh.name
-        os.chmod(wrapper_path, 0o700)
-
         security = ctypes.CDLL("/System/Library/Frameworks/Security.framework/Security")
         libc = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
         security.AuthorizationCreate.argtypes = [
@@ -499,7 +481,8 @@ def run_shell_via_native_authorization(
         status = security.AuthorizationCreate(None, None, 0, ctypes.byref(auth))
         if status:
             return 1, f"native admin authorization setup failed (OSStatus {status})"
-        tool = b"/bin/sh"
+        native_argv = native_shell_argv(script_text)
+        tool = native_argv[0].encode()
         tool_value = ctypes.create_string_buffer(tool)
         item = _AuthorizationItem(
             b"system.privilege.admin", len(tool),
@@ -513,7 +496,8 @@ def run_shell_via_native_authorization(
             if status == _AUTHORIZATION_CANCELED:
                 return 1, "User canceled native admin authorization."
             return 1, f"native admin authorization was not granted (OSStatus {status})"
-        argv = (ctypes.c_char_p * 2)(wrapper_path.encode(), None)
+        encoded_args = [arg.encode() for arg in native_argv[1:]]
+        argv = (ctypes.c_char_p * (len(encoded_args) + 1))(*encoded_args, None)
         # ponytail: use the still-present native API because a signed SMJobBless
         # helper cannot ship from this ad-hoc USB build; replace it only when the
         # project gains a distributable signed privileged helper.
@@ -556,12 +540,6 @@ def run_shell_via_native_authorization(
                 security.AuthorizationFree(auth, 0)
             except OSError:
                 pass
-        for path in (wrapper_path, payload_path):
-            if path:
-                try:
-                    os.unlink(path)
-                except OSError:
-                    pass
 
 
 def run_via_native_authorization(argv: list[str]) -> tuple[int, str]:
@@ -598,8 +576,18 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
             "refusing to re-sign so none are stripped.",
         )
     if not needs_patch(current):
-        return PatchResult(True, "already_patched",
-                           "Rekordbox already carries get-task-allow — nothing to do.")
+        try:
+            signature_valid, _detail = verify_signature(app)
+        except SignatureVerifyError as exc:
+            return PatchResult(
+                False, "refused",
+                f"Could not safely verify Rekordbox's signature ({exc}); refusing to re-sign it.",
+            )
+        if signature_valid:
+            return PatchResult(
+                True, "already_patched",
+                "Rekordbox carries get-task-allow and its full signature verifies — nothing to do.",
+            )
 
     merged = build_patched_entitlements(current)
     # Write the entitlements to a temp plist codesign will read.
@@ -626,13 +614,17 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
 
     # Exclusive lock so a double-click / two concurrent runs can't interleave two
     # `codesign --force` writes on the same bundle (which would corrupt it).
-    lock_fh = open(Path(tempfile.gettempdir()) / "rbss_rekordbox_patch.lock", "w")
+    lock_fh = None
     try:
         try:
+            lock_fh = open(
+                Path(tempfile.gettempdir()) / "rbss_rekordbox_patch.lock", "w"
+            )
             fcntl.flock(lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
+        except OSError as exc:
             return PatchResult(False, "refused",
-                               "Another Rekordbox patch is already in progress — wait for it to finish.")
+                               "Could not acquire the Rekordbox patch lock "
+                               f"({type(exc).__name__}); another patch may be in progress.")
 
         argvs = plan_codesign_argvs(app, ents_path)
         sign_argv = argvs[0]
@@ -641,7 +633,7 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
         admin_shell_runner = (
             run_shell_via_native_authorization
             if runner is run_via_native_authorization
-            else run_shell_via_admin if runner is run_via_admin else None
+            else None
         )
         if admin_shell_runner is not None:
             script = build_sign_script(steps)
@@ -687,18 +679,14 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
         # confirms that by relaunching Rekordbox.) The operator declined a
         # full-bundle backup, so failure reports are intentionally not recovery claims.
         try:
-            verify = subprocess.run(
-                ["codesign", "--verify", "--deep", "--strict", str(app)],
-                capture_output=True, text=True, timeout=180,
-                env=sanitized_system_env(os.environ),
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
+            signature_valid, signature_detail = verify_signature(app)
+        except SignatureVerifyError as exc:
             failed = _failed_without_backup(
                 f"could not verify the re-sign ({exc}).", sign_argv, argvs)
             return failed
-        if verify.returncode != 0:
+        if not signature_valid:
             failed = _failed_without_backup(
-                "the re-sign did not verify: " + verify.stderr.strip() + ".",
+                "the re-sign did not verify: " + signature_detail + ".",
                 sign_argv, argvs)
             return failed
         try:
@@ -722,7 +710,8 @@ def apply_patch(app: Path, *, dry_run: bool = True, runner=None) -> PatchResult:
             command=sign_argv, commands=argvs,
         )
     finally:
-        lock_fh.close()  # releases the flock
+        if lock_fh is not None:
+            lock_fh.close()  # releases the flock
         try:
             ents_path.unlink()
         except OSError:
@@ -781,8 +770,8 @@ def run_interactive_gui() -> int:
         _gui_notify("Rekordbox not found in /Applications — install it first.")
         return 2
     try:
-        already_patched = has_get_task_allow(app)
-    except EntitlementsReadError as exc:
+        already_patched = has_valid_target_patch(app)
+    except (EntitlementsReadError, SignatureVerifyError) as exc:
         _gui_notify(
             "Could not safely read Rekordbox's current entitlements, so it was "
             f"not modified: {exc}"
@@ -810,9 +799,12 @@ def run_interactive_gui() -> int:
         "blocker. A Rekordbox update will undo it. You'll be asked for your "
         "admin password."
     ):
+        print("User canceled Rekordbox patch.", file=sys.stderr)
         return 1
     result = apply_patch(app, dry_run=False, runner=run_via_native_authorization)
     _gui_notify(result.message)
+    if result.action == "refused" and "cancel" in result.message.casefold():
+        print("User canceled Rekordbox patch.", file=sys.stderr)
     return 0 if result.ok else 1
 
 
@@ -849,21 +841,29 @@ def main(argv: list[str] | None = None) -> int:
         result = apply_patch(app, dry_run=True)
     else:  # --check (default)
         try:
-            patched = has_get_task_allow(app)
-        except EntitlementsReadError as exc:
-            print(f"Could not safely read Rekordbox entitlements: {exc}")
+            gta_present = has_get_task_allow(app)
+            signature_valid, signature_detail = verify_signature(app)
+        except (EntitlementsReadError, SignatureVerifyError) as exc:
+            print(f"Could not safely verify Rekordbox: {exc}")
             return 4
+        patched = gta_present and signature_valid
         running = is_rekordbox_running()
         print(f"Rekordbox: {app}")
         print(
             "  target get-task-allow present: "
-            f"{'YES (target patch only; live attach unproven)' if patched else 'NO'}"
+            f"{'YES (target patch only; live attach unproven)' if gta_present else 'NO'}"
+        )
+        print(
+            "  full signature valid: "
+            f"{'YES' if signature_valid else 'NO' + (f' ({signature_detail})' if signature_detail else '')}"
         )
         print(f"  running now: {'yes' if running else 'no' if running is False else 'unknown (could not verify)'}")
         if running is None:
             return 4
-        if not patched:
+        if not gta_present:
             print("  -> run with --apply to add the target patch (quit Rekordbox first).")
+        elif not signature_valid:
+            print("  -> run with --apply to repair the invalid patched signature (quit Rekordbox first).")
         return 0 if patched else 3
 
     print(result.message)
