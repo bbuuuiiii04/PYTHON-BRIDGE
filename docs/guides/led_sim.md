@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: software-tested
-last_verified_commit: c3aa631
+last_verified_commit: b3a255a
 last_verified_date: 2026-07-15
 validation_scope: >
   H612D LED Studio (AWR-196 + AWR-244 room-view + AWR-246 layout library):
