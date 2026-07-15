@@ -19,60 +19,11 @@ def _profile(**overrides) -> dict:
     return base
 
 
-class GeometryTests(unittest.TestCase):
-    def test_default_profile_covers_four_walls_on_perimeter(self) -> None:
-        profile = _profile()
-        geo = engine.segment_geometry(profile)
-        self.assertEqual(len(geo), 60)
-        width, height = profile["room_mm"]
-        for entry in geo:
-            x, y = entry["x_mm"], entry["y_mm"]
-            on_x_edge = abs(x) < 1e-6 or abs(x - width) < 1e-6
-            on_y_edge = abs(y) < 1e-6 or abs(y - height) < 1e-6
-            self.assertTrue(on_x_edge or on_y_edge, f"segment {entry['segment']} off perimeter: {x}, {y}")
-        self.assertEqual(sorted({entry["wall"] for entry in geo}), [0, 1, 2, 3])
-
-    def test_normals_point_inward(self) -> None:
-        profile = _profile()
-        geo = engine.segment_geometry(profile)
-        cx, cy = profile["room_mm"][0] / 2, profile["room_mm"][1] / 2
-        for entry in geo:
-            dot = (cx - entry["x_mm"]) * entry["nx"] + (cy - entry["y_mm"]) * entry["ny"]
-            self.assertGreater(dot, 0, f"segment {entry['segment']} normal not inward")
-
-    def test_direction_flip_reverses_travel_order(self) -> None:
-        # Shoelace winding of the ordered centers flips sign when direction flips.
-        def winding(geo: list[dict]) -> float:
-            total = 0.0
-            for i, entry in enumerate(geo):
-                nxt = geo[(i + 1) % len(geo)]
-                total += (nxt["x_mm"] - entry["x_mm"]) * (nxt["y_mm"] + entry["y_mm"])
-            return total
-
-        cw = winding(engine.segment_geometry(_profile(direction="cw")))
-        ccw = winding(engine.segment_geometry(_profile(direction="ccw")))
-        self.assertNotEqual(cw, 0.0)
-        self.assertNotEqual(ccw, 0.0)
-        self.assertLess(cw * ccw, 0)  # opposite signs = reversed travel
-
-    def test_start_corner_rotation_shifts_mapping(self) -> None:
-        self.assertEqual(engine.segment_geometry(_profile(start_corner=0))[0]["wall"], 0)
-        self.assertEqual(engine.segment_geometry(_profile(start_corner=1))[0]["wall"], 1)
-
-    def test_validate_rejects_bad_corner_lists(self) -> None:
-        non_ascending = engine.validate_profile(_profile(corner_segments=[0.0, 30.0, 20.0, 50.0]))
-        self.assertTrue(any("ascending" in e for e in non_ascending), non_ascending)
-        out_of_range = engine.validate_profile(_profile(corner_segments=[0.0, 20.0, 30.0, 60.5]))
-        self.assertTrue(any("corner_segments" in e for e in out_of_range), out_of_range)
-        wrong_count = engine.validate_profile(_profile(corner_segments=[0.0, 20.0, 30.0]))
-        self.assertTrue(any("4 numbers" in e for e in wrong_count), wrong_count)
-
-
 class BleedTests(unittest.TestCase):
-    def test_ring_wrap_exact_values(self) -> None:
+    def test_linear_strip_exact_values_without_endpoint_wrap(self) -> None:
         frame = [(100, 0, 0), (0, 100, 0), (0, 0, 100), (0, 0, 0)]
         out = engine.apply_bleed(frame, 0.5)
-        self.assertEqual(out, [(50, 25, 0), (25, 50, 25), (0, 25, 50), (25, 0, 25)])
+        self.assertEqual(out, [(75, 25, 0), (25, 50, 25), (0, 25, 50), (0, 0, 25)])
 
     def test_bleed_zero_identity(self) -> None:
         frame = [(1, 2, 3), (4, 5, 6), (7, 8, 9)]
@@ -88,6 +39,19 @@ class BleedTests(unittest.TestCase):
                 self.assertLessEqual(channel, 255)
 
 
+class H612DModelTests(unittest.TestCase):
+    def test_expands_every_segment_to_six_emitters(self) -> None:
+        frame = [(1, 2, 3), (4, 5, 6)]
+        expanded = engine.expand_segments(frame)
+        self.assertEqual(expanded, [(1, 2, 3)] * 6 + [(4, 5, 6)] * 6)
+        self.assertEqual(len(engine.expand_segments([(0, 0, 0)] * 60)), 360)
+
+    def test_reference_transfer_and_bleed(self) -> None:
+        profile = _profile(gamma=1.0, brightness=0.5, white_point=[1.0, 0.5, 2.0], bleed=0.0)
+        self.assertEqual(engine.transform_color((200, 200, 100), profile), (100, 50, 100))
+        self.assertEqual(engine.device_segments([(200, 200, 100)], profile), [(100, 50, 100)])
+
+
 class RenderAdapterTests(unittest.TestCase):
     def test_determinism_and_shape(self) -> None:
         kwargs = dict(params={}, seed=7, fps=30, duration_s=2.0, bpm=120.0, segments=60)
@@ -96,6 +60,14 @@ class RenderAdapterTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(len(first), 60)  # fps * duration
         self.assertEqual(len(first[0]), 60)  # segments wide
+
+    def test_runtime_capture_uses_production_runner(self) -> None:
+        frames = engine.render_runtime_frames(
+            "solid", params={"color": [1, 2, 3]}, seed=7,
+            fps=20, duration_s=0.5, bpm=120.0, segments=60,
+        )
+        self.assertEqual(len(frames), 10)
+        self.assertTrue(all(frame == [(1, 2, 3)] * 60 for frame in frames))
 
     def test_unknown_name_fails_dark(self) -> None:
         # Pinned to render_preview_frames parity: the production renderer returns
@@ -118,6 +90,14 @@ class CodecTests(unittest.TestCase):
         self.assertEqual(back["segments"], 60)
         self.assertEqual(back["meta"], {"name": "beat_chase"})
         self.assertEqual(back["frames"], [[list(px) for px in frame] for frame in frames])
+
+    def test_roundtrip_preserves_irregular_timestamps(self) -> None:
+        frames = [[(0, 0, 0)], [(1, 2, 3)], [(4, 5, 6)]]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "timed.jsonl"
+            engine.write_frames_jsonl(path, frames, fps=60, t_ms=[0, 19, 41])
+            back = engine.read_frames_jsonl(path)
+        self.assertEqual(back["t_ms"], [0, 19, 41])
 
     def test_corrupt_line_raises_with_line_number(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -162,6 +142,11 @@ class ProfileTests(unittest.TestCase):
     def test_example_profile_is_valid(self) -> None:
         self.assertEqual(engine.validate_profile(_profile()), [])
 
+    def test_h612d_physical_shape_is_fixed(self) -> None:
+        errors = engine.validate_profile(_profile(physical_leds=359, leds_per_segment=5))
+        self.assertTrue(any("physical_leds" in error for error in errors), errors)
+        self.assertTrue(any("leds_per_segment" in error for error in errors), errors)
+
 
 class TestCardTests(unittest.TestCase):
     def test_exact_expected_pixels(self) -> None:
@@ -183,6 +168,28 @@ class TestCardTests(unittest.TestCase):
         self.assertTrue(all(px == (0, 0, 0) for px in single[0][1:]))
         with self.assertRaises(ValueError):
             engine.test_card_frames("nope", 60)
+
+
+class CalibrationSequenceTests(unittest.TestCase):
+    def test_sequences_are_deterministic_timed_h612d_frames(self) -> None:
+        for name in engine.CALIBRATION_SEQUENCE_NAMES:
+            first = engine.calibration_sequence(name, fps=60)
+            second = engine.calibration_sequence(name, fps=60)
+            self.assertEqual(first, second)
+            self.assertEqual(first["segments"], 60)
+            self.assertEqual(len(first["frames"]), len(first["t_ms"]))
+            self.assertTrue(first["markers"])
+            self.assertTrue(all(len(frame) == 60 for frame in first["frames"]))
+
+    def test_segment_map_visits_all_segments_individually(self) -> None:
+        result = engine.calibration_sequence("segment_map", fps=60)
+        visited = []
+        for marker in result["markers"]:
+            if marker["label"].startswith("segment "):
+                frame = result["frames"][marker["frame"]]
+                lit = [index for index, pixel in enumerate(frame) if pixel != (0, 0, 0)]
+                visited.extend(lit)
+        self.assertEqual(visited, list(range(60)))
 
 
 if __name__ == "__main__":

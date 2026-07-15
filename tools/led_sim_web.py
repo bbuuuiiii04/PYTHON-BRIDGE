@@ -1,4 +1,4 @@
-"""LED room simulator web server (AWR-196) — 127.0.0.1:8767, stdlib only.
+"""H612D simulator web server (AWR-196) — 127.0.0.1:8767, stdlib only.
 
 Offline tooling. Mirrors the LED Pad server PATTERN (ThreadingHTTPServer +
 handler closure) without importing from tools.led_pad_web (AWR-193 fence).
@@ -46,23 +46,21 @@ class LedSimService:
         self.profile_path = Path(profile_path) if profile_path else engine.DEFAULT_PROFILE_PATH
 
     def profile_state(self) -> tuple[dict[str, Any], str]:
-        """Current profile + error string. Bad saved profile → example defaults +
-        surfaced error; the saved file is never reset by the server."""
+        """Current profile + error string; old profiles inherit new defaults."""
         error = ""
+        try:
+            example = engine.load_profile(engine.EXAMPLE_PROFILE_PATH)
+        except Exception as exc:
+            return {}, f"{engine.EXAMPLE_PROFILE_PATH.name}: {exc}"
         if self.profile_path.exists():
             try:
-                profile = engine.load_profile(self.profile_path)
+                profile = {**example, **engine.load_profile(self.profile_path)}
                 errors = engine.validate_profile(profile)
                 if not errors:
                     return profile, ""
                 error = f"{self.profile_path.name}: " + "; ".join(errors)
             except Exception as exc:
                 error = f"{self.profile_path.name}: {exc}"
-        try:
-            example = engine.load_profile(engine.EXAMPLE_PROFILE_PATH)
-        except Exception as exc:
-            tail = f"{engine.EXAMPLE_PROFILE_PATH.name}: {exc}"
-            return {}, f"{error}; {tail}" if error else tail
         return example, error
 
     def catalog(self) -> dict[str, Any]:
@@ -77,6 +75,14 @@ class LedSimService:
             "profile_error": profile_error,
             "lab_error": lab.get("error", ""),
             "test_cards": list(engine.TEST_CARD_KINDS),
+            "calibration_sequences": list(engine.CALIBRATION_SEQUENCE_NAMES),
+            "device": {
+                "model": engine.H612D_MODEL,
+                "segments": engine.H612D_SEGMENTS,
+                "physical_leds": engine.H612D_PHYSICAL_LEDS,
+                "leds_per_segment": engine.H612D_LEDS_PER_SEGMENT,
+                "strip_length_mm": engine.H612D_LENGTH_MM,
+            },
         }
 
     def segments(self) -> int:
@@ -181,6 +187,8 @@ def build_handler(service: LedSimService) -> type[BaseHTTPRequestHandler]:
                     self._handle_render(body)
                 elif path == "/api/render_card":
                     self._handle_render_card(body)
+                elif path == "/api/calibration":
+                    self._handle_calibration(body)
                 elif path == "/api/profile":
                     self._handle_profile_save(body)
                 elif path == "/api/replay/load":
@@ -212,8 +220,13 @@ def build_handler(service: LedSimService) -> type[BaseHTTPRequestHandler]:
                 fps = int(body.get("fps", 60))
                 duration_s = float(body.get("duration_s", 4.0))
                 bpm = float(body.get("bpm", 128.0))
+                beat_division = float(body.get("beat_division", 0.0))
             except (TypeError, ValueError):
-                self._bad_request("seed/fps/duration_s/bpm must be numeric")
+                self._bad_request("seed/fps/duration_s/bpm/beat_division must be numeric")
+                return
+            sync_mode = body.get("sync_mode", "")
+            if not isinstance(sync_mode, str):
+                self._bad_request("sync_mode must be a string")
                 return
             if not (1 <= fps <= MAX_FPS):
                 self._bad_request(f"fps must be in [1, {MAX_FPS}]")
@@ -238,13 +251,19 @@ def build_handler(service: LedSimService) -> type[BaseHTTPRequestHandler]:
                     return
                 frames = result["frames"]
             else:
-                # No try/except here by design: a renderer exception surfaces as
-                # HTTP 500 + traceback via do_POST (calibration trust > tidiness).
-                frames = engine.render_frames(
+                # Use the real runner composition, not the raw effect function.
+                frames = engine.render_runtime_frames(
                     name, params=params, seed=seed, fps=fps,
                     duration_s=duration_s, bpm=bpm, segments=segments,
+                    sync_mode=sync_mode, beat_division=beat_division,
                 )
-            self._send_json({"frames": frames, "fps": fps, "segments": segments})
+            self._send_json({
+                "frames": frames,
+                "fps": fps,
+                "segments": segments,
+                "t_ms": engine.frame_timestamps(len(frames), fps),
+                "pipeline": "lab" if source == "lab" else "runtime",
+            })
 
         def _handle_render_card(self, body: dict[str, Any]) -> None:
             kind = body.get("kind")
@@ -253,7 +272,22 @@ def build_handler(service: LedSimService) -> type[BaseHTTPRequestHandler]:
                 return
             segments = service.segments()
             frames = engine.test_card_frames(kind, segments)
-            self._send_json({"frames": frames, "fps": 1, "segments": segments})
+            self._send_json({"frames": frames, "fps": 1, "segments": segments, "t_ms": [0]})
+
+        def _handle_calibration(self, body: dict[str, Any]) -> None:
+            name = body.get("name")
+            if not isinstance(name, str) or name not in engine.CALIBRATION_SEQUENCE_NAMES:
+                self._bad_request(f"name must be one of {list(engine.CALIBRATION_SEQUENCE_NAMES)}")
+                return
+            try:
+                fps = int(body.get("fps", 60))
+            except (TypeError, ValueError):
+                self._bad_request("fps must be numeric")
+                return
+            if not (1 <= fps <= MAX_FPS):
+                self._bad_request(f"fps must be in [1, {MAX_FPS}]")
+                return
+            self._send_json(engine.calibration_sequence(name, segments=service.segments(), fps=fps))
 
         def _handle_profile_save(self, body: dict[str, Any]) -> None:
             errors = engine.validate_profile(body)

@@ -55,6 +55,9 @@ class LedSimServiceTests(unittest.TestCase):
         self.assertTrue(catalog["effects"])
         self.assertIn("beat_chase", catalog["effects"])
         self.assertEqual(catalog["profile"]["segments"], 60)
+        self.assertEqual(catalog["device"]["physical_leds"], 360)
+        self.assertEqual(catalog["device"]["leds_per_segment"], 6)
+        self.assertIn("timing_response", catalog["calibration_sequences"])
         self.assertEqual(catalog["profile_error"], "")
         self.assertIn("looks", catalog)
         self.assertIn("lab", catalog)
@@ -68,6 +71,8 @@ class LedSimServiceTests(unittest.TestCase):
             self.assertEqual(len(result["frames"]), 30)  # fps * duration
             self.assertEqual(result["segments"], 60)
             self.assertTrue(all(len(frame) == 60 for frame in result["frames"]))
+            self.assertEqual(len(result["t_ms"]), 30)
+            self.assertEqual(result["pipeline"], "runtime")
 
             status, result = _request(port, "POST", "/api/render", {
                 "source": "effect", "name": "beat_chase", "duration_s": 31,
@@ -106,6 +111,15 @@ class LedSimServiceTests(unittest.TestCase):
         self.assertEqual(after["profile"]["operator_note"], "kept")
         self.assertEqual(after["profile_error"], "")
 
+    def test_old_profile_inherits_h612d_defaults_without_rewrite(self) -> None:
+        self.profile_path.write_text(json.dumps({"schema": 1, "segments": 60, "gamma": 1.5}), encoding="utf-8")
+        with _server(self.profile_path) as port:
+            status, result = _request(port, "GET", "/api/profile")
+        self.assertEqual(status, 200)
+        self.assertEqual(result["profile"]["gamma"], 1.5)
+        self.assertEqual(result["profile"]["physical_leds"], 360)
+        self.assertEqual(result["profile_error"], "")
+
     def test_lab_degradation_keeps_catalog_serving(self) -> None:
         with mock.patch.object(led_sim_engine, "_import_lab", side_effect=RuntimeError("lab exploded")):
             with _server(self.profile_path) as port:
@@ -135,6 +149,19 @@ class LedSimServiceTests(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertEqual(result["frames"][0][0], [128, 128, 128])
             status, result = _request(port, "POST", "/api/render_card", {"kind": "nope"})
+        self.assertEqual(status, 400)
+
+    def test_calibration_sequence_endpoint(self) -> None:
+        with _server(self.profile_path) as port:
+            status, result = _request(port, "POST", "/api/calibration", {
+                "name": "segment_map", "fps": 60,
+            })
+            self.assertEqual(status, 200)
+            self.assertEqual(result["segments"], 60)
+            self.assertEqual(len(result["frames"]), len(result["t_ms"]))
+            self.assertTrue(result["markers"])
+
+            status, result = _request(port, "POST", "/api/calibration", {"name": "nope"})
         self.assertEqual(status, 400)
 
 

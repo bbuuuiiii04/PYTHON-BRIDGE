@@ -1,4 +1,4 @@
-"""LED room simulator engine (AWR-196) — pure functions, no HTTP, no sockets.
+"""H612D simulator engine (AWR-196) — pure functions, no HTTP, no sockets.
 
 Offline tooling only. This module NEVER contacts the Govee device: no UDP, no
 transport/discovery imports (`govee_realtime_transport`, `govee_lan_discovery`
@@ -13,6 +13,7 @@ the pad lane rewrites that module in parallel).
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 import tempfile
@@ -30,6 +31,8 @@ def _ensure_parent_on_path() -> None:
 
 try:
     from ..govee_frame_renderer import Frame, GoveeFrameRenderer, REALTIME_EFFECT_NAMES
+    from ..govee_realtime_runner import EffectSpec, GoveeRealtimeRunner
+    from ..led_models import BeatAnchor
 except ImportError:  # run as `python3 -m tools.led_sim_engine` from the repo root
     _ensure_parent_on_path()
     from rb_ss_bridge_v2.govee_frame_renderer import (  # type: ignore
@@ -37,13 +40,21 @@ except ImportError:  # run as `python3 -m tools.led_sim_engine` from the repo ro
         GoveeFrameRenderer,
         REALTIME_EFFECT_NAMES,
     )
+    from rb_ss_bridge_v2.govee_realtime_runner import EffectSpec, GoveeRealtimeRunner  # type: ignore
+    from rb_ss_bridge_v2.led_models import BeatAnchor  # type: ignore
 
 EXAMPLE_PROFILE_PATH = _REPO_ROOT / "config" / "led_sim_profile.example.json"
 DEFAULT_PROFILE_PATH = _REPO_ROOT / "config" / "led_sim_profile.json"
 LAB_DIR = _REPO_ROOT / "config" / "led_lab"
 
-_DIRECTIONS = {"cw", "ccw"}
 _HOLD_MODES = {"zoh", "slew"}
+_CALIBRATION_STATUSES = {"unmeasured", "relative", "measured"}
+
+H612D_MODEL = "H612D"
+H612D_SEGMENTS = 60
+H612D_LEDS_PER_SEGMENT = 6
+H612D_PHYSICAL_LEDS = 360
+H612D_LENGTH_MM = 14996.16
 
 
 # --- profile -----------------------------------------------------------------
@@ -68,34 +79,19 @@ def validate_profile(profile: Mapping[str, Any]) -> list[str]:
         return ["profile must be a JSON object"]
     if profile.get("schema") != 1:
         errors.append("schema must be 1")
+    if profile.get("device_model") != H612D_MODEL:
+        errors.append(f"device_model must be {H612D_MODEL}")
     segments = profile.get("segments")
-    if not isinstance(segments, int) or isinstance(segments, bool) or not (1 <= segments <= 1000):
-        errors.append("segments must be an integer in [1, 1000]")
+    if not isinstance(segments, int) or isinstance(segments, bool) or segments != H612D_SEGMENTS:
+        errors.append(f"segments must be {H612D_SEGMENTS}")
         segments = None
-    room = profile.get("room_mm")
-    if (
-        not isinstance(room, (list, tuple))
-        or len(room) != 2
-        or not all(isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0 for v in room)
-    ):
-        errors.append("room_mm must be [width_mm, height_mm] with positive numbers")
-    corners = profile.get("corner_segments")
-    if (
-        not isinstance(corners, (list, tuple))
-        or len(corners) != 4
-        or not all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in corners)
-    ):
-        errors.append("corner_segments must be a list of 4 numbers")
-    else:
-        if segments is not None and not all(0 <= float(v) < segments for v in corners):
-            errors.append(f"corner_segments values must lie in [0, {segments})")
-        if not all(float(a) < float(b) for a, b in zip(corners, corners[1:])):
-            errors.append("corner_segments must be strictly ascending")
-    start = profile.get("start_corner")
-    if not isinstance(start, int) or isinstance(start, bool) or not (0 <= start <= 3):
-        errors.append("start_corner must be an integer in [0, 3]")
-    if profile.get("direction") not in _DIRECTIONS:
-        errors.append("direction must be cw or ccw")
+    leds_per_segment = profile.get("leds_per_segment")
+    if not isinstance(leds_per_segment, int) or isinstance(leds_per_segment, bool) or leds_per_segment != H612D_LEDS_PER_SEGMENT:
+        errors.append(f"leds_per_segment must be {H612D_LEDS_PER_SEGMENT}")
+    physical_leds = profile.get("physical_leds")
+    if not isinstance(physical_leds, int) or isinstance(physical_leds, bool) or physical_leds != H612D_PHYSICAL_LEDS:
+        errors.append(f"physical_leds must be {H612D_PHYSICAL_LEDS}")
+    _check_number(profile, "strip_length_mm", H612D_LENGTH_MM, H612D_LENGTH_MM, errors)
     _check_number(profile, "gamma", 0.2, 5.0, errors)
     white = profile.get("white_point")
     if (
@@ -105,16 +101,17 @@ def validate_profile(profile: Mapping[str, Any]) -> list[str]:
     ):
         errors.append("white_point must be [r, g, b] gains in [0, 4]")
     _check_number(profile, "brightness", 0.0, 4.0, errors)
-    _check_number(profile, "diffusion_width_seg", 0.1, 10.0, errors)
+    _check_number(profile, "glow_radius", 0.1, 6.0, errors)
+    _check_number(profile, "glow_gain", 0.0, 4.0, errors)
     _check_number(profile, "bleed", 0.0, 1.0, errors)
-    _check_number(profile, "wash_reach_mm", 0.0, 100000.0, errors)
-    _check_number(profile, "wash_gain", 0.0, 10.0, errors)
     _check_number(profile, "fps", 1, 120, errors)
     _check_number(profile, "latency_ms", -2000.0, 2000.0, errors)
     if profile.get("hold_mode") not in _HOLD_MODES:
         errors.append("hold_mode must be zoh or slew")
     _check_number(profile, "slew_ms", 0.0, 5000.0, errors)
     _check_number(profile, "bpm", 20.0, 300.0, errors)
+    if profile.get("calibration_status") not in _CALIBRATION_STATUSES:
+        errors.append(f"calibration_status must be one of {sorted(_CALIBRATION_STATUSES)}")
     return errors
 
 
@@ -140,101 +137,65 @@ def save_profile(path: Path | str, profile: Mapping[str, Any]) -> None:
         raise
 
 
-# --- geometry ----------------------------------------------------------------
-
-def _room_corners(room_mm: tuple[float, float]) -> list[tuple[float, float]]:
-    # Top-down view, y grows downward; corners in clockwise order.
-    width, height = float(room_mm[0]), float(room_mm[1])
-    return [(0.0, 0.0), (width, 0.0), (width, height), (0.0, height)]
-
-
-_INWARD_NORMALS = [(0.0, 1.0), (-1.0, 0.0), (0.0, -1.0), (1.0, 0.0)]  # per physical wall 0-3
-
-
-def segment_geometry(profile: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """Map each strip segment onto the rectangle perimeter.
-
-    The strip is a closed ring of `segments`; `corner_segments` (fractional
-    strip positions) splits it into 4 arcs; arc k maps linearly onto the k-th
-    wall traversed starting at room corner `start_corner` following
-    `direction`. This function is THE calibration target — the UI's dragging
-    just edits the profile and re-runs it.
-    """
-    segments = int(profile["segments"])
-    corners_pos = [float(v) for v in profile["corner_segments"]]
-    start = int(profile["start_corner"])
-    direction = str(profile["direction"])
-    room = _room_corners(tuple(profile["room_mm"]))
-
-    # Traversed wall k: from room corner a_k to b_k; its physical wall index.
-    walls: list[tuple[tuple[float, float], tuple[float, float], int]] = []
-    for k in range(4):
-        if direction == "cw":
-            a = (start + k) % 4
-            b = (a + 1) % 4
-            wall_index = a
-        else:
-            a = (start - k) % 4
-            b = (a - 1) % 4
-            wall_index = b  # physical wall j connects corner j -> j+1
-        walls.append((room[a], room[b], wall_index))
-
-    # Arc k covers ring interval [corners_pos[k], next); the last arc wraps.
-    arc_lengths = [
-        (corners_pos[k + 1] - corners_pos[k]) if k < 3 else (segments - corners_pos[3] + corners_pos[0])
-        for k in range(4)
-    ]
-
-    def strip_pos_to_point(pos: float) -> tuple[float, float, int]:
-        rel = (pos - corners_pos[0]) % segments
-        offset = 0.0
-        for k in range(4):
-            if rel < offset + arc_lengths[k] or k == 3:
-                frac = (rel - offset) / arc_lengths[k]
-                (ax, ay), (bx, by), wall_index = walls[k]
-                return (ax + (bx - ax) * frac, ay + (by - ay) * frac, wall_index)
-            offset += arc_lengths[k]
-        raise AssertionError("unreachable")
-
-    out: list[dict[str, Any]] = []
-    for i in range(segments):
-        cx, cy, wall_index = strip_pos_to_point(i + 0.5)
-        x0, y0, _ = strip_pos_to_point(float(i))
-        x1, y1, _ = strip_pos_to_point(float((i + 1) % segments))
-        nx, ny = _INWARD_NORMALS[wall_index]
-        out.append({
-            "segment": i,
-            "x_mm": cx,
-            "y_mm": cy,
-            "nx": nx,
-            "ny": ny,
-            "wall": wall_index,
-            "x0_mm": x0,
-            "y0_mm": y0,
-            "x1_mm": x1,
-            "y1_mm": y1,
-        })
-    return out
-
-
 # --- photometrics ------------------------------------------------------------
 
 def apply_bleed(frame: list[tuple[int, int, int]] | list[list[int]], bleed: float) -> list[tuple[int, int, int]]:
-    """Ring-wrapped 3-tap mix: out[i] = (1-bleed)*f[i] + (bleed/2)*(f[i-1]+f[i+1]).
+    """Linear-strip 3-tap mix; endpoints never leak into each other.
 
     Reference implementation; the JS view mirrors it (ledsim-view.js) — keep in
     lockstep.
     """
     n = len(frame)
+    if n == 0:
+        return []
     mix = float(bleed)
     out: list[tuple[int, int, int]] = []
     for i in range(n):
-        prev, cur, nxt = frame[i - 1], frame[i], frame[(i + 1) % n]
+        cur = frame[i]
+        prev = frame[i - 1] if i else cur
+        nxt = frame[i + 1] if i + 1 < n else cur
         out.append(tuple(
             max(0, min(255, int(round((1.0 - mix) * cur[c] + (mix / 2.0) * (prev[c] + nxt[c])))))
             for c in range(3)
         ))
     return out
+
+
+def transform_color(rgb: tuple[int, int, int] | list[int], profile: Mapping[str, Any]) -> tuple[int, int, int]:
+    """Reference H612D command-RGB to display-RGB transfer used by the browser.
+
+    The defaults are identity assumptions. Calibration replaces gamma, channel
+    gains, brightness, and glow parameters; no value here claims measured
+    hardware behavior.
+    """
+    gamma = float(profile.get("gamma", 1.0))
+    brightness = float(profile.get("brightness", 1.0))
+    gains = profile.get("white_point", (1.0, 1.0, 1.0))
+    return tuple(
+        max(0, min(255, int(round(
+            255.0 * max(0.0, float(gains[c]) * brightness * (int(rgb[c]) / 255.0)) ** gamma
+        ))))
+        for c in range(3)
+    )
+
+
+def device_segments(frame: list[tuple[int, int, int]] | list[list[int]], profile: Mapping[str, Any]) -> list[tuple[int, int, int]]:
+    """Apply the calibrated transfer and linear optical bleed to 60 commands."""
+    return apply_bleed([transform_color(pixel, profile) for pixel in frame], float(profile.get("bleed", 0.0)))
+
+
+def expand_segments(
+    frame: list[tuple[int, int, int]] | list[list[int]],
+    leds_per_segment: int = H612D_LEDS_PER_SEGMENT,
+) -> list[tuple[int, int, int]]:
+    """Expand each logical H612D segment into its six physical emitters."""
+    repeat = max(1, int(leds_per_segment))
+    return [tuple(int(channel) for channel in pixel) for pixel in frame for _ in range(repeat)]
+
+
+def frame_timestamps(frame_count: int, fps: int) -> list[int]:
+    """Ideal-grid millisecond timestamps; measured captures can replace these."""
+    return [int(round(index * 1000.0 / float(fps))) for index in range(max(0, int(frame_count)))]
 
 
 # --- render adapter ----------------------------------------------------------
@@ -275,6 +236,89 @@ def render_frames(
             seed=seed,
         ))
     return frames
+
+
+class _FrameCaptureTransport:
+    """Tool-only runner sink. Same tiny surface as the production transport."""
+
+    def __init__(self) -> None:
+        self.frames: list[Frame] = []
+
+    def activate(self) -> bool:
+        return True
+
+    def deactivate(self) -> bool:
+        return True
+
+    def set_brightness(self, _value: int) -> bool:
+        return True
+
+    def send_frame(self, frame: Frame) -> bool:
+        self.frames.append(list(frame))
+        return True
+
+    def blackout(self) -> bool:
+        return True
+
+    def close(self) -> None:
+        return None
+
+    def status(self) -> dict[str, Any]:
+        return {"frames_sent": len(self.frames), "send_error_count": 0, "last_error": ""}
+
+
+def render_runtime_frames(
+    name: str,
+    *,
+    params: Mapping[str, Any] | None,
+    seed: int,
+    fps: int,
+    duration_s: float,
+    bpm: float,
+    segments: int,
+    sync_mode: str = "",
+    beat_division: float = 0.0,
+) -> list[Frame]:
+    """Capture the same runner composition that feeds the production transport.
+
+    This stays single-threaded and offline: the runner receives a capture sink,
+    a deterministic monotonic clock, and neutral CFX anchors. Device behavior
+    begins after this frame boundary and is calibrated separately.
+    """
+    total = max(1, int(round(float(duration_s) * int(fps))))
+    transport = _FrameCaptureTransport()
+    runner = GoveeRealtimeRunner(
+        transport,
+        GoveeFrameRenderer(),
+        segments=int(segments),
+        fps=int(fps),
+        time_fn=lambda: 0.0,
+        sleep_fn=lambda _seconds: None,
+    )
+    runner.set_desired(EffectSpec(
+        effect_name=name,
+        params=dict(params or {}),
+        seed=int(seed),
+        applied_monotonic=0.0,
+        sync_mode=str(sync_mode or ""),
+        beat_division=float(beat_division or 0.0),
+    ))
+    for index in range(total):
+        now = index / float(fps)
+        runner._tick_once(  # noqa: SLF001 - exact production composition is the point of this offline tool
+            BeatAnchor(
+                deck=1,
+                abs_beat_pos=now * float(bpm) / 60.0,
+                bpm=float(bpm),
+                captured_monotonic=now,
+                playing=True,
+                permitted=True,
+            ),
+            now,
+        )
+    if len(transport.frames) != total:
+        raise RuntimeError(f"runtime capture produced {len(transport.frames)} frames, expected {total}")
+    return transport.frames
 
 
 # --- lab bridge (guarded; AWR-193 fence) --------------------------------------
@@ -374,22 +418,41 @@ def look_params_catalog() -> dict[str, Any]:
                 "error": f"{path.name}: realtime look {look_name!r} has unexpected scene_ref/params shape",
                 "source": path.name,
             }
-        out[look_name] = {"effect": effect, "params": params, "known": effect in REALTIME_EFFECT_NAMES}
+        digest = hashlib.blake2b(look_name.encode("utf-8"), digest_size=8).digest()
+        seed = int.from_bytes(digest, "big", signed=False) & 0x7FFFFFFF
+        out[look_name] = {
+            "effect": effect,
+            "params": params,
+            "known": effect in REALTIME_EFFECT_NAMES,
+            "seed": seed,
+            "sync_mode": str(params.get("sync_mode") or ""),
+            "beat_division": float(params.get("beat_division") or 0.0),
+        }
     return {"ok": True, "looks": out, "error": "", "source": path.name}
 
 
 # --- frames-JSONL codec --------------------------------------------------------
 
-def write_frames_jsonl(path: Path | str, frames: list[Frame], *, fps: int, meta: Mapping[str, Any] | None = None) -> None:
+def write_frames_jsonl(
+    path: Path | str,
+    frames: list[Frame],
+    *,
+    fps: int,
+    meta: Mapping[str, Any] | None = None,
+    t_ms: list[int] | None = None,
+) -> None:
     segments = len(frames[0]) if frames else 0
+    stamps = list(t_ms) if t_ms is not None else frame_timestamps(len(frames), fps)
+    if len(stamps) != len(frames):
+        raise ValueError("t_ms length must match frames length")
     lines = [json.dumps(
         {"v": 1, "kind": "header", "fps": int(fps), "segments": segments, "meta": dict(meta or {})},
         separators=(",", ":"),
     )]
-    for index, frame in enumerate(frames):
+    for stamp, frame in zip(stamps, frames):
         lines.append(json.dumps({
             "v": 1,
-            "t_ms": int(round(index * 1000.0 / float(fps))),
+            "t_ms": int(stamp),
             "frame": [[int(r), int(g), int(b)] for r, g, b in frame],
         }, separators=(",", ":")))
     Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -475,6 +538,89 @@ def test_card_frames(kind: str, segments: int) -> list[Frame]:
     return [[color] * count]
 
 
+CALIBRATION_SEQUENCE_NAMES = (
+    "segment_map",
+    "color_response",
+    "timing_response",
+)
+
+
+def calibration_sequence(name: str, *, segments: int = H612D_SEGMENTS, fps: int = 60) -> dict[str, Any]:
+    """Deterministic H612D measurement frames. Generates data; never sends it."""
+    if name not in CALIBRATION_SEQUENCE_NAMES:
+        raise ValueError(f"unknown calibration sequence: {name!r}")
+    count = int(segments)
+    rate = int(fps)
+    if count != H612D_SEGMENTS:
+        raise ValueError(f"segments must be {H612D_SEGMENTS}")
+    if not (1 <= rate <= 120):
+        raise ValueError("fps must be in [1, 120]")
+
+    frames: list[Frame] = []
+    markers: list[dict[str, Any]] = []
+
+    def solid(color: tuple[int, int, int]) -> Frame:
+        return [color] * count
+
+    def add(frame: Frame, hold: int, label: str) -> None:
+        markers.append({"frame": len(frames), "label": label})
+        frames.extend([list(frame) for _ in range(max(1, int(hold)))])
+
+    short = max(1, round(rate * 0.1))
+    gap = max(1, round(rate / 30.0))
+    sync = max(1, round(rate * 0.25))
+    black = solid((0, 0, 0))
+    white = solid((255, 255, 255))
+
+    add(black, sync, "black reference")
+    add(white, sync, "sync white")
+    add(black, sync, "sync black")
+
+    if name == "segment_map":
+        for segment in range(count):
+            frame = list(black)
+            frame[segment] = (255, 255, 255)
+            add(frame, short, f"segment {segment:02d}")
+            add(black, gap, "gap")
+    elif name == "color_response":
+        levels = (0, 1, 2, 4, 8, 16, 32, 64, 96, 128, 160, 192, 224, 255)
+        channels = (
+            ("red", (1, 0, 0)),
+            ("green", (0, 1, 0)),
+            ("blue", (0, 0, 1)),
+            ("white", (1, 1, 1)),
+        )
+        for label, mask in channels:
+            for level in levels:
+                add(solid(tuple(level * value for value in mask)), short, f"{label} {level}")
+        for label, color in (
+            ("cyan", (0, 255, 255)),
+            ("magenta", (255, 0, 255)),
+            ("yellow", (255, 255, 0)),
+        ):
+            for level in (64, 128, 255):
+                add(solid(tuple(round(channel * level / 255) for channel in color)), short, f"{label} {level}")
+    else:
+        for hold in (1, 2, 3, 4, 6, 8, 12, 18, 30):
+            add(white, hold, f"white {hold}f")
+            add(black, hold, f"black {hold}f")
+        for hold in (1, 2):
+            for segment in range(count):
+                frame = list(black)
+                frame[segment] = (255, 255, 255)
+                add(frame, hold, f"chase {hold}f segment {segment:02d}")
+
+    add(black, sync, "final black")
+    return {
+        "name": name,
+        "fps": rate,
+        "segments": count,
+        "frames": frames,
+        "t_ms": frame_timestamps(len(frames), rate),
+        "markers": markers,
+    }
+
+
 # --- CLI -------------------------------------------------------------------------
 
 def main(argv: list[str] | None = None) -> int:
@@ -494,7 +640,7 @@ def main(argv: list[str] | None = None) -> int:
     params = json.loads(args.params)
     if not isinstance(params, dict):
         raise SystemExit("--params must be a JSON object")
-    frames = render_frames(
+    frames = render_runtime_frames(
         args.name,
         params=params,
         seed=args.seed,
@@ -507,7 +653,7 @@ def main(argv: list[str] | None = None) -> int:
         args.out,
         frames,
         fps=args.fps,
-        meta={"name": args.name, "seed": args.seed, "bpm": args.bpm, "params": params},
+        meta={"name": args.name, "seed": args.seed, "bpm": args.bpm, "params": params, "pipeline": "runtime"},
     )
     print(f"wrote {len(frames)} frames x {args.segments} segments -> {args.out}")
     return 0

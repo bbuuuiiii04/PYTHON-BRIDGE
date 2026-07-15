@@ -1,344 +1,158 @@
-// ledsim-view.js — LED room simulator view (AWR-196). THE SWAPPABLE SEAM.
-//
-// SEAM CONTRACT (read this before the future pad-round integration):
-//   import { createLedSimView } from "./ledsim-view.js";
-//   const view = createLedSimView(canvas, profile);
-//   view.renderFrame(frame);  // frame = [[r,g,b] × segments], RAW renderer output
-//   view.setProfile(p);       // geometry + photometric knobs; `_calibrating`
-//                             // (truthy) shows the drag affordances
-//   view.hitTest(x, y);       // canvas px -> {type:"corner"|"start"|"direction",
-//                             //   index?, tangent?, segPerPx?} or null
-//   view.destroy();
-// This module is self-contained (no imports). It DRAWS ONLY: it never fetches,
-// persists, or edits the profile. A host mounts it and feeds frames — nothing
-// else. hitTest hands the host enough geometry (travel tangent + segments-per-
-// pixel) to wire its own dragging; all profile edits stay host-owned.
-//
-// The photometric/bleed/geometry formulas here are DELIBERATE mirrors of the
-// Python engine (interactive knobs must not round-trip the server per slider
-// tick). The Python twins carry the unit tests; keep each mirror in lockstep.
+// ledsim-view.js — H612D fixture view. Draws only; never fetches or persists.
 
 export function createLedSimView(canvas, initialProfile) {
-  const ctx = canvas.getContext("2d");
-  let profile = JSON.parse(JSON.stringify(initialProfile || {}));
-  let lastFrame = null;
-  let directionHitCenter = null; // set during overlay draw, canvas px
+  const ctx = canvas.getContext("2d", {alpha: false});
+  let profile = structuredClone(initialProfile || {});
+  let lastFrame = [];
 
-  // --- geometry -------------------------------------------------------------
-  // mirror of led_sim_engine.segment_geometry — keep in lockstep
-  function roomCorners() {
-    const room = profile.room_mm || [5216, 2284];
-    const w = Number(room[0]) || 1;
-    const h = Number(room[1]) || 1;
-    return [[0, 0], [w, 0], [w, h], [0, h]]; // clockwise, y down
-  }
-
-  const INWARD_NORMALS = [[0, 1], [-1, 0], [0, -1], [1, 0]]; // physical wall 0-3
-
-  function traversedWalls() {
-    const corners = roomCorners();
-    const start = (Number(profile.start_corner) || 0) & 3;
-    const cw = profile.direction !== "ccw";
-    const walls = [];
-    for (let k = 0; k < 4; k += 1) {
-      let a, b, wallIndex;
-      if (cw) {
-        a = (start + k) % 4;
-        b = (a + 1) % 4;
-        wallIndex = a;
-      } else {
-        a = ((start - k) % 4 + 4) % 4;
-        b = ((a - 1) % 4 + 4) % 4;
-        wallIndex = b; // physical wall j connects corner j -> j+1
-      }
-      walls.push({ a: corners[a], b: corners[b], wallIndex });
-    }
-    return walls;
-  }
-
-  function arcLengths() {
-    const seg = Number(profile.segments) || 60;
-    const cs = profile.corner_segments || [0, 15, 30, 45];
-    const out = [];
-    for (let k = 0; k < 4; k += 1) {
-      out.push(k < 3 ? cs[k + 1] - cs[k] : seg - cs[3] + cs[0]);
-    }
-    return out;
-  }
-
-  // strip position (0..segments) -> {x, y, wallIndex, tangent} in room mm
-  function stripPosToPoint(pos) {
-    const seg = Number(profile.segments) || 60;
-    const cs = profile.corner_segments || [0, 15, 30, 45];
-    const walls = traversedWalls();
-    const arcs = arcLengths();
-    let rel = ((pos - cs[0]) % seg + seg) % seg;
-    let offset = 0;
-    for (let k = 0; k < 4; k += 1) {
-      if (rel < offset + arcs[k] || k === 3) {
-        const frac = (rel - offset) / arcs[k];
-        const [ax, ay] = walls[k].a;
-        const [bx, by] = walls[k].b;
-        const dx = bx - ax;
-        const dy = by - ay;
-        const len = Math.hypot(dx, dy) || 1;
-        return {
-          x: ax + dx * frac,
-          y: ay + dy * frac,
-          wallIndex: walls[k].wallIndex,
-          tangent: [dx / len, dy / len],
-        };
-      }
-      offset += arcs[k];
-    }
-    return { x: 0, y: 0, wallIndex: 0, tangent: [1, 0] };
-  }
-
-  // --- canvas fit -------------------------------------------------------------
-  const MARGIN = 56;
-
-  function fit() {
-    const room = roomCorners();
-    const w = room[1][0];
-    const h = room[3][1];
-    const cw = canvas.width;
-    const ch = canvas.height;
-    const scale = Math.min((cw - 2 * MARGIN) / w, (ch - 2 * MARGIN) / h);
-    const ox = (cw - w * scale) / 2;
-    const oy = (ch - h * scale) / 2;
-    return { scale, ox, oy, w, h };
-  }
-
-  function toCanvas(f, x, y) {
-    return [f.ox + x * f.scale, f.oy + y * f.scale];
-  }
-
-  // --- photometrics -------------------------------------------------------------
-  // mirror of led_sim_engine formula: out_c = 255*(gain_c*brightness*(in_c/255))^gamma
-  // — keep in lockstep
   function transformColor(rgb) {
-    const gamma = Number(profile.gamma) || 1.0;
-    const brightness = Number(profile.brightness);
-    const bright = Number.isFinite(brightness) ? brightness : 1.0;
-    const white = profile.white_point || [1, 1, 1];
-    const out = [0, 0, 0];
-    for (let c = 0; c < 3; c += 1) {
-      const linear = (Number(white[c]) || 0) * bright * (rgb[c] / 255);
-      out[c] = Math.max(0, Math.min(255, Math.round(255 * Math.pow(Math.max(0, linear), gamma))));
-    }
-    return out;
+    const gamma = Number(profile.gamma) || 1;
+    const brightness = Number.isFinite(Number(profile.brightness)) ? Number(profile.brightness) : 1;
+    const gains = profile.white_point || [1, 1, 1];
+    return rgb.map((channel, index) => {
+      const linear = (Number(gains[index]) || 0) * brightness * (Number(channel) / 255);
+      return Math.max(0, Math.min(255, Math.round(255 * Math.max(0, linear) ** gamma)));
+    });
   }
 
-  // mirror of led_sim_engine.apply_bleed — keep in lockstep
-  function applyBleed(frame, bleed) {
-    const n = frame.length;
-    const mix = Number(bleed) || 0;
-    if (mix <= 0 || n === 0) return frame;
-    const out = new Array(n);
-    for (let i = 0; i < n; i += 1) {
-      const prev = frame[(i - 1 + n) % n];
-      const cur = frame[i];
-      const nxt = frame[(i + 1) % n];
-      const px = [0, 0, 0];
-      for (let c = 0; c < 3; c += 1) {
-        px[c] = Math.max(0, Math.min(255, Math.round(
-          (1 - mix) * cur[c] + (mix / 2) * (prev[c] + nxt[c]),
-        )));
-      }
-      out[i] = px;
-    }
-    return out;
+  // Mirror of led_sim_engine.apply_bleed: linear strip, no 59 -> 0 leak.
+  function applyBleed(frame) {
+    const mix = Number(profile.bleed) || 0;
+    if (!frame.length || mix <= 0) return frame;
+    return frame.map((current, index) => {
+      const previous = index ? frame[index - 1] : current;
+      const next = index + 1 < frame.length ? frame[index + 1] : current;
+      return current.map((channel, c) => Math.max(0, Math.min(255, Math.round(
+        (1 - mix) * channel + (mix / 2) * (previous[c] + next[c]),
+      ))));
+    });
   }
 
-  // --- drawing ---------------------------------------------------------------
-  function drawRoom(f) {
-    ctx.fillStyle = "#08090c";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = "#101218";
-    ctx.strokeStyle = "#2a2e3a";
-    ctx.lineWidth = 1;
-    ctx.fillRect(f.ox, f.oy, f.w * f.scale, f.h * f.scale);
-    ctx.strokeRect(f.ox, f.oy, f.w * f.scale, f.h * f.scale);
+  function roundedRect(x, y, width, height, radius) {
+    const r = Math.min(radius, width / 2, height / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + width, y, x + width, y + height, r);
+    ctx.arcTo(x + width, y + height, x, y + height, r);
+    ctx.arcTo(x, y + height, x, y, r);
+    ctx.arcTo(x, y, x + width, y, r);
+    ctx.closePath();
   }
 
-  function drawFrame(frame) {
-    const f = fit();
-    drawRoom(f);
-    const seg = Number(profile.segments) || 60;
-    const count = Math.min(seg, frame.length);
+  function drawEmitter(x, y, radius, rgb) {
+    const [r, g, b] = rgb;
+    const peak = Math.max(r, g, b) / 255;
+    const glowRadius = radius * (2.2 + 2.8 * (Number(profile.glow_radius) || 1));
+    const glowAlpha = Math.min(0.95, peak * (Number(profile.glow_gain) || 0));
 
-    // Photometric transform then ring bleed (order matches the engine's docs).
-    const transformed = [];
-    for (let i = 0; i < count; i += 1) transformed.push(transformColor(frame[i]));
-    const shaped = applyBleed(transformed, profile.bleed);
-
-    const perimeterMm = 2 * (f.w + f.h);
-    const segLenMm = perimeterMm / seg;
-    const diffusion = Math.max(0.1, Number(profile.diffusion_width_seg) || 1);
-    const diffPx = Math.max(2, diffusion * segLenMm * f.scale);
-    const reachMm = Math.max(0, Number(profile.wash_reach_mm) || 0);
-    const washGain = Math.max(0, Number(profile.wash_gain) || 0);
-
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-
-    // Wash pass first (indirect room glow behind the strip line).
-    if (reachMm > 0 && washGain > 0) {
-      for (let i = 0; i < count; i += 1) {
-        const [r, g, b] = shaped[i];
-        const luma = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
-        const alpha = Math.min(1, luma * washGain * 0.55);
-        if (alpha <= 0.003) continue;
-        const p = stripPosToPoint(i + 0.5);
-        const nrm = INWARD_NORMALS[p.wallIndex];
-        const cxMm = p.x + nrm[0] * reachMm * 0.35;
-        const cyMm = p.y + nrm[1] * reachMm * 0.35;
-        const [cx, cy] = toCanvas(f, cxMm, cyMm);
-        const radius = Math.max(4, reachMm * f.scale);
-        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
-        grad.addColorStop(0, `rgba(${r},${g},${b},${alpha})`);
-        grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-
-    // Strip pass: per segment a glow band along its wall span, linear gradient
-    // across diffusion_width_seg.
-    for (let i = 0; i < count; i += 1) {
-      const [r, g, b] = shaped[i];
-      if (r === 0 && g === 0 && b === 0) continue;
-      const p0 = stripPosToPoint(i);
-      const p1 = stripPosToPoint((i + 1) % seg);
-      const [x0, y0] = toCanvas(f, p0.x, p0.y);
-      const [x1, y1] = toCanvas(f, p1.x, p1.y);
-      const midX = (x0 + x1) / 2;
-      const midY = (y0 + y1) / 2;
-      const angle = Math.atan2(y1 - y0, x1 - x0);
-      const len = Math.hypot(x1 - x0, y1 - y0);
+    if (glowAlpha > 0.002) {
       ctx.save();
-      ctx.translate(midX, midY);
-      ctx.rotate(angle);
-      const grad = ctx.createLinearGradient(0, -diffPx / 2, 0, diffPx / 2);
-      grad.addColorStop(0, `rgba(${r},${g},${b},0)`);
-      grad.addColorStop(0.5, `rgba(${r},${g},${b},0.95)`);
-      grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
-      ctx.fillStyle = grad;
-      ctx.fillRect(-len / 2, -diffPx / 2, len, diffPx);
+      ctx.globalCompositeOperation = "lighter";
+      const glow = ctx.createRadialGradient(x, y, radius * 0.25, x, y, glowRadius);
+      glow.addColorStop(0, `rgba(${r},${g},${b},${glowAlpha})`);
+      glow.addColorStop(0.3, `rgba(${r},${g},${b},${glowAlpha * 0.42})`);
+      glow.addColorStop(1, `rgba(${r},${g},${b},0)`);
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(x, y, glowRadius, 0, Math.PI * 2);
+      ctx.fill();
       ctx.restore();
     }
 
-    ctx.restore();
-
-    if (profile._calibrating) drawCalibrationOverlay(f);
+    const core = ctx.createRadialGradient(
+      x - radius * 0.25, y - radius * 0.28, radius * 0.08,
+      x, y, radius,
+    );
+    const white = Math.round(peak * 210);
+    core.addColorStop(0, `rgb(${Math.max(r, white)},${Math.max(g, white)},${Math.max(b, white)})`);
+    core.addColorStop(0.34, `rgb(${r},${g},${b})`);
+    core.addColorStop(1, `rgb(${Math.round(r * 0.14)},${Math.round(g * 0.14)},${Math.round(b * 0.14)})`);
+    ctx.fillStyle = core;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = peak ? "rgba(255,255,255,.12)" : "rgba(255,255,255,.06)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
   }
 
-  const HANDLE_R = 9;
+  function draw(frame) {
+    const width = canvas.width;
+    const height = canvas.height;
+    const segments = Number(profile.segments) || 60;
+    const ledsPerSegment = Number(profile.leds_per_segment) || 6;
+    const segmentsPerRow = 10;
+    const rows = Math.ceil(segments / segmentsPerRow);
+    const padX = 54;
+    const padTop = 46;
+    const padBottom = 38;
+    const usableWidth = width - padX * 2;
+    const rowHeight = (height - padTop - padBottom) / rows;
+    const segmentWidth = usableWidth / segmentsPerRow;
+    const emitterRadius = Math.max(3.2, Math.min(7.5, segmentWidth / (ledsPerSegment * 3.2)));
 
-  function drawCalibrationOverlay(f) {
-    const cs = profile.corner_segments || [0, 15, 30, 45];
-    ctx.save();
-    ctx.font = "12px system-ui, sans-serif";
-    ctx.textAlign = "center";
+    const backdrop = ctx.createLinearGradient(0, 0, 0, height);
+    backdrop.addColorStop(0, "#080912");
+    backdrop.addColorStop(1, "#030408");
+    ctx.fillStyle = backdrop;
+    ctx.fillRect(0, 0, width, height);
 
-    // Corner handles: where strip positions corner_segments[k] sit (the room corners).
-    for (let k = 0; k < 4; k += 1) {
-      const p = stripPosToPoint(cs[k]);
-      const [x, y] = toCanvas(f, p.x, p.y);
-      ctx.beginPath();
-      ctx.arc(x, y, HANDLE_R, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(80, 170, 255, 0.25)";
+    const transformed = applyBleed(frame.slice(0, segments).map(transformColor));
+    while (transformed.length < segments) transformed.push([0, 0, 0]);
+
+    ctx.font = "600 11px ui-monospace, SFMono-Regular, Menlo, monospace";
+    ctx.textBaseline = "middle";
+    for (let row = 0; row < rows; row += 1) {
+      const y = padTop + row * rowHeight + rowHeight * 0.45;
+      const first = row * segmentsPerRow;
+      const last = Math.min(segments, first + segmentsPerRow);
+
+      ctx.fillStyle = "#11131b";
+      roundedRect(padX - 12, y - 17, usableWidth + 24, 34, 10);
       ctx.fill();
-      ctx.strokeStyle = "#54aaff";
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = "rgba(255,255,255,.06)";
       ctx.stroke();
-      ctx.fillStyle = "#9fd0ff";
-      ctx.fillText(`c${k} @ ${cs[k].toFixed(1)}`, x, y - HANDLE_R - 4);
+
+      for (let segment = first; segment < last; segment += 1) {
+        const column = segment - first;
+        const segmentX = padX + column * segmentWidth;
+        const rgb = transformed[segment];
+
+        if (column) {
+          ctx.strokeStyle = "rgba(255,255,255,.075)";
+          ctx.beginPath();
+          ctx.moveTo(segmentX, y - 13);
+          ctx.lineTo(segmentX, y + 13);
+          ctx.stroke();
+        }
+
+        for (let led = 0; led < ledsPerSegment; led += 1) {
+          const x = segmentX + ((led + 0.5) / ledsPerSegment) * segmentWidth;
+          drawEmitter(x, y, emitterRadius, rgb);
+        }
+
+        ctx.fillStyle = "rgba(195,202,220,.48)";
+        ctx.textAlign = "center";
+        ctx.fillText(String(segment).padStart(2, "0"), segmentX + segmentWidth / 2, y + 31);
+      }
+
+      ctx.fillStyle = "rgba(137,146,170,.62)";
+      ctx.textAlign = "right";
+      ctx.fillText(`${String(first).padStart(2, "0")}–${String(last - 1).padStart(2, "0")}`, padX - 18, y);
     }
-
-    // Start handle: where strip position 0 (segment 0) sits.
-    const s0 = stripPosToPoint(0);
-    const [sx, sy] = toCanvas(f, s0.x, s0.y);
-    ctx.beginPath();
-    ctx.rect(sx - HANDLE_R, sy - HANDLE_R, HANDLE_R * 2, HANDLE_R * 2);
-    ctx.fillStyle = "rgba(120, 255, 170, 0.25)";
-    ctx.fill();
-    ctx.strokeStyle = "#5aff9c";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    ctx.fillStyle = "#a8ffc9";
-    ctx.fillText("seg 0", sx, sy + HANDLE_R + 14);
-
-    // Direction arrow: travel direction just after segment 0. Click to flip.
-    const ahead = stripPosToPoint(2.0);
-    const nrm = INWARD_NORMALS[ahead.wallIndex];
-    const inset = 26; // px, inward from the strip line
-    const [bx, by] = toCanvas(f, ahead.x, ahead.y);
-    const ax = bx + nrm[0] * inset;
-    const ay = by + nrm[1] * inset;
-    const [tx, ty] = ahead.tangent;
-    directionHitCenter = [ax, ay];
-    ctx.beginPath();
-    ctx.moveTo(ax - tx * 16, ay - ty * 16);
-    ctx.lineTo(ax + tx * 16, ay + ty * 16);
-    ctx.strokeStyle = "#ffd166";
-    ctx.lineWidth = 3;
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(ax + tx * 22, ay + ty * 22);
-    ctx.lineTo(ax + tx * 8 - ty * 7, ay + ty * 8 + tx * 7);
-    ctx.lineTo(ax + tx * 8 + ty * 7, ay + ty * 8 - tx * 7);
-    ctx.closePath();
-    ctx.fillStyle = "#ffd166";
-    ctx.fill();
-    ctx.fillStyle = "#ffe4a3";
-    ctx.fillText(profile.direction === "ccw" ? "ccw (click to flip)" : "cw (click to flip)", ax, ay - 14);
-    ctx.restore();
   }
 
-  // --- public API ----------------------------------------------------------------
   return {
     renderFrame(frame) {
-      lastFrame = frame;
-      drawFrame(frame || []);
+      lastFrame = frame || [];
+      draw(lastFrame);
     },
-
     setProfile(next) {
-      profile = JSON.parse(JSON.stringify(next || {}));
-      if (lastFrame) drawFrame(lastFrame);
-      else drawFrame([]);
+      profile = structuredClone(next || {});
+      draw(lastFrame);
     },
-
-    hitTest(x, y) {
-      const f = fit();
-      const seg = Number(profile.segments) || 60;
-      const perimeterPx = 2 * (f.w + f.h) * f.scale;
-      const segPerPx = seg / perimeterPx;
-      const cs = profile.corner_segments || [0, 15, 30, 45];
-      if (profile._calibrating && directionHitCenter) {
-        const [dxc, dyc] = directionHitCenter;
-        if (Math.hypot(x - dxc, y - dyc) <= 24) return { type: "direction" };
-      }
-      for (let k = 0; k < 4; k += 1) {
-        const p = stripPosToPoint(cs[k]);
-        const [hx, hy] = toCanvas(f, p.x, p.y);
-        if (Math.hypot(x - hx, y - hy) <= HANDLE_R + 4) {
-          return { type: "corner", index: k, tangent: p.tangent, segPerPx };
-        }
-      }
-      const s0 = stripPosToPoint(0);
-      const [sx, sy] = toCanvas(f, s0.x, s0.y);
-      if (Math.abs(x - sx) <= HANDLE_R + 4 && Math.abs(y - sy) <= HANDLE_R + 4) {
-        return { type: "start", tangent: s0.tangent, segPerPx };
-      }
-      return null;
-    },
-
     destroy() {
-      lastFrame = null;
-      directionHitCenter = null;
+      lastFrame = [];
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     },
   };
