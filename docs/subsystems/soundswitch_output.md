@@ -22,6 +22,7 @@ supervisor thread retries ~every 10 s (warn-once then DEBUG) until Enttec/IAC ap
 late-attaches the same consumers as boot (`set_pack_runtime`, cleanup owners, laser executor
 backend). Happy-path boot starts no supervisor. Status stays honest while down. SOFTWARE-TESTED;
 foreign-Mac hot-plug live-unvalidated.
+
 Audit P1 (2026-07-03): `SoundSwitchEngine` documentation now describes the current routing/send
 facade instead of the obsolete no-op scaffold text. Runtime send ordering and output behavior are
 unchanged.
