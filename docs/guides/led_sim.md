@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: software-tested
-last_verified_commit: 6db34d7
+last_verified_commit: 333ba77
 last_verified_date: 2026-07-15
 validation_scope: >
   H612D LED Studio (AWR-196 + AWR-244 room-view rebuild): offline
