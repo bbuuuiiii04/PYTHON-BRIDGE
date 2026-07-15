@@ -25,6 +25,7 @@ from .canonical import canonical_bytes, jsonl_line, sha256_hex
 from .schemas import SCHEMA_VERSION, CardManifestRow, ResponseRow
 
 MAX_DECISIONS = 113
+ACTIVE_SECONDS_CEILING = 65 * 60      # spec B9: 65 active minutes
 GENESIS = "0" * 64
 
 # Which questions a card may answer, and the order they close in (spec B6).
@@ -80,11 +81,13 @@ def write_card_manifest(workspace, rows) -> Path:
     return p
 
 
-def verify_predictions_frozen(workspace: Path, expected_methods) -> None:
+def verify_predictions_frozen(workspace: Path, expected_methods, expected_manifest_hash=None) -> None:
     """prediction_hashes.json must exist and cover every method before the first card.
 
     Reads only the hashes file — never a prediction's contents (spec B6 response
-    independence).
+    independence). When ``expected_manifest_hash`` is given, the recorded
+    ``card_manifest_hash`` must equal it (spec B6/fix 3c) — otherwise predictions
+    were frozen against a different card manifest than this runner drives.
     """
     p = _safe_path(Path(workspace), "prediction_hashes.json")
     if not p.exists():
@@ -94,6 +97,9 @@ def verify_predictions_frozen(workspace: Path, expected_methods) -> None:
     missing = set(expected_methods) - have
     if missing:
         raise Gate1Error(f"prediction_hashes.json incomplete, missing: {sorted(missing)}")
+    if expected_manifest_hash is not None and data.get("card_manifest_hash") != expected_manifest_hash:
+        raise Gate1Error("prediction_hashes.json card_manifest_hash "
+                         f"{data.get('card_manifest_hash')!r} != runner manifest {expected_manifest_hash!r}")
 
 
 def _card_closed(card_type: str, answers: dict) -> bool:
@@ -124,7 +130,8 @@ class SessionRunner:
     """Runs one pilot workspace across sessions A/P1-P3 and resumed segments."""
 
     def __init__(self, workspace, card_manifest, *, pilot_seed,
-                 clock: Callable[[], str], local_date: Callable[[], str]):
+                 clock: Callable[[], str], local_date: Callable[[], str],
+                 expected_methods=None):
         self.workspace = Path(workspace)
         self.workspace.mkdir(parents=True, exist_ok=True)
         self.cards = list(card_manifest)                      # frozen order (dicts)
@@ -136,6 +143,8 @@ class SessionRunner:
         self.card_manifest_hash = sha256_hex(self.cards)
         self.responses_path = _safe_path(self.workspace, "responses.jsonl")
         self.playbacks_path = _safe_path(self.workspace, "playbacks.jsonl")
+        self.expected_methods = expected_methods
+        self._frozen_checked = False
         self.segment_index = 0
         self._load()
 
@@ -222,6 +231,12 @@ class SessionRunner:
                 if r.get("local_date") == today:
                     raise WorkloadError(
                         f"local date {today} already holds a commit; one session per day")
+        # First start_session verifies predictions are frozen AND were frozen against
+        # this runner's exact card manifest (spec B6 response independence, fix 3c).
+        if not self._frozen_checked:
+            if self.expected_methods is not None:
+                verify_predictions_frozen(self.workspace, self.expected_methods, self.card_manifest_hash)
+            self._frozen_checked = True
         self.segment_index += 1
         self.current_session = session_index
         return self.segment_index
@@ -257,8 +272,12 @@ class SessionRunner:
         answers = self._answers.get(card_id, {})
         if question in answers:
             raise ValueError(f"immutable: {card_id}/{question} already committed")
+        if question == "hardness" and answers.get("state") != "genuine":
+            raise ValueError(f"hardness on {card_id} requires a committed state == 'genuine'")
         if len(self.responses) >= MAX_DECISIONS:
             raise WorkloadError(f"commit past {MAX_DECISIONS}-decision ceiling refused")
+        if self.active_seconds() >= ACTIVE_SECONDS_CEILING:
+            raise WorkloadError(f"active time >= {ACTIVE_SECONDS_CEILING}s ceiling; intake ends")
 
         row = ResponseRow(
             schema_version=SCHEMA_VERSION, pilot_seed=self.pilot_seed, card_id=card_id,
