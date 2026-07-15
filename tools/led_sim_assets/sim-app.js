@@ -263,19 +263,23 @@ function invalidateCalibration() {
 
 function syncEditGestureClass() {
   const wrap = $("canvas-wrap");
-  const editing = state.activeTab === "layout" && !layoutLocked() && view?.getViewMode() === "room";
+  const editing = state.activeTab === "layout" && !layoutLocked() && !isPreviewingLayout()
+    && view?.getViewMode() === "room";
   wrap.classList.toggle("edit-gestures", Boolean(editing));
+  wrap.classList.toggle("previewing-layout", isPreviewingLayout());
 }
 
 function syncLockUi() {
   ensureLockDefaults();
   const layoutLock = layoutLocked();
   const calibLock = calibrationLocked();
+  const previewing = isPreviewingLayout();
   const layoutBtn = $("layout-lock");
   if (layoutBtn) {
     layoutBtn.setAttribute("aria-pressed", layoutLock ? "true" : "false");
     layoutBtn.textContent = layoutLock ? "🔒 Locked" : "🔓 Unlocked";
     layoutBtn.title = layoutLock ? "Unlock layout editing" : "Lock layout editing";
+    layoutBtn.disabled = previewing;
   }
   const calibBtn = $("calibration-lock");
   if (calibBtn) {
@@ -288,15 +292,17 @@ function syncLockUi() {
     lockChip.hidden = !(layoutLock && view?.getViewMode() === "room");
   }
 
+  // Geometry editors bind only to the ACTIVE layout — disabled while previewing.
+  const geometryBlocked = layoutLock || previewing;
   for (const id of ["room-width-ft", "room-height-ft", "layout-flip", "layout-reset"]) {
     const el = $(id);
-    if (el) el.disabled = layoutLock;
+    if (el) el.disabled = geometryBlocked;
   }
   for (const button of document.querySelectorAll(".preset-card")) {
-    button.disabled = layoutLock;
+    button.disabled = geometryBlocked;
   }
   const undoBtn = $("layout-undo");
-  if (undoBtn) undoBtn.disabled = layoutLock || state.layoutUndoStack.length === 0;
+  if (undoBtn) undoBtn.disabled = geometryBlocked || state.layoutUndoStack.length === 0;
 
   const calibRoot = $("calibration-controls");
   if (calibRoot) {
@@ -310,7 +316,8 @@ function syncLockUi() {
   const save = $("profile-save");
   if (save) save.disabled = false;
 
-  const roomEditing = view?.getViewMode() === "room" && state.activeTab === "layout" && !layoutLock;
+  const roomEditing = view?.getViewMode() === "room" && state.activeTab === "layout"
+    && !layoutLock && !previewing;
   view?.setEditing(Boolean(roomEditing));
   syncEditGestureClass();
   updateResetLabel();
@@ -332,12 +339,32 @@ function toggleCalibrationLock() {
 }
 
 function pushProfileToView() {
-  view.setProfile(state.profile);
+  // AWR-251 M-4: stage shows the picker selection (preview ghost when ≠ active).
+  view.setProfile(displayProfile());
   markDirty();
   updateCalibrationBadge();
   syncLayoutForm();
   syncLockUi();
   syncLayoutPicker();
+}
+
+/** Profile the stage draws — selected slot when previewing, else the active one. */
+function displayProfile() {
+  ensureLayoutLibrary();
+  const selected = selectedLayoutName();
+  const active = state.profile.active_layout;
+  if (!selected || selected === active || !state.profile.layouts[selected]) {
+    return state.profile;
+  }
+  const preview = clone(state.profile);
+  preview.active_layout = selected;
+  return preview;
+}
+
+function isPreviewingLayout() {
+  ensureLayoutLibrary();
+  const selected = selectedLayoutName();
+  return Boolean(selected && selected !== state.profile.active_layout && state.profile.layouts[selected]);
 }
 
 function ensureProfileLayout() {
@@ -527,7 +554,10 @@ function syncLayoutActiveHint({flashSaved = false} = {}) {
   const selected = selectedLayoutName();
   const active = state.profile.active_layout;
   const savedActive = state.savedProfile?.active_layout;
-  if (selected !== active || (savedActive && savedActive !== active)) {
+  if (selected !== active) {
+    hint.textContent = "previewing — press Use to activate & edit";
+    hint.hidden = false;
+  } else if (savedActive && savedActive !== active) {
     hint.textContent = "Press Use to make this the active layout";
     hint.hidden = false;
   } else {

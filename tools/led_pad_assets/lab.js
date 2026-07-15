@@ -374,9 +374,6 @@
     $("targetRoleSelect").value = mem ? mem.target_role : roleOf(e);
     $("timingModeSelect").value = (mem ? mem.timing_mode : e.timing_mode) || "unknown";
     $("paramsInput").value = JSON.stringify(mem ? mem.params : (e.params || {}), null, 2);
-    // Cue comes from memory when present so draft-switch restores unsaved length.
-    if (mem && mem.cue_beats != null) e._editor_cue = mem.cue_beats;
-    else delete e._editor_cue;
     renderParamControls();
     renderCue();
     renderLive();
@@ -423,10 +420,9 @@
 
   function renderCue() {
     const values = [4, 8, 16, 32];
+    const mem = state.current && state.editorMemory[state.current.name];
     const current = Number(
-      (state.current && state.current._editor_cue != null)
-        ? state.current._editor_cue
-        : (state.current || {}).cue_beats || 16
+      (mem && mem.cue_beats != null) ? mem.cue_beats : (state.current || {}).cue_beats || 16
     );
     const isPreset = values.includes(current);
     // Fix P4 duplicate chip: hide the number input when a preset is selected.

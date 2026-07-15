@@ -247,6 +247,14 @@ main { padding: var(--pad); }
 .lab-route .lab-tuning-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--pad); display: flex; flex-direction: column; gap: var(--sp-3); }
 .lab-route .lab-applied-hint { font-size: 12px; color: var(--text-dim); }
 .lab-route .lab-applied-hint[hidden] { display: none; }
+.lab-route #playDraftBtn.lab-switch-live {
+  color: #1a1400;
+  background: color-mix(in srgb, var(--warn) 82%, #fff);
+  border-color: var(--warn);
+}
+.lab-route .lab-preview-hero.room-mode {
+  scroll-margin-top: 72px; /* clear sticky topbar when Preview scrolls room into view */
+}
 .lab-route .lab-tuning-footer { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--gap); flex-wrap: wrap; }
 .lab-route .lab-tuning-actions { display: flex; align-items: center; gap: var(--sp-2); margin-left: auto; }
 .lab-route .param-slider { grid-template-columns: minmax(88px, 140px) minmax(0, 1fr) 56px; align-items: start; }
