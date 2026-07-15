@@ -526,7 +526,8 @@ function syncLayoutActiveHint({flashSaved = false} = {}) {
   delete hint.dataset.flashUntil;
   const selected = selectedLayoutName();
   const active = state.profile.active_layout;
-  if (selected !== active) {
+  const savedActive = state.savedProfile?.active_layout;
+  if (selected !== active || (savedActive && savedActive !== active)) {
     hint.textContent = "Press Use to make this the active layout";
     hint.hidden = false;
   } else {
@@ -542,6 +543,7 @@ function syncLayoutPicker() {
   const names = Object.keys(state.profile.layouts).sort((a, b) => a.localeCompare(b));
   const active = state.profile.active_layout;
   const selected = selectedLayoutName();
+  const savedActive = state.savedProfile?.active_layout;
   select.innerHTML = "";
   for (const name of names) {
     select.add(new Option(name === active ? `${name} (active)` : name, name));
@@ -553,7 +555,8 @@ function syncLayoutPicker() {
   const saveAs = $("layout-save-as");
   if (saveAs) saveAs.disabled = names.length >= MAX_LAYOUTS;
   const use = $("layout-use");
-  if (use) use.disabled = selected === active;
+  // Enable Use when picker ≠ stage active, or stage active is not yet on disk.
+  if (use) use.disabled = selected === active && (!savedActive || savedActive === active);
   syncLayoutActiveHint();
 }
 
