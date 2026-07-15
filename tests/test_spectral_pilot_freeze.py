@@ -130,8 +130,8 @@ class RunAllMethodsTests(unittest.TestCase):
         # baseline A: genuine(abstain)+hardness on the marker, family on the montage = 3
         self.assertEqual(len(rows[cand.BASELINE_A]), 3)
         self.assertEqual(len(rows[cand.BASELINE_B]), 1)                # genuine only, marker
-        # candidate C: marker genuine+hardness at 0,±2 = 6, plus montage family = 7
-        self.assertEqual(len(rows[cand.CANDIDATE_C]), 7)
+        # candidate C: marker genuine+hardness at 0,-2,-1,+1,+2 = 10, plus montage family = 11
+        self.assertEqual(len(rows[cand.CANDIDATE_C]), 11)
         axes_a = sorted(r["axis"] for r in rows[cand.BASELINE_A])
         self.assertEqual(axes_a, ["family", "genuine", "hardness"])
         # every prediction row carries real hashes
@@ -145,7 +145,7 @@ class RunAllMethodsTests(unittest.TestCase):
         rows = freeze.run_all_methods(pilot_seed=SEED, cards=cards, resolve=resolve, window_fn=wf,
                                       plan_fn=self._plan, dev=dm, scalers=sc, manifest_hash="mh")
         cabs = [r for r in rows[cand.CANDIDATE_C] if r["abstained"]]
-        self.assertEqual(len(cabs), 7)                              # all C rows abstain
+        self.assertEqual(len(cabs), 11)                             # all C rows abstain
         self.assertIn("missing_or_invalid_v4", cabs[0]["reason_codes"])
 
     def test_determinism_run_twice(self):
@@ -153,6 +153,25 @@ class RunAllMethodsTests(unittest.TestCase):
         kw = dict(pilot_seed=SEED, cards=cards, resolve=resolve, window_fn=wf,
                   plan_fn=self._plan, dev=dm, scalers=sc, manifest_hash="mh")
         self.assertEqual(freeze.run_all_methods(**kw), freeze.run_all_methods(**kw))
+
+    def test_stability_shifts_pin_four_deltas(self):
+        # spec B8: each central marker recomputed at deltas -2,-1,+1,+2 -> 5 rows per gated axis.
+        self.assertEqual(freeze.STABILITY_SHIFTS, (-2, -1, 1, 2))
+        dm, sc, cards, resolve, _ = self._setup()
+        # marker card m1 sits at beat 200; kill only the -2 shift window (beat 198) to force an
+        # out-of-range-style miss, and prove it is EXCLUDED BY REASON, not silently dropped.
+        wf = lambda cid, beat: None if beat == 198 else win(scale=1.0 + 0.05 * (beat % 11))
+        rows = freeze.run_all_methods(pilot_seed=SEED, cards=cards, resolve=resolve, window_fn=wf,
+                                      plan_fn=self._plan, dev=dm, scalers=sc, manifest_hash="mh")
+        expected = {"m1", "m1@-2", "m1@-1", "m1@+1", "m1@+2"}
+        for axis in ("genuine", "hardness"):
+            got = {r["target_id"] for r in rows[cand.CANDIDATE_C] if r["axis"] == axis}
+            self.assertEqual(got, expected, axis)                  # central + 4 shifts, none dropped
+            miss = [r for r in rows[cand.CANDIDATE_C]
+                    if r["axis"] == axis and r["target_id"] == "m1@-2"]
+            self.assertEqual(len(miss), 1)
+            self.assertTrue(miss[0]["abstained"])                  # out-of-range window kept as a row...
+            self.assertIn("missing_or_invalid_v4", miss[0]["reason_codes"])  # ...with a named reason
 
     def test_diagnostics_when_wired(self):
         dm, sc, cards, resolve, wf = self._setup()

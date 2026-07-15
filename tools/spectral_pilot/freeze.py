@@ -31,7 +31,7 @@ _TIER_MAP = {1: "T1", 2: "T2", 3: "T3"}
 # every method version the freeze runs, canonical order
 PREDICTION_METHODS = (cand.BASELINE_A, cand.BASELINE_B, cand.CANDIDATE_C)
 DIAGNOSTIC_METHODS = (cand.DIAG_HARDNESS, cand.DIAG_APPROACH)
-STABILITY_SHIFTS = (-2, 2)   # ±2-beat shifted windows for the marker-stability contract
+STABILITY_SHIFTS = (-2, -1, 1, 2)   # spec B8: recompute each central marker at beat deltas -2,-1,+1,+2
 
 
 def reduce_family(fa: str, fb: str) -> str:
@@ -241,7 +241,7 @@ def _marker_targets(rows, c, resolve, window_fn, plan_fn, dev_rows, scalers, pro
     # baseline B: development majority (genuine)
     rows[cand.BASELINE_B].append(
         cand.predict_baseline_b_genuine(tgt, dev_rows, input_hash=ih, **prov).to_dict())
-    # candidate C: retrieval genuine + hardness at the frozen marker, then ±2 shifts
+    # candidate C: retrieval genuine + hardness at the frozen marker, then the -2,-1,+1,+2 shifts
     for shift in (0,) + STABILITY_SHIFTS:
         stgt = tgt if shift == 0 else f"{tgt}@{shift:+d}"
         swin = win if shift == 0 else window_fn(cid, beat + shift)
