@@ -5,7 +5,10 @@ const H612D_SEGMENTS = 60;
 const H612D_LEDS_PER_SEGMENT = 6;
 const H612D_PHYSICAL_LEDS = 360;
 const H612D_LENGTH_MM = 14996.16;
-const H612D_JUNCTION_MM = H612D_LENGTH_MM / 2;
+const H612D_JUNCTION_MM = H612D_LENGTH_MM / 2; // 7498.08 absolute arc mm
+const H612D_LED_PITCH_MM = H612D_LENGTH_MM / H612D_PHYSICAL_LEDS; // 41.656
+const H612D_SEGMENT_MM = H612D_LENGTH_MM / H612D_SEGMENTS;
+const MM_PER_FOOT = 304.8;
 const DEFAULT_ROOM_MM = [5216, 2284];
 
 function roomSizeMm(profile) {
@@ -20,9 +23,25 @@ function roomSizeMm(profile) {
   return [...DEFAULT_ROOM_MM];
 }
 
+export function formatLengthMm(mm) {
+  const feet = Number(mm) / MM_PER_FOOT;
+  const meters = Number(mm) / 1000;
+  return `${feet.toFixed(1)} ft · ${meters.toFixed(1)} m`;
+}
+
+export function mmToFeet(mm) {
+  return Number(mm) / MM_PER_FOOT;
+}
+
+export function feetToMm(feet) {
+  return Number(feet) * MM_PER_FOOT;
+}
+
 export function perimeterPresetPoints(roomMm) {
   const [width, height] = roomMm && roomMm.length === 2 ? roomMm.map(Number) : DEFAULT_ROOM_MM;
-  const gap = Math.min(width * 0.06, 280);
+  const perimeter = 2 * (width + height);
+  let gap = perimeter - H612D_LENGTH_MM;
+  if (gap < 0) gap = Math.min(width * 0.001, 1);
   const half = width / 2;
   return [
     [half - gap / 2, 0],
@@ -35,35 +54,91 @@ export function perimeterPresetPoints(roomMm) {
   ];
 }
 
+function packSerpentineMm({start, lengthMm, xLeft, xRight, yMin, rowPitch}) {
+  const points = [];
+  let x = start[0];
+  let y = start[1];
+  let remaining = lengthMm;
+  let atRight = Math.abs(x - xRight) <= Math.abs(x - xLeft);
+  let pitch = Math.max(20, rowPitch);
+  let guard = 0;
+  while (remaining > 1e-6 && guard < 10000) {
+    guard += 1;
+    const downRoom = y - yMin;
+    if (downRoom > 1e-9) {
+      const dv = Math.min(downRoom, remaining, pitch);
+      y -= dv;
+      points.push([x, y]);
+      remaining -= dv;
+      if (remaining <= 1e-6) break;
+    }
+    const targetX = atRight ? xLeft : xRight;
+    const span = Math.abs(targetX - x);
+    if (span <= 1e-9) {
+      if (y <= yMin + 1e-9) break;
+      continue;
+    }
+    const move = Math.min(span, remaining);
+    x += (targetX - x) * (move / span);
+    points.push([x, y]);
+    remaining -= move;
+    if (move >= span - 1e-9) atRight = !atRight;
+    if (y <= yMin + 1e-9 && remaining > 1e-6 && Math.abs(x - targetX) <= 1e-9) {
+      pitch = Math.max(8, pitch * 0.5);
+      if (pitch <= 8 + 1e-9 && downRoom <= 1e-9) break;
+    }
+  }
+  return points;
+}
+
 export function snakePresetPoints(roomMm) {
   const [width, height] = roomMm && roomMm.length === 2 ? roomMm.map(Number) : DEFAULT_ROOM_MM;
-  const margin = Math.min(width, height) * 0.08;
-  const run = 0.28;
-  const rise = 0.08;
-  const drop = 3 * run + 2 * rise;
-  const abstract = [
-    [0, 0],
-    [run, 0],
-    [run, rise],
-    [0, rise],
-    [0, 2 * rise],
-    [run, 2 * rise],
-    [run, 2 * rise - drop],
-  ];
-  const xs = abstract.map((point) => point[0]);
-  const ys = abstract.map((point) => point[1]);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
-  const spanX = Math.max(maxX - minX, 1e-9);
-  const spanY = Math.max(maxY - minY, 1e-9);
+  const half = H612D_JUNCTION_MM;
+  const margin = Math.min(200, Math.min(width, height) * 0.05);
   const availW = Math.max(1, width - 2 * margin);
   const availH = Math.max(1, height - 2 * margin);
-  const scale = Math.min(availW / spanX, availH / spanY);
-  const offsetX = margin + (availW - spanX * scale) / 2 - minX * scale;
-  const offsetY = margin + (availH - spanY * scale) / 2 - minY * scale;
-  return abstract.map(([x, y]) => [offsetX + x * scale, offsetY + y * scale]);
+  let riseSpan = Math.min(availH * 0.55, half * 0.35);
+  let v = riseSpan / 2;
+  let run = (half - 2 * v) / 3;
+  if (run > availW) {
+    run = availW;
+    v = (half - 3 * run) / 2;
+  }
+  if (run <= 0 || v < 0) {
+    run = Math.min(availW, half / 3);
+    v = Math.max(0, (half - 3 * run) / 2);
+  }
+  let left = margin + (availW - run) / 2;
+  let right = left + run;
+  const y0 = margin;
+  let y1 = y0 + v;
+  let y2 = y1 + v;
+  if (y2 > height - margin) {
+    const scale = (height - margin - y0) / Math.max(y2 - y0, 1e-9);
+    y1 = y0 + (y1 - y0) * scale;
+    y2 = y0 + (y2 - y0) * scale;
+    v = (y2 - y0) / 2;
+    run = (half - 2 * v) / 3;
+    left = margin + (availW - run) / 2;
+    right = left + run;
+  }
+  const points = [
+    [left, y0],
+    [right, y0],
+    [right, y1],
+    [left, y1],
+    [left, y2],
+    [right, y2],
+  ];
+  const rowPitch = Math.max(40, Math.min(140, (y2 - margin) / 10));
+  return points.concat(packSerpentineMm({
+    start: points[5],
+    lengthMm: half,
+    xLeft: left,
+    xRight: right,
+    yMin: margin,
+    rowPitch,
+  }));
 }
 
 export function defaultLayout(roomMm) {
@@ -133,34 +208,51 @@ export function layoutLedPositions(profile) {
   const layout = resolveLayout(profile);
   let points = layout.points_mm.map((point) => [point[0], point[1]]);
   if (layout.flip_chain) points = points.slice().reverse();
-  const sketchLength = polylineArcLength(points);
-  let stripLength = Number(profile?.strip_length_mm);
-  if (!Number.isFinite(stripLength) || stripLength <= 0) stripLength = H612D_LENGTH_MM;
+  const pathLength = polylineArcLength(points);
+  const stripLength = H612D_LENGTH_MM;
+  const pitch = H612D_LED_PITCH_MM;
+  const segmentMm = H612D_SEGMENT_MM;
+  const placedLength = Math.min(pathLength, stripLength);
+  let unplacedMm = Math.max(0, stripLength - pathLength);
+  let excessPathMm = Math.max(0, pathLength - stripLength);
+  if (excessPathMm < 1e-6) excessPathMm = 0;
+  if (unplacedMm < 1e-6) unplacedMm = 0;
 
-  function sample(stripMm) {
-    if (sketchLength <= 1e-12) return [points[0][0], points[0][1]];
-    return pointAtArcDistance(points, (stripMm / stripLength) * sketchLength, sketchLength);
+  function sample(arcMm) {
+    if (pathLength <= 1e-12) return points[0] ? [points[0][0], points[0][1]] : [0, 0];
+    return pointAtArcDistance(points, Math.min(Math.max(0, arcMm), pathLength), pathLength);
   }
 
   const ledPositions = [];
   for (let index = 0; index < H612D_PHYSICAL_LEDS; index += 1) {
-    ledPositions.push(sample(((index + 0.5) / H612D_PHYSICAL_LEDS) * stripLength));
+    const distance = (index + 0.5) * pitch;
+    ledPositions.push(distance <= pathLength + 1e-9 ? sample(distance) : null);
   }
   const boundaries = [];
   for (let index = 0; index <= H612D_SEGMENTS; index += 1) {
-    boundaries.push(sample((index / H612D_SEGMENTS) * stripLength));
+    const distance = index * segmentMm;
+    boundaries.push(distance <= pathLength + 1e-9 ? sample(distance) : null);
   }
   return {
     leds_mm: ledPositions,
     segment_boundaries_mm: boundaries,
-    junction_mm: sample(stripLength / 2),
+    junction_mm: pathLength + 1e-9 >= H612D_JUNCTION_MM ? sample(H612D_JUNCTION_MM) : null,
     start_mm: sample(0),
-    end_mm: sample(stripLength),
+    end_mm: sample(placedLength),
+    path_end_mm: sample(pathLength),
     points_mm: points,
-    sketch_length_mm: sketchLength,
+    path_length_mm: pathLength,
     strip_length_mm: stripLength,
+    placed_length_mm: placedLength,
+    unplaced_mm: unplacedMm,
+    excess_path_mm: excessPathMm,
+    led_pitch_mm: pitch,
+    segment_mm: segmentMm,
+    junction_arc_mm: H612D_JUNCTION_MM,
     flip_chain: Boolean(layout.flip_chain),
     preset: layout.preset,
+    path_label: formatLengthMm(pathLength),
+    strip_label: formatLengthMm(stripLength),
   };
 }
 
@@ -221,17 +313,20 @@ export function createLedSimView(canvas, initialProfile) {
     const key = [
       viewWidth, viewHeight, viewDpr, viewMode,
       transform.scale, transform.originX, transform.originY,
-      layout.sketch_length_mm, layout.flip_chain, layout.points_mm.length,
+      layout.path_length_mm, layout.flip_chain, layout.points_mm.length,
+      layout.unplaced_mm, layout.excess_path_mm,
     ].join("|");
     if (screenCache && screenCache.key === key) return screenCache;
 
-    const leds = layout.leds_mm.map(([x, y]) => mmToCanvas(x, y, transform));
+    const toScreen = (point) => (point ? mmToCanvas(point[0], point[1], transform) : null);
+    const leds = layout.leds_mm.map(toScreen);
     const points = layout.points_mm.map(([x, y]) => mmToCanvas(x, y, transform));
-    const boundaries = layout.segment_boundaries_mm.map(([x, y]) => mmToCanvas(x, y, transform));
-    const junction = mmToCanvas(layout.junction_mm[0], layout.junction_mm[1], transform);
-    const start = mmToCanvas(layout.start_mm[0], layout.start_mm[1], transform);
-    const end = mmToCanvas(layout.end_mm[0], layout.end_mm[1], transform);
-    screenCache = {key, transform, leds, points, boundaries, junction, start, end, layout};
+    const boundaries = layout.segment_boundaries_mm.map(toScreen);
+    const junction = toScreen(layout.junction_mm);
+    const start = toScreen(layout.start_mm);
+    const end = toScreen(layout.end_mm);
+    const pathEnd = toScreen(layout.path_end_mm);
+    screenCache = {key, transform, leds, points, boundaries, junction, start, end, pathEnd, layout};
     return screenCache;
   }
 
@@ -448,7 +543,7 @@ export function createLedSimView(canvas, initialProfile) {
     const width = viewWidth;
     const height = viewHeight;
     const screen = ensureScreenCache();
-    const {transform, leds, points, boundaries, junction, start, end} = screen;
+    const {transform, leds, points, boundaries, junction, start, end, pathEnd, layout} = screen;
 
     const backdrop = ctx.createLinearGradient(0, 0, 0, height);
     backdrop.addColorStop(0, "#0a0c14");
@@ -456,7 +551,6 @@ export function createLedSimView(canvas, initialProfile) {
     ctx.fillStyle = backdrop;
     ctx.fillRect(0, 0, width, height);
 
-    // Subtle wall rectangle (room aspect).
     ctx.fillStyle = "rgba(18, 22, 34, .92)";
     ctx.strokeStyle = "rgba(255,255,255,.1)";
     ctx.lineWidth = 1.5;
@@ -464,27 +558,91 @@ export function createLedSimView(canvas, initialProfile) {
     ctx.fill();
     ctx.stroke();
 
-    // Faint strip guide polyline.
+    // Strip path (solid through placed length; dashed excess beyond strip end).
     if (points.length >= 2) {
-      ctx.strokeStyle = "rgba(138,108,255,.28)";
+      const stripEndArc = layout.placed_length_mm;
+      ctx.strokeStyle = "rgba(138,108,255,.35)";
       ctx.lineWidth = 2;
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
+      ctx.setLineDash([]);
       ctx.beginPath();
-      ctx.moveTo(points[0].x, points[0].y);
-      for (let index = 1; index < points.length; index += 1) {
-        ctx.lineTo(points[index].x, points[index].y);
+      let walked = 0;
+      let started = false;
+      for (let index = 1; index < layout.points_mm.length; index += 1) {
+        const a = layout.points_mm[index - 1];
+        const b = layout.points_mm[index];
+        const edge = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        if (edge <= 1e-12) continue;
+        const from = walked;
+        const to = walked + edge;
+        if (to <= stripEndArc + 1e-9) {
+          const sa = mmToCanvas(a[0], a[1], transform);
+          const sb = mmToCanvas(b[0], b[1], transform);
+          if (!started) {
+            ctx.moveTo(sa.x, sa.y);
+            started = true;
+          }
+          ctx.lineTo(sb.x, sb.y);
+        } else if (from < stripEndArc) {
+          const t = (stripEndArc - from) / edge;
+          const mx = a[0] + (b[0] - a[0]) * t;
+          const my = a[1] + (b[1] - a[1]) * t;
+          const sa = mmToCanvas(a[0], a[1], transform);
+          const sm = mmToCanvas(mx, my, transform);
+          if (!started) {
+            ctx.moveTo(sa.x, sa.y);
+            started = true;
+          }
+          ctx.lineTo(sm.x, sm.y);
+        }
+        walked = to;
       }
-      ctx.stroke();
+      if (started) ctx.stroke();
+
+      if (layout.excess_path_mm > 0 && end && pathEnd) {
+        ctx.strokeStyle = "rgba(138,108,255,.22)";
+        ctx.setLineDash([6, 5]);
+        ctx.beginPath();
+        walked = 0;
+        started = false;
+        for (let index = 1; index < layout.points_mm.length; index += 1) {
+          const a = layout.points_mm[index - 1];
+          const b = layout.points_mm[index];
+          const edge = Math.hypot(b[0] - a[0], b[1] - a[1]);
+          if (edge <= 1e-12) continue;
+          const from = walked;
+          const to = walked + edge;
+          if (to <= stripEndArc + 1e-9) {
+            walked = to;
+            continue;
+          }
+          const startT = from >= stripEndArc ? 0 : (stripEndArc - from) / edge;
+          const x0 = a[0] + (b[0] - a[0]) * startT;
+          const y0 = a[1] + (b[1] - a[1]) * startT;
+          const s0 = mmToCanvas(x0, y0, transform);
+          const s1 = mmToCanvas(b[0], b[1], transform);
+          if (!started) {
+            ctx.moveTo(s0.x, s0.y);
+            started = true;
+          } else {
+            ctx.lineTo(s0.x, s0.y);
+          }
+          ctx.lineTo(s1.x, s1.y);
+          walked = to;
+        }
+        if (started) ctx.stroke();
+        ctx.setLineDash([]);
+      }
     }
 
     const emitterRadius = Math.max(2.4, Math.min(5.5, transform.scale * 18));
     for (let led = 0; led < leds.length; led += 1) {
+      if (!leds[led]) continue;
       const segment = Math.floor(led / H612D_LEDS_PER_SEGMENT);
       drawEmitter(leds[led].x, leds[led].y, emitterRadius, transformed[segment]);
     }
 
-    // Segment ticks every 10.
     if (labelsVisible) {
       ctx.fillStyle = "rgba(195,202,220,.55)";
       ctx.strokeStyle = "rgba(195,202,220,.35)";
@@ -493,41 +651,67 @@ export function createLedSimView(canvas, initialProfile) {
       ctx.textBaseline = "bottom";
       for (let segment = 0; segment < H612D_SEGMENTS; segment += 10) {
         const point = boundaries[segment];
+        if (!point) continue;
         ctx.beginPath();
         ctx.moveTo(point.x, point.y - 6);
         ctx.lineTo(point.x, point.y + 6);
         ctx.stroke();
-        ctx.fillText(String(segment).padStart(2, "0"), point.x, point.y - 8);
+        const distLabel = formatLengthMm(segment * H612D_SEGMENT_MM);
+        ctx.fillText(`${String(segment).padStart(2, "0")} · ${distLabel}`, point.x, point.y - 8);
       }
     }
 
-    // Start / end markers.
-    ctx.fillStyle = "#7ee0b6";
-    ctx.beginPath();
-    ctx.arc(start.x, start.y, 5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#ff7690";
-    ctx.beginPath();
-    ctx.arc(end.x, end.y, 5, 0, Math.PI * 2);
-    ctx.fill();
-
-    drawControlBox(junction.x, junction.y);
+    if (start) {
+      ctx.fillStyle = "#7ee0b6";
+      ctx.beginPath();
+      ctx.arc(start.x, start.y, 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    if (end) {
+      ctx.fillStyle = "#ff7690";
+      ctx.beginPath();
+      ctx.arc(end.x, end.y, 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    if (junction) drawControlBox(junction.x, junction.y);
 
     if (labelsVisible) {
       ctx.font = "700 11px ui-sans-serif, -apple-system, sans-serif";
       ctx.textBaseline = "middle";
-      ctx.fillStyle = "#7ee0b6";
-      ctx.textAlign = start.x < end.x ? "right" : "left";
-      ctx.fillText("start", start.x + (start.x < end.x ? -8 : 8), start.y);
-      ctx.fillStyle = "#ff7690";
-      ctx.textAlign = end.x > start.x ? "left" : "right";
-      ctx.fillText("end", end.x + (end.x > start.x ? 8 : -8), end.y);
-      ctx.fillStyle = "#c4b5ff";
-      ctx.textAlign = "left";
-      ctx.fillText("center · control box", junction.x + 12, junction.y);
+      if (start) {
+        ctx.fillStyle = "#7ee0b6";
+        ctx.textAlign = "left";
+        ctx.fillText("start", start.x + 8, start.y);
+      }
+      if (end) {
+        ctx.fillStyle = "#ff7690";
+        ctx.textAlign = "left";
+        ctx.fillText(`end · ${formatLengthMm(layout.placed_length_mm)}`, end.x + 8, end.y);
+      }
+      if (junction) {
+        ctx.fillStyle = "#c4b5ff";
+        ctx.textAlign = "left";
+        ctx.fillText("center · control box · 24.6 ft", junction.x + 12, junction.y);
+      }
     }
 
-    // Editable vertex handles.
+    if (layout.unplaced_mm > 0) {
+      ctx.fillStyle = "rgba(255, 193, 92, .95)";
+      ctx.font = "700 12px ui-sans-serif, -apple-system, sans-serif";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      ctx.fillText(
+        `Path ${layout.path_label} / Strip ${layout.strip_label} — ${formatLengthMm(layout.unplaced_mm)} unplaced`,
+        transform.originX + 10,
+        transform.originY + 10,
+      );
+      if (end) {
+        ctx.strokeStyle = "#ffc15c";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(end.x - 8, end.y - 8, 16, 16);
+      }
+    }
+
     if (editing) {
       const handleR = 6;
       for (const point of points) {

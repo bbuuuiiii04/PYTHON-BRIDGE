@@ -60,7 +60,10 @@ H612D_SEGMENTS = 60
 H612D_LEDS_PER_SEGMENT = 6
 H612D_PHYSICAL_LEDS = 360
 H612D_LENGTH_MM = 14996.16
-H612D_JUNCTION_MM = H612D_LENGTH_MM / 2.0  # 7498.08 — segment 29|30 boundary / center control box
+H612D_JUNCTION_MM = H612D_LENGTH_MM / 2.0  # 7498.08 — absolute arc mm, never proportional
+H612D_LED_PITCH_MM = H612D_LENGTH_MM / H612D_PHYSICAL_LEDS  # 41.656 mm/LED (fixed)
+H612D_SEGMENT_MM = H612D_LENGTH_MM / H612D_SEGMENTS  # ~249.936 mm (~250 mm)
+MM_PER_FOOT = 304.8
 
 DEFAULT_ROOM_MM = (5216.0, 2284.0)
 LAYOUT_PRESETS = ("perimeter", "snake", "custom")
@@ -241,6 +244,17 @@ def _as_xy(point: Any) -> tuple[float, float]:
     return (float(point[0]), float(point[1]))
 
 
+def mm_to_feet(mm: float) -> float:
+    return float(mm) / MM_PER_FOOT
+
+
+def format_length_mm(mm: float) -> str:
+    """Feet primary, metric secondary — e.g. '49.2 ft · 15.0 m'."""
+    feet = mm_to_feet(mm)
+    meters = float(mm) / 1000.0
+    return f"{feet:.1f} ft · {meters:.1f} m"
+
+
 def room_size_mm(profile: Mapping[str, Any] | None = None) -> tuple[float, float]:
     """Room width/height in mm; defaults to the operator room when absent."""
     room = (profile or {}).get("room_mm") if profile else None
@@ -254,14 +268,19 @@ def room_size_mm(profile: Mapping[str, Any] | None = None) -> tuple[float, float
 
 
 def perimeter_preset_points(room_mm: tuple[float, float] | list[float] | None = None) -> list[list[float]]:
-    """Rectangle loop with a bottom-center gap; junction lands at top-center.
+    """Rectangle loop with a real bottom-center gap; junction at top-center.
 
-    Chain starts left of the gap, runs CCW, midpoint is top-center, end returns
-    right of the gap. Sketch path length need not equal strip_length_mm — LED
-    placement scales by arc length (see layout_led_positions).
+    Closed room perimeter is 2*(W+H). The strip is H612D_LENGTH_MM, so the gap
+    is exactly perimeter - strip (3.84 mm for the operator 5216×2284 room). Path
+    length equals the strip when perimeter ≥ strip; otherwise the path is nearly
+    closed and layout_led_positions reports the shortfall. Never stretch LEDs.
     """
     width, height = room_size_mm({"room_mm": list(room_mm)} if room_mm is not None else None)
-    gap = min(width * 0.06, 280.0)
+    perimeter = 2.0 * (width + height)
+    gap = perimeter - H612D_LENGTH_MM
+    if gap < 0.0:
+        # Room too small for a full strip loop — tiny visual gap; shortfall warned later.
+        gap = min(width * 0.001, 1.0)
     half = width / 2.0
     return [
         [half - gap / 2.0, 0.0],
@@ -274,39 +293,110 @@ def perimeter_preset_points(room_mm: tuple[float, float] | list[float] | None = 
     ]
 
 
-def snake_preset_points(room_mm: tuple[float, float] | list[float] | None = None) -> list[list[float]]:
-    """S-path across the room; arc-length midpoint lands on the top-right bend.
+def _pack_serpentine_mm(
+    *,
+    start: tuple[float, float],
+    length_mm: float,
+    x_left: float,
+    x_right: float,
+    y_min: float,
+    row_pitch: float,
+) -> list[list[float]]:
+    """Append a downward serpentine of exactly length_mm (or as much as fits)."""
+    points: list[list[float]] = []
+    x, y = float(start[0]), float(start[1])
+    remaining = float(length_mm)
+    at_right = abs(x - x_right) <= abs(x - x_left)
+    pitch = max(20.0, float(row_pitch))
+    guard = 0
+    while remaining > 1e-6 and guard < 10000:
+        guard += 1
+        down_room = y - y_min
+        if down_room > 1e-9:
+            dv = min(down_room, remaining, pitch)
+            y -= dv
+            points.append([x, y])
+            remaining -= dv
+            if remaining <= 1e-6:
+                break
+        target_x = x_left if at_right else x_right
+        span = abs(target_x - x)
+        if span <= 1e-9:
+            if y <= y_min + 1e-9:
+                break
+            continue
+        move = min(span, remaining)
+        x = x + (target_x - x) * (move / span)
+        points.append([x, y])
+        remaining -= move
+        if move >= span - 1e-9:
+            at_right = not at_right
+        if y <= y_min + 1e-9 and remaining > 1e-6 and abs(x - target_x) <= 1e-9:
+            # Tighten pitch at the floor to keep packing length.
+            pitch = max(8.0, pitch * 0.5)
+            if pitch <= 8.0 + 1e-9 and down_room <= 1e-9:
+                break
+    return points
 
-    Built in abstract units so (lower + rise1 + middle + rise2 + top) equals the
-    right drop, then uniformly fitted into room_mm. Path-length normalization in
-    layout_led_positions keeps that vertex at strip_length_mm / 2.
+
+def snake_preset_points(room_mm: tuple[float, float] | list[float] | None = None) -> list[list[float]]:
+    """S-path in true room mm; total = strip length; junction at top-right bend.
+
+    First half (exactly H612D_JUNCTION_MM): three horizontal runs + two rises
+    ending at the top-right bend. Second half: downward serpentine packing the
+    remaining H612D_JUNCTION_MM inside the room. No LED-spacing stretch.
     """
     width, height = room_size_mm({"room_mm": list(room_mm)} if room_mm is not None else None)
-    margin = min(width, height) * 0.08
-    # Half = 1: three equal runs + two rises on the first half; drop = that sum.
-    run, rise = 0.28, 0.08
-    drop = 3.0 * run + 2.0 * rise
-    abstract = [
-        (0.0, 0.0),
-        (run, 0.0),
-        (run, rise),
-        (0.0, rise),
-        (0.0, 2.0 * rise),
-        (run, 2.0 * rise),           # top-right bend = junction
-        (run, 2.0 * rise - drop),    # right drop; equal arc length by construction
-    ]
-    xs = [p[0] for p in abstract]
-    ys = [p[1] for p in abstract]
-    min_x, max_x = min(xs), max(xs)
-    min_y, max_y = min(ys), max(ys)
-    span_x = max(max_x - min_x, 1e-9)
-    span_y = max(max_y - min_y, 1e-9)
+    half = H612D_JUNCTION_MM
+    margin = min(200.0, min(width, height) * 0.05)
     avail_w = max(1.0, width - 2.0 * margin)
     avail_h = max(1.0, height - 2.0 * margin)
-    scale = min(avail_w / span_x, avail_h / span_y)
-    offset_x = margin + (avail_w - span_x * scale) / 2.0 - min_x * scale
-    offset_y = margin + (avail_h - span_y * scale) / 2.0 - min_y * scale
-    return [[offset_x + x * scale, offset_y + y * scale] for x, y in abstract]
+
+    # Prefer a taller first-half S (TR near the top).
+    rise_span = min(avail_h * 0.55, half * 0.35)
+    v = rise_span / 2.0
+    run = (half - 2.0 * v) / 3.0
+    if run > avail_w:
+        run = avail_w
+        v = (half - 3.0 * run) / 2.0
+    if run <= 0.0 or v < 0.0:
+        # Extreme rooms: fall back to max-width runs and whatever rise fits the half.
+        run = min(avail_w, half / 3.0)
+        v = max(0.0, (half - 3.0 * run) / 2.0)
+
+    left = margin + (avail_w - run) / 2.0
+    right = left + run
+    y0 = margin
+    y1 = y0 + v
+    y2 = y1 + v
+    if y2 > height - margin:
+        scale = (height - margin - y0) / max(y2 - y0, 1e-9)
+        y1 = y0 + (y1 - y0) * scale
+        y2 = y0 + (y2 - y0) * scale
+        v = (y2 - y0) / 2.0
+        run = (half - 2.0 * v) / 3.0
+        left = margin + (avail_w - run) / 2.0
+        right = left + run
+
+    points: list[list[float]] = [
+        [left, y0],
+        [right, y0],
+        [right, y1],
+        [left, y1],
+        [left, y2],
+        [right, y2],  # top-right bend = junction at absolute 7498.08 mm
+    ]
+
+    row_pitch = max(40.0, min(140.0, (y2 - margin) / 10.0))
+    points.extend(_pack_serpentine_mm(
+        start=(points[5][0], points[5][1]),
+        length_mm=half,
+        x_left=left,
+        x_right=right,
+        y_min=margin,
+        row_pitch=row_pitch,
+    ))
+    return points
 
 
 def preset_layout_points(preset: str, room_mm: tuple[float, float] | list[float] | None = None) -> list[list[float]]:
@@ -388,45 +478,76 @@ def _point_at_arc_distance(
 
 
 def layout_led_positions(profile: Mapping[str, Any]) -> dict[str, Any]:
-    """Map the strip onto the layout polyline by arc length.
+    """Place the strip on the layout polyline in true room millimetres.
 
-    The drawing is to scale of itself: sketch path length is normalized so it
-    maps to exactly strip_length_mm. Physical millimetre truth lives in the
-    strip length, not the room sketch. Junction = arc-length midpoint
-    (H612D_JUNCTION_MM). Returns 360 LED centers, 61 segment-boundary samples
-    (0..60), and marker positions.
+    LED pitch is fixed (H612D_LED_PITCH_MM). Distances are absolute along the
+    polyline — never stretched to fit the drawing. Path longer than the strip →
+    strip ends at strip_length_mm; remaining path is excess guide. Path shorter →
+    unplaced_mm shortfall (visible warning); LEDs beyond the path are null.
+
+    Junction is always at absolute H612D_JUNCTION_MM when the path reaches it.
 
     Reference implementation; ledsim-view.js mirrors this — keep in lockstep.
     """
     layout = resolve_layout(profile)
-    points = [(_as_xy(p)) for p in layout["points_mm"]]
+    points = [_as_xy(p) for p in layout["points_mm"]]
     if layout["flip_chain"]:
         points = list(reversed(points))
-    sketch_length = polyline_arc_length(points)
-    strip_length = float(profile.get("strip_length_mm", H612D_LENGTH_MM))
-    if not math.isfinite(strip_length) or strip_length <= 0:
-        strip_length = H612D_LENGTH_MM
+    path_length = polyline_arc_length(points)
+    strip_length = H612D_LENGTH_MM
+    pitch = H612D_LED_PITCH_MM
+    segment_mm = H612D_SEGMENT_MM
+    placed_length = min(path_length, strip_length)
+    unplaced_mm = max(0.0, strip_length - path_length)
+    excess_path_mm = max(0.0, path_length - strip_length)
+    if excess_path_mm < 1e-6:
+        excess_path_mm = 0.0
+    if unplaced_mm < 1e-6:
+        unplaced_mm = 0.0
 
-    def sample(strip_mm: float) -> tuple[float, float]:
-        if sketch_length <= 1e-12:
-            return points[0]
-        return _point_at_arc_distance(points, strip_mm / strip_length * sketch_length, sketch_length)
+    def sample(arc_mm: float) -> tuple[float, float]:
+        if path_length <= 1e-12:
+            return points[0] if points else (0.0, 0.0)
+        return _point_at_arc_distance(points, min(max(0.0, arc_mm), path_length), path_length)
 
-    leds = H612D_PHYSICAL_LEDS
-    led_positions = [sample((index + 0.5) / leds * strip_length) for index in range(leds)]
-    boundaries = [sample(index / H612D_SEGMENTS * strip_length) for index in range(H612D_SEGMENTS + 1)]
-    junction = sample(strip_length / 2.0)
+    led_positions: list[tuple[float, float] | None] = []
+    for index in range(H612D_PHYSICAL_LEDS):
+        distance = (index + 0.5) * pitch
+        if distance <= path_length + 1e-9:
+            led_positions.append(sample(distance))
+        else:
+            led_positions.append(None)
+
+    boundaries: list[tuple[float, float] | None] = []
+    for index in range(H612D_SEGMENTS + 1):
+        distance = index * segment_mm
+        if distance <= path_length + 1e-9:
+            boundaries.append(sample(distance))
+        else:
+            boundaries.append(None)
+
+    junction = sample(H612D_JUNCTION_MM) if path_length + 1e-9 >= H612D_JUNCTION_MM else None
+    strip_end = sample(placed_length)
     return {
         "leds_mm": led_positions,
         "segment_boundaries_mm": boundaries,
         "junction_mm": junction,
         "start_mm": sample(0.0),
-        "end_mm": sample(strip_length),
+        "end_mm": strip_end,
+        "path_end_mm": sample(path_length),
         "points_mm": points,
-        "sketch_length_mm": sketch_length,
+        "path_length_mm": path_length,
         "strip_length_mm": strip_length,
+        "placed_length_mm": placed_length,
+        "unplaced_mm": unplaced_mm,
+        "excess_path_mm": excess_path_mm,
+        "led_pitch_mm": pitch,
+        "segment_mm": segment_mm,
+        "junction_arc_mm": H612D_JUNCTION_MM,
         "flip_chain": bool(layout["flip_chain"]),
         "preset": layout["preset"],
+        "path_label": format_length_mm(path_length),
+        "strip_label": format_length_mm(strip_length),
     }
 
 

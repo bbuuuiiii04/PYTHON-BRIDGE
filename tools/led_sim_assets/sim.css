@@ -159,6 +159,25 @@ button.action { width: 100%; padding: 12px; }
   flex: 0 1 140px;
 }
 .layout-tools .field.inline input { padding: 8px 9px; }
+.field-hint { color: var(--muted); font-size: 10px; font-weight: 600; }
+.path-length-status {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #0a0c13;
+  color: #aeb5c7;
+  font: 600 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.path-length-status.warn {
+  color: #ffe0a0;
+  border-color: rgba(255, 193, 92, .35);
+  background: rgba(52, 43, 19, .55);
+}
+.path-length-status.ok {
+  color: #7ee0b6;
+  border-color: rgba(58, 190, 135, .25);
+}
 
 .transport { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 11px; background: rgba(13,15,23,.82); }
 .transport .play { min-width: 70px; }

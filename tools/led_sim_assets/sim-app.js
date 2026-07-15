@@ -3,6 +3,9 @@
 import {
   createLedSimView,
   defaultLayout,
+  feetToMm,
+  formatLengthMm,
+  mmToFeet,
   perimeterPresetPoints,
   resolveLayout,
   snakePresetPoints,
@@ -181,12 +184,33 @@ function syncPresetCards() {
 
 function syncLayoutForm() {
   ensureProfileLayout();
-  $("room-width").value = String(Math.round(Number(state.profile.room_mm[0])));
-  $("room-height").value = String(Math.round(Number(state.profile.room_mm[1])));
+  const widthMm = Number(state.profile.room_mm[0]);
+  const heightMm = Number(state.profile.room_mm[1]);
+  $("room-width-ft").value = String(Math.round(mmToFeet(widthMm) * 10) / 10);
+  $("room-height-ft").value = String(Math.round(mmToFeet(heightMm) * 10) / 10);
+  $("room-width-mm-hint").textContent = `${Math.round(widthMm)} mm`;
+  $("room-height-mm-hint").textContent = `${Math.round(heightMm)} mm`;
   syncPresetCards();
+  updatePathLengthStatus();
   markDirty();
   const dirty = JSON.stringify(stripLocal(state.profile)) !== JSON.stringify(state.savedProfile);
   $("layout-dirty").hidden = !dirty;
+}
+
+function updatePathLengthStatus() {
+  if (!view) return;
+  const layout = view.getLayout();
+  const status = $("path-length-status");
+  if (layout.unplaced_mm > 0) {
+    status.className = "path-length-status warn";
+    status.textContent = `Path ${layout.path_label} / Strip ${layout.strip_label} — ${formatLengthMm(layout.unplaced_mm)} unplaced`;
+  } else if (layout.excess_path_mm > 0) {
+    status.className = "path-length-status ok";
+    status.textContent = `Path ${layout.path_label} / Strip ${layout.strip_label} — strip ends at 49.2 ft; extra path is a dashed guide`;
+  } else {
+    status.className = "path-length-status ok";
+    status.textContent = `Path ${layout.path_label} · Strip ${layout.strip_label} · pitch 41.656 mm/LED`;
+  }
 }
 
 function drawPresetThumb(canvas, points, room) {
@@ -292,9 +316,9 @@ function wireLayoutEditor() {
 
   const onRoomSize = () => {
     snapshotLayout();
-    const width = Math.max(500, Number($("room-width").value) || 5216);
-    const height = Math.max(500, Number($("room-height").value) || 2284);
-    state.profile.room_mm = [width, height];
+    const widthFt = Math.max(1, Number($("room-width-ft").value) || mmToFeet(5216));
+    const heightFt = Math.max(1, Number($("room-height-ft").value) || mmToFeet(2284));
+    state.profile.room_mm = [feetToMm(widthFt), feetToMm(heightFt)];
     const preset = ensureProfileLayout().preset;
     if (preset === "perimeter" || preset === "snake") {
       state.profile.layout.points_mm = preset === "snake"
@@ -304,8 +328,8 @@ function wireLayoutEditor() {
     pushProfileToView();
     refreshPresetThumbs();
   };
-  $("room-width").addEventListener("change", onRoomSize);
-  $("room-height").addEventListener("change", onRoomSize);
+  $("room-width-ft").addEventListener("change", onRoomSize);
+  $("room-height-ft").addEventListener("change", onRoomSize);
 
   $("layout-flip").addEventListener("click", () => {
     snapshotLayout();

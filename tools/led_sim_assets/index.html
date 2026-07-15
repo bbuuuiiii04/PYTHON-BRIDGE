@@ -13,7 +13,7 @@
     <h1>H612D LED Studio</h1>
   </div>
   <div class="device-facts" aria-label="Device facts">
-    <span>60 segments</span><i></i><span>360 LEDs</span><i></i><span>6 per segment</span>
+    <span>60 segments</span><i></i><span>360 LEDs</span><i></i><span>49.2 ft · 15.0 m</span><i></i><span>41.656 mm/LED</span>
   </div>
   <div class="top-actions">
     <span id="calibration-badge" class="badge warning">UNMEASURED</span>
@@ -154,7 +154,7 @@
     <section class="layout-panel" id="layout-panel" aria-label="Strip layout">
       <div class="layout-head">
         <span class="section-label">STRIP LAYOUT</span>
-        <p class="fine-print">Drag vertices on the room. Double-click an edge to add a point, a vertex to remove one. Path length is scaled to the real 15&nbsp;m strip.</p>
+        <p class="fine-print">Drag vertices on the room. Double-click an edge to add a point, a vertex to remove one. LED spacing is fixed in real inches/mm — the path is never stretched to fit the strip.</p>
       </div>
       <div class="preset-cards" role="listbox" aria-label="Layout presets">
         <button type="button" class="preset-card" data-preset="perimeter" id="preset-perimeter" aria-selected="true">
@@ -173,9 +173,10 @@
           <span>Edit the current path</span>
         </button>
       </div>
+      <p id="path-length-status" class="path-length-status" aria-live="polite">Path —</p>
       <div class="layout-tools">
-        <label class="field inline">Room width mm<input type="number" id="room-width" min="500" max="30000" step="1"></label>
-        <label class="field inline">Room height mm<input type="number" id="room-height" min="500" max="30000" step="1"></label>
+        <label class="field inline">Room width (ft)<input type="number" id="room-width-ft" min="1" max="100" step="0.1"><span class="field-hint" id="room-width-mm-hint"></span></label>
+        <label class="field inline">Room height (ft)<input type="number" id="room-height-ft" min="1" max="100" step="0.1"><span class="field-hint" id="room-height-mm-hint"></span></label>
         <button type="button" id="layout-flip">Flip chain</button>
         <button type="button" id="layout-reset">Reset preset</button>
         <button type="button" id="layout-undo">Undo</button>

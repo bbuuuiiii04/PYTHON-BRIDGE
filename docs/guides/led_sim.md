@@ -22,11 +22,13 @@ segment, 360 LEDs total, 49.2 ft / 14,996.16 mm**. Two 7.5 m halves meet at a
 **center junction / control box** (arc-length midpoint = 7498.08 mm, segment
 29|30). Addressing stays one linear 60-segment strip through that junction.
 
-**AWR-244** adds a default **room view**: the strip is a polyline in room
-coordinates. LEDs are placed by arc length along that polyline, scaled so the
-sketch path maps to exactly `strip_length_mm`. The drawing is to scale of
-itself; physical millimetre truth lives in the strip length, not the room
-sketch. A **Strip** toggle keeps the old 6×10 bench grid for command inspection.
+**AWR-244** adds a default **room view**: the strip is a polyline in true room
+millimetres. LED pitch is fixed (**41.656 mm/LED**, ~250 mm/segment). Distances
+along the path are absolute — the drawing is never stretched to fit the strip.
+Path longer than 49.2 ft → strip ends there; leftover path is a dashed guide.
+Path shorter → live shortfall warning (`Path … / Strip … — … unplaced`).
+Junction is always at absolute **24.6 ft / 7498.08 mm**. A **Strip** toggle keeps
+the old 6×10 bench grid for command inspection.
 
 Each group of six dots receives one RGB command because the H612D exposes 60
 groups, not 360 separately controllable pixels. Screen optics (gamma, gains,
@@ -84,15 +86,19 @@ ignored.
 
 Presets:
 
-- **Perimeter** — rectangle loop with a bottom-center gap; chain starts left of
-  the gap, junction at top-center, end right of the gap.
-- **Snake** — S-path; junction at the top-right bend (equal arc-length halves).
+- **Perimeter** — rectangle loop whose path length equals the strip when the
+  room perimeter is ≥ 49.2 ft. For the operator room (2×(5216+2284)=15000 mm)
+  the bottom gap is the real **3.84 mm** shortfall; junction at top-center.
+- **Snake** — S-path solved in room mm so total = 14996.16 mm with the junction
+  on the top-right bend (second half packed as a downward serpentine).
 - **Custom** — current points, freely editable on the canvas.
 
 The Python engine function `layout_led_positions(profile)` is the tested
-reference (360 LED centers, segment boundaries, junction). `ledsim-view.js`
+reference (fixed pitch, absolute junction, truncation/shortfall). `ledsim-view.js`
 mirrors it. LED screen positions are cached per layout/resize, not recomputed
-every frame.
+every frame. UI lengths are **feet primary** with metric secondary
+(e.g. `49.2 ft · 15.0 m`); segment ticks every 10 show true distance (8.2 ft).
+
 
 The layout editor supports preset cards, room-size fields (presets rescale),
 drag handles (≥32 px hit target), double-click / long-press to insert or delete
@@ -284,6 +290,6 @@ Focused checks:
 python3 -m unittest discover tests -p "test_led_sim*"
 ```
 
-Current focused result: **49 tests passed** on 2026-07-15 (includes layout
-path math). This is software proof for the offline studio only; no H612D
-hardware was exercised. Optics remain uncalibrated.
+Current focused result: **52 tests passed** on 2026-07-15 (includes fixed-pitch
+layout, truncation, and shortfall cases). This is software proof for the offline
+studio only; no H612D hardware was exercised. Optics remain uncalibrated.

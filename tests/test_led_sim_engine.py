@@ -278,59 +278,86 @@ class ProfileTests(unittest.TestCase):
 
 
 class LayoutTests(unittest.TestCase):
-    def test_perimeter_junction_is_top_center_vertex(self) -> None:
+    def test_fixed_led_pitch_in_true_mm(self) -> None:
+        result = engine.layout_led_positions(_profile(layout=engine.default_layout()))
+        self.assertAlmostEqual(result["led_pitch_mm"], 41.656, places=6)
+        self.assertAlmostEqual(result["led_pitch_mm"], engine.H612D_LED_PITCH_MM, places=9)
+        for index in range(1, 60):  # first segment is collinear on bottom edge
+            a = result["leds_mm"][index - 1]
+            b = result["leds_mm"][index]
+            self.assertIsNotNone(a)
+            self.assertIsNotNone(b)
+            self.assertAlmostEqual(
+                math.hypot(a[0] - b[0], a[1] - b[1]),
+                engine.H612D_LED_PITCH_MM,
+                places=5,
+                msg=f"led {index - 1}->{index}",
+            )
+
+    def test_perimeter_matches_strip_with_real_gap_and_absolute_junction(self) -> None:
         room = [5216.0, 2284.0]
         points = engine.perimeter_preset_points(room)
+        path_len = engine.polyline_arc_length(points)
+        self.assertAlmostEqual(path_len, engine.H612D_LENGTH_MM, places=6)
+        self.assertAlmostEqual(2.0 * (room[0] + room[1]) - path_len, 3.84, places=6)
         profile = _profile(room_mm=room, layout={
             "preset": "perimeter", "points_mm": points, "flip_chain": False,
         })
         result = engine.layout_led_positions(profile)
-        self.assertEqual(len(result["leds_mm"]), 360)
-        self.assertEqual(len(result["segment_boundaries_mm"]), 61)
-        junction = result["junction_mm"]
+        self.assertEqual(result["unplaced_mm"], 0.0)
+        self.assertEqual(result["excess_path_mm"], 0.0)
         top_center = tuple(points[3])
-        self.assertAlmostEqual(junction[0], top_center[0], places=6)
-        self.assertAlmostEqual(junction[1], top_center[1], places=6)
-        self.assertAlmostEqual(result["strip_length_mm"], engine.H612D_LENGTH_MM)
-        mid = engine._point_at_arc_distance(
-            result["points_mm"],
-            result["sketch_length_mm"] / 2.0,
-            result["sketch_length_mm"],
+        self.assertAlmostEqual(result["junction_mm"][0], top_center[0], places=6)
+        self.assertAlmostEqual(result["junction_mm"][1], top_center[1], places=6)
+        at_junction = engine._point_at_arc_distance(
+            result["points_mm"], engine.H612D_JUNCTION_MM, path_len,
         )
-        self.assertAlmostEqual(mid[0], top_center[0], places=6)
-        self.assertAlmostEqual(mid[1], top_center[1], places=6)
+        self.assertAlmostEqual(at_junction[0], top_center[0], places=6)
+        self.assertAlmostEqual(at_junction[1], top_center[1], places=6)
 
-    def test_snake_junction_is_top_right_bend(self) -> None:
+    def test_snake_total_and_junction_are_absolute(self) -> None:
         room = [5216.0, 2284.0]
         points = engine.snake_preset_points(room)
-        profile = _profile(room_mm=room, layout={
+        self.assertAlmostEqual(engine.polyline_arc_length(points), engine.H612D_LENGTH_MM, places=5)
+        self.assertAlmostEqual(
+            engine.polyline_arc_length(points[:6]), engine.H612D_JUNCTION_MM, places=5,
+        )
+        result = engine.layout_led_positions(_profile(room_mm=room, layout={
             "preset": "snake", "points_mm": points, "flip_chain": False,
-        })
-        result = engine.layout_led_positions(profile)
-        junction = result["junction_mm"]
-        top_right = tuple(points[5])
-        self.assertAlmostEqual(junction[0], top_right[0], places=6)
-        self.assertAlmostEqual(junction[1], top_right[1], places=6)
-        # Arc-length midpoint in strip space is exactly half the physical strip.
-        half = engine.H612D_JUNCTION_MM
-        self.assertAlmostEqual(half, engine.H612D_LENGTH_MM / 2.0, places=6)
+        }))
+        self.assertAlmostEqual(result["junction_mm"][0], points[5][0], places=5)
+        self.assertAlmostEqual(result["junction_mm"][1], points[5][1], places=5)
+        self.assertEqual(result["unplaced_mm"], 0.0)
 
-    def test_arc_length_maps_to_strip_length(self) -> None:
-        profile = _profile(layout=engine.default_layout())
-        result = engine.layout_led_positions(profile)
-        start = result["start_mm"]
-        end = result["end_mm"]
-        self.assertEqual(start, result["points_mm"][0])
-        self.assertEqual(end, result["points_mm"][-1])
-        # First LED is near the start; last near the end (centers, not endpoints).
-        self.assertLess(
-            math.hypot(result["leds_mm"][0][0] - start[0], result["leds_mm"][0][1] - start[1]),
-            math.hypot(result["leds_mm"][0][0] - end[0], result["leds_mm"][0][1] - end[1]),
-        )
-        self.assertLess(
-            math.hypot(result["leds_mm"][-1][0] - end[0], result["leds_mm"][-1][1] - end[1]),
-            math.hypot(result["leds_mm"][-1][0] - start[0], result["leds_mm"][-1][1] - start[1]),
-        )
+    def test_path_longer_than_strip_truncates_without_stretch(self) -> None:
+        result = engine.layout_led_positions(_profile(layout={
+            "preset": "custom",
+            "points_mm": [[0.0, 0.0], [20000.0, 0.0]],
+            "flip_chain": False,
+        }))
+        self.assertAlmostEqual(result["excess_path_mm"], 20000.0 - engine.H612D_LENGTH_MM, places=6)
+        self.assertEqual(result["unplaced_mm"], 0.0)
+        self.assertAlmostEqual(result["end_mm"][0], engine.H612D_LENGTH_MM, places=6)
+        self.assertAlmostEqual(result["path_end_mm"][0], 20000.0, places=6)
+        # Pitch stays real even on a long guide.
+        a, b = result["leds_mm"][0], result["leds_mm"][1]
+        self.assertAlmostEqual(math.hypot(a[0] - b[0], a[1] - b[1]), engine.H612D_LED_PITCH_MM, places=6)
+
+    def test_path_shorter_than_strip_reports_shortfall(self) -> None:
+        result = engine.layout_led_positions(_profile(layout={
+            "preset": "custom",
+            "points_mm": [[0.0, 0.0], [5000.0, 0.0]],
+            "flip_chain": False,
+        }))
+        self.assertAlmostEqual(result["unplaced_mm"], engine.H612D_LENGTH_MM - 5000.0, places=6)
+        self.assertEqual(result["excess_path_mm"], 0.0)
+        placed = [led for led in result["leds_mm"] if led is not None]
+        unplaced = [led for led in result["leds_mm"] if led is None]
+        self.assertEqual(len(placed) + len(unplaced), 360)
+        self.assertGreater(len(unplaced), 0)
+        self.assertLess(len(placed), 360)
+        self.assertIn("ft", result["path_label"])
+        self.assertEqual(result["strip_label"], engine.format_length_mm(engine.H612D_LENGTH_MM))
 
     def test_flip_chain_reverses_led_order(self) -> None:
         base = engine.default_layout()
@@ -368,7 +395,10 @@ class LayoutTests(unittest.TestCase):
         })
         result2 = engine.layout_led_positions(zero_edge)
         self.assertEqual(len(result2["leds_mm"]), 360)
-        self.assertTrue(all(math.isfinite(x) and math.isfinite(y) for x, y in result2["leds_mm"]))
+        for point in result2["leds_mm"]:
+            if point is None:
+                continue
+            self.assertTrue(math.isfinite(point[0]) and math.isfinite(point[1]))
 
     def test_layout_validation_accepts_presets_and_rejects_bad_points(self) -> None:
         self.assertEqual(engine.validate_profile(_profile(layout=engine.default_layout())), [])
@@ -388,6 +418,10 @@ class LayoutTests(unittest.TestCase):
         )
         legacy.pop("layout", None)
         self.assertEqual(engine.validate_profile(legacy), [])
+
+    def test_format_length_feet_primary(self) -> None:
+        self.assertEqual(engine.format_length_mm(engine.H612D_LENGTH_MM), "49.2 ft · 15.0 m")
+        self.assertEqual(engine.format_length_mm(10 * engine.H612D_SEGMENT_MM), "8.2 ft · 2.5 m")
 
 
 class LookCatalogTests(unittest.TestCase):
