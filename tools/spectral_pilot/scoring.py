@@ -91,16 +91,25 @@ def paired_scoring(rows) -> dict:
     }
 
 
-def repeatability_counters(repeats) -> dict:
-    """Hidden-repeat consistency (spec B8). ``repeats``: ``{axis, answers:[a,b]}``.
+def repeatability_counters(repeats, *, re_exposed_card_ids=()) -> dict:
+    """Hidden-repeat consistency (spec B8). ``repeats``: ``{axis, answers:[a,b]}``,
+    optionally carrying ``source_card_id`` / ``instance_card_id``.
 
     Direct contradictions only: genuine<->not_genuine, harder<->softer, any change
     between two decisive family answers. tied / marker-wrong / unsure transitions
     are reported, not opposites (they never count as contradictions here).
+
+    A repeat pair whose source or instance card was ``re_exposed`` on resume (played
+    without a commit before an interrupt, per B6/ResumeState) is excluded from the
+    gate-2 counters — the interrupt makes that pair non-comparable.
     """
+    re_exposed = set(re_exposed_card_ids)
     counts = {"marker": 0, "hardness": 0, "family": 0}
     contra = {"marker": 0, "hardness": 0, "family": 0}
     for rp in repeats:
+        if re_exposed and (rp.get("source_card_id") in re_exposed
+                           or rp.get("instance_card_id") in re_exposed):
+            continue
         ax = rp["axis"]
         a, b = rp["answers"]
         counts[ax] += 1
