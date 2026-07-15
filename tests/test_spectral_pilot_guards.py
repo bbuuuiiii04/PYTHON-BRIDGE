@@ -13,6 +13,17 @@ class NoRuntimeImporterTests(unittest.TestCase):
         offenders = guards.no_runtime_importer_offenders()
         self.assertEqual(offenders, [], f"runtime modules import spectral_pilot: {offenders}")
 
+    def test_local_workspace_driver_is_not_an_offender(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            driver = root / "local" / "spectral_ai_pilot" / "run1" / "scratch"
+            driver.mkdir(parents=True)
+            (driver / "driver.py").write_text("from tools.spectral_pilot import session\n")
+            self.assertEqual(guards.no_runtime_importer_offenders(root), [])
+            # a repo-root runtime module importing us is still flagged
+            (root / "rogue.py").write_text("import tools.spectral_pilot.selection\n")
+            self.assertEqual(guards.no_runtime_importer_offenders(root), ["rogue.py"])
+
     def test_guard_detects_import_forms(self):
         for src in (
             "from tools.spectral_pilot import canonical",

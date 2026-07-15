@@ -56,14 +56,18 @@ def _imports_spectral_pilot(text: str) -> bool:
 
 
 def no_runtime_importer_offenders(root=None):
-    """Repo-root runtime modules (not under tools/ or tests/) that import us (B11a)."""
+    """Repo-root runtime modules (not under tools/, tests/, or local/) that import us (B11a).
+
+    ``local/`` is the gitignored pilot workspace: sanctioned session-driver scripts
+    live there and legitimately import this package, so they are not offenders.
+    """
     root = Path(root) if root else _repo_root()
     offenders = []
     for path in root.rglob("*.py"):
         rel = path.relative_to(root).as_posix()
         if any(part in SKIP_DIRS or part.startswith(".") for part in rel.split("/")):
             continue
-        if rel.startswith("tools/") or rel.startswith("tests/"):
+        if rel.startswith(("tools/", "tests/", "local/")):
             continue
         try:
             text = path.read_text(encoding="utf-8")
