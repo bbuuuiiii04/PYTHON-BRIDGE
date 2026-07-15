@@ -422,10 +422,17 @@ Row schemas (exact; all rows also carry `schema_version` and `pilot_seed`):
   scratch_peak_bytes, retained_bytes, manual_prep_minutes, human_active_seconds,
   decisions_total, cleanup_seconds, ceilings, breaches`.
 
-**Clip rule (ordinary engineering):** every audio clip in the pilot — marker card,
-hardness pair side, family-montage element, anchor — is that marker's exact
-16-beat window (the `drop_window_vector` width), rendered read-only from the
-source file; any playback temp file lives in `scratch/`. Every card's `clip_spec`
+**Clip rule (`operator-decided` 2026-07-15):** every audio clip in the pilot —
+marker card, hardness pair side, family-montage element, anchor — plays a
+16-beat **run-in** followed by the marker's 16-beat window:
+`[max(0, marker−16), marker+16)`. Brandon raised the run-in mid-session-A
+(before any commit; ledger empty): his development labels and anchor picks were
+all made hearing builds/blackouts in context, so context-free slices would
+generate truth from a different listening process than the labels the methods
+train on. The **machine-scored window is unchanged** — `drop_window_vector`
+stays 16 beats from the marker forward plus the frozen `pre_gap_beats` scalar;
+the run-in is presentation-only and no candidate/feature contract moves. Clips
+render read-only from the source file; playback temp files live in `scratch/`. Every card's `clip_spec`
 must locate its clip(s) exactly: anchor rows carry their anchor marker beat (the
 B3.7 gold beats now; Mau P and Anti Up pinned at Phase-1), and a family-montage
 card's `clip_spec` carries **both** marker windows. The `mixed` anchor card is
