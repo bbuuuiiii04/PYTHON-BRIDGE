@@ -40,7 +40,10 @@ Unlabeled statements in Parts B–E are `proposed` protocol rules.
 **`operator-decided`** Closed 2026-07-14: the burden justifies a bounded experiment;
 the ceiling is 65 active minutes / 113 atomic decisions across four sessions. Closed
 2026-07-15: Fable orchestrates; non-Fable subagents may do deep reads/adversarial
-reviews; execution rounds run in named Claude CLI tmux seats; never Codex.
+reviews; execution rounds run in named Claude CLI tmux seats; never Codex. Also
+closed 2026-07-15: the family vocabulary stays `WALL|COMET|HOUSE|mixed|none|unsure`
+(4 families, 3 tiers — no expansion before the pilot) and the seven anchors are
+fixed in B3.7.
 
 **Verified repo facts at `882d8c7`** (each checked this round; pinned files are
 byte-identical to the `790c625` anchor):
@@ -177,10 +180,22 @@ or budget is **never** expanded after any prediction or answer exists.
    marker cards and 4 family montages; place them non-adjacently with two marker
    repeats per pilot session and family repeats distributed 1/1/2. Repeats never add
    sample size.
-7. **Anchor candidates (7).** From development rows that carry the role's label
-   (WALL/COMET/HOUSE family refs, T1/T2/T3 hardness refs, one confirmed-`mixed`
-   example), one candidate per role: sort eligible rows by
-   `SHA256(pilot_seed || track_instance_id || "anchor-" || role)`; take the first.
+7. **Anchors (7) — `operator-decided` 2026-07-15.** Brandon fixed the seven
+   anchors directly (chat veto rounds over his own development labels); the
+   deterministic candidate ordering that previously stood here is retired:
+
+   | Role | Anchor (development lineage) | Clip provenance |
+   | --- | --- | --- |
+   | WALL family ref | REWIND — Ray Volpe, Sullivan King | gold row, first labeled drop (beat 128) |
+   | COMET family ref | Laserbeam (TiDo Edit) — Ray Volpe | gold row, third labeled drop (beat 472) |
+   | HOUSE family ref | Utopia — Dombresky | gold row, second labeled drop (beat 384) |
+   | `mixed` example | Sexy (Extended Mix) — Matt Sassari | gold rows, first + second labeled drops (beats 192 + 288; HOUSE vs COMET) |
+   | T1 hardness ref | ESSE – Work It x Dom Dolla – Take It (Bellevue Rework) | gold row, first labeled drop (beat 128) |
+   | T2 hardness ref | Like I Like It — Mau P | operator note upgraded to a decision 2026-07-15; exact marker pinned at implementation from existing Rekordbox markers |
+   | T3 hardness ref | I Cannot (Extended Mix) — Anti Up | operator note ("T3 is warranted"); exact marker pinned at implementation from existing Rekordbox markers |
+
+   An anchor that proves ineligible at implementation time (missing audio, invalid
+   v4, no usable marker) stops with a report — never a silent substitute.
    One clip may not fill two roles; anchor lineages must be unrelated to each other
    and to the 18 pilot lineages. No substitution mid-session: a rejected anchor
    stops the axes that depend on it (family axis per review §8.1; a rejected tier
@@ -292,8 +307,9 @@ hides title, artist, playlist, cover art, content ID, old notes, prior labels,
 predictions, method, explanation, confidence, and neighbour identity. Cards carry
 neutral IDs; recognition is recorded, never prevented.
 
-- **Session A — anchors (≈15 min, 7 decisions):** the seven role candidates from
-  B3.7, one confirm/reject decision each. A family-vocabulary rejection or an
+- **Session A — anchors (≈15 min, 7 decisions):** the seven fixed anchors from
+  B3.7, one confirm/reject decision each (the ear-check of the exact clips; roles,
+  vocabulary, and anchor identities were already decided 2026-07-15). A family-vocabulary rejection or an
   indecisive `mixed` anchor stops the family axis before the pilot; a rejected tier
   anchor stops the hardness axis. This is the review's operator gate (§20 Q1) — it
   never re-asks the closed burden/workload decisions and its answers are never used
@@ -304,6 +320,8 @@ neutral IDs; recognition is recorded, never prevented.
      neutral-ID anchor clip, pair side per B3.5.
   Per lineage, once: play the two frozen montage clips; ask
   `WALL | COMET | HOUSE | mixed | none | unsure` about those two moments only.
+  Display-only note (ordinary engineering): cards may render `none` as
+  "none (calm / NEUTRAL)" — the stored enum value stays `none`.
   Two marker-repeat cards per session (each up to two repeated answers) and family
   montage repeats 1/1/2 per B3.6.
 
@@ -608,7 +626,7 @@ Implementation (when separately authorized) is done only when:
 
 | Item | Class |
 | --- | --- |
-| Anchor roles + family vocabulary confirmation (session A confirm/reject; axis stops on rejection) | operator taste — the named pre-run gate; does not block spec readiness |
+| Session-A ear-check of the seven fixed anchors (confirm/reject; axis stops on rejection) | operator taste — roles, vocabulary, and anchor identities were decided 2026-07-15 (B3.7); only the in-protocol clip listen remains |
 | Actual analysis wall time / RSS on the real 60-row pool | unavailable measurement until Phase-1 runs; ceilings are frozen either way |
 | Whether ≥18 lineages survive eligibility; repeatability floors; availability floors | experiment-dependent — the pilot exists to measure them |
 | Canonical JSON details, ID formats, module layout, recovery mechanics, anchor-candidate ordering | ordinary engineering — resolved in this spec (B1–B7) |
