@@ -193,8 +193,8 @@ or budget is **never** expanded after any prediction or answer exists.
    | HOUSE family ref | Utopia — Dombresky | gold row, second labeled drop (beat 384) |
    | `mixed` example | Sexy (Extended Mix) — Matt Sassari | gold rows, first + second labeled drops (beats 192 + 288; HOUSE vs COMET) |
    | T1 hardness ref | ESSE – Work It x Dom Dolla – Take It (Bellevue Rework) | gold row, first labeled drop (beat 128) |
-   | T2 hardness ref | Like I Like It — Mau P | operator note upgraded to a decision 2026-07-15; exact marker pinned at implementation from existing Rekordbox markers |
-   | T3 hardness ref | I Cannot (Extended Mix) — Anti Up | operator note ("T3 is warranted"); exact marker pinned at implementation from existing Rekordbox markers |
+   | T2 hardness ref | Like I Like It — Mau P | its single phrase-drop marker (beat 124, ≈0:58) operator-confirmed a genuine drop 2026-07-15 |
+   | T3 hardness ref | I Cannot (Extended Mix) — Anti Up | operator-named moment 1:19.4 (nearest beatgrid beat, ≈176), decided 2026-07-15; the track's phrase-drop marker at beat 64 (≈0:29) was operator-ruled NOT a genuine drop — anchors are operator-confirmed clips and need not sit on phrase markers; no Rekordbox data is created or moved |
 
    An anchor that proves ineligible at implementation time (missing audio, invalid
    v4, no usable marker) stops with a report — never a silent substitute.
@@ -428,7 +428,9 @@ hardness pair side, family-montage element, anchor — is that marker's exact
 source file; any playback temp file lives in `scratch/`. Every card's `clip_spec`
 must locate its clip(s) exactly: anchor rows carry their anchor marker beat (the
 B3.7 gold beats now; Mau P and Anti Up pinned at Phase-1), and a family-montage
-card's `clip_spec` carries **both** marker windows.
+card's `clip_spec` carries **both** marker windows. The `mixed` anchor card is
+montage-style: its `clip_spec` carries both of its lineage's B3.7 windows (Sexy
+beats 192 + 288), since confirming "mixed" requires hearing both moments.
 
 ### B8. Metrics, reconciliation, and the verdict function (review §§9.4, 11.4, exact)
 
