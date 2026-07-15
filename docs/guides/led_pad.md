@@ -214,8 +214,9 @@ The `/lab` page (lab-route only — Pad markup and playwright selectors are unto
   always stays in the list** even when its status chip is off (Accept with Accepted=off no longer
   makes the row vanish); it drops out only after you select something else or change filters.
 - **Detail (top → bottom).** Header flows title → Phrase/Timing → collision banner **only when**
-  `production_collision` is true → preview hero (64px / 48px phone canvas with a dim “press
-  Preview” placeholder until frames arrive + Preview/Play/Stop + AWR-241 beat meter IDs unchanged)
+  `production_collision` is true → preview hero (Strip|Room toggle + strip/room canvases; AWR-245;
+  64px / 48px phone strip with a dim “press Preview” placeholder until frames arrive + Preview/Play/Stop
+  + AWR-241 beat meter IDs unchanged)
   → tuning card (labeled sliders; on phone, label+value on one line and full-width track below with
   ≥32px thumbs; cue segmented control; Save + dirty; dim hint when `/api/lab/update` returns
   `applied:false`: “Edits saved to the draft — press ▶ Play to hear them live”) → Accept (solid
