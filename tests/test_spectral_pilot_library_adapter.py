@@ -110,5 +110,40 @@ class EndToEndSelectionTests(unittest.TestCase):
         self.assertEqual(len(res.selected_rows), 18)
 
 
+class AnchorPinningTests(unittest.TestCase):
+    def test_pick_highest_tier_tiebreak_earliest(self):
+        self.assertEqual(la.pick_highest_tier_beat([(64, 1), (128, 3), (256, 3)]), 128)  # T3 tie -> earliest
+        self.assertEqual(la.pick_highest_tier_beat([(400, 2), (64, 3)]), 64)             # highest tier wins
+        self.assertIsNone(la.pick_highest_tier_beat([]))
+
+    def _meta_getter(self):
+        metas = {cid: la.LocatorMeta(content_id_locator=cid, artist="a", title=role, duration_s=200.0,
+                                     bpm=128.0, audio_path=f"/{cid}.wav", analysis_data_path=f"{cid}.DAT")
+                 for role, cid, kind, gold in la.ANCHOR_SPECS}
+        return lambda cid: metas.get(cid)
+
+    def test_build_seven_anchor_rows(self):
+        readers = fake_readers(drops=(64, 128, 256))
+        tier_fn = lambda meta, covered: [(b, 3 if b == 128 else 2) for b in covered]  # 128 is hardest
+        rows, pins = la.build_anchor_rows(self._meta_getter(), readers, tier_fn)
+        self.assertEqual(len(rows), 7)
+        by_role = dict(zip(la.ANCHOR_ROLES, rows))
+        self.assertEqual(by_role["WALL"].anchor_marker_beat, 128)              # gold beat
+        self.assertEqual(by_role["mixed"].anchor_montage_beats, (192, 288))    # montage windows
+        self.assertIsNone(by_role["mixed"].anchor_marker_beat)
+        self.assertEqual(by_role["T2"].anchor_marker_beat, 128)               # pinned highest tier
+        self.assertEqual(pins, {"T2": 128, "T3": 128})
+
+    def test_invalid_v4_anchor_fails_closed(self):
+        readers = fake_readers(valid=False)
+        with self.assertRaises(la.AnchorError):
+            la.build_anchor_rows(self._meta_getter(), readers, lambda m, c: [], )
+
+    def test_pinned_anchor_no_markers_fails_closed(self):
+        readers = fake_readers(drops=())                                       # no phrase drops
+        with self.assertRaises(la.AnchorError):
+            la.build_anchor_rows(self._meta_getter(), readers, lambda m, c: [(c[0], 3)])
+
+
 if __name__ == "__main__":
     unittest.main()

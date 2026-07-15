@@ -69,7 +69,85 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 
 from .canonical import sha256_hex, selection_hash
-from .selection import LocatorRow, POOL_SIZE, WINDOW
+from .selection import ANCHOR_ROLES, LocatorRow, POOL_SIZE, WINDOW
+
+
+class AnchorError(ValueError):
+    """An anchor could not be pinned (missing content, invalid v4, no usable marker).
+
+    Fail closed (spec B3.7, B10): an ineligible anchor STOPS with a report — it is
+    never silently substituted.
+    """
+
+
+# The seven anchors — operator-decided 2026-07-15 (spec B3.7). Content-ids resolved
+# read-only against the live library at Phase-1 prep and verified valid. `gold`
+# anchors use their fixed B3.7 labeled-drop beats; T2/T3 pin the highest-F2-tier
+# phrase drop at implementation. Order MUST match selection.ANCHOR_ROLES.
+ANCHOR_SPECS = (
+    ("WALL",  "51640855",  "gold", (128,)),        # REWIND — Ray Volpe, Sullivan King
+    ("COMET", "250469778", "gold", (472,)),        # Laserbeam (TiDo Edit) — Ray Volpe
+    ("HOUSE", "67676901",  "gold", (384,)),        # Utopia — Dombresky
+    ("mixed", "216468125", "gold", (192, 288)),    # Sexy (Extended Mix) — Matt Sassari (montage)
+    ("T1",    "1783601",   "gold", (128,)),        # ESSE Work It x Take It (Bellevue Rework)
+    ("T2",    "87057007",  "pin",  ()),            # Like I Like It — Mau P (pin from RB markers)
+    ("T3",    "127938342", "pin",  ()),            # I Cannot (Extended Mix) — Anti Up (pin)
+)
+
+
+def pick_highest_tier_beat(tiered_markers):
+    """Pinning rule (spec B3.7 T2/T3): the marker whose frozen F2 plan tier is
+    highest, tie-break earliest beat. ``tiered_markers`` = iterable of (beat, tier).
+    """
+    tiered = [(int(b), int(t)) for b, t in tiered_markers]
+    if not tiered:
+        return None
+    return sorted(tiered, key=lambda bt: (-bt[1], bt[0]))[0][0]
+
+
+def build_anchor_rows(get_meta, readers, tier_fn, *, specs=ANCHOR_SPECS):
+    """Build the seven anchor LocatorRows in ANCHOR_ROLES order (spec B3.7/B7).
+
+    ``get_meta(content_id) -> LocatorMeta`` resolves an anchor's library row;
+    ``tier_fn(meta, covered_drops) -> [(beat, tier)]`` returns the F2 plan tier per
+    covered drop (real: lighting_moments_v2.build_track_plan; fake under test). Gold
+    anchors use their fixed B3.7 beats; T2/T3 pin the highest-tier phrase drop.
+    Returns ``(rows, pins)`` where ``pins`` maps the pinned roles (T2/T3) to beats.
+    Fails closed via ``AnchorError`` if any anchor lacks valid v4, its content, or a
+    usable covered marker — never a silent substitution (spec B3.7, B10).
+    """
+    if tuple(s[0] for s in specs) != ANCHOR_ROLES:
+        raise AnchorError("anchor specs order must match selection.ANCHOR_ROLES")
+    rows, pins = [], {}
+    for role, cid, kind, gold in specs:
+        meta = get_meta(cid)
+        if meta is None:
+            raise AnchorError(f"anchor {role}: content_id {cid} not found in library")
+        times = readers.beatgrid_times(meta.analysis_data_path) or []
+        present, valid, v4_n = readers.v4_status(meta.audio_path, times)
+        if not valid:
+            raise AnchorError(f"anchor {role} ({cid}): no valid v4 payload")
+        n_beats = int(v4_n) if v4_n else len(times)
+        drops = tuple(sorted(int(b) for b in (readers.phrase_drops(meta.analysis_data_path) or [])))
+        if kind == "gold":
+            beats = tuple(int(b) for b in gold)
+        else:
+            covered = [b for b in drops if b >= 0 and b + WINDOW <= n_beats]
+            if not covered:
+                raise AnchorError(f"anchor {role} ({cid}): no usable candidate markers")
+            beat = pick_highest_tier_beat(tier_fn(meta, covered))
+            if beat is None:
+                raise AnchorError(f"anchor {role} ({cid}): tier pinning produced no beat")
+            beats = (int(beat),)
+            pins[role] = int(beat)
+        for b in beats:
+            if not (0 <= b and b + WINDOW <= n_beats):
+                raise AnchorError(f"anchor {role} ({cid}): beat {b} lacks 16-beat coverage")
+        if role == "mixed":
+            rows.append(enrich(meta, readers, marker_beats=beats, anchor_montage_beats=beats))
+        else:
+            rows.append(enrich(meta, readers, marker_beats=beats, anchor_marker_beat=beats[0]))
+    return rows, pins
 
 
 # --- metadata-only row (spec B3.1: listing WITHOUT audio decode/hash) ----------
