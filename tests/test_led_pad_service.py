@@ -14,10 +14,19 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from rb_ss_bridge_v2.tools.led_pad_web import LedPadService, build_handler, freshness_restart_due  # noqa: E402
+import rb_ss_bridge_v2.tools.led_pad_web as led_pad_web  # noqa: E402
+from rb_ss_bridge_v2.tools.led_pad_web import (  # noqa: E402
+    LedPadService,
+    build_handler,
+    freshness_restart_due,
+    resolve_sim_profile_state,
+    sim_profile_response,
+)
 
 
 _EXAMPLE_PATH = Path(__file__).resolve().parents[1] / "config" / "led_look_director.example.json"
+_SIM_VIEW_JS = Path(__file__).resolve().parents[1] / "tools" / "led_sim_assets" / "ledsim-view.js"
+_SIM_EXAMPLE = Path(__file__).resolve().parents[1] / "config" / "led_sim_profile.example.json"
 
 
 class _FakePlayback:
@@ -691,6 +700,114 @@ class CacheControlTests(unittest.TestCase):
 
             self.assertEqual(headers["json"], "no-cache")
             self.assertEqual(headers["static"], "no-cache")
+
+
+@contextmanager
+def _pad_http(service: LedPadService):
+    server = ThreadingHTTPServer(("127.0.0.1", 0), build_handler(service))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield server
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2.0)
+
+
+class SimRoomHookupRouteTests(unittest.TestCase):
+    """AWR-245: pad serves sim view JS + profile JSON read-only (fail-soft)."""
+
+    def _service(self, td: str) -> LedPadService:
+        path = Path(td) / "led_look_director.json"
+        shutil.copy2(_EXAMPLE_PATH, path)
+        return LedPadService(path, dry_run=True, playback=_FakePlayback())
+
+    def test_sim_view_js_served_with_javascript_content_type(self) -> None:
+        self.assertTrue(_SIM_VIEW_JS.is_file())
+        with tempfile.TemporaryDirectory() as td, _pad_http(self._service(td)) as server:
+            conn = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=3)
+            conn.request("GET", "/static/sim/ledsim-view.js")
+            res = conn.getresponse()
+            body = res.read()
+            ctype = res.getheader("Content-Type") or ""
+            conn.close()
+
+        self.assertEqual(res.status, 200)
+        self.assertIn("javascript", ctype.lower())
+        self.assertEqual(body, _SIM_VIEW_JS.read_bytes())
+        self.assertIn(b"createLedSimView", body)
+
+    def test_sim_view_js_missing_returns_404(self) -> None:
+        missing = Path("/tmp/rbss_awr245_missing_ledsim_view.js")
+        if missing.exists():
+            missing.unlink()
+        previous = led_pad_web._SIM_VIEW_JS
+        led_pad_web._SIM_VIEW_JS = missing
+        try:
+            with tempfile.TemporaryDirectory() as td, _pad_http(self._service(td)) as server:
+                conn = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=3)
+                conn.request("GET", "/static/sim/ledsim-view.js")
+                res = conn.getresponse()
+                res.read()
+                conn.close()
+            self.assertEqual(res.status, 404)
+        finally:
+            led_pad_web._SIM_VIEW_JS = previous
+
+    def test_sim_profile_ok_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as td, _pad_http(self._service(td)) as server:
+            conn = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=3)
+            conn.request("GET", "/api/sim/profile")
+            res = conn.getresponse()
+            payload = json.loads(res.read().decode("utf-8"))
+            conn.close()
+
+        self.assertEqual(res.status, 200)
+        self.assertTrue(payload.get("ok"))
+        profile = payload["profile"]
+        self.assertIsInstance(profile, dict)
+        self.assertIn("room_mm", profile)
+        self.assertIn("layout", profile)
+        self.assertIsInstance(profile.get("layout_locked"), bool)
+        self.assertIsInstance(profile.get("calibration_locked"), bool)
+
+        # Helper matches HTTP payload for the default paths.
+        direct = sim_profile_response()
+        self.assertTrue(direct["ok"])
+        self.assertEqual(direct["profile"].keys(), profile.keys())
+
+    def test_sim_profile_failure_shape_when_example_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            missing_example = Path(td) / "no_such_example.json"
+            missing_live = Path(td) / "no_such_live.json"
+            payload = sim_profile_response(
+                example_path=missing_example,
+                profile_path=missing_live,
+            )
+            self.assertFalse(payload.get("ok"))
+            self.assertIn("error", payload)
+            self.assertNotIn("profile", payload)
+
+            profile, err = resolve_sim_profile_state(
+                example_path=missing_example,
+                profile_path=missing_live,
+            )
+            self.assertEqual(profile, {})
+            self.assertTrue(err)
+
+    def test_sim_profile_falls_back_to_example_on_bad_live(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            bad_live = Path(td) / "led_sim_profile.json"
+            bad_live.write_text("{not-json", encoding="utf-8")
+            payload = sim_profile_response(
+                example_path=_SIM_EXAMPLE,
+                profile_path=bad_live,
+            )
+            self.assertTrue(payload.get("ok"))
+            self.assertIn("profile", payload)
+            self.assertIn("profile_error", payload)
+            self.assertIn("led_sim_profile.json", payload["profile_error"])
 
 
 if __name__ == "__main__":

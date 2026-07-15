@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: software-tested
-last_verified_commit: bb3a310
+last_verified_commit: f24736e
 last_verified_date: 2026-07-15
-validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (live-apply + variant switch + preview), Round 2 (param_specs sliders/toggles, slot swatches, JSON demoted to Advanced), Round 3 (rejected-drafts filter, draft delete), QR same-network access, the iOS/iPad touch pass, the editor unset-param-defaults fix, the AWR-193 pad/lab overhaul (accept snapshot, decoupled preview, archive flow, fn fallback, effective bounds, color pickers + regime badges, reconnect, freshness watchdog + live fingerprint + no-cache), the AWR-202 commit read-modify-merge with the gate fix that tracks look CONTENT (`touched`) separately from role-bank PLACEMENT (`moved`) so a params-only edit keeps the look's LIVE bank while an explicit pad move still applies, AWR-240 pad offline v2 stand-down so Test Palette still injects slot_colors, AWR-241 Template Lab beat meter + metronome click (preview exact / live server-synced), AWR-242 Template Lab UX overhaul (search/filter/group draft list, target_role phrase tags, settable timing_mode, detail restructure, health strip + self-test), and AWR-243 Template Lab functional fix round (collision banner gate, selected-draft list pin, ownership takeover catch, applied:false hint, live test_palette for lab play, header/phone/preview/health/utility UX); SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
+validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (live-apply + variant switch + preview), Round 2 (param_specs sliders/toggles, slot swatches, JSON demoted to Advanced), Round 3 (rejected-drafts filter, draft delete), QR same-network access, the iOS/iPad touch pass, the editor unset-param-defaults fix, the AWR-193 pad/lab overhaul (accept snapshot, decoupled preview, archive flow, fn fallback, effective bounds, color pickers + regime badges, reconnect, freshness watchdog + live fingerprint + no-cache), the AWR-202 commit read-modify-merge with the gate fix that tracks look CONTENT (`touched`) separately from role-bank PLACEMENT (`moved`) so a params-only edit keeps the look's LIVE bank while an explicit pad move still applies, AWR-240 pad offline v2 stand-down so Test Palette still injects slot_colors, AWR-241 Template Lab beat meter + metronome click (preview exact / live server-synced), AWR-242 Template Lab UX overhaul (search/filter/group draft list, target_role phrase tags, settable timing_mode, detail restructure, health strip + self-test), AWR-243 Template Lab functional fix round (collision banner gate, selected-draft list pin, ownership takeover catch, applied:false hint, live test_palette for lab play, header/phone/preview/health/utility UX), and AWR-245 Template Lab Strip|Room preview hookup (pad serves sim view JS + profile read-only; fail-soft; preview-only honesty); SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # LED Pad
@@ -358,6 +358,27 @@ returned frames on a canvas strip in the detail panel, so a draft can be eyeball
 before it ever reaches the physical strip. A broken `effects_lab.py` returns
 `{"ok": false, "error", "traceback"}` and the UI shows the traceback panel instead of animating.
 
+### Room view preview (AWR-245)
+
+The preview hero has a **Strip | Room** toggle (default Strip; choice persisted in
+`localStorage` key `labPreviewMode`). Room mode reuses the LED Studio room canvas as-is — it does
+not fork the simulator:
+
+- Pad serves `GET /static/sim/ledsim-view.js` read-only from `tools/led_sim_assets/ledsim-view.js`
+  (404 if missing; never crashes the pad).
+- Pad serves `GET /api/sim/profile` with the same example-inherited merge shape as the sim's
+  `LedSimService.profile_state()` (JSON-only; no Python import of `led_sim_engine` / `led_sim_web`,
+  so the AWR-193 pad↔sim cycle fence stays intact). Failures return `{"ok": false, "error": …}`.
+- Lab dynamically imports the view module, creates `createLedSimView(canvas, profile)` on a second
+  stage-sized canvas, and feeds it the **same** preview frames / playback clock as the strip
+  canvas (only the visible canvas renders). Toggle destroys/recreates the view so ResizeObservers
+  do not leak. The AWR-241 beat meter keeps working identically in both modes.
+- **Fail-soft.** If the module import or profile fetch fails, Lab stays in Strip with a dim note:
+  “Room view unavailable — simulator assets not found.”
+- **Honesty.** Room mode shows “Room view · simulator layout · preview only.” Live on-strip play is
+  not frame-streamed to the browser; the room canvas shows the last offline preview. The LIVE chip
+  logic is untouched.
+
 ### Beat meter + metronome click (AWR-241)
 
 Template Lab can verify that a preview or strip play is actually running at the stated BPM, and
@@ -474,9 +495,11 @@ beat meter + optional metronome click (preview exact from frame math; live phase
 styles scoped under `.lab-route`; Pad route untouched). AWR-243 is the functional fix round on that
 UI (collision banner only when `production_collision`, selected-draft list pin, ownership
 takeover catch via `err.payload`, `applied:false` slider hint, live Test Palette while a lab scene
-plays, plus header/phone/preview/health/utility polish). AWR-193/241/242/243 JS/UI behavior has no
-automated harness — it is code-review + manual-smoke covered only (registry `production_collision`
-+ session lab palette live-update are unit-tested). Locked Palette and renderer param unlock
-behavior is covered by software tests only.
+plays, plus header/phone/preview/health/utility polish). AWR-245 adds the Strip|Room preview
+hookup (pad read-only sim routes + Lab toggle; route unit tests in `tests/test_led_pad_service.py`;
+JS toggle/fail-soft is code-review + Claude e2e after pad restart). AWR-193/241/242/243/245 JS/UI
+behavior otherwise has no automated harness — code-review + manual-smoke covered only (registry
+`production_collision` + session lab palette live-update + sim routes are unit-tested). Locked
+Palette and renderer param unlock behavior is covered by software tests only.
 All LED Pad and Template Lab playback/UI claims are SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
 The iOS/iPad touch pass is implemented/software-tested only; on-device verification is pending.
