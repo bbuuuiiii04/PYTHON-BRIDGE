@@ -279,6 +279,7 @@ def real_readers(*, repo_root):
     parent, which is how the bridge's own relative imports resolve. Pure reads only.
     """
     import hashlib
+    import os
     import sys
     from pathlib import Path
 
@@ -290,6 +291,11 @@ def real_readers(*, repo_root):
     import rb_ss_bridge_v2.spectral_cache as sc
 
     def _audio_sha256(path):
+        # A streaming/remote track (e.g. a soundcloud: locator) has no local file;
+        # return a deterministic per-path sentinel — the row has no valid v4 either,
+        # so it is excluded (missing_v4), never silently hashed to a real digest.
+        if not path or not os.path.exists(path):
+            return "no-local-audio:" + hashlib.sha256((path or "").encode("utf-8")).hexdigest()[:32]
         h = hashlib.sha256()
         with open(path, "rb") as fh:
             for chunk in iter(lambda: fh.read(1 << 20), b""):
@@ -317,11 +323,16 @@ def real_readers(*, repo_root):
         return list(getattr(tad, "drop_beat_indices", []) or [])
 
     def _v4_status(audio_path, times):
-        if not times:
+        # No grid, no local audio, or any stat/parse failure ⇒ treat as missing v4
+        # (the cache key stats the audio file, which raises for a remote locator).
+        if not times or not audio_path or not os.path.exists(audio_path):
             return (False, False, None)
-        key = sc._cache_key(audio_path, times)
-        present = (sc._cache_dir_v4() / f"{key}.json").exists()
-        v4 = sc.get_cached_v4(audio_path, times)
+        try:
+            key = sc._cache_key(audio_path, times)
+            present = (sc._cache_dir_v4() / f"{key}.json").exists()
+            v4 = sc.get_cached_v4(audio_path, times)
+        except OSError:
+            return (False, False, None)
         return (present, v4 is not None, getattr(v4, "n_beats", None) if v4 else None)
 
     def _label_store_hash():

@@ -30,6 +30,26 @@ def _locators(n=20):
     ) for i in range(n)]
 
 
+def _anchors():
+    """Seven synthetic anchors in ANCHOR_ROLES order; the mixed one is montage."""
+    roles = [("WALL", 128), ("COMET", 472), ("HOUSE", 384), ("mixed", None),
+             ("T1", 128), ("T2", 124), ("T3", 64)]
+    out = []
+    for role, beat in roles:
+        d = dict(
+            content_id_locator=f"anc-{role}", audio_sha256=f"anc{role}".ljust(64, "0"),
+            recording_lineage_id=f"anclin-{role}", audio_duplicate_group=f"ancdup-{role}",
+            artist=f"anchor {role}", title=f"anchor track {role}", duration_s=300.0, bpm=128.0,
+            beatgrid_fingerprint=f"abg-{role}", marker_set_fingerprint=f"ams-{role}",
+            label_store_hash="lh", n_beats=800,
+            candidate_markers=[beat] if beat is not None else [192, 288],
+            anchor_marker_beat=beat)
+        if role == "mixed":
+            d["anchor_montage_beats"] = [192, 288]
+        out.append(d)
+    return out
+
+
 def _verdict_inputs():
     return dict(
         pilot_seed=SEED, created_from_head="head", input_hashes={}, setup_failures=[],
@@ -93,6 +113,27 @@ class CliReplayTests(unittest.TestCase):
         self._select(self.root / "a")
         self.assertEqual(sorted(p.name for p in self.watch.iterdir()), ["live.txt"])
         self.assertEqual((self.watch / "live.txt").read_text(), "do not touch")
+
+    def _select_anchors(self, ws):
+        anc = self.root / "anchors.json"
+        anc.write_text(json.dumps(_anchors()))
+        _run(["--workspace", str(ws), "--watch", str(self.watch), "select",
+              "--locators", str(self.loc), "--anchors", str(anc),
+              "--config", str(self.cfg), "--head", "deadbeef"])
+
+    def test_select_with_anchors_replay_byte_identical(self):
+        a, b = self.root / "a2", self.root / "b2"
+        self._select_anchors(a)
+        self._select_anchors(b)
+        for name in ("card_manifest.jsonl", "lineage_manifest.jsonl", "suspicious_pairs.json"):
+            self.assertEqual((a / name).read_bytes(), (b / name).read_bytes(), name)
+        cards = [json.loads(ln) for ln in (a / "card_manifest.jsonl").read_text().splitlines()]
+        anchor_cards = [c for c in cards if c["card_type"] == "anchor_confirm"]
+        self.assertEqual(len(anchor_cards), 7)
+        mixed = [c for c in anchor_cards if c["anchor_role"] == "mixed"][0]
+        self.assertEqual(len(mixed["clip_spec"]["windows"]), 2)      # montage clip
+        # 18 pilot lineages + 7 anchor rows in the lineage manifest
+        self.assertEqual(len((a / "lineage_manifest.jsonl").read_text().splitlines()), 25)
 
 
 if __name__ == "__main__":

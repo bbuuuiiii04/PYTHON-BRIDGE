@@ -59,34 +59,143 @@ def _read_jsonl(path):
     return [json.loads(ln) for ln in Path(path).read_text(encoding="utf-8").splitlines() if ln]
 
 
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[2]   # tools/spectral_pilot -> repo root
+
+
+def _warm_bridge_imports():
+    """Import pyrekordbox + bridge modules BEFORE ``no_network_guard`` patches
+    ``socket.socket``. ``ssl`` (pulled in transitively via pdb/asyncio) subclasses
+    ``socket.socket`` at import; once the guard replaces it with a function that
+    raises, that subclassing fails with a TypeError. Importing here (one-time,
+    cached) means only socket *instantiation* is blocked under the guard, not the
+    import-time class definitions. The DB reads still run inside the guard, so
+    read-only egress is still proven."""
+    import sys
+    import warnings
+
+    parent = str(_repo_root().parent)
+    if parent not in sys.path:
+        sys.path.insert(0, parent)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        import pyrekordbox.db6  # noqa: F401
+    import rb_ss_bridge_v2.anlz_reader        # noqa: F401
+    import rb_ss_bridge_v2.filepath_resolver  # noqa: F401
+    import rb_ss_bridge_v2.lighting_moments_v2  # noqa: F401
+    import rb_ss_bridge_v2.spectral_cache     # noqa: F401
+
+
+def _locator_from_dict(d):
+    """Build a ``LocatorRow`` from a JSON dict, re-tupling the sequence fields so the
+    frozen dataclass round-trips (JSON has no tuples). Missing optional keys fall to
+    the dataclass defaults."""
+    from .selection import LocatorRow
+    d = dict(d)
+    d["candidate_markers"] = tuple(d.get("candidate_markers", []) or [])
+    if d.get("anchor_montage_beats") is not None:
+        d["anchor_montage_beats"] = tuple(d["anchor_montage_beats"])
+    return LocatorRow(**d)
+
+
 # --- subcommands -------------------------------------------------------------
 def cmd_select(args, ws):
     from . import selection as sel
-    from .selection import LocatorRow
     from .session import write_card_manifest
 
     cfg = _load_json(args.config) if args.config else {}
-    rows = []
-    for d in _load_json(args.locators):
-        d = dict(d)
-        d["candidate_markers"] = tuple(d.get("candidate_markers", []))
-        rows.append(LocatorRow(**d))
+    rows = [_locator_from_dict(d) for d in _load_json(args.locators)]
+    anchors = [_locator_from_dict(d) for d in _load_json(args.anchors)] if args.anchors else []
+
+    dev_ids = set(cfg.get("dev_content_ids", []))
+    scripted_ids = set(cfg.get("scripted_ids", []))
+    # spec B3.2: suspicious pairs over the 60-row pool ∪ anchors; fail closed —
+    # every affected row is unresolved unless the manual review confirmed unrelated.
+    pool = sel.seed_pool(rows, pilot_seed=args.pilot_seed, dev_content_ids=dev_ids, scripted_ids=scripted_ids)
+    pairs = sel.find_suspicious_pairs(pool + anchors, pilot_seed=args.pilot_seed)
+    adj = cfg.get("adjudications") or {}
+    unresolved = set(cfg.get("unresolved_ids", []))
+    for a, b in pairs:
+        for cid in (a, b):
+            if adj.get(cid) != "confirmed_unrelated":
+                unresolved.add(cid)
+    # lineage_review_state proxy: confirmed for every pool row unless config overrides
+    # (the 30-min human lineage curation is NOT part of this prep round — see report).
+    lineage_states = cfg.get("lineage_states") or {r.content_id_locator: "confirmed" for r in pool}
+
+    _write_json(ws, "suspicious_pairs.json", {
+        "pilot_seed": args.pilot_seed, "pairs": [list(p) for p in pairs],
+        "unresolved_ids": sorted(unresolved),
+        "note": "fail-closed: every emitted suspicious pair recorded unresolved (no adjudication in prep)"})
+
     res = sel.build_selection(
         rows, pilot_seed=args.pilot_seed, created_from_head=args.head,
-        dev_content_ids=set(cfg.get("dev_content_ids", [])),
-        dev_lineages=set(cfg.get("dev_lineages", [])),
-        scripted_ids=set(cfg.get("scripted_ids", [])),
-        unresolved_ids=set(cfg.get("unresolved_ids", [])),
-        lineage_states=cfg.get("lineage_states", {}),
-        adjudications=cfg.get("adjudications"),
+        dev_content_ids=dev_ids, dev_lineages=set(cfg.get("dev_lineages", [])),
+        scripted_ids=scripted_ids, unresolved_ids=unresolved, lineage_states=lineage_states,
+        anchor_rows=anchors, adjudications=adj or None,
     )
     if res.status != "OK":
-        print(json.dumps({"status": res.status, "reason": res.reason}))
+        _write_json(ws, "selection_status.json", {
+            "status": res.status, "reason": res.reason,
+            "eligible_lineage_count": res.eligible_lineage_count,
+            "suspicious_pairs": len(pairs), "unresolved_rows": len(unresolved)})
+        print(json.dumps({"status": res.status, "reason": res.reason,
+                          "eligible_lineage_count": res.eligible_lineage_count}))
         return
     _write_jsonl(ws, "lineage_manifest.jsonl", [r.to_dict() for r in res.selected_rows])
     manifest_rows = sel.card_manifest_rows(args.pilot_seed, res.cards)
     write_card_manifest(ws, [m.to_dict() for m in manifest_rows])
-    print(json.dumps({"status": "OK", "manifest_id": res.manifest_id, "cards": len(manifest_rows)}))
+    print(json.dumps({"status": "OK", "manifest_id": res.manifest_id, "cards": len(manifest_rows),
+                      "suspicious_pairs": len(pairs), "unresolved_rows": len(unresolved)}))
+
+
+def cmd_enumerate(args, ws):
+    """Produce the real-library locators.json + anchors.json from the DB copy in
+    scratch/ (spec B3.1). READ-ONLY: opens the COPY (never the live master.db), reads
+    ANLZ/audio/v4-cache in place (no mtime/size change). Enriches the 60-row pool +
+    the seven anchors ONLY. All live-bridge imports live behind ``real_readers``.
+    """
+    import dataclasses
+    import warnings
+
+    from . import library_adapter as la
+
+    cfg = _load_json(args.config) if args.config else {}
+    dev_ids = set(cfg.get("dev_content_ids", []))
+    scripted_ids = set(cfg.get("scripted_ids", []))
+    readers = la.real_readers(repo_root=str(_repo_root()))
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        from pyrekordbox.db6 import Rekordbox6Database  # type: ignore
+    db = Rekordbox6Database(args.db_copy, unlock=True)
+    try:
+        # read every needed ORM attribute into plain LocatorMeta while the session is
+        # open — the ORM lazy-loads (e.g. Artist) and detaches once the DB is closed.
+        metas = la.list_locators(list(db.get_content()), scripted_ids=scripted_ids)
+    finally:
+        db.close()
+    _write_jsonl(ws, "library_listing.jsonl", [dataclasses.asdict(m) for m in metas])  # audit: all rows, no audio
+    by_id = {m.content_id_locator: m for m in metas}
+    pool_ids = la.seed_pool_ids(metas, pilot_seed=args.pilot_seed,
+                                dev_content_ids=dev_ids, scripted_ids=scripted_ids)
+    pool_rows = [la.enrich(by_id[cid], readers) for cid in pool_ids]
+
+    # anchors: F2 plan tier per covered drop drives T2/T3 pinning (real tier_fn).
+    def tier_fn(meta, covered):
+        import rb_ss_bridge_v2.lighting_moments_v2 as lm  # noqa: WPS433
+        import rb_ss_bridge_v2.spectral_cache as sc       # noqa: WPS433
+        times = readers.beatgrid_times(meta.analysis_data_path) or []
+        v4 = sc.get_cached_v4(meta.audio_path, times)
+        plan = lm.build_track_plan(v4, drops=covered, buildups=[], hotcues=[], beatgrid_times_ms=times)
+        return [(e.drop_beat, e.decision.tier) for e in plan.entries]
+
+    anchor_rows, pins = la.build_anchor_rows(lambda cid: by_id.get(cid), readers, tier_fn)
+
+    _write_json(ws, "locators.json", [dataclasses.asdict(r) for r in pool_rows])
+    _write_json(ws, "anchors.json", [dataclasses.asdict(r) for r in anchor_rows])
+    print(json.dumps({"library_rows": len(metas), "pool_rows": len(pool_rows),
+                      "anchors": len(anchor_rows), "pinned": pins}))
 
 
 def cmd_freeze(args, ws):
@@ -184,8 +293,13 @@ def main(argv=None) -> int:
                         help="a live dir to prove unchanged; repeatable (never the workspace)")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
+    pe = sub.add_parser("enumerate")
+    pe.add_argument("--db-copy", required=True, help="path to the master.db COPY in scratch/ (never the live DB)")
+    pe.add_argument("--config")
+
     ps = sub.add_parser("select")
     ps.add_argument("--locators", required=True)
+    ps.add_argument("--anchors")
     ps.add_argument("--config")
     ps.add_argument("--head", default="unknown")
 
@@ -203,7 +317,9 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     ws = _resolve_workspace(args.workspace)
     _configure_logging(ws)      # before importing any package internals below
-    dispatch = {"select": cmd_select, "freeze": cmd_freeze,
+    if args.cmd == "enumerate":
+        _warm_bridge_imports()  # before no_network_guard patches socket (ssl subclasses it)
+    dispatch = {"enumerate": cmd_enumerate, "select": cmd_select, "freeze": cmd_freeze,
                 "session": cmd_session, "score": cmd_score}[args.cmd]
     _run_guarded([Path(w) for w in args.watch], lambda: dispatch(args, ws))
     return 0
