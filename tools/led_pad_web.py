@@ -668,6 +668,7 @@ class LedPadService:
         session = self._session(config)
         palette = str(session.get("test_palette") or "")
         engine = LedColorEngine(result.config.color_engine, set_seed=0)
+        engine.set_scripted_stand_down(True)  # pad engine is fresh/offline: v2 has no dressing here; stand down to the v1 test-palette fill
         if palette:
             engine.set_palette(palette)
         engine.lock()

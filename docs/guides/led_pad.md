@@ -2,8 +2,8 @@
 doc_status: current
 truth_level: software-tested
 last_verified_commit: a8d92c0
-last_verified_date: 2026-07-11
-validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (live-apply + variant switch + preview), Round 2 (param_specs sliders/toggles, slot swatches, JSON demoted to Advanced), Round 3 (rejected-drafts filter, draft delete), QR same-network access, the iOS/iPad touch pass, the editor unset-param-defaults fix, the AWR-193 pad/lab overhaul (accept snapshot, decoupled preview, archive flow, fn fallback, effective bounds, color pickers + regime badges, reconnect, freshness watchdog + live fingerprint + no-cache), and the AWR-202 commit read-modify-merge with the gate fix that tracks look CONTENT (`touched`) separately from role-bank PLACEMENT (`moved`) so a params-only edit keeps the look's LIVE bank while an explicit pad move still applies; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
+last_verified_date: 2026-07-15
+validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (live-apply + variant switch + preview), Round 2 (param_specs sliders/toggles, slot swatches, JSON demoted to Advanced), Round 3 (rejected-drafts filter, draft delete), QR same-network access, the iOS/iPad touch pass, the editor unset-param-defaults fix, the AWR-193 pad/lab overhaul (accept snapshot, decoupled preview, archive flow, fn fallback, effective bounds, color pickers + regime badges, reconnect, freshness watchdog + live fingerprint + no-cache), the AWR-202 commit read-modify-merge with the gate fix that tracks look CONTENT (`touched`) separately from role-bank PLACEMENT (`moved`) so a params-only edit keeps the look's LIVE bank while an explicit pad move still applies, and AWR-240 pad offline v2 stand-down so Test Palette still injects slot_colors; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # LED Pad
@@ -107,7 +107,10 @@ Logs are written to `/tmp/led_pad.log` and `/tmp/led_pad.err`.
 - Duplicate, move, delete, save, discard, and apply LED looks through
   `config/led_look_director.draft.json`.
 - Preview realtime-razer looks with synthetic BPM, Test Palette, and Loop settings. Cloud scenes
-  are shown but not previewed.
+  are shown but not previewed. When `color_engine.v2.enabled` is true, pad/lab play still builds a
+  fresh offline `LedColorEngine` with no live dressing, so `_inject_engine_colors` calls
+  `set_scripted_stand_down(True)` before the Test Palette fill — otherwise v2 returns empty
+  `slot_colors` and slot cues paint black (AWR-240). Software-tested only; not a bridge runtime change.
 - Lock a look to a named color-engine palette. Locked looks ignore the session Test Palette
   during pad playback and keep using their saved palette until cleared.
 - Derive renderer controls from `REALTIME_EFFECT_PARAM_KEYS` and validate the MERGED result (see

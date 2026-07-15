@@ -370,6 +370,32 @@ class LedPadServiceTests(unittest.TestCase):
             self.assertEqual(colors[5], (255, 255, 255))
             self.assertEqual(first["spec"]["params"]["slot_colors"], second["spec"]["params"]["slot_colors"])
 
+    def test_v2_enabled_pad_still_injects_slot_colors_from_test_palette(self) -> None:
+        """AWR-240: fresh pad LedColorEngine has no v2 dressing; stand down to v1 fill.
+
+        Without set_scripted_stand_down(True), resolve_slot_colors returns {} and
+        slot cues render black/white-only in pad preview and lab play.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            path = self._copy_config(td)
+            data = json.loads(path.read_text(encoding="utf-8"))
+            data["color_engine"]["v2"]["enabled"] = True
+            path.write_text(json.dumps(data), encoding="utf-8")
+            playback = _FakePlayback()
+            service = LedPadService(path, dry_run=True, playback=playback)
+            service.session({"test_palette": "blue_cyan"})
+
+            result = service.play({"name": "rt_groove_chase"})
+
+            self.assertTrue(result["ok"])
+            colors = playback.play_calls[-1]["spec"]["params"]["slot_colors"]
+            self.assertEqual(len(colors), 6)
+            self.assertTrue(
+                any(tuple(c) != (0, 0, 0) for c in colors[:5]),
+                f"expected non-black slot colors, got {colors!r}",
+            )
+            self.assertEqual(tuple(colors[5]), (255, 255, 255))
+
     def test_locked_palette_ignores_session_test_palette(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             service, playback, _path = self._service(td)
