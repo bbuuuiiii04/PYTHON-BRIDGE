@@ -12,6 +12,7 @@ import unittest
 from pathlib import Path
 
 from tools.spectral_pilot.__main__ import main
+from tools.spectral_pilot.schemas import SCHEMA_VERSION
 
 
 def _run(argv):
@@ -134,6 +135,78 @@ class CliReplayTests(unittest.TestCase):
         self.assertEqual(len(mixed["clip_spec"]["windows"]), 2)      # montage clip
         # 18 pilot lineages + 7 anchor rows in the lineage manifest
         self.assertEqual(len((a / "lineage_manifest.jsonl").read_text().splitlines()), 25)
+
+
+class FreezeManifestHashWiringTests(unittest.TestCase):
+    """Decouple lock (spec B4, ruled 2026-07-15): ``cmd_freeze`` stamps every prediction
+    row with the LINEAGE-manifest hash (selection identity), never the card deck — a
+    presentation-only re-cut must not move prediction bytes. Card binding lives ONLY in
+    prediction_hashes.json. Heavy freeze internals + live readers are faked, so this
+    drives the real CLI wiring without the library."""
+
+    def test_predictions_bind_lineage_not_card_deck(self):
+        import types
+        from unittest import mock
+
+        from tools.spectral_pilot import __main__ as m
+        from tools.spectral_pilot import freeze as fz
+        from tools.spectral_pilot import library_adapter as la
+        from tools.spectral_pilot.canonical import sha256_hex
+        from tools.spectral_pilot.session import _safe_path
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        ws = Path(tmp.name)
+        (ws / "scratch").mkdir(parents=True)
+
+        card = dict(schema_version=SCHEMA_VERSION, pilot_seed=SEED, card_id="m1",
+                    card_type="marker_state", session_index="P1", order_index=0,
+                    track_instance_id="tid1", marker_beat=200, display_left_id=None,
+                    display_right_id=None, anchor_role="T2", repeat_of_card_id=None,
+                    clip_spec={"windows": [{"marker_beat": 200, "start_beat": 184, "end_beat": 216}]},
+                    card_hash="h")
+        _safe_path(ws, "card_manifest.jsonl").write_bytes((json.dumps(card) + "\n").encode())
+        lineage_rows = [dict(track_instance_id="tid1", content_id_locator="c1",
+                             recording_lineage_id="l1", audio_duplicate_group="d1")]
+        _safe_path(ws, "lineage_manifest.jsonl").write_bytes(
+            "".join(json.dumps(r) + "\n" for r in lineage_rows).encode())
+        _safe_path(ws, "anchors.json").write_bytes(b"[]")
+        _safe_path(ws, "library_listing.jsonl").write_bytes(b"")
+        gold = ws / "gold.json"
+        gold.write_text(json.dumps({"rows": []}))
+        cfg = ws / "cfg.json"
+        cfg.write_text(json.dumps({}))
+
+        captured = {}
+
+        def fake_run_all_methods(**kw):
+            captured["manifest_hash"] = kw["manifest_hash"]
+            return {}
+
+        for target, name, repl in (
+            (fz, "run_all_methods", fake_run_all_methods),
+            (fz, "build_dev_manifest", lambda **kw: types.SimpleNamespace(
+                manifest={"ok": 1}, hash="dmh", dev_rows=(), dev_montages=())),
+            (fz, "fit_scalers", lambda dm: object()),
+            (fz, "candidate_contracts", lambda **kw: []),
+            (la, "real_readers", lambda **kw: object()),
+        ):
+            p = mock.patch.object(target, name, repl)
+            p.start()
+            self.addCleanup(p.stop)
+
+        args = types.SimpleNamespace(pilot_seed=SEED, gold=str(gold), config=str(cfg),
+                                     utc="2026-07-15T00:00:00+00:00")
+        with contextlib.redirect_stdout(io.StringIO()):
+            m.cmd_freeze(args, ws)
+
+        lineage_hash = sha256_hex(lineage_rows)
+        card_hash = sha256_hex([card])
+        self.assertNotEqual(lineage_hash, card_hash)                       # the two hashes differ
+        self.assertEqual(captured["manifest_hash"], lineage_hash)          # rows get lineage identity
+        ph = json.loads(_safe_path(ws, "prediction_hashes.json").read_text())
+        self.assertEqual(ph["lineage_manifest_hash"], lineage_hash)
+        self.assertEqual(ph["card_manifest_hash"], card_hash)              # card binding lives here only
 
 
 if __name__ == "__main__":

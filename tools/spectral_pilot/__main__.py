@@ -300,10 +300,14 @@ def cmd_freeze(args, ws):
                                        dev_manifest_hash=dm.hash, code_hash=code_hash)
 
     # --- run every method at the frozen targets ---
+    # Prediction rows bind to the LINEAGE manifest (selection identity), never the card
+    # deck: a presentation-only re-cut (run-in clip window) must not move prediction bytes
+    # (spec B4, ruled 2026-07-15). The card-deck binding lives ONLY in prediction_hashes.json.
     card_manifest_hash = sha256_hex(cards)
+    lineage_manifest_hash = sha256_hex(lineage)
     method_rows = fz.run_all_methods(pilot_seed=seed, cards=cards, resolve=lambda t: tid_map[t],
                                      window_fn=window_fn, plan_fn=plan_fn, dev=dm, scalers=scalers,
-                                     manifest_hash=card_manifest_hash, baseline_fn=baseline_fn)
+                                     manifest_hash=lineage_manifest_hash, baseline_fn=baseline_fn)
 
     # --- write artifacts (all fenced) ---
     _write_json(ws, "development_training_manifest.json", dm.manifest)
@@ -316,7 +320,7 @@ def cmd_freeze(args, ws):
         method_hashes[method] = sha256_hex(rws)
         counts[method] = _axis_counts(rws)
     ph = PredictionHashes(schema_version=SCHEMA_VERSION, pilot_seed=seed, method_hashes=method_hashes,
-                          card_manifest_hash=card_manifest_hash, lineage_manifest_hash=sha256_hex(lineage),
+                          card_manifest_hash=card_manifest_hash, lineage_manifest_hash=lineage_manifest_hash,
                           freeze_utc=args.utc)
     _write_json(ws, "prediction_hashes.json", ph.to_dict())
 
