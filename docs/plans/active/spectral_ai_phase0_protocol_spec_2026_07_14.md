@@ -356,6 +356,12 @@ is a workload FAIL by gate 3. Never more than one session per calendar day —
 machine-local date, recorded alongside each commit's UTC timestamp; a resumed
 segment belongs to its origin session regardless of date, and a **new** session
 may not start on a local date that already holds any commit.
+**`operator-decided`** Override provision (Brandon, 2026-07-15): the operator may
+explicitly override the one-per-day rule for a specific session start. The
+override must be passed explicitly by the driver, is refused by default, and
+writes a durable `override` row into the ledger so the results carry the caveat
+permanently (first use: session A and P1 sharing 2026-07-15; fatigue risk
+accepted by the operator). The 65-minute/113-decision ceilings are unaffected.
 
 **Interrupted-session recovery:** every commit is durable (append-only
 `responses.jsonl` with per-row hash chaining to the frozen card manifest). Resume
