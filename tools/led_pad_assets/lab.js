@@ -656,15 +656,126 @@
   }
 
   const preview = {frames: [], fps: 40, raf: 0};
+  // AWR-245: Strip | Room toggle. Room reuses the sim view module as-is (no fork).
+  const PREVIEW_MODE_KEY = "labPreviewMode";
+  const roomView = {
+    mode: "strip", // "strip" | "room"
+    profile: null, // fetched once per page load
+    profilePromise: null,
+    view: null,
+    unavailable: false,
+  };
   function setPreviewHint(show) {
     const hint = $("previewHint");
     if (hint) hint.hidden = !show;
+  }
+  function syncPreviewModeChrome() {
+    const hero = $("labPreviewHero");
+    const stripBtn = $("previewModeStrip");
+    const roomBtn = $("previewModeRoom");
+    const caption = $("roomViewCaption");
+    const note = $("roomViewNote");
+    const stripCanvas = $("previewStrip");
+    const roomCanvas = $("previewRoom");
+    const isRoom = roomView.mode === "room" && !roomView.unavailable;
+    if (hero) hero.classList.toggle("room-mode", isRoom);
+    if (stripBtn) {
+      stripBtn.classList.toggle("on", !isRoom);
+      stripBtn.setAttribute("aria-pressed", isRoom ? "false" : "true");
+    }
+    if (roomBtn) {
+      roomBtn.classList.toggle("on", isRoom);
+      roomBtn.setAttribute("aria-pressed", isRoom ? "true" : "false");
+      roomBtn.disabled = roomView.unavailable;
+    }
+    if (caption) caption.hidden = !isRoom;
+    if (note) note.hidden = !roomView.unavailable;
+    if (stripCanvas) stripCanvas.hidden = isRoom;
+    if (roomCanvas) roomCanvas.hidden = !isRoom;
+  }
+  function destroyRoomView() {
+    if (roomView.view && typeof roomView.view.destroy === "function") {
+      try { roomView.view.destroy(); } catch (_) { /* fail-soft */ }
+    }
+    roomView.view = null;
+  }
+  async function ensureRoomProfile() {
+    if (roomView.profile) return roomView.profile;
+    if (!roomView.profilePromise) {
+      roomView.profilePromise = fetch("/api/sim/profile")
+        .then((r) => r.json())
+        .then((data) => {
+          if (!data || !data.ok || !data.profile) {
+            throw new Error((data && data.error) || "sim profile unavailable");
+          }
+          roomView.profile = data.profile;
+          return roomView.profile;
+        })
+        .catch((err) => {
+          roomView.unavailable = true;
+          roomView.profilePromise = null;
+          throw err;
+        });
+    }
+    return roomView.profilePromise;
+  }
+  async function ensureRoomView() {
+    if (roomView.view) return roomView.view;
+    const canvas = $("previewRoom");
+    if (!canvas) throw new Error("room canvas missing");
+    const [mod, profile] = await Promise.all([
+      import("/static/sim/ledsim-view.js"),
+      ensureRoomProfile(),
+    ]);
+    if (!mod || typeof mod.createLedSimView !== "function") {
+      throw new Error("createLedSimView missing");
+    }
+    roomView.view = mod.createLedSimView(canvas, profile);
+    return roomView.view;
+  }
+  async function setPreviewMode(mode) {
+    let next = mode === "room" ? "room" : "strip";
+    if (next === "room" && !roomView.unavailable) {
+      try {
+        await ensureRoomView();
+      } catch (_) {
+        next = "strip";
+        roomView.unavailable = true;
+        destroyRoomView();
+      }
+    }
+    if (next === "strip") destroyRoomView();
+    roomView.mode = next;
+    try { localStorage.setItem(PREVIEW_MODE_KEY, next); } catch (_) { /* private mode */ }
+    syncPreviewModeChrome();
+    // Re-paint last preview frame into the newly visible canvas.
+    if (preview.frames.length && beatUI.mode === "preview") {
+      paintPreviewFrame(preview.frames[beatUI.frameIndex % preview.frames.length]);
+    }
+  }
+  function paintPreviewFrame(frame) {
+    if (!Array.isArray(frame) || !frame.length) return;
+    if (roomView.mode === "room" && roomView.view) {
+      roomView.view.renderFrame(frame);
+      return;
+    }
+    const canvas = $("previewStrip");
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const w = canvas.width / frame.length;
+    frame.forEach((rgb, i) => {
+      ctx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+      ctx.fillRect(i * w, 0, Math.ceil(w), canvas.height);
+    });
   }
   function stopPreview() {
     cancelAnimationFrame(preview.raf);
     preview.frames = [];
     const canvas = $("previewStrip");
-    canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+    if (canvas) canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+    if (roomView.view) {
+      try { roomView.view.renderFrame([]); } catch (_) { /* fail-soft */ }
+    }
     setPreviewHint(true);
     if (beatUI.mode === "preview") setBeatMode("off");
   }
@@ -689,7 +800,15 @@
     const canvas = $("previewStrip");
     sizePreviewCanvas();
     canvas.width = canvas.clientWidth || 600;
-    const ctx = canvas.getContext("2d");
+    // Room mode: ensure the sim view exists before the raf clock starts (fail-soft → strip).
+    if (roomView.mode === "room" && !roomView.unavailable) {
+      try { await ensureRoomView(); } catch (_) {
+        roomView.unavailable = true;
+        roomView.mode = "strip";
+        destroyRoomView();
+        syncPreviewModeChrome();
+      }
+    }
     preview.frames = res.frames;
     preview.fps = res.fps;
     setPreviewHint(false);
@@ -701,12 +820,7 @@
       if (start === undefined) start = ts;
       const frameIndex = Math.floor((ts - start) / 1000 * preview.fps) % preview.frames.length;
       beatUI.frameIndex = frameIndex;
-      const frame = preview.frames[frameIndex];
-      const w = canvas.width / frame.length;
-      frame.forEach((rgb, i) => {
-        ctx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
-        ctx.fillRect(i * w, 0, Math.ceil(w), canvas.height);
-      });
+      paintPreviewFrame(preview.frames[frameIndex]);
       preview.raf = requestAnimationFrame(step);
     };
     preview.raf = requestAnimationFrame(step);
@@ -715,6 +829,15 @@
     $("previewBtn").disabled = true;
     try { await previewDraft(); } catch (err) { showError(err); } finally { $("previewBtn").disabled = false; }
   };
+  $("previewModeStrip").onclick = () => { setPreviewMode("strip"); };
+  $("previewModeRoom").onclick = () => { setPreviewMode("room"); };
+  // Restore persisted choice (default Strip). Fail-soft if Room assets are gone.
+  (async () => {
+    let saved = "strip";
+    try { saved = localStorage.getItem(PREVIEW_MODE_KEY) || "strip"; } catch (_) { saved = "strip"; }
+    if (saved === "room") await setPreviewMode("room");
+    else syncPreviewModeChrome();
+  })();
 
   $("clickToggle").onclick = () => {
     beatUI.clickOn = !beatUI.clickOn;

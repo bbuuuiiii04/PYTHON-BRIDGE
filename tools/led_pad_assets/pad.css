@@ -223,8 +223,22 @@ main { padding: var(--pad); }
 .lab-route .lab-z1 [hidden] { display: none !important; }
 
 .lab-route .lab-preview-hero { display: flex; flex-direction: column; gap: var(--sp-2); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--sp-3); }
+.lab-route .lab-preview-mode-row { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; min-height: 28px; }
+.lab-route .lab-preview-mode { display: inline-flex; gap: 4px; }
+.lab-route .lab-mode-btn { min-height: 32px; font-size: 12px; padding: 0 12px; color: var(--text-dim); }
+.lab-route .lab-mode-btn.on { border-color: var(--lab); color: var(--text); background: var(--surface-3); }
+.lab-route .lab-room-caption, .lab-route .lab-room-note { font-size: 11px; }
+.lab-route .lab-room-caption[hidden], .lab-route .lab-room-note[hidden] { display: none; }
 .lab-route .lab-preview-wrap { position: relative; }
-.lab-route .lab-preview-hero canvas { width: 100%; height: 64px; background: #000; border: 1px solid var(--border); border-radius: var(--radius-sm); display: block; }
+.lab-route .lab-preview-hero canvas#previewStrip { width: 100%; height: 64px; background: #000; border: 1px solid var(--border); border-radius: var(--radius-sm); display: block; }
+.lab-route .lab-preview-hero canvas#previewRoom,
+.lab-route .lab-preview-hero canvas.lab-preview-room {
+  width: 100%; height: 280px; background: #000; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); display: none;
+}
+.lab-route .lab-preview-hero.room-mode canvas#previewStrip { display: none; }
+.lab-route .lab-preview-hero.room-mode canvas#previewRoom,
+.lab-route .lab-preview-hero.room-mode canvas.lab-preview-room { display: block; }
 .lab-route .lab-preview-hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; color: var(--text-faint); font-size: 13px; text-align: center; padding: 0 var(--sp-3); }
 .lab-route .lab-preview-hint[hidden] { display: none; }
 .lab-route .lab-transport-row { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
@@ -286,7 +300,9 @@ main { padding: var(--pad); }
     grid-column: unset; grid-row: unset;
   }
   .lab-route.lab-drawer-open .lab-list-panel { display: flex; }
-  .lab-route .lab-preview-hero canvas { height: 48px; }
+  .lab-route .lab-preview-hero canvas#previewStrip { height: 48px; }
+  .lab-route .lab-preview-hero canvas#previewRoom,
+  .lab-route .lab-preview-hero canvas.lab-preview-room { height: 200px; }
   .lab-route .param-slider {
     grid-template-columns: minmax(0, 1fr) auto;
     grid-template-rows: auto auto;

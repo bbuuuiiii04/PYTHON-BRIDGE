@@ -83,9 +83,18 @@
         </div>
 
         <!-- Z2 Preview hero -->
-        <div class="lab-preview-hero">
+        <div class="lab-preview-hero" id="labPreviewHero">
+          <div class="lab-preview-mode-row">
+            <div class="lab-preview-mode" role="group" aria-label="Preview mode">
+              <button id="previewModeStrip" type="button" class="ghost lab-mode-btn on" aria-pressed="true">Strip</button>
+              <button id="previewModeRoom" type="button" class="ghost lab-mode-btn" aria-pressed="false">Room</button>
+            </div>
+            <span id="roomViewCaption" class="lab-room-caption dim" hidden>Room view · simulator layout · preview only</span>
+            <span id="roomViewNote" class="lab-room-note dim" hidden>Room view unavailable — simulator assets not found</span>
+          </div>
           <div class="lab-preview-wrap">
             <canvas id="previewStrip" height="64" aria-label="Draft preview strip"></canvas>
+            <canvas id="previewRoom" class="lab-preview-room" height="280" hidden aria-label="Draft preview room view"></canvas>
             <div id="previewHint" class="lab-preview-hint">◉ Preview renders here — press Preview</div>
           </div>
           <div class="lab-transport-row">

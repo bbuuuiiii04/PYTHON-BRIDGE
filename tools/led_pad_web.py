@@ -34,11 +34,90 @@ from .pad_access import _is_loopback_host, access_payload
 _ASSETS_DIR = Path(__file__).resolve().parent / "led_pad_assets"
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _DEFAULT_CONFIG_PATH = _REPO_ROOT / "config" / "led_look_director.json"
+# AWR-245: serve sim view asset + profile JSON read-only. Paths only — never
+# import led_sim_engine / led_sim_web (AWR-193 fence; sim already imports pad-lab).
+_SIM_VIEW_JS = _REPO_ROOT / "tools" / "led_sim_assets" / "ledsim-view.js"
+_SIM_EXAMPLE_PROFILE = _REPO_ROOT / "config" / "led_sim_profile.example.json"
+_SIM_DEFAULT_PROFILE = _REPO_ROOT / "config" / "led_sim_profile.json"
+_SIM_DEFAULT_ROOM_MM = [5216.0, 2284.0]
 _IDENT_RE = re.compile(r"^[a-z0-9_]+$")
 _ROLE_BANKS = ("ambient", "groove", "buildup", "pre_drop", "drop", "post_drop", "breakdown", "utility")
 _VISIBLE_BANKS = ("drafts", "ambient", "groove", "buildup", "drop", "post_drop", "breakdown", "utility")
 _STOP_LOOKS = frozenset({"safe_default", "blackout"})
 logger = logging.getLogger("led_pad_web")
+
+
+def _load_sim_profile_json(path: Path) -> dict[str, Any]:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("profile root must be a JSON object")
+    return data
+
+
+def _with_sim_lock_defaults(profile: dict[str, Any]) -> dict[str, Any]:
+    """Mirror LedSimService.profile_state lock-key repair (no engine import)."""
+    if not isinstance(profile.get("layout_locked"), bool):
+        profile["layout_locked"] = False
+    if not isinstance(profile.get("calibration_locked"), bool):
+        profile["calibration_locked"] = False
+    return profile
+
+
+def resolve_sim_profile_state(
+    *,
+    example_path: Path | None = None,
+    profile_path: Path | None = None,
+) -> tuple[dict[str, Any], str]:
+    """Example-inherited sim profile merge — same shape as LedSimService.profile_state.
+
+    JSON-only. Does not import ``led_sim_engine`` (pad↔sim Python cycle fence).
+    Invalid/unreadable live profile falls back to the example with an error string.
+    """
+    example_path = Path(example_path) if example_path else _SIM_EXAMPLE_PROFILE
+    profile_path = Path(profile_path) if profile_path else _SIM_DEFAULT_PROFILE
+    error = ""
+    try:
+        example = _load_sim_profile_json(example_path)
+    except Exception as exc:
+        return {}, f"{example_path.name}: {exc}"
+
+    if profile_path.exists():
+        try:
+            profile = {**example, **_load_sim_profile_json(profile_path)}
+            # Independent repairs — layout missing and room_mm missing can both apply.
+            if not isinstance(profile.get("layout"), dict):
+                fallback = example.get("layout")
+                profile["layout"] = (
+                    dict(fallback) if isinstance(fallback, dict)
+                    else {"preset": "perimeter", "points_mm": [], "flip_chain": False}
+                )
+            if not isinstance(profile.get("room_mm"), (list, tuple)):
+                profile["room_mm"] = list(_SIM_DEFAULT_ROOM_MM)
+            return _with_sim_lock_defaults(profile), ""
+        except Exception as exc:
+            error = f"{profile_path.name}: {exc}"
+    return _with_sim_lock_defaults(dict(example)), error
+
+
+def sim_profile_response(
+    *,
+    example_path: Path | None = None,
+    profile_path: Path | None = None,
+) -> dict[str, Any]:
+    """Fail-soft JSON for GET /api/sim/profile — never raises to the handler."""
+    try:
+        profile, err = resolve_sim_profile_state(
+            example_path=example_path,
+            profile_path=profile_path,
+        )
+        if not profile:
+            return {"ok": False, "error": err or "sim profile unavailable"}
+        payload: dict[str, Any] = {"ok": True, "profile": profile}
+        if err:
+            payload["profile_error"] = err
+        return payload
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
 
 # Freshness watchdog (AWR-193 Task 9): the launchd-supervised pad process
 # outlives code changes, so a stale catalog surface (import-time module state)
@@ -1123,6 +1202,7 @@ def build_handler(service: LedPadService) -> type[BaseHTTPRequestHandler]:
             "/api/history": service.history,
             "/api/runtime_status": service.runtime_status,
             "/api/lab/list": service.lab_list,
+            "/api/sim/profile": sim_profile_response,
         }
         _POST_ROUTES = {
             "/api/look/save": service.save_look,
@@ -1198,6 +1278,10 @@ def build_handler(service: LedPadService) -> type[BaseHTTPRequestHandler]:
                     self._send_json(
                         access_payload(self.server.server_address[0], self.server.server_address[1])
                     )
+                    return
+                # AWR-245: sim view module served read-only from disk (not under pad assets).
+                if path == "/static/sim/ledsim-view.js":
+                    self._send_file(_SIM_VIEW_JS)
                     return
                 if path.startswith("/static/"):
                     target = (_ASSETS_DIR / path.removeprefix("/static/")).resolve()
