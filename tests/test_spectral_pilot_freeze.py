@@ -114,8 +114,9 @@ class RunAllMethodsTests(unittest.TestCase):
             {"card_type": "marker_state", "card_id": "m1", "track_instance_id": mtid,
              "marker_beat": 200, "anchor_role": "T2"},
             {"card_type": "family_montage", "card_id": "f1", "track_instance_id": ftid,
-             "marker_beat": None, "clip_spec": {"windows": [{"start_beat": 96, "end_beat": 112},
-                                                            {"start_beat": 300, "end_beat": 316}]}},
+             "marker_beat": None, "clip_spec": {"windows": [
+                 {"marker_beat": 96, "start_beat": 80, "end_beat": 112},
+                 {"marker_beat": 300, "start_beat": 284, "end_beat": 316}]}},
         ]
         resolve = {mtid: ("Q1", "Q1", "qsha1"), ftid: ("Q2", "Q2", "qsha2")}.__getitem__
         return dm, sc, cards, resolve, wf
@@ -153,6 +154,23 @@ class RunAllMethodsTests(unittest.TestCase):
         kw = dict(pilot_seed=SEED, cards=cards, resolve=resolve, window_fn=wf,
                   plan_fn=self._plan, dev=dm, scalers=sc, manifest_hash="mh")
         self.assertEqual(freeze.run_all_methods(**kw), freeze.run_all_methods(**kw))
+
+    def test_montage_scores_at_marker_not_run_in(self):
+        # spec B7 amended: the run-in is presentation-only; montage features must be
+        # computed at the marker beats (96, 300), never the run-in starts (80, 284).
+        dm, sc, cards, resolve, wf = self._setup()
+        seen = []
+
+        def spy(cid, beat):
+            seen.append(beat)
+            return wf(cid, beat)
+
+        freeze.run_all_methods(pilot_seed=SEED, cards=cards, resolve=resolve, window_fn=spy,
+                               plan_fn=self._plan, dev=dm, scalers=sc, manifest_hash="mh")
+        self.assertIn(96, seen)
+        self.assertIn(300, seen)
+        self.assertNotIn(80, seen)      # never scored at the run-in start
+        self.assertNotIn(284, seen)
 
     def test_stability_shifts_pin_four_deltas(self):
         # spec B8: each central marker recomputed at deltas -2,-1,+1,+2 -> 5 rows per gated axis.

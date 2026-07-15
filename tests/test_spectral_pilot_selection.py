@@ -212,13 +212,34 @@ class CardManifestRowTests(unittest.TestCase):
         for m in mrows:
             by_type.setdefault(m.card_type, []).append(m)
         marker = by_type["marker_state"][0]
-        self.assertEqual(sorted(marker.clip_spec), ["audio_sha256", "end_beat", "start_beat"])
-        self.assertEqual(marker.clip_spec["end_beat"] - marker.clip_spec["start_beat"], 16)
+        cs = marker.clip_spec
+        self.assertEqual(sorted(cs), ["audio_sha256", "end_beat", "marker_beat", "start_beat"])
+        # spec B7 amended: 16-beat run-in before the scored 16-beat window.
+        self.assertEqual(cs["marker_beat"] - cs["start_beat"], 16)   # run-in present
+        self.assertEqual(cs["end_beat"] - cs["marker_beat"], 16)     # scored window untouched
         montage = by_type["family_montage"][0]
-        self.assertEqual(len(montage.clip_spec["windows"]), 2)
+        wins = montage.clip_spec["windows"]
+        self.assertEqual(len(wins), 2)
+        for w in wins:                                                # both windows carry run-ins
+            self.assertEqual(w["marker_beat"] - w["start_beat"], 16)
+            self.assertEqual(w["end_beat"] - w["marker_beat"], 16)
         self.assertIsNotNone(montage.display_left_id)
         self.assertIsNotNone(montage.display_right_id)
         self.assertEqual(len({m.card_hash for m in mrows}), len(mrows))
+
+    def test_clip_spec_run_in_clamps_at_track_start(self):
+        from types import SimpleNamespace
+        sha = "a" * 64
+        # single card: play window [marker-16, marker+16); marker_beat stays explicit.
+        cs = sel._clip_spec(SimpleNamespace(montage_windows=None, audio_sha256=sha, marker_beat=200))
+        self.assertEqual((cs["start_beat"], cs["marker_beat"], cs["end_beat"]), (184, 200, 216))
+        # clamp: a marker inside the first 16 beats floors the run-in at 0.
+        early = sel._clip_spec(SimpleNamespace(montage_windows=None, audio_sha256=sha, marker_beat=8))
+        self.assertEqual((early["start_beat"], early["end_beat"]), (0, 24))
+        # montage: BOTH windows independently carry a run-in + explicit marker beat.
+        mont = sel._clip_spec(SimpleNamespace(montage_windows=[192, 288], audio_sha256=sha, marker_beat=None))
+        self.assertEqual([w["marker_beat"] for w in mont["windows"]], [192, 288])
+        self.assertEqual([w["start_beat"] for w in mont["windows"]], [176, 272])
 
     def test_anchor_cards_carry_marker_beat_and_clip(self):
         rows, ls = eligible_corpus()
@@ -234,11 +255,15 @@ class CardManifestRowTests(unittest.TestCase):
         for m in anchor_cards:
             if m.anchor_role == "mixed":
                 self.assertIsNone(m.marker_beat)
-                self.assertEqual([w["start_beat"] for w in m.clip_spec["windows"]], [192, 288])
-                self.assertTrue(all(w["end_beat"] - w["start_beat"] == 16 for w in m.clip_spec["windows"]))
+                wins = m.clip_spec["windows"]
+                self.assertEqual([w["marker_beat"] for w in wins], [192, 288])   # scored beats
+                self.assertEqual([w["start_beat"] for w in wins], [176, 272])    # run-ins
+                self.assertTrue(all(w["end_beat"] - w["marker_beat"] == 16 for w in wins))
             else:
                 self.assertEqual(m.marker_beat, 128)
-                self.assertEqual(m.clip_spec["end_beat"] - m.clip_spec["start_beat"], 16)
+                self.assertEqual(m.clip_spec["marker_beat"], 128)
+                self.assertEqual(m.clip_spec["start_beat"], 112)                 # 128-16 run-in
+                self.assertEqual(m.clip_spec["end_beat"] - m.clip_spec["marker_beat"], 16)
 
     def test_mixed_anchor_requires_two_montage_beats(self):
         rows, ls = eligible_corpus()

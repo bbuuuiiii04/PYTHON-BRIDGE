@@ -21,6 +21,7 @@ POOL_SIZE = 60
 N_LINEAGES = 18
 MARKERS_PER_LINEAGE = 2
 WINDOW = 16                 # full 16-beat coverage (drop_window_vector width)
+RUN_IN = 16                 # presentation-only run-in before the marker (spec B7 amended 2026-07-15)
 DUP_WITHIN_S = 3.0
 BPM_WITHIN = 0.10
 HARDNESS_TIERS = ("T1", "T2", "T3")
@@ -422,16 +423,22 @@ def _place_repeats(pilot_seed, base, repeats):
 
 # --- card manifest producer (spec B7) ----------------------------------------
 def _clip_spec(c: CardPlan) -> dict:
-    """The exact 16-beat clip(s) a card plays (spec B7 clip rule).
+    """The play window(s) a card renders (spec B7 amended clip rule, operator 2026-07-15).
+
+    Each clip plays a 16-beat run-in, then the scored 16-beat window: play range
+    ``[max(0, marker-16), marker+16)`` (clamped at track start). The scored moment
+    stays explicit per window as ``marker_beat`` — the run-in is presentation only,
+    so ``drop_window_vector`` and every feature/candidate contract are unchanged.
 
     Montage-style (two windows) whenever the card carries ``montage_windows`` — the
-    family montage/repeat cards AND the `mixed` anchor card (spec B7 amended); a
-    single 16-beat window otherwise.
+    family montage/repeat cards AND the `mixed` anchor card; a single window otherwise.
     """
+    def window(beat):
+        return {"audio_sha256": c.audio_sha256, "marker_beat": beat,
+                "start_beat": max(0, beat - RUN_IN), "end_beat": beat + WINDOW}
     if c.montage_windows:
-        return {"windows": [{"audio_sha256": c.audio_sha256, "start_beat": b, "end_beat": b + WINDOW}
-                            for b in c.montage_windows]}
-    return {"audio_sha256": c.audio_sha256, "start_beat": c.marker_beat, "end_beat": c.marker_beat + WINDOW}
+        return {"windows": [window(b) for b in c.montage_windows]}
+    return window(c.marker_beat)
 
 
 def card_manifest_rows(pilot_seed, cards):

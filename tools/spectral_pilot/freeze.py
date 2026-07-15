@@ -272,7 +272,9 @@ def _montage_targets(rows, c, resolve, window_fn, plan_fn, dev_montages, scalers
     tid = c["track_instance_id"]
     cid, lineage, dup = resolve(tid)
     wins = c["clip_spec"]["windows"]
-    beats = [int(w["start_beat"]) for w in wins]
+    # scored moment is the marker beat, not the run-in start (spec B7 amended clip rule);
+    # keying off start_beat would drag montage features back by the presentation run-in.
+    beats = [int(w["marker_beat"]) for w in wins]
     tgt = c["card_id"]
     # baseline A family from the two F2 plan families
     pa, pb = plan_fn(cid, beats[0]), plan_fn(cid, beats[1])
