@@ -6,6 +6,7 @@
   const state = {
     entries: [],
     current: null,
+    editorMemory: {}, // per-draft unsaved editor fields (session-local; never auto-written)
     playingLook: "",
     showRejected: false, // kept for archived semantics; driven by Rejected chip
     filters: {search: "", iterating: true, accepted: false, rejected: false, phrase: "all"},
@@ -226,10 +227,21 @@
 
   function matchesFilters(e) {
     const q = state.filters.search.trim().toLowerCase();
-    if (q && !String(e.name || "").toLowerCase().includes(q)) return false;
+    let exactName = false;
+    if (q) {
+      // AWR-251 m-8: search name/brief/notes only — never params/fn/kind.
+      const name = String(e.name || "").toLowerCase();
+      const brief = String(e.brief || "").toLowerCase();
+      const notes = String(e.notes || "").toLowerCase();
+      if (!(name.includes(q) || brief.includes(q) || notes.includes(q))) return false;
+      exactName = name === q;
+    }
     const role = roleOf(e);
     if (state.filters.phrase === "untagged" && role) return false;
     if (state.filters.phrase !== "all" && state.filters.phrase !== "untagged" && role !== state.filters.phrase) return false;
+    // Exact-name search hit surfaces even when its status chip is off (same idea as
+    // the selected-draft pin).
+    if (exactName) return true;
     // Status chips: rejected chip also covers promoted (old Archived semantics)
     if (e.status === "iterating") return state.filters.iterating;
     if (e.status === "accepted") return state.filters.accepted;
@@ -299,7 +311,26 @@
     $("draftsDrawerBtn").setAttribute("aria-expanded", "false");
   }
 
+  function stashEditor() {
+    if (!state.current) return;
+    try {
+      state.editorMemory[state.current.name] = {
+        params: JSON.parse($("paramsInput").value || "{}"),
+        brief: $("briefInput").value,
+        notes: $("notesInput").value,
+        cue_beats: cue(),
+        target_role: $("targetRoleSelect").value,
+        timing_mode: $("timingModeSelect").value,
+      };
+    } catch (_) { /* invalid JSON — leave prior stash */ }
+  }
+
+  function clearEditorMemory(name) {
+    if (name) delete state.editorMemory[name];
+  }
+
   function selectDraft(name) {
+    if (state.current && state.current.name !== name) stashEditor();
     stopPreview();
     renderSwatches(null);
     state.current = state.entries.find(e => e.name === name) || null;
@@ -328,20 +359,24 @@
       $("notesSummary").textContent = "Notes";
       return;
     }
+    const mem = state.editorMemory[e.name];
     // F1: banner only when list decoration says so (CSS also honors [hidden]).
     $("collisionBanner").hidden = !e.production_collision;
     $("draftTitle").textContent = e.name;
     $("draftFn").textContent = `${e.kind} · ${e.fn}`;
-    $("briefInput").value = e.brief || "";
-    $("notesInput").value = e.notes || "";
-    $("notesSummary").textContent = notesPreview(e.notes);
+    $("briefInput").value = mem ? mem.brief : (e.brief || "");
+    $("notesInput").value = mem ? mem.notes : (e.notes || "");
+    $("notesSummary").textContent = notesPreview($("notesInput").value);
     $("kindText").textContent = e.kind || "";
-    $("timingText").textContent = timingLabel(e.timing_mode);
+    $("timingText").textContent = timingLabel(mem ? mem.timing_mode : e.timing_mode);
     $("statusText").textContent = e.status;
     $("statusText").className = `status-pill ${e.status}`;
-    $("targetRoleSelect").value = roleOf(e);
-    $("timingModeSelect").value = e.timing_mode || "unknown";
-    $("paramsInput").value = JSON.stringify(e.params || {}, null, 2);
+    $("targetRoleSelect").value = mem ? mem.target_role : roleOf(e);
+    $("timingModeSelect").value = (mem ? mem.timing_mode : e.timing_mode) || "unknown";
+    $("paramsInput").value = JSON.stringify(mem ? mem.params : (e.params || {}), null, 2);
+    // Cue comes from memory when present so draft-switch restores unsaved length.
+    if (mem && mem.cue_beats != null) e._editor_cue = mem.cue_beats;
+    else delete e._editor_cue;
     renderParamControls();
     renderCue();
     renderLive();
@@ -388,7 +423,11 @@
 
   function renderCue() {
     const values = [4, 8, 16, 32];
-    const current = Number((state.current || {}).cue_beats || 16);
+    const current = Number(
+      (state.current && state.current._editor_cue != null)
+        ? state.current._editor_cue
+        : (state.current || {}).cue_beats || 16
+    );
     const isPreset = values.includes(current);
     // Fix P4 duplicate chip: hide the number input when a preset is selected.
     document.querySelector(".cue-group").innerHTML =
@@ -424,7 +463,22 @@
   async function save() {
     if (!state.current) return;
     const res = await api.labSave(currentPayload());
+    clearEditorMemory(state.current.name);
     state.current = res.entry;
+    await refresh();
+  }
+
+  async function acceptDraft() {
+    if (!state.current) return;
+    await api.labAccept({...currentPayload(), status: "accepted"});
+    clearEditorMemory(state.current.name);
+    await refresh();
+  }
+
+  async function rejectDraft() {
+    if (!state.current) return;
+    await api.labReject({...currentPayload(), status: "rejected"});
+    clearEditorMemory(state.current.name);
     await refresh();
   }
 
@@ -536,10 +590,13 @@
   }
 
   function renderLive() {
-    $("labLive").hidden = !(state.current && state.playingLook === labScene(state.current.name));
-    $("playDraftBtn").textContent =
+    const switching = Boolean(
       state.current && state.playingLook && state.playingLook.startsWith("lab_") &&
-      state.playingLook !== labScene(state.current.name) ? "⇄ Switch" : "▶ Play";
+      state.playingLook !== labScene(state.current.name)
+    );
+    $("labLive").hidden = !(state.current && state.playingLook === labScene(state.current.name));
+    $("playDraftBtn").textContent = switching ? "⇄ Switch live lights" : "▶ Play";
+    $("playDraftBtn").classList.toggle("lab-switch-live", switching);
   }
 
   let applyTimer = 0;
@@ -547,14 +604,15 @@
     $("appliedHint").hidden = !show;
   }
   function queueAutoApply() {
+    // AWR-251 M-2: slider/param edits are LIVE-APPLY ONLY + editor-local.
+    // Persist only on Save / Accept / Reject — never via this path.
     clearTimeout(applyTimer);
     applyTimer = setTimeout(async () => {
       if (!state.current) return;
       let params;
       try { params = JSON.parse($("paramsInput").value || "{}"); } catch { showError("Params JSON invalid — live apply paused"); return; }
+      stashEditor();
       try {
-        const res = await api.labSave(currentPayload());
-        state.current = res.entry;
         const upd = await api.labUpdate({name: state.current.name, params});
         setAppliedHint(upd && upd.applied === false);
         clearError();
@@ -867,6 +925,11 @@
     preview.frames = res.frames;
     preview.fps = res.fps;
     setPreviewHint(false);
+    // m-5: room preview sits below a sticky header — bring the animating wall on screen.
+    if (roomView.mode === "room") {
+      const hero = document.querySelector(".lab-preview-hero");
+      (hero || $("previewRoom"))?.scrollIntoView({block: "nearest", behavior: "smooth"});
+    }
     const bpm = Number(res.bpm) || Number($("bpmInput").value) || 128;
     setBeatMode("preview", {bpm, fps: preview.fps, frameIndex: 0});
     let start;
@@ -988,8 +1051,8 @@
   $("playDraftBtn").onclick = () => play(false);
   $("stopDraftBtn").onclick = () => api.stop().then(() => { if (beatUI.mode === "live") setBeatMode("off"); return updateRuntime(); }).catch(showError);
   $("reloadBtn").onclick = () => reloadCode().catch(showError);
-  $("acceptBtn").onclick = () => state.current && api.labAccept(state.current.name).then(refresh).catch(showError);
-  $("rejectBtn").onclick = () => state.current && api.labReject(state.current.name).then(refresh).catch(showError);
+  $("acceptBtn").onclick = () => acceptDraft().catch(showError);
+  $("rejectBtn").onclick = () => rejectDraft().catch(showError);
   $("rejectedToggle").onclick = () => {
     state.filters.rejected = !state.filters.rejected;
     document.querySelector('[data-status-filter="rejected"]').classList.toggle("on", state.filters.rejected);

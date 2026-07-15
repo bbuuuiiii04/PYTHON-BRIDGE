@@ -841,21 +841,45 @@ class LedPadService:
     def lab_save(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._lab.save(payload)
 
+    def _lab_merge_editor(self, entry: dict[str, Any], payload: dict[str, Any]) -> bool:
+        """Merge editor fields into entry. Accept/Reject = Save then flip status.
+
+        Params preference: payload.params (what the editor shows) wins; else the
+        last live-applied pre-injection snapshot (agent Accept-after-Play); else
+        leave entry params alone. Returns whether params came from that snapshot.
+        """
+        snapshotted = False
+        if isinstance(payload.get("params"), dict):
+            entry["params"] = copy.deepcopy(payload["params"])
+        else:
+            snapshot = self._last_lab_applied.get(str(entry.get("name", "")))
+            if snapshot is not None:
+                entry["params"] = copy.deepcopy(snapshot)
+                snapshotted = True
+        for key in ("brief", "notes", "target_role", "timing_mode"):
+            if key in payload:
+                entry[key] = str(payload.get(key) or "")
+        if "cue_beats" in payload:
+            entry["cue_beats"] = float(payload.get("cue_beats") or 16)
+        return snapshotted
+
     def lab_accept(self, payload: dict[str, Any]) -> dict[str, Any]:
-        # Accept-what-you-hear: write the last-applied pre-injection params into
-        # the entry in the SAME save that flips status.
+        # AWR-251: Accept implies Save — persist what the editor shows, then accept.
         name = str(payload.get("name", "")).strip()
         entry = self._lab.get(name)
-        snapshot = self._last_lab_applied.get(name)
-        if snapshot is not None:
-            entry["params"] = copy.deepcopy(snapshot)
+        snapshotted = self._lab_merge_editor(entry, payload)
         entry["status"] = "accepted"
         result = self._lab.save(entry)
-        result["snapshotted"] = snapshot is not None
+        result["snapshotted"] = snapshotted
         return result
 
     def lab_reject(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._lab.set_status(str(payload.get("name", "")).strip(), "rejected")
+        # AWR-251: Reject also persists the current editor state (named = saved).
+        name = str(payload.get("name", "")).strip()
+        entry = self._lab.get(name)
+        self._lab_merge_editor(entry, payload)
+        entry["status"] = "rejected"
+        return self._lab.save(entry)
 
     def lab_archive(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._lab.archive(str(payload.get("name", "")).strip())

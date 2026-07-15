@@ -184,8 +184,8 @@
     labSwitch: (body) => request("/api/lab/switch", {method: "POST", body}),
     labPreview: (body) => request("/api/lab/preview", {method: "POST", body}),
     labReload: () => request("/api/lab/reload", {method: "POST", body: {}}),
-    labAccept: (name) => request("/api/lab/accept", {method: "POST", body: {name}}),
-    labReject: (name) => request("/api/lab/reject", {method: "POST", body: {name}}),
+    labAccept: (body) => request("/api/lab/accept", {method: "POST", body: typeof body === "string" ? {name: body} : body}),
+    labReject: (body) => request("/api/lab/reject", {method: "POST", body: typeof body === "string" ? {name: body} : body}),
     labArchive: (body) => request("/api/lab/archive", {method: "POST", body}),
     labDelete: (body) => request("/api/lab/delete", {method: "POST", body}),
     access: () => request("/api/access")
