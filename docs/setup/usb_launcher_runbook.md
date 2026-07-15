@@ -5,7 +5,8 @@ last_verified_commit: b629b93
 last_verified_date: 2026-07-15
 validation_scope: >
   Current USB builder, frozen launcher, native install/purge, target
-  Rekordbox patch, Venue Check (AWR-236), and software tests. The patch adds only target
+  Rekordbox patch, Venue Check (AWR-236), frozen Stream Deck libhidapi
+  bundling (AWR-237), and software tests. The patch adds only target
   get-task-allow while preserving existing entitlements. A valid menu verdict
   additionally requires deep+strict signature verification. Target GTA is the expected
   TimecodeLink-style access mechanism. A positive entitlement proves the
@@ -325,6 +326,17 @@ carries the secrets it shipped with.
   Window → **Show MIDI Studio** → double-click **IAC Driver** → tick **"Device is
   online"** (the default bus name "Bus 1" is what the bridge expects — don't rename
   it). Then restart the bridge.
+- **Stream Deck HIDAPI (AWR-237):** the frozen app now ships a hash-locked
+  `libhidapi.dylib` (Homebrew hidapi 0.15.0 on the build Mac;
+  `packaging/libhidapi_arm64.lock`) under the bundle `_MEIPASS/lib/` path.
+  Frozen `--run-streamdeck` points StreamDeck's Darwin Homebrew search at that
+  copy (`prepare_frozen_hidapi`) so a guest Mac with no Homebrew can load HIDAPI.
+  `make_stick` / the PyInstaller spec fail closed if the source dylib is missing,
+  not arm64, or the SHA-256 drifts. `sign.sh --deep` signs it with the rest of
+  the app. This does **not** prove a physical Stream Deck works on a guest —
+  Input Monitoring / device presence remain operator-gated. Source runs still
+  use the host Homebrew path unchanged. `--check-deps` does not probe HIDAPI:
+  StreamDeck's `LibUSBHIDAPI.probe()` calls `hid_init` (not side-effect-free).
 - **Patch Rekordbox path (AWR-223):** it signs Rekordbox with **one**
   root-bundle ad-hoc `codesign` (no `--deep`, no nested re-sign), under the
   RBSS app's native macOS authorization. It adds only `get-task-allow`,

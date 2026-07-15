@@ -431,7 +431,7 @@ in the installed location, not the stick.
   `8abccdf` — but the runtime also imports **`python-elgato-streamdeck`** (+ its `hidapi`),
   **`Pillow`** (`streamdeck/streamdeck_midi.py`), **`python-rtmidi`** (mido's backend), and
   `pyserial` (Enttec, AWR-124 R5). The PyInstaller spec needs either the manifest fixed or an
-  explicit hidden-imports list covering all of these. External system binaries the runtime
+  explicit hidden-imports list covering all of these. **AWR-237 (2026-07-15):** StreamDeck's Darwin LibUSBHIDAPI search is find_library + `$HOMEBREW_PREFIX/lib/libhidapi.dylib` only — not PyInstaller `_MEIPASS`. The frozen app now ships a hash-locked Homebrew hidapi 0.15.0 `libhidapi.dylib` (`packaging/libhidapi_arm64.lock`) under `_MEIPASS/lib/`; frozen `--run-streamdeck` calls `usb_launcher.prepare_frozen_hidapi` to ctypes-load that path and set `HOMEBREW_PREFIX=_MEIPASS` before importing StreamDeck. make_stick/spec fail closed if the source dylib is missing/mismatched/non-arm64. Guest device behavior remains unvalidated. External system binaries the runtime
   shells out to (inventory for entitlement/runbook purposes): `vmmap` (`rb_memory.py:140-143`),
   `pgrep` (`rb_memory.py:129-132`), `lsof` (`filepath_resolver.py:83-95`).
 

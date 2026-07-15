@@ -37,6 +37,50 @@ if str(_REPO_ROOT.parent) not in sys.path:
 # Where the operator's Govee secret lives (same path the watcher sources).
 GOVEE_ENV_PATH = Path.home() / "Library" / "Application Support" / "RBSS Bridge" / "govee.env"
 
+# Bundled relative to sys._MEIPASS (PyInstaller binaries dest "lib").
+_BUNDLED_HIDAPI_REL = ("lib", "libhidapi.dylib")
+
+
+def prepare_frozen_hidapi(
+    *,
+    frozen: bool | None = None,
+    meipass: str | None = None,
+    environ: dict | None = None,
+    loader=None,
+) -> str | None:
+    """Make StreamDeck's Darwin HIDAPI search see the bundled libhidapi.
+
+    Confirmed against python-elgato-streamdeck ``LibUSBHIDAPI._load_hidapi_library``:
+    on Darwin it tries ``ctypes.util.find_library("libhidapi")``, then
+    ``$HOMEBREW_PREFIX/lib/libhidapi.dylib``, then bare ``libhidapi.dylib``.
+    PyInstaller ``sys._MEIPASS`` is not on that list, so a guest Mac with no
+    Homebrew fails with "No suitable LibUSB HIDAPI library found".
+
+    Frozen path: load the absolute bundled dylib (injectable ``loader``; default
+    ``ctypes.CDLL``) and set ``HOMEBREW_PREFIX`` to ``_MEIPASS`` so StreamDeck's
+    own Homebrew fallback resolves ``lib/libhidapi.dylib``. Source runs are a
+    no-op so the normal Homebrew path stays byte-identical.
+    """
+    if frozen is None:
+        frozen = bool(getattr(sys, "frozen", False))
+    if not frozen:
+        return None
+    root = meipass if meipass is not None else getattr(sys, "_MEIPASS", None)
+    if not root:
+        return None
+    path = os.path.join(root, *_BUNDLED_HIDAPI_REL)
+    if not os.path.isfile(path):
+        return None
+    env = environ if environ is not None else os.environ
+    # StreamDeck's Darwin fallback joins HOMEBREW_PREFIX / "lib" / "libhidapi.dylib".
+    env["HOMEBREW_PREFIX"] = root
+    if loader is None:
+        import ctypes
+
+        loader = ctypes.CDLL
+    loader(path)
+    return path
+
 
 def _parse_env_file(text: str) -> dict[str, str]:
     """Parse KEY=VAL lines from a dotenv-style file.
@@ -131,7 +175,12 @@ def _run_bridge() -> int:
 
 
 def _run_streamdeck() -> int:
-    """Run the Stream Deck MIDI controller (its own singleton lock guards doubles)."""
+    """Run the Stream Deck MIDI controller (its own singleton lock guards doubles).
+
+    Frozen: preload bundled libhidapi before StreamDeck imports (guest Macs have
+    no Homebrew). Source: prepare_frozen_hidapi is a no-op.
+    """
+    prepare_frozen_hidapi()
     from rb_ss_bridge_v2.streamdeck.streamdeck_midi import main as streamdeck_main
 
     streamdeck_main()

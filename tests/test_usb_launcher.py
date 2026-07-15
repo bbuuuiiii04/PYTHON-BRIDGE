@@ -49,6 +49,75 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(usb_launcher.main(["--run-streamdeck"]), 0)
         run.assert_called_once_with()
 
+    def test_run_streamdeck_preloads_frozen_hidapi_before_import(self) -> None:
+        # Guest Macs have no Homebrew; prepare must run before StreamDeck imports.
+        source = Path(usb_launcher.__file__).read_text(encoding="utf-8")
+        start = source.index("def _run_streamdeck")
+        body = source[start:start + 500]
+        self.assertIn("prepare_frozen_hidapi()", body)
+        self.assertLess(
+            body.index("prepare_frozen_hidapi"),
+            body.index("streamdeck_midi"),
+        )
+
+    def test_prepare_frozen_hidapi_noop_on_source(self) -> None:
+        env = {"HOMEBREW_PREFIX": "/opt/homebrew"}
+        loader = mock.Mock()
+        self.assertIsNone(
+            usb_launcher.prepare_frozen_hidapi(
+                frozen=False,
+                meipass="/fake/_MEIPASS",
+                environ=env,
+                loader=loader,
+            )
+        )
+        loader.assert_not_called()
+        self.assertEqual(env["HOMEBREW_PREFIX"], "/opt/homebrew")
+
+    def test_prepare_frozen_hidapi_loads_bundled_and_points_homebrew_prefix(
+        self,
+    ) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bundled = Path(tmp) / "lib" / "libhidapi.dylib"
+            bundled.parent.mkdir(parents=True)
+            bundled.write_bytes(b"fake-dylib")
+            env: dict[str, str] = {}
+            loader = mock.Mock()
+            path = usb_launcher.prepare_frozen_hidapi(
+                frozen=True,
+                meipass=tmp,
+                environ=env,
+                loader=loader,
+            )
+        self.assertEqual(path, str(bundled))
+        self.assertEqual(env["HOMEBREW_PREFIX"], tmp)
+        loader.assert_called_once_with(str(bundled))
+
+    def test_prepare_frozen_hidapi_missing_dylib_is_noop(self) -> None:
+        env: dict[str, str] = {}
+        loader = mock.Mock()
+        self.assertIsNone(
+            usb_launcher.prepare_frozen_hidapi(
+                frozen=True,
+                meipass="/no/such/_MEIPASS",
+                environ=env,
+                loader=loader,
+            )
+        )
+        loader.assert_not_called()
+        self.assertNotIn("HOMEBREW_PREFIX", env)
+
+    def test_spec_declares_libhidapi_binary(self) -> None:
+        spec = (
+            Path(__file__).resolve().parents[1] / "packaging" / "rbss_launcher.spec"
+        ).read_text(encoding="utf-8")
+        self.assertIn("libhidapi_arm64.lock", spec)
+        self.assertIn("_resolve_hidapi_dylib", spec)
+        self.assertIn('binaries = [(_resolve_hidapi_dylib(), "lib")]', spec)
+        self.assertNotIn("binaries=[]", spec)
+
     def test_run_laser_pad_dispatch(self) -> None:
         with mock.patch.object(usb_launcher, "_run_laser_pad", return_value=0) as run:
             self.assertEqual(usb_launcher.main(["--run-laser-pad"]), 0)

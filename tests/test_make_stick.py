@@ -278,6 +278,78 @@ class MakeStickTests(unittest.TestCase):
         self.assertLess(py_idx, buddy_idx)
         self.assertLess(buddy_idx, sign_idx)
 
+    def test_spec_declares_locked_libhidapi_binary(self):
+        spec = SPEC.read_text(encoding="utf-8")
+        lock = (SCRIPT.with_name("libhidapi_arm64.lock")).read_text(encoding="utf-8")
+        self.assertIn("libhidapi_arm64.lock", spec)
+        self.assertIn("_resolve_hidapi_dylib", spec)
+        self.assertIn('binaries = [(_resolve_hidapi_dylib(), "lib")]', spec)
+        self.assertNotIn("binaries=[]", spec)
+        self.assertIn(
+            "b55d26323e13bee30afa54479ebfb3e02593aafcc20c69d5d6e545ad5d135cbd",
+            lock,
+        )
+        self.assertIn("hidapi", lock.lower())
+        script = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("verify_hidapi_lock", script)
+        self.assertIn("require_hidapi_in_app", script)
+        # Gate runs before PyInstaller; finished-app check runs after.
+        verify_idx = script.index("verify_hidapi_lock")
+        py_idx = script.index('RBSS_GENERATION="$GENERATION" "$VENV/bin/pyinstaller"')
+        require_idx = script.index("require_hidapi_in_app \"$REPO_ROOT/dist/RBSS Bridge.app\"")
+        self.assertLess(verify_idx, py_idx)
+        self.assertLess(py_idx, require_idx)
+
+    def test_hidapi_lock_gate_refuses_missing_and_hash_mismatch(self):
+        fake = Path(self.tmp.name) / "libhidapi.dylib"
+        fake.write_bytes(b"not-the-locked-bytes")
+        missing = self._source_and_run(
+            "verify_hidapi_lock",
+            {"RBSS_HIDAPI_DYLIB": str(Path(self.tmp.name) / "absent.dylib")},
+        )
+        self.assertNotEqual(missing.returncode, 0)
+        self.assertIn("libhidapi.dylib not found", missing.stderr)
+        mismatch = self._source_and_run(
+            "verify_hidapi_lock",
+            {"RBSS_HIDAPI_DYLIB": str(fake)},
+        )
+        self.assertNotEqual(mismatch.returncode, 0)
+        self.assertIn("SHA-256 mismatch", mismatch.stderr)
+        # Matching hash + arm64 lipo → OK (fake lipo always reports arm64).
+        digest = hashlib.sha256(b"locked-hidapi").hexdigest()
+        good = Path(self.tmp.name) / "good-hidapi.dylib"
+        good.write_bytes(b"locked-hidapi")
+        lock = Path(self.tmp.name) / "hidapi.lock"
+        lock.write_text(f"{digest}  libhidapi.dylib\n", encoding="utf-8")
+        fake_bin = Path(self.tmp.name) / "hidapi-tools"
+        fake_bin.mkdir()
+        lipo = fake_bin / "lipo"
+        lipo.write_text('#!/bin/bash\necho "arm64"\n')
+        lipo.chmod(0o755)
+        ok = self._source_and_run(
+            f"HIDAPI_LOCK={shlex.quote(str(lock))} verify_hidapi_lock",
+            {
+                "RBSS_HIDAPI_DYLIB": str(good),
+                "PATH": f"{fake_bin}:{os.environ['PATH']}",
+            },
+        )
+        self.assertEqual(ok.returncode, 0, ok.stderr)
+        self.assertIn("libhidapi OK", ok.stdout)
+
+    def test_require_hidapi_in_app_refuses_missing(self):
+        empty = self._source_and_run(
+            f"require_hidapi_in_app {shlex.quote(str(self.app))}"
+        )
+        self.assertNotEqual(empty.returncode, 0)
+        self.assertIn("missing libhidapi.dylib", empty.stderr)
+        planted = self.app / "Contents" / "Frameworks" / "lib" / "libhidapi.dylib"
+        planted.parent.mkdir(parents=True)
+        planted.write_bytes(b"x")
+        present = self._source_and_run(
+            f"require_hidapi_in_app {shlex.quote(str(self.app))}"
+        )
+        self.assertEqual(present.returncode, 0, present.stderr)
+
     def test_bundle_native_files_must_not_exceed_deployment_target(self):
         fake_bin = Path(self.tmp.name) / "compat-tools"
         fake_bin.mkdir()

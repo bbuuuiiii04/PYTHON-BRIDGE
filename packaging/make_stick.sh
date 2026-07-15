@@ -61,6 +61,7 @@ VENV="$REPO_ROOT/.build-venv-u2"
 WHEELHOUSE="$REPO_ROOT/.build-wheelhouse-macos12-arm64-cp313"
 WHEEL_LOCK="$REPO_ROOT/packaging/macos12_arm64_cp313.lock"
 SOURCE_LOCK="$REPO_ROOT/packaging/macos12_arm64_cp313_source.lock"
+HIDAPI_LOCK="$REPO_ROOT/packaging/libhidapi_arm64.lock"
 BUILD_PYTHON_VERSION="3.13.14"
 SIDECAR_PYTHON="${RBSS_MAKE_STICK_SIDECAR_PYTHON:-$VENV/bin/python}"
 # The honest foreign-Mac floor. Official CPython 3.13 SciPy wheels are tagged
@@ -195,6 +196,70 @@ verify_locked_artifacts() {
         actual="$(shasum -a 256 "$directory/$filename" | awk '{print $1}')" || return 1
         [ "$actual" = "$expected" ] || { echo "make_stick: locked artifact hash mismatch: $filename" >&2; return 1; }
     done < "$lock"
+}
+
+# AWR-237: frozen Stream Deck needs libhidapi.dylib inside the app. Guest Macs
+# have no Homebrew; the build Mac's hidapi dylib is hash-locked like the wheel
+# closure (AWR-229). Missing/mismatched/non-arm64 fails closed before PyInstaller.
+resolve_hidapi_dylib() {
+    local candidate
+    if [ -n "${RBSS_HIDAPI_DYLIB:-}" ]; then
+        [ -f "$RBSS_HIDAPI_DYLIB" ] || return 1
+        realpath "$RBSS_HIDAPI_DYLIB"
+        return 0
+    fi
+    for candidate in \
+        /opt/homebrew/opt/hidapi/lib/libhidapi.dylib \
+        /usr/local/opt/hidapi/lib/libhidapi.dylib
+    do
+        if [ -f "$candidate" ]; then
+            realpath "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+verify_hidapi_lock() {
+    local src expected actual archs
+    [ -f "$HIDAPI_LOCK" ] || {
+        echo "make_stick: missing $HIDAPI_LOCK" >&2
+        return 1
+    }
+    src="$(resolve_hidapi_dylib)" || {
+        echo "make_stick: libhidapi.dylib not found (brew install hidapi, or set RBSS_HIDAPI_DYLIB=...). Refusing a Stream-Deck-dead guest bundle." >&2
+        return 1
+    }
+    expected="$(awk '/^[^#[:space:]]/ {print $1; exit}' "$HIDAPI_LOCK")"
+    [ -n "$expected" ] || {
+        echo "make_stick: $HIDAPI_LOCK has no SHA-256 line" >&2
+        return 1
+    }
+    actual="$(shasum -a 256 "$src" | awk '{print $1}')" || return 1
+    [ "$actual" = "$expected" ] || {
+        echo "make_stick: libhidapi SHA-256 mismatch at $src (got $actual, want $expected). Pin hidapi 0.15.0 or refresh packaging/libhidapi_arm64.lock after review." >&2
+        return 1
+    }
+    archs="$(lipo -archs "$src" 2>/dev/null || true)"
+    case " $archs " in
+        *" arm64 "*) ;;
+        *)
+            echo "make_stick: libhidapi at $src has no arm64 slice (archs=[$archs])" >&2
+            return 1
+            ;;
+    esac
+    echo "make_stick: libhidapi OK → $src (arm64, hash locked)"
+    export RBSS_HIDAPI_DYLIB="$src"
+}
+
+require_hidapi_in_app() {
+    local app="$1" found
+    found="$(find "$app" -name 'libhidapi.dylib' -type f 2>/dev/null | head -1)"
+    [ -n "$found" ] || {
+        echo "make_stick: finished app is missing libhidapi.dylib — Stream Deck would be dead on a guest Mac." >&2
+        return 1
+    }
+    echo "make_stick: bundled libhidapi → $found"
 }
 
 download_locked_artifacts() {
@@ -670,8 +735,15 @@ fi
 if [ -n "$PREBUILT_APP" ]; then
     [ -d "$PREBUILT_APP" ] || fail "RBSS_MAKE_STICK_APP='$PREBUILT_APP' is not an app bundle dir."
     APP="$PREBUILT_APP"
+    # STAGE_ONLY is the unit-test seam (fake empty .app); real prebuilts must carry hidapi.
+    if [ -z "${RBSS_MAKE_STICK_STAGE_ONLY:-}" ]; then
+        require_hidapi_in_app "$APP" \
+            || fail "prebuilt app is missing libhidapi.dylib (AWR-237); rebuild with a current make_stick."
+    fi
 else
     cd "$REPO_ROOT"
+    verify_hidapi_lock \
+        || fail "locked libhidapi is required before PyInstaller (AWR-237); no app or DMG was produced."
     # Reuse the venv ONLY if it has pyinstaller AND every runtime dep (--check-deps
     # imports the full required set). A narrow probe (pyinstaller + a few libs) would
     # let a STALE venv built before a dep was added (e.g. mutagen) pass, skip the pip
@@ -730,6 +802,8 @@ else
     # guard above cannot catch every way a venv might drift, so verify the real
     # bundle can import the whole rig (mutagen etc.) exactly like the arch check.
     "$APP_BIN" --check-deps || fail "the built app is missing a required runtime dependency (see the MISSING line above). Delete .build-venv-u2 and rebuild, or check pyproject/spec. Refusing to ship a bundle that would degrade on the guest."
+    require_hidapi_in_app "$REPO_ROOT/dist/RBSS Bridge.app" \
+        || fail "built app is missing libhidapi.dylib after PyInstaller (AWR-237); refusing to ship."
     APP="$REPO_ROOT/dist/RBSS Bridge.app"
 fi
 
