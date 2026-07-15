@@ -199,45 +199,71 @@ verify_locked_artifacts() {
 }
 
 # AWR-237: frozen Stream Deck needs libhidapi.dylib inside the app. Guest Macs
-# have no Homebrew; the build Mac's hidapi dylib is hash-locked like the wheel
-# closure (AWR-229). Missing/mismatched/non-arm64 fails closed before PyInstaller.
-resolve_hidapi_dylib() {
-    local candidate
-    if [ -n "${RBSS_HIDAPI_DYLIB:-}" ]; then
-        [ -f "$RBSS_HIDAPI_DYLIB" ] || return 1
-        realpath "$RBSS_HIDAPI_DYLIB"
-        return 0
-    fi
-    for candidate in \
-        /opt/homebrew/opt/hidapi/lib/libhidapi.dylib \
-        /usr/local/opt/hidapi/lib/libhidapi.dylib
-    do
-        if [ -f "$candidate" ]; then
-            realpath "$candidate"
-            return 0
-        fi
-    done
-    return 1
-}
+# have no Homebrew. Do NOT use the host Homebrew dylib — Homebrew builds for the
+# host macOS (e.g. 15.0 on Tahoe), which the AWR-229 Mach-O floor gate correctly
+# rejects. Build from the hash-locked hidapi 0.15.0 SOURCE at
+# MACOSX_DEPLOYMENT_TARGET=12.3 (same discipline as python-rtmidi). Authenticity
+# = locked source SHA-256 + Mach-O floor (arm64 + minos <= 12.3); built dylibs
+# are not hash-stable and are never pinned by binary digest.
+HIDAPI_SRC_URL="https://github.com/libusb/hidapi/archive/refs/tags/hidapi-0.15.0.tar.gz"
+HIDAPI_SRC_NAME="hidapi-0.15.0.tar.gz"
+HIDAPI_DYLIB_NAME="libhidapi.dylib"
 
-verify_hidapi_lock() {
-    local src expected actual archs
+read_hidapi_source_sha256() {
+    local line expected
     [ -f "$HIDAPI_LOCK" ] || {
         echo "make_stick: missing $HIDAPI_LOCK" >&2
         return 1
     }
-    src="$(resolve_hidapi_dylib)" || {
-        echo "make_stick: libhidapi.dylib not found (brew install hidapi, or set RBSS_HIDAPI_DYLIB=...). Refusing a Stream-Deck-dead guest bundle." >&2
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in ''|'#'*) continue ;; esac
+        expected="${line#*--hash=sha256:}"
+        expected="${expected%% *}"
+        [ -n "$expected" ] || continue
+        printf '%s\n' "$expected"
+        return 0
+    done < "$HIDAPI_LOCK"
+    echo "make_stick: $HIDAPI_LOCK has no SHA-256 line" >&2
+    return 1
+}
+
+hidapi_lock_fingerprint() {
+    shasum -a 256 "$HIDAPI_LOCK" | awk '{print $1}'
+}
+
+verify_hidapi_source_tarball() {
+    local tarball="$1" expected actual
+    expected="$(read_hidapi_source_sha256)" || return 1
+    [ -f "$tarball" ] || {
+        echo "make_stick: hidapi source tarball missing: $tarball" >&2
         return 1
     }
-    expected="$(awk '/^[^#[:space:]]/ {print $1; exit}' "$HIDAPI_LOCK")"
-    [ -n "$expected" ] || {
-        echo "make_stick: $HIDAPI_LOCK has no SHA-256 line" >&2
-        return 1
-    }
-    actual="$(shasum -a 256 "$src" | awk '{print $1}')" || return 1
+    actual="$(shasum -a 256 "$tarball" | awk '{print $1}')" || return 1
     [ "$actual" = "$expected" ] || {
-        echo "make_stick: libhidapi SHA-256 mismatch at $src (got $actual, want $expected). Pin hidapi 0.15.0 or refresh packaging/libhidapi_arm64.lock after review." >&2
+        echo "make_stick: hidapi source SHA-256 mismatch at $tarball (got $actual, want $expected). Refresh packaging/libhidapi_arm64.lock after review." >&2
+        return 1
+    }
+}
+
+download_hidapi_source() {
+    local directory="$1" tarball
+    mkdir -p "$directory" || return 1
+    tarball="$directory/$HIDAPI_SRC_NAME"
+    if [ -f "$tarball" ]; then
+        verify_hidapi_source_tarball "$tarball" && return 0
+        rm -f "$tarball"
+    fi
+    curl -fsSL "$HIDAPI_SRC_URL" -o "$tarball" || {
+        echo "make_stick: failed to download hidapi source from $HIDAPI_SRC_URL" >&2
+        return 1
+    }
+    verify_hidapi_source_tarball "$tarball"
+}
+
+validate_hidapi_dylib() {
+    local src="$1" archs minoses minos
+    [ -f "$src" ] || {
+        echo "make_stick: libhidapi.dylib not found at $src" >&2
         return 1
     }
     archs="$(lipo -archs "$src" 2>/dev/null || true)"
@@ -248,8 +274,101 @@ verify_hidapi_lock() {
             return 1
             ;;
     esac
-    echo "make_stick: libhidapi OK → $src (arm64, hash locked)"
-    export RBSS_HIDAPI_DYLIB="$src"
+    if ! minoses="$(vtool -show-build "$src" 2>/dev/null | awk '$1 == "minos" {print $2}')" || [ -z "$minoses" ]; then
+        echo "make_stick: cannot read the minimum macOS version from libhidapi at $src" >&2
+        return 1
+    fi
+    while IFS= read -r minos; do
+        [ -n "$minos" ] || continue
+        if ! version_at_most "$minos" "$MACOSX_DEPLOYMENT_TARGET"; then
+            echo "make_stick: incompatible native file: $src requires macOS $minos (max $MACOSX_DEPLOYMENT_TARGET)" >&2
+            return 1
+        fi
+    done <<< "$minoses"
+    echo "make_stick: libhidapi OK → $src (arm64, minos <= $MACOSX_DEPLOYMENT_TARGET)"
+}
+
+build_hidapi_dylib() {
+    local directory="$1" tarball work src_root out tmp
+    tarball="$directory/$HIDAPI_SRC_NAME"
+    verify_hidapi_source_tarball "$tarball" || return 1
+    work="$(mktemp -d /tmp/rbss_hidapi_build.XXXXXX)" || return 1
+    out="$directory/$HIDAPI_DYLIB_NAME"
+    tmp="$out.tmp.$$"
+    if ! tar -xzf "$tarball" -C "$work"; then
+        rm -rf "$work"
+        echo "make_stick: cannot unpack hidapi source tarball" >&2
+        return 1
+    fi
+    src_root="$(find "$work" -maxdepth 1 -type d -name 'hidapi-*' | head -1)"
+    if [ -z "$src_root" ] || [ ! -f "$src_root/mac/hid.c" ]; then
+        rm -rf "$work"
+        echo "make_stick: hidapi source tree missing mac/hid.c" >&2
+        return 1
+    fi
+    if ! clang -dynamiclib \
+        -arch arm64 \
+        -mmacosx-version-min="$MACOSX_DEPLOYMENT_TARGET" \
+        -O2 \
+        -I"$src_root/hidapi" \
+        -framework IOKit \
+        -framework CoreFoundation \
+        -install_name @rpath/libhidapi.0.dylib \
+        -current_version 0.15.0 \
+        -compatibility_version 0.15.0 \
+        -o "$tmp" \
+        "$src_root/mac/hid.c"
+    then
+        rm -rf "$work" "$tmp"
+        echo "make_stick: clang failed building libhidapi.dylib at deployment target $MACOSX_DEPLOYMENT_TARGET" >&2
+        return 1
+    fi
+    rm -rf "$work"
+    mv -f "$tmp" "$out" || {
+        rm -f "$tmp"
+        return 1
+    }
+    validate_hidapi_dylib "$out" || {
+        rm -f "$out"
+        return 1
+    }
+}
+
+ensure_hidapi_dylib() {
+    local directory="$WHEELHOUSE" out stamp expected_stamp
+    [ -f "$HIDAPI_LOCK" ] || {
+        echo "make_stick: missing $HIDAPI_LOCK" >&2
+        return 1
+    }
+    if [ -n "${RBSS_HIDAPI_DYLIB:-}" ]; then
+        [ -f "$RBSS_HIDAPI_DYLIB" ] || {
+            echo "make_stick: libhidapi.dylib not found at RBSS_HIDAPI_DYLIB=$RBSS_HIDAPI_DYLIB" >&2
+            return 1
+        }
+        validate_hidapi_dylib "$RBSS_HIDAPI_DYLIB" || return 1
+        export RBSS_HIDAPI_DYLIB="$(realpath "$RBSS_HIDAPI_DYLIB")"
+        return 0
+    fi
+    mkdir -p "$directory" || return 1
+    out="$directory/$HIDAPI_DYLIB_NAME"
+    stamp="$directory/.libhidapi-built.stamp"
+    expected_stamp="$(hidapi_lock_fingerprint)" || return 1
+    if [ -f "$out" ] && [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$expected_stamp" ]; then
+        if validate_hidapi_dylib "$out"; then
+            export RBSS_HIDAPI_DYLIB="$(realpath "$out")"
+            return 0
+        fi
+        rm -f "$out" "$stamp"
+    fi
+    download_hidapi_source "$directory" || return 1
+    build_hidapi_dylib "$directory" || return 1
+    printf '%s\n' "$expected_stamp" > "$stamp" || return 1
+    export RBSS_HIDAPI_DYLIB="$(realpath "$out")"
+}
+
+# Back-compat name used by tests / call sites: build-or-reuse + Mach-O gate.
+verify_hidapi_lock() {
+    ensure_hidapi_dylib
 }
 
 require_hidapi_in_app() {
@@ -743,7 +862,7 @@ if [ -n "$PREBUILT_APP" ]; then
 else
     cd "$REPO_ROOT"
     verify_hidapi_lock \
-        || fail "locked libhidapi is required before PyInstaller (AWR-237); no app or DMG was produced."
+        || fail "built libhidapi (locked source @ $MACOSX_DEPLOYMENT_TARGET) is required before PyInstaller (AWR-237); no app or DMG was produced."
     # Reuse the venv ONLY if it has pyinstaller AND every runtime dep (--check-deps
     # imports the full required set). A narrow probe (pyinstaller + a few libs) would
     # let a STALE venv built before a dep was added (e.g. mutagen) pass, skip the pip

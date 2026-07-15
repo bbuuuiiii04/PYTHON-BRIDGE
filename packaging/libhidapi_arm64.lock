@@ -1,13 +1,23 @@
-# Locked native dylib for frozen Stream Deck (AWR-237 / AWR-229 discipline).
+# Locked SOURCE for libhidapi (AWR-237 / AWR-229 discipline).
 #
-# Source: Homebrew formula `hidapi` 0.15.0 (https://libusb.info/hidapi/).
-# Build-Mac paths (symlink-resolved to the same Mach-O):
-#   /opt/homebrew/opt/hidapi/lib/libhidapi.dylib
-#   /usr/local/opt/hidapi/lib/libhidapi.dylib
-# Override for CI/tests: RBSS_HIDAPI_DYLIB=/path/to/libhidapi.dylib
+# Official GitHub tag archive for hidapi 0.15.0 (libusb/hidapi):
+#   https://github.com/libusb/hidapi/archive/refs/tags/hidapi-0.15.0.tar.gz
 #
-# make_stick + rbss_launcher.spec fail closed if the file is missing, not arm64,
-# or the SHA-256 below does not match. Guest Macs have no Homebrew — the frozen
-# app must carry this exact binary.
+# Built binaries are NOT hash-stable (linker ids / timestamps vary). Do NOT
+# hash the built dylib. Authenticity chain = this locked source SHA-256 + the
+# make_stick Mach-O floor gate (arm64 + minos <= MACOSX_DEPLOYMENT_TARGET 12.3).
 #
-b55d26323e13bee30afa54479ebfb3e02593aafcc20c69d5d6e545ad5d135cbd  libhidapi.dylib
+# Build recipe (make_stick ensure_hidapi_dylib / build_hidapi_dylib):
+#   MACOSX_DEPLOYMENT_TARGET=12.3
+#   clang -dynamiclib -arch arm64 -mmacosx-version-min=12.3 -O2
+#     -I <src>/hidapi <src>/mac/hid.c
+#     -framework IOKit -framework CoreFoundation
+#     -install_name @rpath/libhidapi.0.dylib
+#     -current_version 0.15.0 -compatibility_version 0.15.0
+#     -o <wheelhouse>/libhidapi.dylib
+# Cache: .build-wheelhouse-macos12-arm64-cp313/libhidapi.dylib
+#        (rebuild when absent or this lock file changes)
+# Override: RBSS_HIDAPI_DYLIB=/path/to/prebuilt.dylib (still Mach-O gated;
+#           never use a Homebrew host dylib — that is the wrong-floor trap)
+#
+hidapi==0.15.0 --hash=sha256:5d84dec684c27b97b921d2f3b73218cb773cf4ea915caee317ac8fc73cef8136  # hidapi-0.15.0.tar.gz

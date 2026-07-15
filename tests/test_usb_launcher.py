@@ -116,6 +116,9 @@ class DispatchTests(unittest.TestCase):
         self.assertIn("libhidapi_arm64.lock", spec)
         self.assertIn("_resolve_hidapi_dylib", spec)
         self.assertIn('binaries = [(_resolve_hidapi_dylib(), "lib")]', spec)
+        self.assertIn(".build-wheelhouse-macos12-arm64-cp313", spec)
+        self.assertNotIn("/opt/homebrew/opt/hidapi", spec)
+        self.assertNotIn("/usr/local/opt/hidapi", spec)
         self.assertNotIn("binaries=[]", spec)
 
     def test_run_laser_pad_dispatch(self) -> None:

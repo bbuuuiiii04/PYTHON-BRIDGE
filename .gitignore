@@ -11,6 +11,11 @@ govee.env
 .venv/
 # USB launcher (M1) build artifacts and disposable build interpreters — never commit
 .build-venv-*/
+# make_stick-built hidapi (AWR-237): authenticity is packaging/libhidapi_arm64.lock
+# + Mach-O floor gate; built dylibs are not hash-stable — never commit them.
+.build-wheelhouse-*/hidapi-*.tar.gz
+.build-wheelhouse-*/libhidapi.dylib
+.build-wheelhouse-*/.libhidapi-built.stamp
 build/
 dist/
 .hypothesis/

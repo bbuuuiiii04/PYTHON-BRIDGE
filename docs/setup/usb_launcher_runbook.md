@@ -326,17 +326,23 @@ carries the secrets it shipped with.
   Window → **Show MIDI Studio** → double-click **IAC Driver** → tick **"Device is
   online"** (the default bus name "Bus 1" is what the bridge expects — don't rename
   it). Then restart the bridge.
-- **Stream Deck HIDAPI (AWR-237):** the frozen app now ships a hash-locked
-  `libhidapi.dylib` (Homebrew hidapi 0.15.0 on the build Mac;
-  `packaging/libhidapi_arm64.lock`) under the bundle `_MEIPASS/lib/` path.
-  Frozen `--run-streamdeck` points StreamDeck's Darwin Homebrew search at that
-  copy (`prepare_frozen_hidapi`) so a guest Mac with no Homebrew can load HIDAPI.
-  `make_stick` / the PyInstaller spec fail closed if the source dylib is missing,
-  not arm64, or the SHA-256 drifts. `sign.sh --deep` signs it with the rest of
-  the app. This does **not** prove a physical Stream Deck works on a guest —
-  Input Monitoring / device presence remain operator-gated. Source runs still
-  use the host Homebrew path unchanged. `--check-deps` does not probe HIDAPI:
-  StreamDeck's `LibUSBHIDAPI.probe()` calls `hid_init` (not side-effect-free).
+- **Stream Deck HIDAPI (AWR-237):** the frozen app ships a `libhidapi.dylib`
+  built from the hash-locked hidapi 0.15.0 **source** tarball
+  (`packaging/libhidapi_arm64.lock`) at `MACOSX_DEPLOYMENT_TARGET=12.3` during
+  `make_stick` (same discipline as python-rtmidi; cached in the wheelhouse).
+  Do **not** bundle the host Homebrew dylib — that inherits the build Mac's
+  floor and was rejected live 2026-07-14 by the AWR-229 Mach-O gate
+  (`requires macOS 15.0 (max 12.3)`). Authenticity = locked source SHA-256 +
+  Mach-O floor (arm64 + minos ≤ 12.3); built dylibs are not binary-hash-pinned.
+  Frozen `--run-streamdeck` points StreamDeck's Darwin Homebrew search at the
+  bundled copy (`prepare_frozen_hidapi`) so a guest Mac with no Homebrew can
+  load HIDAPI. `make_stick` / the PyInstaller spec fail closed if the built
+  dylib is missing, not arm64, or newer than the 12.3 floor. `sign.sh --deep`
+  signs it with the rest of the app. This does **not** prove a physical Stream
+  Deck works on a guest — Input Monitoring / device presence remain
+  operator-gated. Source runs still use the host Homebrew path unchanged.
+  `--check-deps` does not probe HIDAPI: StreamDeck's `LibUSBHIDAPI.probe()`
+  calls `hid_init` (not side-effect-free).
 - **Patch Rekordbox path (AWR-223):** it signs Rekordbox with **one**
   root-bundle ad-hoc `codesign` (no `--deep`, no nested re-sign), under the
   RBSS app's native macOS authorization. It adds only `get-task-allow`,

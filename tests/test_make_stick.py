@@ -285,14 +285,28 @@ class MakeStickTests(unittest.TestCase):
         self.assertIn("_resolve_hidapi_dylib", spec)
         self.assertIn('binaries = [(_resolve_hidapi_dylib(), "lib")]', spec)
         self.assertNotIn("binaries=[]", spec)
+        # Built artifact path — never Homebrew host dylibs (wrong-floor trap).
+        self.assertIn(".build-wheelhouse-macos12-arm64-cp313", spec)
+        self.assertNotIn("/opt/homebrew/opt/hidapi", spec)
+        self.assertNotIn("/usr/local/opt/hidapi", spec)
+        # Source lock pins the official 0.15.0 tarball; built dylib is not hashed.
+        self.assertIn("hidapi==0.15.0", lock)
         self.assertIn(
-            "b55d26323e13bee30afa54479ebfb3e02593aafcc20c69d5d6e545ad5d135cbd",
+            "5d84dec684c27b97b921d2f3b73218cb773cf4ea915caee317ac8fc73cef8136",
             lock,
         )
-        self.assertIn("hidapi", lock.lower())
+        self.assertIn("hidapi-0.15.0.tar.gz", lock)
+        self.assertIn("Built binaries are NOT hash-stable", lock)
+        self.assertIn("clang -dynamiclib", lock)
         script = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("ensure_hidapi_dylib", script)
+        self.assertIn("build_hidapi_dylib", script)
+        self.assertIn("validate_hidapi_dylib", script)
+        self.assertIn("verify_hidapi_source_tarball", script)
         self.assertIn("verify_hidapi_lock", script)
         self.assertIn("require_hidapi_in_app", script)
+        self.assertNotIn("/opt/homebrew/opt/hidapi", script)
+        self.assertNotIn("/usr/local/opt/hidapi", script)
         # Gate runs before PyInstaller; finished-app check runs after.
         verify_idx = script.index("verify_hidapi_lock")
         py_idx = script.index('RBSS_GENERATION="$GENERATION" "$VENV/bin/pyinstaller"')
@@ -300,41 +314,96 @@ class MakeStickTests(unittest.TestCase):
         self.assertLess(verify_idx, py_idx)
         self.assertLess(py_idx, require_idx)
 
-    def test_hidapi_lock_gate_refuses_missing_and_hash_mismatch(self):
-        fake = Path(self.tmp.name) / "libhidapi.dylib"
-        fake.write_bytes(b"not-the-locked-bytes")
+    def test_hidapi_source_lock_read_and_tarball_gate(self):
+        digest = hashlib.sha256(b"locked-hidapi-src").hexdigest()
+        lock = Path(self.tmp.name) / "hidapi.lock"
+        lock.write_text(
+            f"hidapi==0.15.0 --hash=sha256:{digest}  # hidapi-0.15.0.tar.gz\n",
+            encoding="utf-8",
+        )
+        tarball = Path(self.tmp.name) / "hidapi-0.15.0.tar.gz"
+        tarball.write_bytes(b"locked-hidapi-src")
+        ok = self._source_and_run(
+            f"HIDAPI_LOCK={shlex.quote(str(lock))} "
+            f"verify_hidapi_source_tarball {shlex.quote(str(tarball))}"
+        )
+        self.assertEqual(ok.returncode, 0, ok.stderr)
+        tarball.write_bytes(b"tampered")
+        bad = self._source_and_run(
+            f"HIDAPI_LOCK={shlex.quote(str(lock))} "
+            f"verify_hidapi_source_tarball {shlex.quote(str(tarball))}"
+        )
+        self.assertNotEqual(bad.returncode, 0)
+        self.assertIn("SHA-256 mismatch", bad.stderr)
         missing = self._source_and_run(
-            "verify_hidapi_lock",
-            {"RBSS_HIDAPI_DYLIB": str(Path(self.tmp.name) / "absent.dylib")},
+            f"HIDAPI_LOCK={shlex.quote(str(lock))} "
+            f"verify_hidapi_source_tarball {shlex.quote(str(Path(self.tmp.name) / 'absent.tar.gz'))}"
         )
         self.assertNotEqual(missing.returncode, 0)
-        self.assertIn("libhidapi.dylib not found", missing.stderr)
-        mismatch = self._source_and_run(
-            "verify_hidapi_lock",
-            {"RBSS_HIDAPI_DYLIB": str(fake)},
+        self.assertIn("source tarball missing", missing.stderr)
+        read = self._source_and_run(
+            f"HIDAPI_LOCK={shlex.quote(str(lock))} read_hidapi_source_sha256"
         )
-        self.assertNotEqual(mismatch.returncode, 0)
-        self.assertIn("SHA-256 mismatch", mismatch.stderr)
-        # Matching hash + arm64 lipo → OK (fake lipo always reports arm64).
-        digest = hashlib.sha256(b"locked-hidapi").hexdigest()
-        good = Path(self.tmp.name) / "good-hidapi.dylib"
-        good.write_bytes(b"locked-hidapi")
-        lock = Path(self.tmp.name) / "hidapi.lock"
-        lock.write_text(f"{digest}  libhidapi.dylib\n", encoding="utf-8")
+        self.assertEqual(read.returncode, 0, read.stderr)
+        self.assertEqual(read.stdout.strip(), digest)
+
+    def test_hidapi_macho_floor_gate_refuses_too_new(self):
+        fake = Path(self.tmp.name) / "libhidapi.dylib"
+        fake.write_bytes(b"fake-macho")
         fake_bin = Path(self.tmp.name) / "hidapi-tools"
         fake_bin.mkdir()
         lipo = fake_bin / "lipo"
         lipo.write_text('#!/bin/bash\necho "arm64"\n')
         lipo.chmod(0o755)
+        vtool = fake_bin / "vtool"
+        vtool.write_text('#!/bin/bash\nprintf "    minos %s\\n" "${FAKE_MINOS:-12.3}"\n')
+        vtool.chmod(0o755)
+        env = {"PATH": f"{fake_bin}:{os.environ['PATH']}"}
         ok = self._source_and_run(
-            f"HIDAPI_LOCK={shlex.quote(str(lock))} verify_hidapi_lock",
+            f"validate_hidapi_dylib {shlex.quote(str(fake))}", env
+        )
+        self.assertEqual(ok.returncode, 0, ok.stderr)
+        self.assertIn("libhidapi OK", ok.stdout)
+        bad = self._source_and_run(
+            f"validate_hidapi_dylib {shlex.quote(str(fake))}",
+            {**env, "FAKE_MINOS": "15.0"},
+        )
+        self.assertNotEqual(bad.returncode, 0)
+        self.assertIn("requires macOS 15.0", bad.stderr)
+        missing = self._source_and_run(
+            f"validate_hidapi_dylib {shlex.quote(str(Path(self.tmp.name) / 'absent.dylib'))}",
+            env,
+        )
+        self.assertNotEqual(missing.returncode, 0)
+        self.assertIn("libhidapi.dylib not found", missing.stderr)
+
+    def test_hidapi_ensure_override_uses_macho_gate_not_binary_hash(self):
+        fake = Path(self.tmp.name) / "override-hidapi.dylib"
+        fake.write_bytes(b"override-bytes")
+        fake_bin = Path(self.tmp.name) / "hidapi-tools"
+        fake_bin.mkdir()
+        lipo = fake_bin / "lipo"
+        lipo.write_text('#!/bin/bash\necho "arm64"\n')
+        lipo.chmod(0o755)
+        vtool = fake_bin / "vtool"
+        vtool.write_text('#!/bin/bash\nprintf "    minos 12.3\\n"\n')
+        vtool.chmod(0o755)
+        # Override path: no source tarball / binary digest required.
+        ok = self._source_and_run(
+            "verify_hidapi_lock",
             {
-                "RBSS_HIDAPI_DYLIB": str(good),
+                "RBSS_HIDAPI_DYLIB": str(fake),
                 "PATH": f"{fake_bin}:{os.environ['PATH']}",
             },
         )
         self.assertEqual(ok.returncode, 0, ok.stderr)
         self.assertIn("libhidapi OK", ok.stdout)
+        absent = self._source_and_run(
+            "verify_hidapi_lock",
+            {"RBSS_HIDAPI_DYLIB": str(Path(self.tmp.name) / "absent.dylib")},
+        )
+        self.assertNotEqual(absent.returncode, 0)
+        self.assertIn("libhidapi.dylib not found", absent.stderr)
 
     def test_require_hidapi_in_app_refuses_missing(self):
         empty = self._source_and_run(

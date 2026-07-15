@@ -13,13 +13,13 @@ Bundle version: make_stick.sh exports RBSS_GENERATION into this process so
 CFBundleShortVersionString/CFBundleVersion match the build manifest generation
 (e.g. 39a2ffa5c770-20260712T225252Z). Outside make_stick, fall back to 0.0.1.
 
-AWR-237: ships Homebrew hidapi's libhidapi.dylib under _MEIPASS/lib/ so frozen
---run-streamdeck works on guest Macs with no Homebrew. Hash-locked via
-packaging/libhidapi_arm64.lock (AWR-229 discipline); missing/mismatched dylib
-fails the build closed here and in make_stick.
+AWR-237: ships a make_stick-built libhidapi.dylib under _MEIPASS/lib/ so frozen
+--run-streamdeck works on guest Macs with no Homebrew. The dylib is built from
+the hash-locked hidapi 0.15.0 SOURCE at MACOSX_DEPLOYMENT_TARGET=12.3 (see
+packaging/libhidapi_arm64.lock); Homebrew host dylibs are the wrong-floor trap
+and are never candidates. Missing dylib fails closed here and in make_stick.
 """
 import glob
-import hashlib
 import os
 import sys
 
@@ -39,53 +39,29 @@ PARENT = os.path.abspath(os.path.join(REPO_ROOT, os.pardir))
 if PARENT not in sys.path:
     sys.path.insert(0, PARENT)
 
-_HIDAPI_LOCK = os.path.join(REPO_ROOT, "packaging", "libhidapi_arm64.lock")
-_HIDAPI_CANDIDATES = (
-    os.environ.get("RBSS_HIDAPI_DYLIB") or "",
-    "/opt/homebrew/opt/hidapi/lib/libhidapi.dylib",
-    "/usr/local/opt/hidapi/lib/libhidapi.dylib",
+# make_stick ensure_hidapi_dylib writes here; RBSS_HIDAPI_DYLIB overrides.
+_HIDAPI_BUILT = os.path.join(
+    REPO_ROOT, ".build-wheelhouse-macos12-arm64-cp313", "libhidapi.dylib"
 )
 
 
-def _read_hidapi_expected_sha256(lock_path: str) -> str:
-    with open(lock_path, encoding="utf-8") as fh:
-        for raw in fh:
-            line = raw.strip()
-            if not line or line.startswith("#"):
-                continue
-            return line.split()[0]
-    raise SystemExit(
-        "rbss_launcher.spec: packaging/libhidapi_arm64.lock has no SHA-256 line"
-    )
-
-
 def _resolve_hidapi_dylib() -> str:
-    """Real Mach-O path for the locked hidapi dylib; fail closed if absent."""
-    expected = _read_hidapi_expected_sha256(_HIDAPI_LOCK)
-    for candidate in _HIDAPI_CANDIDATES:
-        if not candidate:
-            continue
-        if not os.path.isfile(candidate):
-            continue
-        path = os.path.realpath(candidate)
-        digest = hashlib.sha256()
-        with open(path, "rb") as fh:
-            for chunk in iter(lambda: fh.read(1024 * 1024), b""):
-                digest.update(chunk)
-        actual = digest.hexdigest()
-        if actual != expected:
-            raise SystemExit(
-                "rbss_launcher.spec: libhidapi SHA-256 mismatch at %s "
-                "(got %s, want %s from packaging/libhidapi_arm64.lock). "
-                "brew reinstall/pin hidapi 0.15.0 or refresh the lock after review."
-                % (path, actual, expected)
-            )
-        return path
-    raise SystemExit(
-        "rbss_launcher.spec: libhidapi.dylib not found (brew install hidapi, or "
-        "set RBSS_HIDAPI_DYLIB=/path/to/libhidapi.dylib). Refusing a Stream-Deck-"
-        "dead guest bundle."
-    )
+    """Path to the floor-gated built hidapi dylib; fail closed if absent.
+
+    Authenticity is the locked SOURCE tarball + make_stick Mach-O gate, not a
+    binary digest (built dylibs are not hash-stable). Never fall back to
+    Homebrew paths — those inherit the host macOS floor.
+    """
+    override = (os.environ.get("RBSS_HIDAPI_DYLIB") or "").strip()
+    candidate = override or _HIDAPI_BUILT
+    if not os.path.isfile(candidate):
+        raise SystemExit(
+            "rbss_launcher.spec: libhidapi.dylib not found at %s "
+            "(run make_stick's ensure_hidapi_dylib, or set "
+            "RBSS_HIDAPI_DYLIB=/path/to/libhidapi.dylib). Refusing a "
+            "Stream-Deck-dead guest bundle." % candidate
+        )
+    return os.path.realpath(candidate)
 
 
 # Place under _MEIPASS/lib/ so usb_launcher.prepare_frozen_hidapi can point
