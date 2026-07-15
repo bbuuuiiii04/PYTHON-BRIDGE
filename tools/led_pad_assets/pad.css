@@ -144,6 +144,13 @@ main { padding: var(--pad); }
 .danger-zone { border-top: 1px solid var(--border); margin-top: var(--gap); padding-top: var(--pad); display: flex; align-items: center; justify-content: space-between; gap: var(--gap); }
 .preview-row { display: flex; align-items: center; gap: var(--gap); }
 .preview-row canvas { flex: 1; width: 100%; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.beat-meter { display: flex; align-items: center; gap: var(--gap); flex-wrap: wrap; min-height: 36px; }
+.beat-meter[hidden] { display: none; }
+.beat-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--border); flex-shrink: 0; transition: transform .05s ease-out, background .05s ease-out, box-shadow .05s ease-out; }
+.beat-dot.flash { background: var(--ok); transform: scale(1.35); box-shadow: 0 0 10px rgb(63 214 143 / .55); }
+.beat-dot.flash.downbeat { background: #fff; transform: scale(1.85); box-shadow: 0 0 14px rgb(255 255 255 / .7); }
+#beatCounter { min-width: 9ch; }
+#beatHonesty { font-size: 12px; }
 .param-controls { display: flex; flex-direction: column; gap: var(--sp-2); }
 .param-row { display: grid; grid-template-columns: minmax(96px, 1fr) 2fr auto; align-items: center; gap: var(--sp-3); min-height: 40px; }
 .param-row input[type="range"] { width: 100%; min-height: 40px; }

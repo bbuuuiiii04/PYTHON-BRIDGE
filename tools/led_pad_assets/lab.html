@@ -69,6 +69,12 @@
           <button id="previewBtn" type="button" class="ghost">◉ Preview</button>
           <canvas id="previewStrip" height="24" aria-label="Draft preview strip"></canvas>
         </div>
+        <div id="beatMeter" class="beat-meter" hidden>
+          <button id="clickToggle" type="button" class="ghost" aria-pressed="false" title="Metronome click (off by default)">🔊 off</button>
+          <span id="beatDot" class="beat-dot" aria-hidden="true"></span>
+          <span id="beatCounter" class="mono">—</span>
+          <span id="beatHonesty" class="dim"></span>
+        </div>
         <details id="tracePanel" class="trace-panel" hidden>
           <summary>Traceback</summary>
           <pre id="traceText"></pre>

@@ -17,6 +17,108 @@
   function timingLabel(mode) { return ({beat:"♫ beat sync", mixed:"♫ beat + time", time:"◷ time driven", static:"static", unknown:"timing unknown"})[mode] || "timing unknown"; }
   function timingBadge(entry) { return `<span class="badge">${timingLabel(entry.timing_mode)}</span>`; }
 
+  // Pure beat → bar/beat-in-bar (frame 0 = bar 1 beat 1). Shared by preview + live.
+  function beatParts(beat) {
+    const i = Math.max(0, Math.floor(beat));
+    return { integer: i, bar: Math.floor(i / 4) + 1, beatInBar: (i % 4) + 1, downbeat: i % 4 === 0 };
+  }
+
+  const beatUI = {
+    mode: "off", // "preview" | "live" | "off"
+    bpm: 128,
+    fps: 40,
+    frameIndex: 0,
+    polledBeat: 0,
+    pollTime: 0,
+    clickOn: false,
+    audioCtx: null,
+    lastClick: -1,
+    flashTimer: 0,
+    raf: 0,
+  };
+
+  function currentBeat() {
+    if (beatUI.mode === "preview") return beatUI.frameIndex * beatUI.bpm / (60 * beatUI.fps);
+    if (beatUI.mode === "live") return beatUI.polledBeat + (performance.now() - beatUI.pollTime) * beatUI.bpm / 60000;
+    return null;
+  }
+
+  function ensureAudio() {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return null;
+    if (!beatUI.audioCtx) beatUI.audioCtx = new Ctx();
+    if (beatUI.audioCtx.state === "suspended") beatUI.audioCtx.resume();
+    return beatUI.audioCtx;
+  }
+
+  function clickBlip(downbeat) {
+    const ctx = ensureAudio();
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "square";
+    osc.frequency.value = downbeat ? 1400 : 880;
+    gain.gain.setValueAtTime(downbeat ? 0.12 : 0.06, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.05);
+  }
+
+  function stopClicks() { beatUI.lastClick = -1; }
+
+  function renderBeatMeter() {
+    const beat = currentBeat();
+    const meter = $("beatMeter");
+    const dot = $("beatDot");
+    if (beat == null) {
+      meter.hidden = true;
+      dot.className = "beat-dot";
+      $("beatCounter").textContent = "—";
+      $("beatHonesty").textContent = "";
+      return;
+    }
+    meter.hidden = false;
+    const p = beatParts(beat);
+    if (beatUI.mode === "preview") {
+      $("beatCounter").textContent = `bar ${p.bar} · beat ${p.beatInBar}`;
+      $("beatHonesty").textContent = "click: exact";
+    } else {
+      $("beatCounter").textContent = `beat phase (server) · ${p.beatInBar}/4`;
+      $("beatHonesty").textContent = "click: synced to server clock (± poll jitter)";
+    }
+    if (p.integer !== beatUI._flashAt) {
+      beatUI._flashAt = p.integer;
+      clearTimeout(beatUI.flashTimer);
+      dot.className = "beat-dot flash" + (p.downbeat ? " downbeat" : "");
+      beatUI.flashTimer = setTimeout(() => { dot.className = "beat-dot"; }, 80);
+      if (beatUI.clickOn && p.integer !== beatUI.lastClick && !document.hidden) {
+        beatUI.lastClick = p.integer;
+        clickBlip(p.downbeat);
+      }
+    }
+  }
+
+  function beatLoop() {
+    renderBeatMeter();
+    if (beatUI.mode !== "off") beatUI.raf = requestAnimationFrame(beatLoop);
+  }
+
+  function setBeatMode(mode, opts) {
+    cancelAnimationFrame(beatUI.raf);
+    beatUI.mode = mode;
+    if (opts) Object.assign(beatUI, opts);
+    if (mode === "off") {
+      stopClicks();
+      renderBeatMeter();
+      return;
+    }
+    beatUI._flashAt = -1;
+    beatUI.raf = requestAnimationFrame(beatLoop);
+  }
+
   async function refresh() {
     clearError();
     const [cfg, palettes, lab] = await Promise.all([api.config(), api.palettes(), api.labList()]);
@@ -164,11 +266,28 @@
   async function updateRuntime() {
     const rt = await api.runtime();
     const ownership = (rt.ownership || {}).state || "free";
-    state.playingLook = (rt.playback || {}).playing ? ((rt.playback || {}).playing_look || "") : "";
+    const pb = rt.playback || {};
+    state.playingLook = pb.playing ? (pb.playing_look || "") : "";
     $("ownershipPill").textContent = ownership === "bridge_owned" ? "Bridge owns LEDs" : ownership === "pad_owned" ? "Pad owns LEDs" : "Free";
     $("ownershipPill").className = `pill ${ownership === "bridge_owned" ? "bridge" : ownership === "pad_owned" ? "pad" : ""}`;
     $("ownershipBtn").hidden = ownership === "free";
     $("ownershipBtn").textContent = ownership === "pad_owned" ? "Release" : "Take over";
+    // Live beat: phase-lock to server status.beat; preview owns the meter while its raf runs.
+    if (beatUI.mode !== "preview") {
+      if (pb.playing && typeof pb.beat === "number") {
+        const bpm = Number(pb.bpm) || Number($("bpmInput").value) || 128;
+        if (beatUI.mode === "live") {
+          // Re-anchor only — keep the raf loop and last-click index.
+          beatUI.polledBeat = pb.beat;
+          beatUI.pollTime = performance.now();
+          beatUI.bpm = bpm;
+        } else {
+          setBeatMode("live", {polledBeat: pb.beat, pollTime: performance.now(), bpm});
+        }
+      } else if (beatUI.mode === "live") {
+        setBeatMode("off");
+      }
+    }
     renderLive();
   }
 
@@ -294,6 +413,7 @@
     preview.frames = [];
     const canvas = $("previewStrip");
     canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+    if (beatUI.mode === "preview") setBeatMode("off");
   }
   async function previewDraft() {
     if (!state.current) return;
@@ -312,11 +432,15 @@
     const ctx = canvas.getContext("2d");
     preview.frames = res.frames;
     preview.fps = res.fps;
+    const bpm = Number(res.bpm) || Number($("bpmInput").value) || 128;
+    setBeatMode("preview", {bpm, fps: preview.fps, frameIndex: 0});
     let start;
     const step = (ts) => {
       if (!preview.frames.length) return;
       if (start === undefined) start = ts;
-      const frame = preview.frames[Math.floor((ts - start) / 1000 * preview.fps) % preview.frames.length];
+      const frameIndex = Math.floor((ts - start) / 1000 * preview.fps) % preview.frames.length;
+      beatUI.frameIndex = frameIndex;
+      const frame = preview.frames[frameIndex];
       const w = canvas.width / frame.length;
       frame.forEach((rgb, i) => {
         ctx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
@@ -331,6 +455,17 @@
     try { await previewDraft(); } catch (err) { showError(err); } finally { $("previewBtn").disabled = false; }
   };
 
+  $("clickToggle").onclick = () => {
+    beatUI.clickOn = !beatUI.clickOn;
+    $("clickToggle").setAttribute("aria-pressed", beatUI.clickOn ? "true" : "false");
+    $("clickToggle").textContent = beatUI.clickOn ? "🔊 on" : "🔊 off";
+    if (beatUI.clickOn) ensureAudio(); // gesture unlocks WebAudio
+    else stopClicks();
+  };
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) stopClicks();
+  });
+
   $("newDraftBtn").onclick = () => {
     PadModal.prompt("New draft", "", {label:"Draft name", confirmText:"Create"}, async (name) => {
       if (!name) return;
@@ -341,7 +476,7 @@
   };
   $("saveDraftBtn").onclick = () => save().catch(showError);
   $("playDraftBtn").onclick = () => play(false);
-  $("stopDraftBtn").onclick = () => api.stop().then(updateRuntime).catch(showError);
+  $("stopDraftBtn").onclick = () => api.stop().then(() => { if (beatUI.mode === "live") setBeatMode("off"); return updateRuntime(); }).catch(showError);
   $("reloadBtn").onclick = () => reloadCode().catch(showError);
   $("acceptBtn").onclick = () => state.current && api.labAccept(state.current.name).then(refresh).catch(showError);
   $("rejectBtn").onclick = () => state.current && api.labReject(state.current.name).then(refresh).catch(showError);
@@ -366,7 +501,7 @@
   document.querySelectorAll("[data-step]").forEach(btn => btn.onclick = () => { $("bpmInput").value = Number($("bpmInput").value || 128) + Number(btn.dataset.step); $("bpmInput").dispatchEvent(new Event("change")); });
   $("paletteSelect").onchange = ev => api.session({test_palette:ev.target.value}).catch(showError);
   $("loopToggle").onchange = ev => { $("loopLabel").textContent = ev.target.checked ? "On" : "Off"; api.session({loop:ev.target.checked}).catch(showError); };
-  $("stopBtn").onclick = () => api.emergencyStop().then(updateRuntime).catch(showError);
+  $("stopBtn").onclick = () => api.emergencyStop().then(() => { setBeatMode("off"); return updateRuntime(); }).catch(showError);
   $("ownershipBtn").onclick = async () => { const rt = await api.runtime(); if ((rt.ownership || {}).state === "pad_owned") await api.release(); else await api.takeover(); await updateRuntime(); };
   document.addEventListener("keydown", ev => { if (ev.key === "Escape" && PadModal.isOpen()) PadModal.close(); });
   $("tracePanel").hidden = !DEV;

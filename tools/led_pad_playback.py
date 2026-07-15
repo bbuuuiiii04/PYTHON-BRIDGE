@@ -42,6 +42,8 @@ class SyntheticClock:
         return self._bpm
 
     def beat(self) -> float:
+        if not self.playing:
+            return self._anchor_beat
         now = self._time_fn()
         return self._anchor_beat + max(0.0, now - self._anchor_time) * self._bpm / 60.0
 
@@ -366,6 +368,7 @@ class PadPlayback:
                 "playing": self._clock.playing,
                 "playing_look": self._playing_look,
                 "bpm": self._clock.bpm,
+                "beat": float(self._clock.beat()),
                 "loop": self._loop,
                 "last_error": self._last_error,
             }

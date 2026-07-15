@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: software-tested
-last_verified_commit: a8d92c0
+last_verified_commit: 8f46585
 last_verified_date: 2026-07-15
-validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (live-apply + variant switch + preview), Round 2 (param_specs sliders/toggles, slot swatches, JSON demoted to Advanced), Round 3 (rejected-drafts filter, draft delete), QR same-network access, the iOS/iPad touch pass, the editor unset-param-defaults fix, the AWR-193 pad/lab overhaul (accept snapshot, decoupled preview, archive flow, fn fallback, effective bounds, color pickers + regime badges, reconnect, freshness watchdog + live fingerprint + no-cache), the AWR-202 commit read-modify-merge with the gate fix that tracks look CONTENT (`touched`) separately from role-bank PLACEMENT (`moved`) so a params-only edit keeps the look's LIVE bank while an explicit pad move still applies, and AWR-240 pad offline v2 stand-down so Test Palette still injects slot_colors; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
+validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (live-apply + variant switch + preview), Round 2 (param_specs sliders/toggles, slot swatches, JSON demoted to Advanced), Round 3 (rejected-drafts filter, draft delete), QR same-network access, the iOS/iPad touch pass, the editor unset-param-defaults fix, the AWR-193 pad/lab overhaul (accept snapshot, decoupled preview, archive flow, fn fallback, effective bounds, color pickers + regime badges, reconnect, freshness watchdog + live fingerprint + no-cache), the AWR-202 commit read-modify-merge with the gate fix that tracks look CONTENT (`touched`) separately from role-bank PLACEMENT (`moved`) so a params-only edit keeps the look's LIVE bank while an explicit pad move still applies, AWR-240 pad offline v2 stand-down so Test Palette still injects slot_colors, and AWR-241 Template Lab beat meter + metronome click (preview exact / live server-synced); SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # LED Pad
@@ -315,6 +315,23 @@ returned frames on a canvas strip in the detail panel, so a draft can be eyeball
 before it ever reaches the physical strip. A broken `effects_lab.py` returns
 `{"ok": false, "error", "traceback"}` and the UI shows the traceback panel instead of animating.
 
+### Beat meter + metronome click (AWR-241)
+
+Template Lab can verify that a preview or strip play is actually running at the stated BPM, and
+whether a pulse is per-beat vs per-2-beats:
+
+- **Preview (exact by construction).** Canvas frame N maps to beat `N * bpm / (60 * fps)` with
+  frame 0 = bar 1 beat 1. A beat dot flashes on each integer-beat crossing (bigger/brighter on
+  every 4th / bar downbeat), and a counter shows `bar B · beat K` (K = 1..4).
+- **Live (server-synced).** `PadPlayback.status()` exposes `beat` from the synthetic clock. The
+  UI phase-locks on each `/api/runtime_status` poll and estimates between polls. The counter is
+  labeled **beat phase (server)** — it verifies tempo and period, not cue-start = bar 1 (the
+  clock's beat 0 predates the cue).
+- **Click track.** A 🔊 toggle (off by default; the click is the WebAudio unlock gesture) plays a
+  short oscillator blip per beat, louder/higher on bar downbeats. Preview click = **exact**; live
+  click = **synced to server clock (± poll jitter)**. Clicks stop when preview/play stops or the
+  tab hides.
+
 ### Rejected filter and delete (Round 3)
 
 The drafts list hides `rejected`-status entries by default; a `Rejected (n)` chip next to **New**
@@ -408,8 +425,10 @@ slider/toggle controls, slot swatches, JSON demoted under Advanced), Template La
 (rejected-drafts filter, `/api/lab/delete`), and the AWR-193 overhaul (collision unbrick +
 archive, fn fallback, accept snapshot + dirty chip, decoupled preview, effective bounds, color
 pickers + regime badges, operator-clean surface, reconnect helper, freshness watchdog +
-live-changed fingerprint + no-cache) are implemented/software-tested. AWR-193's JS/UI behavior
-has no automated harness — it is code-review + manual-smoke covered only.
+live-changed fingerprint + no-cache) are implemented/software-tested. AWR-241 adds a Template Lab
+beat meter + optional metronome click (preview exact from frame math; live phase-locked to
+`status.beat`; JS is manual-smoke only). AWR-193's JS/UI behavior has no automated harness — it is
+code-review + manual-smoke covered only.
 Locked Palette and renderer param unlock behavior is covered by software tests only. All LED Pad
 and Template Lab playback/UI claims are SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED. The
 iOS/iPad touch pass is implemented/software-tested only; on-device verification is pending.

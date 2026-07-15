@@ -22,6 +22,31 @@ class LedPadPlaybackTests(unittest.TestCase):
 
         self.assertAlmostEqual(clock.anchor().abs_beat_pos, 30.0)
 
+    def test_status_beat_advances_with_fake_time(self) -> None:
+        now = [0.0]
+        playback = PadPlayback.__new__(PadPlayback)
+        playback._clock = SyntheticClock(bpm=120.0, time_fn=lambda: now[0])
+        playback._loop = True
+        playback._playing_look = ""
+        playback._last_error = ""
+        playback.tick = lambda: None
+        playback._runner = type("Runner", (), {"status": lambda _self: {}})()
+
+        now[0] = 5.0
+        self.assertAlmostEqual(playback.status()["beat"], 0.0)
+
+        playback._clock.play()
+        now[0] = 6.0  # 1 s at 120 BPM → 2 beats
+        self.assertAlmostEqual(playback.status()["beat"], 2.0)
+        now[0] = 7.0
+        self.assertAlmostEqual(playback.status()["beat"], 4.0)
+
+        playback._clock.stop()
+        frozen = playback.status()["beat"]
+        now[0] = 20.0
+        self.assertAlmostEqual(playback.status()["beat"], frozen)
+        self.assertFalse(playback.status()["playing"])
+
     def test_cue_timer_stops_only_when_loop_is_off(self) -> None:
         now = [0.0]
         timer = CueTimer(time_fn=lambda: now[0])
