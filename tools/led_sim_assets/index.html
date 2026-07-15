@@ -3,100 +3,156 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LED Room Simulator</title>
+<title>H612D LED Studio</title>
 <link rel="stylesheet" href="sim.css">
 </head>
 <body>
-<header>
-  <h1>LED Room Simulator</h1>
-  <span class="tag">offline · never touches the device</span>
-  <span id="profile-dirty" class="dirty" hidden>profile edited — not saved</span>
+<header class="topbar">
+  <div class="brand">
+    <span class="eyebrow">GOVEE DIGITAL TWIN</span>
+    <h1>H612D LED Studio</h1>
+  </div>
+  <div class="device-facts" aria-label="Device facts">
+    <span>60 segments</span><i></i><span>360 LEDs</span><i></i><span>6 per segment</span>
+  </div>
+  <div class="top-actions">
+    <span id="calibration-badge" class="badge warning">UNMEASURED</span>
+    <span class="badge safe">OFFLINE · NO DEVICE CONTACT</span>
+  </div>
 </header>
-<div id="error-banner" class="banner" hidden></div>
-<div id="warnings" class="warnings" hidden></div>
 
-<main>
-  <section class="stage">
-    <canvas id="room-canvas" width="960" height="600"></canvas>
+<div id="error-banner" class="banner error" hidden></div>
+<div id="warnings" class="banner warning" hidden></div>
+
+<main class="workspace">
+  <aside class="sidebar">
+    <nav class="tabs" aria-label="Workspace mode">
+      <button id="tab-author" class="active" type="button">Author</button>
+      <button id="tab-calibrate" type="button">Calibrate</button>
+    </nav>
+
+    <section id="author-panel" class="panel-stack">
+      <div>
+        <span class="section-label">SOURCE</span>
+        <label class="field">Type
+          <select id="source-kind">
+            <option value="look">Production look</option>
+            <option value="effect">Production effect</option>
+            <option value="lab">Lab draft</option>
+            <option value="replay">Recorded frames</option>
+          </select>
+        </label>
+        <label id="source-name-row" class="field">Look or effect
+          <select id="source-name"></select>
+        </label>
+        <div id="replay-row" class="stack" hidden>
+          <label class="field">Frames JSONL
+            <input type="text" id="replay-path" placeholder="/tmp/capture.jsonl">
+          </label>
+          <button id="replay-load" type="button">Load recording</button>
+        </div>
+      </div>
+
+      <div class="settings-grid">
+        <label class="field">BPM<input type="number" id="bpm" value="128" min="20" max="300"></label>
+        <label class="field">Duration<input type="number" id="duration" value="8" min="1" max="30"></label>
+        <label class="field">Seed<input type="number" id="seed" value="0"></label>
+      </div>
+
+      <details class="advanced">
+        <summary>Advanced effect parameters</summary>
+        <label class="field">JSON<textarea id="params" rows="8">{}</textarea></label>
+      </details>
+
+      <button id="render" class="primary action" type="button">Render look</button>
+      <p class="fine-print">Production sources run through the real realtime runner before this screen receives a frame.</p>
+    </section>
+
+    <section id="calibrate-panel" class="panel-stack" hidden>
+      <div>
+        <span class="section-label">CAPTURE SEQUENCES</span>
+        <h2>Measure the strip</h2>
+        <p class="muted">These previews generate the exact frames for a later synchronized hardware capture. Nothing is sent now.</p>
+      </div>
+
+      <button class="sequence-card" data-sequence="segment_map" type="button">
+        <strong>Segment map</strong><span>Walk all 60 controllable groups</span>
+      </button>
+      <button class="sequence-card" data-sequence="color_response" type="button">
+        <strong>Color response</strong><span>RGBW ramps plus mixed colors</span>
+      </button>
+      <button class="sequence-card" data-sequence="timing_response" type="button">
+        <strong>Timing response</strong><span>Frame steps, holds, and fast chases</span>
+      </button>
+
+      <details class="advanced">
+        <summary>Static reference frames</summary>
+        <div class="cards">
+          <button data-card="white" type="button">White</button>
+          <button data-card="red" type="button">Red</button>
+          <button data-card="green" type="button">Green</button>
+          <button data-card="blue" type="button">Blue</button>
+          <button data-card="gray50" type="button">Gray 50%</button>
+          <button data-card="single_segment" type="button">Segment 0</button>
+        </div>
+      </details>
+
+      <details class="advanced calibration-controls">
+        <summary>Device calibration values</summary>
+        <p class="fine-print">These remain assumptions until fitted from the real capture.</p>
+        <label class="slider">Gamma<input type="range" id="knob-gamma" min="0.2" max="5" step="0.01"><output id="knob-gamma-val"></output></label>
+        <label class="slider">Red gain<input type="range" id="knob-white-0" min="0" max="2" step="0.01"><output id="knob-white-0-val"></output></label>
+        <label class="slider">Green gain<input type="range" id="knob-white-1" min="0" max="2" step="0.01"><output id="knob-white-1-val"></output></label>
+        <label class="slider">Blue gain<input type="range" id="knob-white-2" min="0" max="2" step="0.01"><output id="knob-white-2-val"></output></label>
+        <label class="slider">Brightness<input type="range" id="knob-brightness" min="0" max="2" step="0.01"><output id="knob-brightness-val"></output></label>
+        <label class="slider">Glow size<input type="range" id="knob-glow-radius" min="0.1" max="6" step="0.05"><output id="knob-glow-radius-val"></output></label>
+        <label class="slider">Glow strength<input type="range" id="knob-glow-gain" min="0" max="4" step="0.05"><output id="knob-glow-gain-val"></output></label>
+        <label class="slider">Neighbor bleed<input type="range" id="knob-bleed" min="0" max="1" step="0.01"><output id="knob-bleed-val"></output></label>
+        <label class="slider">Target FPS<input type="range" id="knob-fps" min="1" max="120" step="1"><output id="knob-fps-val"></output></label>
+        <label class="slider">Latency ms<input type="range" id="knob-latency" min="-500" max="500" step="1"><output id="knob-latency-val"></output></label>
+        <label class="field">Response model
+          <select id="knob-hold"><option value="zoh">Hold exact frames</option><option value="slew">Measured color transition</option></select>
+        </label>
+        <label class="slider">Transition ms<input type="range" id="knob-slew" min="0" max="1000" step="1"><output id="knob-slew-val"></output></label>
+        <div class="button-row">
+          <button id="profile-save" class="primary" type="button">Save values</button>
+          <button id="profile-revert" type="button">Revert</button>
+        </div>
+        <span id="profile-dirty" class="dirty" hidden>Unsaved calibration changes</span>
+      </details>
+    </section>
+  </aside>
+
+  <section class="stage-shell">
+    <div class="stage-header">
+      <div>
+        <span class="section-label">FIXTURE VIEW</span>
+        <h2 id="view-title">H612D command frame</h2>
+      </div>
+      <div class="readouts">
+        <span id="pipeline-badge">RUNTIME PIPELINE</span>
+        <span id="timing-readout">60 FPS TARGET</span>
+        <span id="paint-health">WAITING</span>
+      </div>
+    </div>
+
+    <div class="canvas-wrap">
+      <canvas id="fixture-canvas" width="1600" height="900"></canvas>
+      <div class="canvas-overlay">
+        <span id="marker-label">Choose a look and render</span>
+        <span id="time-label">0.000 s</span>
+      </div>
+    </div>
+
     <div class="transport">
-      <button id="play-pause">Play</button>
-      <label class="check"><input type="checkbox" id="loop" checked> loop</label>
-      <input type="range" id="scrub" min="0" max="0" value="0">
-      <span id="frame-label" class="mono">0/0</span>
+      <button id="play-pause" class="play" type="button" aria-label="Play or pause">Play</button>
+      <input type="range" id="scrub" min="0" max="0" value="0" aria-label="Frame position">
+      <span id="frame-label" class="mono">0 / 0</span>
+      <label class="loop"><input type="checkbox" id="loop" checked> Loop</label>
     </div>
   </section>
-
-  <aside class="controls">
-    <details open>
-      <summary>Source</summary>
-      <label>Type
-        <select id="source-kind">
-          <option value="effect">Production effect</option>
-          <option value="look">Production look</option>
-          <option value="lab">Lab draft</option>
-          <option value="replay">Replay file</option>
-        </select>
-      </label>
-      <label>Name <select id="source-name"></select></label>
-      <div id="replay-row" hidden>
-        <label>frames-JSONL path <input type="text" id="replay-path" placeholder="repo-relative or /tmp/…"></label>
-        <button id="replay-load">Load</button>
-      </div>
-      <label>Params (JSON) <textarea id="params" rows="4">{}</textarea></label>
-      <div class="row3">
-        <label>BPM <input type="number" id="bpm" value="128" min="20" max="300"></label>
-        <label>Seed <input type="number" id="seed" value="0"></label>
-        <label>Duration s <input type="number" id="duration" value="8" min="1" max="30"></label>
-      </div>
-      <button id="render" class="primary">Render</button>
-    </details>
-
-    <details open>
-      <summary>Device knobs (local until saved)</summary>
-      <label>gamma <input type="range" id="knob-gamma" min="0.2" max="5" step="0.01"><span id="knob-gamma-val" class="mono"></span></label>
-      <label>white R <input type="range" id="knob-white-0" min="0" max="2" step="0.01"><span id="knob-white-0-val" class="mono"></span></label>
-      <label>white G <input type="range" id="knob-white-1" min="0" max="2" step="0.01"><span id="knob-white-1-val" class="mono"></span></label>
-      <label>white B <input type="range" id="knob-white-2" min="0" max="2" step="0.01"><span id="knob-white-2-val" class="mono"></span></label>
-      <label>brightness <input type="range" id="knob-brightness" min="0" max="2" step="0.01"><span id="knob-brightness-val" class="mono"></span></label>
-      <label>diffusion (seg) <input type="range" id="knob-diffusion" min="0.1" max="6" step="0.1"><span id="knob-diffusion-val" class="mono"></span></label>
-      <label>bleed <input type="range" id="knob-bleed" min="0" max="1" step="0.01"><span id="knob-bleed-val" class="mono"></span></label>
-      <label>wash reach mm <input type="range" id="knob-wash-reach" min="0" max="3000" step="10"><span id="knob-wash-reach-val" class="mono"></span></label>
-      <label>wash gain <input type="range" id="knob-wash-gain" min="0" max="4" step="0.05"><span id="knob-wash-gain-val" class="mono"></span></label>
-      <label>fps <input type="range" id="knob-fps" min="1" max="120" step="1"><span id="knob-fps-val" class="mono"></span></label>
-      <label>latency ms <input type="range" id="knob-latency" min="-500" max="500" step="5"><span id="knob-latency-val" class="mono"></span></label>
-      <label>hold mode
-        <select id="knob-hold"><option value="zoh">zoh (hard switch)</option><option value="slew">slew (lerp)</option></select>
-      </label>
-      <label>slew ms <input type="range" id="knob-slew" min="0" max="1000" step="5"><span id="knob-slew-val" class="mono"></span></label>
-      <div class="row">
-        <button id="profile-save" class="primary">Save profile</button>
-        <button id="profile-revert">Revert</button>
-      </div>
-    </details>
-
-    <details open>
-      <summary>Calibrate</summary>
-      <button id="calibrate-toggle">Calibrate…</button>
-      <div id="calibrate-panel" hidden>
-        <p><strong>Geometry:</strong> play the same effect on the real strip from the
-        Pad, then drag the corner handles, slide the seg-0 handle, or click the
-        direction arrow until the sim moves like your room.</p>
-        <button id="preset-slow-chase">Slow beat_chase preset</button>
-        <p><strong>Photometrics:</strong> put a test card on the real strip, hold your
-        phone photo next to this canvas, and match with the knobs.</p>
-        <div class="cards">
-          <button data-card="white">white</button>
-          <button data-card="red">red</button>
-          <button data-card="green">green</button>
-          <button data-card="blue">blue</button>
-          <button data-card="gray50">gray50</button>
-          <button data-card="single_segment">single seg</button>
-        </div>
-        <p>Then <em>Save profile</em> to persist.</p>
-      </div>
-    </details>
-  </aside>
 </main>
+
 <script type="module" src="sim-app.js"></script>
 </body>
 </html>

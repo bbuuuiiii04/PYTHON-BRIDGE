@@ -1,94 +1,87 @@
-// sim-app.js — LED room simulator page glue (AWR-196).
-// Owns all state, fetching, transport, knobs, and calibration edits.
-// The view (ledsim-view.js) draws only; profile edits live HERE.
+// sim-app.js — H612D LED Studio page controller.
 
 import { createLedSimView } from "./ledsim-view.js";
 
 const $ = (id) => document.getElementById(id);
 
 const state = {
-  profile: null,        // local working copy (knobs edit this)
-  savedProfile: null,   // last server-confirmed profile
+  profile: null,
+  savedProfile: null,
   catalog: null,
   frames: [],
+  frameTimes: [],
+  markers: [],
   framesFps: 60,
+  cycleMs: 0,
   playing: false,
   loop: true,
   t0: 0,
   manualIdx: 0,
-  display: null,        // slew state: floats per channel
+  lastPaintedIdx: -1,
+  display: null,
   lastTick: 0,
-  calibrating: false,
-  drag: null,
+  paintWindowAt: 0,
+  paintCount: 0,
+  skippedPaints: 0,
 };
 
 let view = null;
 
-// --- error banner ------------------------------------------------------------
+function clone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
 function showError(message) {
-  const el = $("error-banner");
-  el.textContent = message;
-  el.hidden = !message;
+  const element = $("error-banner");
+  element.textContent = message;
+  element.hidden = !message;
 }
 
 function showWarnings() {
-  const bits = [];
-  if (state.catalog?.profile_error) bits.push(`profile: ${state.catalog.profile_error}`);
-  if (state.catalog?.lab_error) bits.push(`lab: ${state.catalog.lab_error}`);
-  if (state.catalog?.looks && !state.catalog.looks.ok) bits.push(`looks: ${state.catalog.looks.error}`);
-  const el = $("warnings");
-  el.textContent = bits.join("  •  ");
-  el.hidden = bits.length === 0;
+  const warnings = [];
+  if (state.catalog?.profile_error) warnings.push(`profile: ${state.catalog.profile_error}`);
+  if (state.catalog?.lab_error) warnings.push(`lab: ${state.catalog.lab_error}`);
+  if (state.catalog?.looks && !state.catalog.looks.ok) warnings.push(`looks: ${state.catalog.looks.error}`);
+  const element = $("warnings");
+  element.textContent = warnings.join("  •  ");
+  element.hidden = warnings.length === 0;
 }
 
 async function api(method, path, body) {
-  let resp;
+  let response;
   try {
-    resp = await fetch(path, {
+    response = await fetch(path, {
       method,
-      headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      headers: body === undefined ? undefined : {"Content-Type": "application/json"},
+      body: body === undefined ? undefined : JSON.stringify(body),
     });
-  } catch (err) {
-    showError(`fetch failed: ${err}`);
-    throw err;
+  } catch (error) {
+    showError(`Could not reach the simulator: ${error}`);
+    throw error;
   }
-  const data = await resp.json().catch(() => ({}));
-  if (!resp.ok) {
-    const detail = data.errors ? data.errors.join("; ") : (data.error || resp.statusText);
-    showError(`${path}: ${detail}`);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const detail = data.errors ? data.errors.join("; ") : (data.error || response.statusText);
+    showError(detail);
     throw new Error(detail);
   }
   showError("");
   return data;
 }
 
-// --- profile / knobs ------------------------------------------------------------
 const KNOBS = [
   ["gamma", "knob-gamma"],
   ["brightness", "knob-brightness"],
-  ["diffusion_width_seg", "knob-diffusion"],
+  ["glow_radius", "knob-glow-radius"],
+  ["glow_gain", "knob-glow-gain"],
   ["bleed", "knob-bleed"],
-  ["wash_reach_mm", "knob-wash-reach"],
-  ["wash_gain", "knob-wash-gain"],
   ["fps", "knob-fps"],
   ["latency_ms", "knob-latency"],
   ["slew_ms", "knob-slew"],
 ];
 
-function knobsFromProfile() {
-  const p = state.profile;
-  for (const [key, id] of KNOBS) {
-    $(id).value = p[key];
-    $(`${id}-val`).textContent = String(p[key]);
-  }
-  for (let c = 0; c < 3; c += 1) {
-    $(`knob-white-${c}`).value = p.white_point[c];
-    $(`knob-white-${c}-val`).textContent = String(p.white_point[c]);
-  }
-  $("knob-hold").value = p.hold_mode;
-  $("bpm").value = p.bpm;
-  markDirty();
+function stripLocal(profile) {
+  return {...profile};
 }
 
 function markDirty() {
@@ -96,16 +89,32 @@ function markDirty() {
   $("profile-dirty").hidden = !dirty;
 }
 
-function stripLocal(profile) {
-  const copy = { ...profile };
-  delete copy._calibrating;
-  return copy;
+function updateCalibrationBadge() {
+  const status = String(state.profile.calibration_status || "unmeasured");
+  const badge = $("calibration-badge");
+  badge.textContent = status.toUpperCase();
+  badge.classList.toggle("warning", status !== "measured");
 }
 
 function pushProfileToView() {
-  const p = { ...state.profile, _calibrating: state.calibrating };
-  view.setProfile(p);
+  view.setProfile(state.profile);
   markDirty();
+  updateCalibrationBadge();
+}
+
+function knobsFromProfile() {
+  for (const [key, id] of KNOBS) {
+    $(id).value = state.profile[key];
+    $(`${id}-val`).textContent = String(state.profile[key]);
+  }
+  for (let channel = 0; channel < 3; channel += 1) {
+    $(`knob-white-${channel}`).value = state.profile.white_point[channel];
+    $(`knob-white-${channel}-val`).textContent = String(state.profile.white_point[channel]);
+  }
+  $("knob-hold").value = state.profile.hold_mode;
+  $("bpm").value = state.profile.bpm;
+  markDirty();
+  updateCalibrationBadge();
 }
 
 function wireKnobs() {
@@ -116,54 +125,55 @@ function wireKnobs() {
       pushProfileToView();
     });
   }
-  for (let c = 0; c < 3; c += 1) {
-    $(`knob-white-${c}`).addEventListener("input", () => {
-      state.profile.white_point[c] = Number($(`knob-white-${c}`).value);
-      $(`knob-white-${c}-val`).textContent = $(`knob-white-${c}`).value;
+  for (let channel = 0; channel < 3; channel += 1) {
+    $(`knob-white-${channel}`).addEventListener("input", () => {
+      state.profile.white_point[channel] = Number($(`knob-white-${channel}`).value);
+      $(`knob-white-${channel}-val`).textContent = $(`knob-white-${channel}`).value;
       pushProfileToView();
     });
   }
   $("knob-hold").addEventListener("change", () => {
     state.profile.hold_mode = $("knob-hold").value;
+    state.display = null;
     pushProfileToView();
   });
 
   $("profile-save").addEventListener("click", async () => {
-    const payload = stripLocal(state.profile);
-    const result = await api("POST", "/api/profile", payload);
-    state.savedProfile = result.profile;
+    const result = await api("POST", "/api/profile", stripLocal(state.profile));
+    state.savedProfile = clone(result.profile);
     markDirty();
   });
-
   $("profile-revert").addEventListener("click", async () => {
     const result = await api("GET", "/api/profile");
     state.profile = result.profile;
-    state.savedProfile = JSON.parse(JSON.stringify(result.profile));
+    state.savedProfile = clone(result.profile);
     knobsFromProfile();
     pushProfileToView();
   });
 }
 
-// --- sources -------------------------------------------------------------------
+function setMode(mode) {
+  const calibrate = mode === "calibrate";
+  $("author-panel").hidden = calibrate;
+  $("calibrate-panel").hidden = !calibrate;
+  $("tab-author").classList.toggle("active", !calibrate);
+  $("tab-calibrate").classList.toggle("active", calibrate);
+}
+
 function fillSourcePicker() {
   const kind = $("source-kind").value;
   const select = $("source-name");
   select.innerHTML = "";
   $("replay-row").hidden = kind !== "replay";
-  select.parentElement.hidden = kind === "replay";
+  $("source-name-row").hidden = kind === "replay";
+
   if (kind === "effect") {
-    for (const name of state.catalog.effects) {
-      select.add(new Option(name, name));
-    }
+    for (const name of state.catalog.effects) select.add(new Option(name, name));
   } else if (kind === "look") {
     const looks = state.catalog.looks.ok ? state.catalog.looks.looks : {};
-    for (const [name, entry] of Object.entries(looks)) {
-      select.add(new Option(`${name} → ${entry.effect}`, name));
-    }
+    for (const [name, entry] of Object.entries(looks)) select.add(new Option(name, name));
   } else if (kind === "lab") {
-    for (const draft of state.catalog.lab.drafts || []) {
-      select.add(new Option(`${draft.name} (${draft.status})`, draft.name));
-    }
+    for (const draft of state.catalog.lab.drafts || []) select.add(new Option(draft.name, draft.name));
   }
   syncParamsFromSource();
 }
@@ -171,30 +181,43 @@ function fillSourcePicker() {
 function syncParamsFromSource() {
   const kind = $("source-kind").value;
   const name = $("source-name").value;
+  $("seed").disabled = kind === "look";
   if (kind === "look") {
     const entry = state.catalog.looks.ok ? state.catalog.looks.looks[name] : null;
-    $("params").value = entry ? JSON.stringify(entry.params, null, 1) : "{}";
+    $("params").value = entry ? JSON.stringify(entry.params, null, 2) : "{}";
+    if (entry) $("seed").value = entry.seed;
   } else if (kind === "lab") {
-    const draft = (state.catalog.lab.drafts || []).find((d) => d.name === name);
-    $("params").value = draft ? JSON.stringify(draft.params || {}, null, 1) : "{}";
+    const draft = (state.catalog.lab.drafts || []).find((item) => item.name === name);
+    $("params").value = draft ? JSON.stringify(draft.params || {}, null, 2) : "{}";
+  } else if (kind === "effect") {
+    $("params").value = "{}";
   }
 }
 
 function renderRequestBody() {
-  const kind = $("source-kind").value;
   let params;
   try {
     params = JSON.parse($("params").value || "{}");
-  } catch (err) {
-    showError(`params is not valid JSON: ${err}`);
+  } catch (error) {
+    showError(`Effect parameters are not valid JSON: ${error}`);
     return null;
   }
-  let source = "effect";
+  const kind = $("source-kind").value;
   let name = $("source-name").value;
+  let source = "effect";
+  let seed = Number($("seed").value) || 0;
+  let syncMode = "";
+  let beatDivision = 0;
   if (kind === "look") {
     const entry = state.catalog.looks.ok ? state.catalog.looks.looks[name] : null;
-    if (!entry) { showError("unknown look"); return null; }
+    if (!entry) {
+      showError("Choose a production look first.");
+      return null;
+    }
     name = entry.effect;
+    seed = entry.seed;
+    syncMode = entry.sync_mode;
+    beatDivision = entry.beat_division;
   } else if (kind === "lab") {
     source = "lab";
   }
@@ -202,9 +225,11 @@ function renderRequestBody() {
     source,
     name,
     params,
-    seed: Number($("seed").value) || 0,
+    seed,
+    sync_mode: syncMode,
+    beat_division: beatDivision,
     fps: Number(state.profile.fps) || 60,
-    duration_s: Number($("duration").value) || 4,
+    duration_s: Number($("duration").value) || 8,
     bpm: Number($("bpm").value) || 128,
   };
 }
@@ -213,186 +238,200 @@ async function doRender() {
   const body = renderRequestBody();
   if (!body) return;
   const result = await api("POST", "/api/render", body);
-  loadFrames(result.frames, result.fps);
+  $("view-title").textContent = $("source-name").selectedOptions[0]?.textContent || body.name;
+  loadFrames(result.frames, result.fps, result.t_ms, [], result.pipeline);
 }
 
 async function doReplayLoad() {
   const path = $("replay-path").value.trim();
-  if (!path) { showError("enter a frames-JSONL path (repo-relative or /tmp)"); return; }
-  const result = await api("POST", "/api/replay/load", { path });
-  loadFrames(result.frames, result.fps);
+  if (!path) {
+    showError("Enter a frames JSONL path.");
+    return;
+  }
+  const result = await api("POST", "/api/replay/load", {path});
+  $("view-title").textContent = result.meta?.name || "Recorded frames";
+  loadFrames(result.frames, result.fps, result.t_ms, result.meta?.markers || [], "recorded");
 }
 
 async function doTestCard(kind) {
-  const result = await api("POST", "/api/render_card", { kind });
-  loadFrames(result.frames, result.fps);
-  stopPlayback(); // static card: hold frame 0
+  const result = await api("POST", "/api/render_card", {kind});
+  $("view-title").textContent = `Reference · ${kind}`;
+  loadFrames(result.frames, result.fps, result.t_ms, [{frame: 0, label: kind}], "reference");
+  stopPlayback();
 }
 
-function loadFrames(frames, fps) {
-  state.frames = frames;
-  state.framesFps = fps || 60;
+async function doCalibration(name) {
+  const result = await api("POST", "/api/calibration", {
+    name,
+    fps: Number(state.profile.fps) || 60,
+  });
+  $("view-title").textContent = `Calibration · ${name.replaceAll("_", " ")}`;
+  loadFrames(result.frames, result.fps, result.t_ms, result.markers, "calibration");
+}
+
+function normalizeTimes(frameCount, fps, supplied) {
+  if (Array.isArray(supplied) && supplied.length === frameCount) return supplied.map(Number);
+  return Array.from({length: frameCount}, (_, index) => Math.round(index * 1000 / fps));
+}
+
+function loadFrames(frames, fps, tMs, markers = [], pipeline = "runtime") {
+  state.frames = frames || [];
+  state.framesFps = Number(fps) || 60;
+  state.frameTimes = normalizeTimes(state.frames.length, state.framesFps, tMs);
+  state.markers = Array.isArray(markers) ? markers : [];
+  state.cycleMs = state.frames.length
+    ? state.frameTimes[state.frameTimes.length - 1] + (1000 / state.framesFps)
+    : 0;
   state.manualIdx = 0;
+  state.lastPaintedIdx = -1;
   state.display = null;
-  $("scrub").max = String(Math.max(0, frames.length - 1));
+  state.skippedPaints = 0;
+  $("scrub").max = String(Math.max(0, state.frames.length - 1));
   $("scrub").value = "0";
+  $("pipeline-badge").textContent = `${String(pipeline).toUpperCase()} PIPELINE`;
+  $("timing-readout").textContent = `${state.framesFps} FPS TARGET`;
   startPlayback();
 }
 
-// --- transport -------------------------------------------------------------------
+function indexAtTime(timeMs) {
+  let low = 0;
+  let high = state.frameTimes.length;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if (state.frameTimes[middle] <= timeMs) low = middle + 1;
+    else high = middle;
+  }
+  return Math.max(0, Math.min(state.frames.length - 1, low - 1));
+}
+
+function currentIndex(now) {
+  if (!state.frames.length) return 0;
+  if (!state.playing) return Math.min(state.manualIdx, state.frames.length - 1);
+  const latency = Number(state.profile.latency_ms) || 0;
+  let elapsed = now - state.t0 - latency;
+  if (elapsed < 0) return 0;
+  if (state.loop && state.cycleMs > 0) elapsed %= state.cycleMs;
+  if (!state.loop && elapsed >= state.cycleMs) {
+    state.playing = false;
+    state.manualIdx = state.frames.length - 1;
+    $("play-pause").textContent = "Play";
+    return state.manualIdx;
+  }
+  return indexAtTime(elapsed);
+}
+
 function startPlayback() {
   if (!state.frames.length) return;
+  if (!state.loop && state.manualIdx >= state.frames.length - 1) state.manualIdx = 0;
+  const latency = Number(state.profile.latency_ms) || 0;
   state.playing = true;
-  state.t0 = performance.now();
+  state.t0 = performance.now() - state.frameTimes[state.manualIdx] - latency;
+  state.lastPaintedIdx = -1;
   $("play-pause").textContent = "Pause";
 }
 
-function stopPlayback() {
+function stopPlayback(now = performance.now()) {
+  if (state.playing && state.frames.length) state.manualIdx = currentIndex(now);
   state.playing = false;
   $("play-pause").textContent = "Play";
 }
 
-function currentIndex(now) {
-  const n = state.frames.length;
-  if (!n) return 0;
-  if (!state.playing) return Math.min(state.manualIdx, n - 1);
-  const latency = Number(state.profile.latency_ms) || 0;
-  // idx = floor((now - t0 - latency_ms) * fps / 1000), looped or clamped
-  const raw = Math.floor(((now - state.t0 - latency) * state.framesFps) / 1000);
-  if (raw < 0) return 0;
-  if (state.loop) return raw % n;
-  if (raw >= n) { stopPlayback(); state.manualIdx = n - 1; return n - 1; }
-  return raw;
+function markerFor(index) {
+  let label = "";
+  for (const marker of state.markers) {
+    if (Number(marker.frame) > index) break;
+    label = marker.label || label;
+  }
+  return label;
+}
+
+function applyMeasuredSlew(target, now) {
+  if (state.profile.hold_mode !== "slew" || Number(state.profile.slew_ms) <= 0) {
+    state.display = null;
+    return target;
+  }
+  const tau = Math.max(1, Number(state.profile.slew_ms));
+  const dt = Math.min(200, now - (state.lastTick || now));
+  const amount = 1 - Math.exp(-dt / tau);
+  if (!state.display || state.display.length !== target.length) {
+    state.display = target.map((pixel) => pixel.slice());
+  } else {
+    for (let index = 0; index < target.length; index += 1) {
+      for (let channel = 0; channel < 3; channel += 1) {
+        state.display[index][channel] += (target[index][channel] - state.display[index][channel]) * amount;
+      }
+    }
+  }
+  return state.display.map((pixel) => pixel.map(Math.round));
+}
+
+function updatePaintHealth(now) {
+  state.paintCount += 1;
+  if (!state.paintWindowAt) state.paintWindowAt = now;
+  const span = now - state.paintWindowAt;
+  if (span < 1000) return;
+  const rate = state.paintCount * 1000 / span;
+  $("paint-health").textContent = `PAINT ${rate.toFixed(1)} · SKIP ${state.skippedPaints}`;
+  state.paintWindowAt = now;
+  state.paintCount = 0;
+  state.skippedPaints = 0;
 }
 
 function tick(now) {
   if (view && state.frames.length) {
-    const idx = currentIndex(now);
-    $("scrub").value = String(idx);
-    $("frame-label").textContent = `${idx + 1}/${state.frames.length}`;
-    const target = state.frames[idx];
-    let shown = target;
-    if (state.profile.hold_mode === "slew") {
-      // Models unknown IC response: per-channel lerp with time constant slew_ms.
-      const tau = Math.max(1, Number(state.profile.slew_ms) || 0);
-      const dt = Math.min(200, now - (state.lastTick || now));
-      const k = 1 - Math.exp(-dt / tau);
-      if (!state.display || state.display.length !== target.length) {
-        state.display = target.map((px) => px.slice());
-      } else {
-        for (let i = 0; i < target.length; i += 1) {
-          for (let c = 0; c < 3; c += 1) {
-            state.display[i][c] += (target[i][c] - state.display[i][c]) * k;
-          }
-        }
+    const index = currentIndex(now);
+    const slewing = state.profile.hold_mode === "slew" && Number(state.profile.slew_ms) > 0;
+    if (index !== state.lastPaintedIdx || slewing) {
+      if (!slewing && state.lastPaintedIdx >= 0) {
+        const expected = (state.lastPaintedIdx + 1) % state.frames.length;
+        if (index !== expected && index !== state.lastPaintedIdx) state.skippedPaints += 1;
       }
-      shown = state.display.map((px) => px.map(Math.round));
-    } else {
-      state.display = null;
+      view.renderFrame(applyMeasuredSlew(state.frames[index], now));
+      state.lastPaintedIdx = index;
+      updatePaintHealth(now);
     }
-    view.renderFrame(shown);
+    state.manualIdx = index;
+    $("scrub").value = String(index);
+    $("frame-label").textContent = `${index + 1} / ${state.frames.length}`;
+    $("time-label").textContent = `${((state.frameTimes[index] || 0) / 1000).toFixed(3)} s`;
+    $("marker-label").textContent = markerFor(index) || "Exact command frame · six physical LEDs per segment";
   }
   state.lastTick = now;
   requestAnimationFrame(tick);
 }
 
-// --- calibration -------------------------------------------------------------------
-// mirror of the app-side corner normalization contract described in
-// docs/guides/led_sim.md; geometry itself mirrors led_sim_engine.segment_geometry.
-function normalizeCorners() {
-  const seg = state.profile.segments;
-  let cs = state.profile.corner_segments.map((v) => ((v % seg) + seg) % seg);
-  // rotate so the list is ascending again; arc k follows wall (start_corner + k)
-  let rot = 0;
-  for (let i = 1; i < 4; i += 1) {
-    if (cs[i] < cs[i - 1]) { rot = i; break; }
-  }
-  if (rot) {
-    cs = cs.slice(rot).concat(cs.slice(0, rot));
-    state.profile.start_corner = (state.profile.start_corner + rot) % 4;
-  }
-  state.profile.corner_segments = cs;
-}
-
-function clampCorner(k, next) {
-  const seg = state.profile.segments;
-  const cs = state.profile.corner_segments;
-  const margin = 0.1;
-  const prev = k > 0 ? cs[k - 1] + margin : cs[3] - seg + margin;
-  const nxt = k < 3 ? cs[k + 1] - margin : cs[0] + seg - margin;
-  return Math.max(prev, Math.min(nxt, next));
-}
-
-function wireCanvas(canvas) {
-  canvas.addEventListener("pointerdown", (ev) => {
-    if (!state.calibrating) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = (ev.clientX - rect.left) * (canvas.width / rect.width);
-    const y = (ev.clientY - rect.top) * (canvas.height / rect.height);
-    const hit = view.hitTest(x, y);
-    if (!hit) return;
-    state.drag = { hit, lastX: x, lastY: y, moved: 0 };
-    canvas.setPointerCapture(ev.pointerId);
-  });
-
-  canvas.addEventListener("pointermove", (ev) => {
-    if (!state.drag) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = (ev.clientX - rect.left) * (canvas.width / rect.width);
-    const y = (ev.clientY - rect.top) * (canvas.height / rect.height);
-    const dx = x - state.drag.lastX;
-    const dy = y - state.drag.lastY;
-    state.drag.lastX = x;
-    state.drag.lastY = y;
-    state.drag.moved += Math.abs(dx) + Math.abs(dy);
-    const { hit } = state.drag;
-    if (hit.type === "corner") {
-      const ds = (dx * hit.tangent[0] + dy * hit.tangent[1]) * hit.segPerPx;
-      const cs = state.profile.corner_segments;
-      cs[hit.index] = clampCorner(hit.index, cs[hit.index] + ds);
-      pushProfileToView();
-    } else if (hit.type === "start") {
-      // Sliding segment 0 shifts the whole ring mapping.
-      const ds = (dx * hit.tangent[0] + dy * hit.tangent[1]) * hit.segPerPx;
-      state.profile.corner_segments = state.profile.corner_segments.map((v) => v - ds);
-      normalizeCorners();
-      pushProfileToView();
+function wireKeyboard() {
+  document.addEventListener("keydown", (event) => {
+    if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) return;
+    if (event.code === "Space") {
+      event.preventDefault();
+      state.playing ? stopPlayback() : startPlayback();
+    } else if ((event.key === "ArrowLeft" || event.key === "ArrowRight") && state.frames.length) {
+      event.preventDefault();
+      stopPlayback();
+      state.manualIdx = Math.max(0, Math.min(
+        state.frames.length - 1,
+        state.manualIdx + (event.key === "ArrowRight" ? 1 : -1),
+      ));
+      state.lastPaintedIdx = -1;
     }
   });
-
-  canvas.addEventListener("pointerup", () => {
-    if (state.drag && state.drag.hit.type === "direction" && state.drag.moved < 6) {
-      state.profile.direction = state.profile.direction === "ccw" ? "cw" : "ccw";
-      pushProfileToView();
-    }
-    state.drag = null;
-  });
 }
 
-async function slowChasePreset() {
-  $("source-kind").value = "effect";
-  fillSourcePicker();
-  $("source-name").value = "beat_chase";
-  $("bpm").value = "60";
-  $("duration").value = "8";
-  await doRender();
-}
-
-// --- boot ------------------------------------------------------------------------
 async function boot() {
-  const canvas = $("room-canvas");
-  const catalog = await api("GET", "/api/catalog");
-  state.catalog = catalog;
-  state.profile = catalog.profile;
-  state.savedProfile = JSON.parse(JSON.stringify(catalog.profile));
-  view = createLedSimView(canvas, state.profile);
+  state.catalog = await api("GET", "/api/catalog");
+  state.profile = state.catalog.profile;
+  state.savedProfile = clone(state.catalog.profile);
+  view = createLedSimView($("fixture-canvas"), state.profile);
+  view.renderFrame(Array.from({length: 60}, () => [0, 0, 0]));
   showWarnings();
   fillSourcePicker();
   knobsFromProfile();
-  pushProfileToView();
   wireKnobs();
-  wireCanvas(canvas);
+  wireKeyboard();
 
+  $("tab-author").addEventListener("click", () => setMode("author"));
+  $("tab-calibrate").addEventListener("click", () => setMode("calibrate"));
   $("source-kind").addEventListener("change", fillSourcePicker);
   $("source-name").addEventListener("change", syncParamsFromSource);
   $("render").addEventListener("click", doRender);
@@ -402,19 +441,17 @@ async function boot() {
   $("scrub").addEventListener("input", () => {
     stopPlayback();
     state.manualIdx = Number($("scrub").value) || 0;
+    state.lastPaintedIdx = -1;
   });
-  $("calibrate-toggle").addEventListener("click", () => {
-    state.calibrating = !state.calibrating;
-    $("calibrate-panel").hidden = !state.calibrating;
-    $("calibrate-toggle").textContent = state.calibrating ? "Exit calibrate" : "Calibrate…";
-    pushProfileToView();
-  });
-  $("preset-slow-chase").addEventListener("click", slowChasePreset);
   for (const button of document.querySelectorAll("[data-card]")) {
     button.addEventListener("click", () => doTestCard(button.dataset.card));
   }
+  for (const button of document.querySelectorAll("[data-sequence]")) {
+    button.addEventListener("click", () => doCalibration(button.dataset.sequence));
+  }
 
   requestAnimationFrame(tick);
+  await doRender();
 }
 
-boot().catch((err) => showError(`boot failed: ${err}`));
+boot().catch((error) => showError(`Simulator failed to start: ${error}`));
