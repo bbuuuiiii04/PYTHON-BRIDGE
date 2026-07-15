@@ -402,7 +402,7 @@ function syncLayoutForm() {
   $("room-height-ft").value = String(heightFt);
   $("room-width-mm-hint").textContent = `${Math.round(widthMm)} mm`;
   $("room-height-mm-hint").textContent = `${Math.round(heightMm)} mm`;
-  syncRoomSizeChip(widthFt, heightFt);
+  syncHudCompact();
   syncPresetCards();
   updatePathLengthStatus();
   markDirty();
@@ -426,14 +426,23 @@ function syncLayoutForm() {
   }
 }
 
-function syncRoomSizeChip(widthFt, heightFt) {
-  const chip = $("room-size-chip");
-  if (!chip) return;
-  const w = Number.isFinite(widthFt) ? widthFt : Math.round(mmToFeet(DEFAULT_ROOM_MM[0]) * 10) / 10;
-  const h = Number.isFinite(heightFt) ? heightFt : Math.round(mmToFeet(DEFAULT_ROOM_MM[1]) * 10) / 10;
-  chip.textContent = `${w} × ${h} ft`;
-  const roomView = !view || view.getViewMode() !== "strip";
-  chip.hidden = !roomView;
+/** Hide provenance chips when the stage is too short; mirror text into ? help. */
+function syncHudCompact() {
+  const stage = $("stage");
+  if (!stage) return;
+  const compact = stage.clientHeight < 240;
+  stage.classList.toggle("hud-compact", compact);
+  const help = $("help-provenance");
+  if (!help) return;
+  if (!compact) {
+    help.hidden = true;
+    help.textContent = "";
+    return;
+  }
+  const source = $("pipeline-badge")?.textContent || "";
+  const timing = $("timing-readout")?.textContent || "";
+  help.textContent = `${source}  ·  ${timing}`;
+  help.hidden = false;
 }
 
 function openRoomSizeEditor() {
@@ -845,10 +854,7 @@ function wireLayoutEditor() {
     $("view-strip").classList.remove("active");
     $("view-strip").setAttribute("aria-pressed", "false");
     syncLockUi();
-    syncRoomSizeChip(
-      Number($("room-width-ft").value),
-      Number($("room-height-ft").value),
-    );
+    syncHudCompact();
   });
   $("view-strip").addEventListener("click", () => {
     view.setViewMode("strip");
@@ -858,10 +864,7 @@ function wireLayoutEditor() {
     $("view-room").setAttribute("aria-pressed", "false");
     view.setEditing(false);
     $("lock-chip").hidden = true;
-    syncRoomSizeChip(
-      Number($("room-width-ft").value),
-      Number($("room-height-ft").value),
-    );
+    syncHudCompact();
     syncEditGestureClass();
   });
   $("toggle-labels").addEventListener("click", () => {
@@ -875,10 +878,7 @@ function wireLayoutEditor() {
       $("toggle-labels").setAttribute("aria-pressed", "false");
       view.setLabelsVisible(false);
     }
-  });
-
-  $("room-size-chip")?.addEventListener("click", () => {
-    openRoomSizeEditor();
+    syncHudCompact();
   });
 
   for (const button of document.querySelectorAll(".preset-card")) {
@@ -970,8 +970,13 @@ function wireLayoutEditor() {
   }
 
   function pointerDown(event) {
-    if (!editsAllowed()) return;
     const point = canvasEventPoint(event);
+    if (view?.getViewMode?.() === "room" && view.hitTestRoomSizeLabel?.(point.x, point.y)) {
+      event.preventDefault();
+      openRoomSizeEditor();
+      return;
+    }
+    if (!editsAllowed()) return;
     const vertex = view.hitTestVertex(point.x, point.y, HIT);
     if (vertex >= 0) {
       event.preventDefault();

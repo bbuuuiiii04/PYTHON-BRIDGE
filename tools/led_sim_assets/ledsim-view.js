@@ -344,6 +344,7 @@ export function createLedSimView(canvas, initialProfile) {
   let editing = false;
   let layoutCache = null;
   let screenCache = null;
+  let roomSizeHit = null;
 
   function invalidateLayout() {
     layoutCache = null;
@@ -537,6 +538,7 @@ export function createLedSimView(canvas, initialProfile) {
   }
 
   function drawStripBench(transformed) {
+    roomSizeHit = null;
     const width = viewWidth;
     const height = viewHeight;
     const segments = H612D_SEGMENTS;
@@ -747,6 +749,8 @@ export function createLedSimView(canvas, initialProfile) {
       drawRoomLabels({
         layout, transform, boundaries, junction, start, end, roomCx, roomCy,
       });
+    } else {
+      roomSizeHit = null;
     }
 
     if (layout.unplaced_mm > 0) {
@@ -829,8 +833,6 @@ export function createLedSimView(canvas, initialProfile) {
       || b.y + b.h + pad < a.y
     );
   }
-
-  let roomSizeHit = null;
 
   function drawRoomLabels({layout, transform, boundaries, junction, start, end, roomCx, roomCy}) {
     const placed = [];
@@ -1088,6 +1090,15 @@ export function createLedSimView(canvas, initialProfile) {
     },
     hitTestVertex,
     hitTestEdge,
+    hitTestRoomSizeLabel(canvasX, canvasY, pad = 4) {
+      if (!roomSizeHit) return false;
+      return (
+        canvasX >= roomSizeHit.x - pad
+        && canvasX <= roomSizeHit.x + roomSizeHit.w + pad
+        && canvasY >= roomSizeHit.y - pad
+        && canvasY <= roomSizeHit.y + roomSizeHit.h + pad
+      );
+    },
     getLayout() {
       return ensureLayout();
     },
