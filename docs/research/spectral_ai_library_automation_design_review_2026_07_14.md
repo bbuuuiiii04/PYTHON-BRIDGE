@@ -94,9 +94,11 @@ the deterministic pilot passes and exposes a named residual.
 questions: the current F2 plus failure-correction burden justifies a bounded experiment,
 and the four-session ceiling of 65 active minutes / 113 atomic decisions is acceptable.
 He also assigned Fable 5 as the executive orchestrator and project manager for this
-spectral automation product. All product work is to run in separate Claude CLI tmux
-sessions managed by Fable; Fable must never use its Agent tool or spawn internal
-subagents. This closes the gate to **author a Phase-0 specification only**. It does not
+spectral automation product. All product execution rounds are to run in separate Claude
+CLI tmux sessions managed by Fable. **`operator-decided`** Amended 2026-07-15: Fable may
+fan out cheaper-tier (non-Fable) Claude subagents for deep reads and independent
+adversarial reviews; Fable-tier subagents and Codex routing remain forbidden. This
+closes the gate to **author a Phase-0 specification only**. It does not
 authorize Phase-0 implementation, pilot execution, model or stem work, a library sweep,
 or any live/runtime action.
 
@@ -1145,7 +1147,7 @@ not an evidence class or calibrated model confidence.
 | `proposed` | 65-minute/113-decision ceiling | Honest count including repeats and montages | “36 cards/one hour” shorthand | Medium | Brandon sets a lower ceiling |
 | `operator-decided` | The pre-pilot burden and workload gates passed on 2026-07-14 | Brandon answered yes after the four-session/65-minute/113-decision breakdown was explained | Stop before Phase 0 | High | Brandon withdraws or lowers the workload authorization |
 | `operator-decided` | Fable 5 is executive orchestrator and project manager for this spectral automation product | Brandon assigned ownership on 2026-07-14 | Codex or an implementation agent silently managing architecture | High | Brandon reassigns the role |
-| `operator-decided` | All work uses Claude CLI tmux seats; Fable never spawns internal subagents | Brandon corrected the execution topology on 2026-07-14 | Fable Agent-tool fan-out; Codex execution | High | Brandon changes the operating model |
+| `operator-decided` | Execution rounds use Claude CLI tmux seats; deep reads/adversarial reviews may use cheaper-tier non-Fable subagents; never Fable-tier subagents | Brandon corrected the execution topology on 2026-07-14 and amended it on 2026-07-15 to allow non-Fable subagent fan-out for reads/reviews | Fable-tier subagent fan-out; Codex execution | High | Brandon changes the operating model |
 | `operator-decided` | SOL4's 35-concept catalog is durable creative product input | Brandon supplied the exact capture on 2026-07-14 | Ignore the catalog; treat it as accepted architecture | High | Brandon replaces or retires the catalog |
 | `proposed` | Per-axis PASS and integrated all-axis PASS | Prevents family success from licensing unrelated fields | Blended score | High | Pilot shows an axis should be removed entirely |
 | `proposed` | Whole-track stable family remains unproven | Human and method unit is exactly two shown moments | Presume one track family | High | A later whole-track protocol |
@@ -1188,8 +1190,9 @@ ceiling. These decisions permit specification work only.
 
 Every phase below is **`proposed`** and unauthorized by this review. Each needs a
 separate bounded spec and explicit dispatch. **`operator-decided`** Every authorized
-round is executed in a named Claude CLI tmux session under Fable's management; Fable
-does not use its Agent tool or spawn internal subagents.
+execution round runs in a named Claude CLI tmux session under Fable's management; deep
+reads and adversarial reviews may run on cheaper-tier non-Fable Claude subagents
+(amended 2026-07-15); Fable never spawns Fable-tier subagents.
 
 ### Phase 0 — Protocol package
 
@@ -1301,8 +1304,9 @@ does not use its Agent tool or spawn internal subagents.
 manager handoff in
 `docs/prompts/active/spectral_ai_phase0_fable_manager_kickoff_2026_07_14.md`. Fable may
 verify this review and author one Claude-CLI-executable Phase-0 protocol specification.
-Any later work is dispatched through named Claude CLI tmux sessions, never Fable's Agent
-tool or internal subagents. Fable may
+Any later execution work is dispatched through named Claude CLI tmux sessions; deep
+reads and adversarial reviews may use cheaper-tier non-Fable Claude subagents (amended
+2026-07-15); Fable-tier subagents are never spawned. Fable may
 not implement the protocol, dispatch pilot execution, or widen the product scope.
 
 **`proposed`** Do not install or run an embedding, run stems, fill the remaining
