@@ -52,6 +52,10 @@ body {
   color: var(--text);
   font: 14px/1.4 var(--font-ui);
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  max-height: 100dvh;
 }
 body.shell-boot .topbar,
 body.shell-boot .stage,
@@ -117,19 +121,34 @@ button.action { width: 100%; min-height: 44px; font-weight: 600; }
 
 /* —— top bar —— */
 .topbar {
-  height: var(--topbar-h);
+  flex: 0 0 auto;
+  min-height: var(--topbar-h);
+  height: auto;
   display: grid;
-  grid-template-columns: minmax(140px, 1fr) auto minmax(140px, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: var(--sp-3);
-  padding: 0 var(--sp-4);
+  padding: 6px var(--sp-4);
   border-bottom: 1px solid var(--border);
   background: var(--surface);
+  z-index: 20;
 }
-.brand { display: flex; flex-direction: column; gap: 0; min-width: 0; }
+.brand {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  min-width: 0;
+}
+.brand .eyebrow {
+  flex: 0 0 100%;
+  line-height: 1;
+}
 .brand h1 {
   margin: 0; font-size: 15px; font-weight: 700; letter-spacing: -.01em;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  min-width: 0;
 }
 .brand h1::before {
   content: ""; display: inline-block; width: 7px; height: 7px;
@@ -138,9 +157,9 @@ button.action { width: 100%; min-height: 44px; font-weight: 600; }
 }
 .route-tabs {
   display: inline-flex; align-items: center; gap: 2px;
-  margin-top: 4px; padding: 2px;
+  margin-top: 0; padding: 2px;
   background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
-  width: fit-content;
+  width: fit-content; flex: 0 0 auto;
 }
 .route-tabs a {
   color: var(--text-dim); text-decoration: none; min-height: 28px;
@@ -148,7 +167,7 @@ button.action { width: 100%; min-height: 44px; font-weight: 600; }
   border-radius: 4px; font-size: 11px; font-weight: 700; letter-spacing: .04em;
 }
 .route-tabs a.active {
-  background: var(--surface-3, #1c222b); color: var(--text);
+  background: var(--surface-3); color: var(--text);
 }
 .device-facts {
   display: flex; align-items: center; gap: 10px;
@@ -189,7 +208,7 @@ button.action { width: 100%; min-height: 44px; font-weight: 600; }
 }
 
 .help-popover {
-  position: absolute; top: calc(var(--topbar-h) + 8px); right: 12px; z-index: 40;
+  position: absolute; top: 56px; right: 12px; z-index: 40;
   width: min(320px, calc(100vw - 24px));
   padding: var(--sp-4);
   background: var(--surface-2);
@@ -212,12 +231,14 @@ kbd {
 .banner.error { color: #ffc4c2; background: #3a1514; border-color: #6b2a28; }
 .banner.warn { color: #f5d89a; background: #3a2e12; border-color: #6b5420; }
 
-/* —— app grid: stage + sidecar, zero page scroll ≥1280 —— */
+/* —— app grid: stage + sidecar; desktop side-by-side from ≥900px —— */
 .app-grid {
+  flex: 1 1 auto;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--sidecar-w);
-  height: calc(100dvh - var(--topbar-h));
+  grid-template-columns: minmax(0, 1fr) minmax(300px, var(--sidecar-w));
   min-height: 0;
+  height: auto;
+  overflow: hidden;
 }
 body.sidecar-collapsed .app-grid {
   grid-template-columns: minmax(0, 1fr) var(--rail-w);
@@ -228,7 +249,8 @@ body.sidecar-collapsed .sidecar { width: var(--rail-w); }
 .stage {
   position: relative;
   display: grid;
-  grid-template-rows: minmax(0, 1fr) var(--transport-h);
+  /* toolbar overlay stays absolute; canvas + HUD strip + transport are reserved rows */
+  grid-template-rows: minmax(0, 1fr) auto var(--transport-h);
   min-width: 0; min-height: 0;
   padding: var(--sp-2);
   gap: var(--sp-2);
@@ -261,10 +283,13 @@ body.sidecar-collapsed .sidecar { width: var(--rail-w); }
 }
 /* U-7: only trap gestures while layout editing is unlocked + Layout tab active */
 .canvas-wrap.edit-gestures canvas { touch-action: none; }
-.canvas-hud {
-  position: absolute; left: 8px; right: 8px; bottom: 8px;
+
+/* HUD lives BELOW the canvas (never over the room drawing). */
+.stage-hud {
+  flex: 0 0 auto;
   display: flex; flex-direction: column; gap: 4px;
-  pointer-events: none; max-width: calc(100% - 16px);
+  min-width: 0; min-height: 0;
+  padding: 0 2px;
 }
 .canvas-overlay {
   display: flex; justify-content: space-between; gap: 8px; min-width: 0;
@@ -275,18 +300,6 @@ body.sidecar-collapsed .sidecar { width: var(--rail-w); }
 }
 #marker-label { flex: 1 1 auto; }
 #time-label { flex: 0 0 auto; max-width: 40%; }
-.room-size-chip {
-  align-self: center;
-  pointer-events: auto;
-  cursor: pointer;
-  font-family: var(--font-data);
-  letter-spacing: .02em;
-  background: color-mix(in srgb, var(--bg) 75%, transparent);
-}
-.room-size-chip:hover, .room-size-chip:focus-visible {
-  border-color: var(--cyan, #3dd6c6);
-  color: var(--text);
-}
 .stage-provenance {
   display: flex; gap: 6px; flex-wrap: wrap; min-width: 0;
 }
@@ -295,6 +308,8 @@ body.sidecar-collapsed .sidecar { width: var(--rail-w); }
   background: color-mix(in srgb, var(--bg) 70%, transparent);
   max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+/* Short stages: drop provenance chips (copied into ? help). */
+.stage.hud-compact .stage-provenance { display: none; }
 
 .transport {
   display: grid;
@@ -451,42 +466,41 @@ body.sidecar-collapsed .sidecar { width: var(--rail-w); }
 
 .sheet-handle { display: none; }
 
-/* —— tablet / phone —— */
-@media (max-width: 1279px) {
-  .app-grid {
-    grid-template-columns: 1fr;
-    grid-template-rows: minmax(0, 1fr) auto;
-    height: calc(100dvh - var(--topbar-h));
-    overflow: hidden;
-  }
-  .sidecar {
-    grid-template-columns: 1fr;
-    border-left: 0; border-top: 1px solid var(--border);
-  }
-  .sidecar-rail { display: none; }
-  body.sidecar-collapsed .app-grid { grid-template-columns: 1fr; }
-  body.sidecar-collapsed .sidecar-main { display: flex; }
+/* Mid widths (900–1279): keep desktop stage+sidecar; shrink chrome only. */
+@media (max-width: 1279px) and (min-width: 900px) {
   .device-facts { display: none; }
-  .topbar { grid-template-columns: 1fr auto; }
+  .brand .eyebrow { display: none; }
+  .topbar { grid-template-columns: minmax(0, 1fr) auto; }
+  .app-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(300px, min(360px, 34vw));
+  }
 }
 
+/* Phone / narrow: sheet collapse only below 900px. */
 @media (max-width: 899px) {
   html, body { height: 100%; overflow: hidden; }
   body { overflow: hidden; }
   .topbar { height: auto; min-height: var(--topbar-h); padding: 8px 12px; }
+  .brand .eyebrow { display: none; }
   .top-actions .chip:not(.ok):not(.warn) { display: none; }
+  .device-facts { display: none; }
   .app-grid {
-    height: calc(100dvh - var(--topbar-h));
+    grid-template-columns: 1fr;
     grid-template-rows: minmax(0, 1fr) auto;
     overflow: hidden;
   }
-  .stage { min-height: 0; padding: 8px; }
   .sidecar {
     display: flex; flex-direction: column;
+    grid-template-columns: 1fr;
+    border-left: 0; border-top: 1px solid var(--border);
     border-radius: 16px 16px 0 0;
     max-height: 60dvh;
     transition: max-height var(--ease);
   }
+  .sidecar-rail { display: none; }
+  body.sidecar-collapsed .app-grid { grid-template-columns: 1fr; }
+  body.sidecar-collapsed .sidecar-main { display: flex; }
+  .stage { min-height: 0; padding: 8px; }
   .sheet-handle {
     display: block; padding: 6px 12px 0; text-align: center; flex: 0 0 auto;
   }

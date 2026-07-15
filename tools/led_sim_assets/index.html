@@ -46,6 +46,7 @@
     <div><dt><kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>Z</kbd></dt><dd>Undo layout edit (Layout tab only)</dd></div>
   </dl>
   <p class="fine-print">Editing gestures are off while Layout is locked. Undo only applies on the Layout tab.</p>
+  <p class="fine-print mono" id="help-provenance" hidden></p>
 </div>
 
 <div id="name-dialog" class="help-popover name-dialog" hidden role="dialog" aria-modal="true" aria-labelledby="name-dialog-title">
@@ -86,18 +87,15 @@
 
     <div class="canvas-wrap" id="canvas-wrap">
       <canvas id="fixture-canvas" width="1600" height="900" role="img" aria-label="H612D room view with strip path and 360 emitters"></canvas>
-      <div class="canvas-hud">
-        <div class="canvas-overlay">
-          <span id="marker-label">Choose a look and render</span>
-          <span id="time-label" class="mono">0.000 s</span>
-        </div>
-        <button type="button" id="room-size-chip" class="chip mono room-size-chip" title="Edit room size on the Layout tab" hidden>
-          —
-        </button>
-        <div class="stage-provenance">
-          <span id="pipeline-badge" class="chip mono">SOURCE · —</span>
-          <span id="timing-readout" class="chip mono">TIMING · —</span>
-        </div>
+    </div>
+    <div class="stage-hud" id="stage-hud">
+      <div class="canvas-overlay">
+        <span id="marker-label">Choose a look and render</span>
+        <span id="time-label" class="mono">0.000 s</span>
+      </div>
+      <div class="stage-provenance" id="stage-provenance">
+        <span id="pipeline-badge" class="chip mono">SOURCE · —</span>
+        <span id="timing-readout" class="chip mono">TIMING · —</span>
       </div>
     </div>
 

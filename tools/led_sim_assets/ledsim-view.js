@@ -830,29 +830,62 @@ export function createLedSimView(canvas, initialProfile) {
     );
   }
 
+  let roomSizeHit = null;
+
   function drawRoomLabels({layout, transform, boundaries, junction, start, end, roomCx, roomCy}) {
     const placed = [];
     const font = "700 11px ui-sans-serif, -apple-system, sans-serif";
     const tickFont = "600 10px ui-monospace, SFMono-Regular, Menlo, monospace";
+    const edgePad = 6;
+    roomSizeHit = null;
 
     function measure(text, useFont) {
       ctx.font = useFont;
       const metrics = ctx.measureText(text);
-      const w = metrics.width;
-      const h = 12;
-      return {w, h};
+      return {w: metrics.width, h: 12};
+    }
+
+    function clampBox(box) {
+      const maxW = viewWidth - 2 * edgePad;
+      const maxH = viewHeight - 2 * edgePad;
+      if (box.w > maxW || box.h > maxH) return null;
+      return {
+        x: Math.max(edgePad, Math.min(viewWidth - box.w - edgePad, box.x)),
+        y: Math.max(edgePad, Math.min(viewHeight - box.h - edgePad, box.y)),
+        w: box.w,
+        h: box.h,
+      };
+    }
+
+    function tryDrawFree(text, preferred, options = {}) {
+      const useFont = options.font || font;
+      const size = measure(text, useFont);
+      let box = clampBox({x: preferred.x, y: preferred.y, w: size.w, h: size.h});
+      if (!box) return false;
+      if (options.align === "center") {
+        box = clampBox({x: preferred.x - size.w / 2, y: preferred.y - size.h / 2, w: size.w, h: size.h});
+        if (!box) return false;
+      }
+      if (placed.some((other) => boxesOverlap(box, other))) return false;
+      placed.push(box);
+      ctx.font = useFont;
+      ctx.fillStyle = options.color || "#4dd8e6";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      ctx.fillText(text, box.x, box.y);
+      return box;
     }
 
     function tryDraw(text, anchor, arcMm, options = {}) {
       const useFont = options.font || font;
       const size = measure(text, useFont);
+      if (size.w > viewWidth - 2 * edgePad) return false;
       const tangent = pathTangentAt(layout, arcMm);
       // mm y-up → screen y-down: flip tangent dy for screen-space normals.
       const screenTangent = {dx: tangent.dx, dy: -tangent.dy};
       let screenNormal = outwardNormal(screenTangent, anchor, roomCx, roomCy);
       const offset = options.offset ?? 14;
       const stack = options.stack || 0;
-      const pad = 6;
 
       function placeWithNormal(normal) {
         let x = anchor.x + normal.nx * offset;
@@ -867,21 +900,20 @@ export function createLedSimView(canvas, initialProfile) {
       }
 
       let box = placeWithNormal(screenNormal);
-      // Prefer flipping inward over clipping at the canvas edge.
       const wouldClip = (
-        box.x < pad
-        || box.y < pad
-        || box.x + box.w > viewWidth - pad
-        || box.y + box.h > viewHeight - pad
+        box.x < edgePad
+        || box.y < edgePad
+        || box.x + box.w > viewWidth - edgePad
+        || box.y + box.h > viewHeight - edgePad
       );
       if (wouldClip) {
         const inward = {nx: -screenNormal.nx, ny: -screenNormal.ny};
         const flipped = placeWithNormal(inward);
         const flippedClips = (
-          flipped.x < pad
-          || flipped.y < pad
-          || flipped.x + flipped.w > viewWidth - pad
-          || flipped.y + flipped.h > viewHeight - pad
+          flipped.x < edgePad
+          || flipped.y < edgePad
+          || flipped.x + flipped.w > viewWidth - edgePad
+          || flipped.y + flipped.h > viewHeight - edgePad
         );
         if (!flippedClips || (
           Math.min(flipped.x, viewWidth - (flipped.x + flipped.w))
@@ -891,8 +923,8 @@ export function createLedSimView(canvas, initialProfile) {
           screenNormal = inward;
         }
       }
-      box.x = Math.max(pad, Math.min(viewWidth - box.w - pad, box.x));
-      box.y = Math.max(pad, Math.min(viewHeight - box.h - pad, box.y));
+      box = clampBox(box);
+      if (!box) return false;
       if (placed.some((other) => boxesOverlap(box, other))) return false;
       placed.push(box);
       ctx.font = useFont;
@@ -903,7 +935,7 @@ export function createLedSimView(canvas, initialProfile) {
       return true;
     }
 
-    // Priority: center > start > end > ticks
+    // Priority: center > start > end > ticks > room-size (lowest — drops first)
     if (junction) {
       tryDraw("center · control box · 24.6 ft", junction, H612D_JUNCTION_MM, {
         color: "#4dd8e6", offset: 16,
@@ -938,13 +970,27 @@ export function createLedSimView(canvas, initialProfile) {
       ctx.lineTo(point.x, point.y + 5);
       ctx.stroke();
       ctx.beginPath();
-      const label = `${String(segment).padStart(2, "0")} · ${formatLengthMm(segment * H612D_SEGMENT_MM)}`;
+      // Feet-only tick text — shorter so mid-width canvases can clamp without clipping.
+      const feet = (segment * H612D_SEGMENT_MM / MM_PER_FOOT).toFixed(1);
+      const label = `${String(segment).padStart(2, "0")} · ${feet} ft`;
       tryDraw(label, point, segment * H612D_SEGMENT_MM, {
         color: "rgba(195,202,220,.85)",
         font: tickFont,
         offset: 12,
       });
     }
+
+    // Room size near bottom wall (mm y=0), lowest label priority.
+    const wFt = (transform.roomW / MM_PER_FOOT).toFixed(1);
+    const hFt = (transform.roomH / MM_PER_FOOT).toFixed(1);
+    const roomText = `${wFt} × ${hFt} ft`;
+    const bottom = mmToCanvas(transform.roomW / 2, Math.min(80, transform.roomH * 0.04), transform);
+    const roomBox = tryDrawFree(roomText, {x: bottom.x, y: bottom.y}, {
+      align: "center",
+      color: "rgba(77, 216, 230, .9)",
+      font: tickFont,
+    });
+    if (roomBox) roomSizeHit = roomBox;
   }
 
   function draw(frame) {
