@@ -258,7 +258,7 @@ class SessionRunner:
     # --- durable actions ------------------------------------------------------
     def play(self, card_id: str):
         """Append a durable first-playback row (idempotent per card)."""
-        if any(pb["card_id"] == card_id and pb.get("kind") == "playback" for pb in self.playbacks):
+        if any(pb.get("card_id") == card_id and pb.get("kind") == "playback" for pb in self.playbacks):
             return
         row = {"schema_version": SCHEMA_VERSION, "pilot_seed": self.pilot_seed, "kind": "playback",
                "card_id": card_id, "utc": self.clock(), "session_index": self.current_session,

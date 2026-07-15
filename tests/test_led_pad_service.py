@@ -827,6 +827,16 @@ class SimRoomHookupRouteTests(unittest.TestCase):
             self.assertIn("profile_error", payload)
             self.assertIn("led_sim_profile.json", payload["profile_error"])
 
+    def test_lab_room_profile_refreshes_on_preview(self) -> None:
+        """AWR-250: Lab must re-fetch /api/sim/profile on Preview + Room toggle (no forever memo)."""
+        root = Path(__file__).resolve().parents[1]
+        lab_js = (root / "tools" / "led_pad_assets" / "lab.js").read_text(encoding="utf-8")
+        self.assertIn("PROFILE_TTL_MS", lab_js)
+        self.assertIn("layoutFingerprint", lab_js)
+        self.assertIn("ensureRoomView({refresh: true})", lab_js)
+        self.assertIn("ensureRoomProfile({force:", lab_js)
+        self.assertNotIn("fetched once per page load", lab_js)
+
 
 if __name__ == "__main__":
     unittest.main()

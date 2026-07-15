@@ -165,11 +165,12 @@
             <select id="layout-slot" aria-label="Selected layout"></select>
           </label>
           <div class="button-row wrap layout-slot-actions">
-            <button type="button" id="layout-use" title="Put the selected layout on the stage">Use</button>
+            <button type="button" id="layout-use" title="Put the selected layout on the stage and save it as active">Use</button>
             <button type="button" id="layout-save-as" title="Duplicate the active layout">Save as…</button>
             <button type="button" id="layout-rename" title="Rename the selected layout">Rename</button>
             <button type="button" id="layout-delete" title="Delete the selected layout (not while it is active)">Delete</button>
           </div>
+          <p class="fine-print" id="layout-active-hint" hidden></p>
         </div>
         <div class="panel-head-row">
           <span class="panel-label">Strip layout</span>

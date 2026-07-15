@@ -228,6 +228,29 @@ class OperatorOverrideTests(unittest.TestCase):
             # durable: a fresh runner reloads the override row without complaint
             self.assertEqual(sum(pb.get("kind") == "override" for pb in runner(Path(d), Clock()).playbacks), 1)
 
+    def test_override_row_survives_play_and_resume(self):
+        """P1 field crash guard: an override row carries no card_id, so play()/
+        resume() scanning the ledger must tolerate it (not KeyError). Recovery
+        still lands on the first unanswered card."""
+        with tempfile.TemporaryDirectory() as d:
+            ws = Path(d)
+            r = runner(ws, Clock(), date="D1")
+            r.start_session("A")
+            r.play("c0")
+            r.commit("c0", "state", "not_genuine", "not_genuine", recognized=False, response_seconds=1.0)
+            # A second same-day NEW session needs the operator override, which
+            # writes a card_id-less override row into playbacks.jsonl.
+            r.start_session("P1", operator_override_one_per_day=True)
+
+            r2 = runner(ws, Clock(), date="D1")   # fresh reload carries the override row
+            self.assertTrue(any(pb.get("kind") == "override" for pb in r2.playbacks))
+            r2.start_session("P1", resume=True)
+            r2.play("c1")                          # play() scans the override row -> no crash
+            r2.commit("c1", "state", "not_genuine", "not_genuine", recognized=False, response_seconds=1.0)
+            state = r2.resume()                    # resume() scans the override row -> no crash
+            self.assertEqual(state.first_unanswered_index, 2)   # c0,c1 closed -> c2 next
+            self.assertEqual(state.re_exposed_card_ids, [])
+
     def test_override_does_not_touch_113_ceiling(self):
         with tempfile.TemporaryDirectory() as d:
             r = self._committed_runner(d)

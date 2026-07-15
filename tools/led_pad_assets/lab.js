@@ -660,14 +660,30 @@
   const PREVIEW_LEN_KEY = "labPreviewLength";
   let previewLengthMode = "full"; // "8" | "16" | "full"
   // AWR-245: Strip | Room toggle. Room reuses the sim view module as-is (no fork).
+  // AWR-250: profile is re-fetched on Preview + Room toggle (short TTL, not forever).
   const PREVIEW_MODE_KEY = "labPreviewMode";
+  const PROFILE_TTL_MS = 2000;
   const roomView = {
     mode: "strip", // "strip" | "room"
-    profile: null, // fetched once per page load
+    profile: null,
+    profileFetchedAt: 0,
     profilePromise: null,
+    layoutFingerprint: "",
     view: null,
     unavailable: false,
   };
+  function layoutFingerprint(profile) {
+    if (!profile || typeof profile !== "object") return "";
+    const name = profile.active_layout;
+    const entry = (profile.layouts && typeof profile.layouts === "object")
+      ? profile.layouts[name]
+      : null;
+    try {
+      return JSON.stringify({active_layout: name, entry: entry || null});
+    } catch (_) {
+      return String(name || "");
+    }
+  }
   function setPreviewHint(show) {
     const hint = $("previewHint");
     if (hint) hint.hidden = !show;
@@ -719,46 +735,64 @@
       try { roomView.view.destroy(); } catch (_) { /* fail-soft */ }
     }
     roomView.view = null;
+    roomView.layoutFingerprint = "";
   }
-  async function ensureRoomProfile() {
-    if (roomView.profile) return roomView.profile;
-    if (!roomView.profilePromise) {
-      roomView.profilePromise = fetch("/api/sim/profile")
-        .then((r) => r.json())
-        .then((data) => {
-          if (!data || !data.ok || !data.profile) {
-            throw new Error((data && data.error) || "sim profile unavailable");
-          }
-          roomView.profile = data.profile;
-          return roomView.profile;
-        })
-        .catch((err) => {
-          roomView.unavailable = true;
-          roomView.profilePromise = null;
-          throw err;
-        });
+  async function fetchRoomProfile() {
+    const data = await fetch("/api/sim/profile").then((r) => r.json());
+    if (!data || !data.ok || !data.profile) {
+      throw new Error((data && data.error) || "sim profile unavailable");
     }
+    roomView.profile = data.profile;
+    roomView.profileFetchedAt = Date.now();
+    roomView.unavailable = false;
+    return roomView.profile;
+  }
+  async function ensureRoomProfile({force = false} = {}) {
+    const freshEnough = roomView.profile
+      && !force
+      && (Date.now() - roomView.profileFetchedAt) < PROFILE_TTL_MS;
+    if (freshEnough) return roomView.profile;
+    if (!force && roomView.profilePromise) return roomView.profilePromise;
+    roomView.profilePromise = fetchRoomProfile()
+      .catch((err) => {
+        // Fail-soft: keep last good profile when we have one; else mark unavailable.
+        roomView.profilePromise = null;
+        if (!roomView.profile) {
+          roomView.unavailable = true;
+          throw err;
+        }
+        return roomView.profile;
+      })
+      .finally(() => {
+        roomView.profilePromise = null;
+      });
     return roomView.profilePromise;
   }
-  async function ensureRoomView() {
-    if (roomView.view) return roomView.view;
+  async function ensureRoomView({refresh = false} = {}) {
     const canvas = $("previewRoom");
     if (!canvas) throw new Error("room canvas missing");
     const [mod, profile] = await Promise.all([
       import("/static/sim/ledsim-view.js"),
-      ensureRoomProfile(),
+      ensureRoomProfile({force: refresh}),
     ]);
     if (!mod || typeof mod.createLedSimView !== "function") {
       throw new Error("createLedSimView missing");
     }
+    const fp = layoutFingerprint(profile);
+    if (roomView.view && roomView.layoutFingerprint === fp) {
+      return roomView.view;
+    }
+    destroyRoomView();
     roomView.view = mod.createLedSimView(canvas, profile);
+    roomView.layoutFingerprint = fp;
     return roomView.view;
   }
   async function setPreviewMode(mode) {
     let next = mode === "room" ? "room" : "strip";
     if (next === "room" && !roomView.unavailable) {
       try {
-        await ensureRoomView();
+        // AWR-250: always re-check disk when switching into Room.
+        await ensureRoomView({refresh: true});
       } catch (_) {
         next = "strip";
         roomView.unavailable = true;
@@ -821,9 +855,9 @@
     const canvas = $("previewStrip");
     sizePreviewCanvas();
     canvas.width = canvas.clientWidth || 600;
-    // Room mode: ensure the sim view exists before the raf clock starts (fail-soft → strip).
+    // Room mode: refresh sim profile so active_layout changes from Sim show up (AWR-250).
     if (roomView.mode === "room" && !roomView.unavailable) {
-      try { await ensureRoomView(); } catch (_) {
+      try { await ensureRoomView({refresh: true}); } catch (_) {
         roomView.unavailable = true;
         roomView.mode = "strip";
         destroyRoomView();

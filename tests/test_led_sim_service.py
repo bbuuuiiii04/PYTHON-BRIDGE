@@ -340,6 +340,60 @@ class LedSimServiceTests(unittest.TestCase):
         self.assertEqual(disk["active_layout"], "Home")
         self.assertNotIn("Venue Test", disk["layouts"])
 
+    def test_use_persists_active_layout_without_leaking_unsaved_knobs(self) -> None:
+        """AWR-250: Use = GET disk → set active_layout → POST; local knob edits stay local."""
+        example = json.loads(
+            (Path(__file__).resolve().parents[1] / "config" / "led_sim_profile.example.json").read_text()
+        )
+        home = dict(example["layouts"]["Home"])
+        venue = dict(home)
+        venue["preset"] = "snake"
+        example["layouts"] = {"Home": home, "Venue": venue}
+        example["active_layout"] = "Home"
+        example["gamma"] = 1.0
+        with _server(self.profile_path) as port:
+            status, seeded = _request(port, "POST", "/api/profile", example)
+            self.assertEqual(status, 200, seeded)
+            self.assertEqual(seeded["profile"]["active_layout"], "Home")
+            self.assertEqual(seeded["profile"]["gamma"], 1.0)
+
+            # Simulate Use: fetch-fresh disk profile, flip pointer only, POST back.
+            # A local unsaved gamma=2.2 edit is intentionally NOT included.
+            status, fresh = _request(port, "GET", "/api/profile")
+            self.assertEqual(status, 200)
+            disk = json.loads(json.dumps(fresh["profile"]))
+            local_gamma_edit = 2.2  # stays in the browser only
+            self.assertNotEqual(local_gamma_edit, disk["gamma"])
+            disk["active_layout"] = "Venue"
+            status, after_use = _request(port, "POST", "/api/profile", disk)
+            self.assertEqual(status, 200, after_use)
+            self.assertTrue(after_use["ok"])
+            self.assertEqual(after_use["profile"]["active_layout"], "Venue")
+            self.assertEqual(after_use["profile"]["gamma"], 1.0)
+
+            status, fetched = _request(port, "GET", "/api/profile")
+            self.assertEqual(status, 200)
+            self.assertEqual(fetched["profile"]["active_layout"], "Venue")
+            self.assertEqual(fetched["profile"]["gamma"], 1.0)
+            self.assertEqual(set(fetched["profile"]["layouts"]), {"Home", "Venue"})
+
+        on_disk = json.loads(self.profile_path.read_text(encoding="utf-8"))
+        self.assertEqual(on_disk["active_layout"], "Venue")
+        self.assertEqual(on_disk["gamma"], 1.0)
+        self.assertNotEqual(on_disk["gamma"], local_gamma_edit)
+
+    def test_use_action_wires_persist_helper_and_hint(self) -> None:
+        """AWR-250: Use calls useSelectedLayout; hint copy present when picker ≠ active."""
+        root = Path(__file__).resolve().parents[1]
+        js = (root / "tools" / "led_sim_assets" / "sim-app.js").read_text(encoding="utf-8")
+        html = (root / "tools" / "led_sim_assets" / "index.html").read_text(encoding="utf-8")
+        self.assertIn("async function useSelectedLayout(", js)
+        self.assertIn('api("GET", "/api/profile")', js)
+        self.assertIn("diskProfile.active_layout = name", js)
+        self.assertIn("useSelectedLayout()", js)
+        self.assertIn('id="layout-active-hint"', html)
+        self.assertIn("Press Use to make this the active layout", js)
+
     def test_delete_ui_uses_inpage_confirm_not_window_confirm(self) -> None:
         """AWR-246 third pass: Delete must use DOM confirm — window.confirm is silent-false in e2e."""
         root = Path(__file__).resolve().parents[1]

@@ -511,6 +511,30 @@ function selectedLayoutName() {
   return active;
 }
 
+function syncLayoutActiveHint({flashSaved = false} = {}) {
+  const hint = $("layout-active-hint");
+  if (!hint || !state.profile) return;
+  if (flashSaved) {
+    hint.textContent = "Active layout saved";
+    hint.hidden = false;
+    hint.dataset.flashUntil = String(Date.now() + 1800);
+    clearTimeout(syncLayoutActiveHint._timer);
+    syncLayoutActiveHint._timer = setTimeout(() => syncLayoutActiveHint(), 1800);
+    return;
+  }
+  if (hint.dataset.flashUntil && Date.now() < Number(hint.dataset.flashUntil)) return;
+  delete hint.dataset.flashUntil;
+  const selected = selectedLayoutName();
+  const active = state.profile.active_layout;
+  if (selected !== active) {
+    hint.textContent = "Press Use to make this the active layout";
+    hint.hidden = false;
+  } else {
+    hint.textContent = "";
+    hint.hidden = true;
+  }
+}
+
 function syncLayoutPicker() {
   const select = $("layout-slot");
   if (!select || !state.profile) return;
@@ -530,6 +554,7 @@ function syncLayoutPicker() {
   if (saveAs) saveAs.disabled = names.length >= MAX_LAYOUTS;
   const use = $("layout-use");
   if (use) use.disabled = selected === active;
+  syncLayoutActiveHint();
 }
 
 function layoutNameError(name, {allowExisting = false, allowName = null} = {}) {
@@ -642,6 +667,57 @@ function switchActiveLayout(name) {
   pushProfileToView();
   syncUndoButton();
   refreshPresetThumbs();
+  syncLayoutPicker();
+}
+
+/**
+ * AWR-250: Use persists only active_layout to disk.
+ * Fetch the saved profile, flip the pointer, POST it back — never ship unsaved
+ * local layout geometry or calibration knobs. Then reconcile the local active
+ * pointer and refresh the saved snapshot for dirty badges.
+ */
+async function useSelectedLayout() {
+  ensureLayoutLibrary();
+  const name = selectedLayoutName();
+  if (!state.profile.layouts[name]) {
+    syncLayoutPicker();
+    return;
+  }
+  if (name === state.profile.active_layout
+      && state.savedProfile
+      && state.savedProfile.active_layout === name) {
+    syncLayoutPicker();
+    return;
+  }
+
+  const fresh = await api("GET", "/api/profile");
+  const diskProfile = clone(fresh.profile);
+  ensureLayoutLibrary(diskProfile);
+  if (!diskProfile.layouts[name]) {
+    showError(`“${name}” is not on disk yet — Save layout first, then Use`);
+    syncLayoutPicker();
+    return;
+  }
+  diskProfile.active_layout = name;
+  const result = await api("POST", "/api/profile", diskProfile);
+
+  // Reconcile local active pointer only — keep unsaved local edits.
+  state.layoutSelection = name;
+  state.profile.active_layout = name;
+  state.layoutUndoStack = [];
+  const preset = activeEntry().preset;
+  if (preset === "snake" || preset === "perimeter") state.lastChosenPreset = preset;
+  state.savedProfile = clone(result.profile);
+  ensureLockDefaults(state.savedProfile);
+  state.catalog.profile_warnings = result.warnings || [];
+  view?.invalidateLayout?.();
+  pushProfileToView();
+  syncUndoButton();
+  refreshPresetThumbs();
+  markDirty();
+  syncLockUi();
+  syncLayoutPicker();
+  syncLayoutActiveHint({flashSaved: true});
 }
 
 async function saveAsLayout() {
@@ -893,7 +969,7 @@ function wireLayoutEditor() {
     syncLayoutPicker();
   });
   $("layout-use")?.addEventListener("click", () => {
-    switchActiveLayout(selectedLayoutName());
+    useSelectedLayout().catch(() => { /* api() already surfaced the error */ });
   });
   $("layout-save-as")?.addEventListener("click", () => { saveAsLayout(); });
   $("layout-rename")?.addEventListener("click", () => { renameSelectedLayout(); });
