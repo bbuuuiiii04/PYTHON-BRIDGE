@@ -8,7 +8,8 @@ validation_scope: >
   offline production-runner frame composition, room polyline layout with
   arc-length LED placement, named layouts library (schema v2) with Home/Venue
   style isolation, picker Use/Delete targeting selected (refuse active/last
-  via error banner; in-page confirm dialog — not window.confirm), perimeter/snake/custom presets, layout and
+  via error banner; in-page confirm dialog — not window.confirm), Pad|Lab|Sim
+  cross-nav + stage room-size chip (AWR-248), perimeter/snake/custom presets, layout and
   calibration lockers, timestamp-held playback, calibration sequence v2,
   profile evidence guards, and the local web service are software-tested.
   Optics (glow/bleed/gamma) remain uncalibrated assumptions. Generated timing
@@ -37,8 +38,13 @@ Round 3 rebuilds the page as a **lighting-console shell**: stage-first room
 canvas, collapsible right sidecar (Play / Layout / Calibrate tabs), bottom
 transport, layout and calibration lockers, and Archivo + mono numeric chrome.
 Round 4 polishes the lockers (persist + stage padlock chip), the phone bottom
-sheet (zero page scroll), tablist semantics, and contrast. Pad/lab get the same
-language in a later round — this change does not touch pad or lab files.
+sheet (zero page scroll), tablist semantics, and contrast.
+
+**AWR-248** adds the shared **Pad | Lab | Sim** route tabs in the top bar
+(plain links: pad `:8766`, lab `:8766/lab`, sim `:8767` — canonical defaults)
+and a stage **room-size chip** near the bottom of the room view
+(e.g. `17.1 × 7.5 ft`). Clicking the chip opens the Layout tab and focuses
+Room width so the size is editable where the operator is already looking.
 
 Each group of six dots receives one RGB command because the H612D exposes 60
 groups, not 360 separately controllable pixels. Screen optics (gamma, gains,

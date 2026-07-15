@@ -275,6 +275,18 @@ body.sidecar-collapsed .sidecar { width: var(--rail-w); }
 }
 #marker-label { flex: 1 1 auto; }
 #time-label { flex: 0 0 auto; max-width: 40%; }
+.room-size-chip {
+  align-self: center;
+  pointer-events: auto;
+  cursor: pointer;
+  font-family: var(--font-data);
+  letter-spacing: .02em;
+  background: color-mix(in srgb, var(--bg) 75%, transparent);
+}
+.room-size-chip:hover, .room-size-chip:focus-visible {
+  border-color: var(--cyan, #3dd6c6);
+  color: var(--text);
+}
 .stage-provenance {
   display: flex; gap: 6px; flex-wrap: wrap; min-width: 0;
 }

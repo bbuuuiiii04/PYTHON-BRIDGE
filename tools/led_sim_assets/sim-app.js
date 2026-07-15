@@ -396,10 +396,13 @@ function syncLayoutForm() {
   const entry = ensureProfileLayout();
   const widthMm = Number(entry.room_mm[0]);
   const heightMm = Number(entry.room_mm[1]);
-  $("room-width-ft").value = String(Math.round(mmToFeet(widthMm) * 10) / 10);
-  $("room-height-ft").value = String(Math.round(mmToFeet(heightMm) * 10) / 10);
+  const widthFt = Math.round(mmToFeet(widthMm) * 10) / 10;
+  const heightFt = Math.round(mmToFeet(heightMm) * 10) / 10;
+  $("room-width-ft").value = String(widthFt);
+  $("room-height-ft").value = String(heightFt);
   $("room-width-mm-hint").textContent = `${Math.round(widthMm)} mm`;
   $("room-height-mm-hint").textContent = `${Math.round(heightMm)} mm`;
+  syncRoomSizeChip(widthFt, heightFt);
   syncPresetCards();
   updatePathLengthStatus();
   markDirty();
@@ -421,6 +424,23 @@ function syncLayoutForm() {
       `${outside} layout point${outside === 1 ? "" : "s"} outside room bounds (±${tol} mm tolerance)`,
     ]);
   }
+}
+
+function syncRoomSizeChip(widthFt, heightFt) {
+  const chip = $("room-size-chip");
+  if (!chip) return;
+  const w = Number.isFinite(widthFt) ? widthFt : Math.round(mmToFeet(DEFAULT_ROOM_MM[0]) * 10) / 10;
+  const h = Number.isFinite(heightFt) ? heightFt : Math.round(mmToFeet(DEFAULT_ROOM_MM[1]) * 10) / 10;
+  chip.textContent = `${w} × ${h} ft`;
+  const roomView = !view || view.getViewMode() !== "strip";
+  chip.hidden = !roomView;
+}
+
+function openRoomSizeEditor() {
+  setActiveTab("layout");
+  const field = $("room-width-ft");
+  field?.focus();
+  field?.select?.();
 }
 
 function updatePathLengthStatus() {
@@ -825,6 +845,10 @@ function wireLayoutEditor() {
     $("view-strip").classList.remove("active");
     $("view-strip").setAttribute("aria-pressed", "false");
     syncLockUi();
+    syncRoomSizeChip(
+      Number($("room-width-ft").value),
+      Number($("room-height-ft").value),
+    );
   });
   $("view-strip").addEventListener("click", () => {
     view.setViewMode("strip");
@@ -834,6 +858,10 @@ function wireLayoutEditor() {
     $("view-room").setAttribute("aria-pressed", "false");
     view.setEditing(false);
     $("lock-chip").hidden = true;
+    syncRoomSizeChip(
+      Number($("room-width-ft").value),
+      Number($("room-height-ft").value),
+    );
     syncEditGestureClass();
   });
   $("toggle-labels").addEventListener("click", () => {
@@ -847,6 +875,10 @@ function wireLayoutEditor() {
       $("toggle-labels").setAttribute("aria-pressed", "false");
       view.setLabelsVisible(false);
     }
+  });
+
+  $("room-size-chip")?.addEventListener("click", () => {
+    openRoomSizeEditor();
   });
 
   for (const button of document.querySelectorAll(".preset-card")) {
