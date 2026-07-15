@@ -51,6 +51,13 @@ Implementation notes:
   emergency/manual/tactical-blackout code paths structurally cannot reach, not behind a runtime
   `source ==` string check that could silently drift.
 - For StateManager LED automation timing changes, keep the push-loop path pure/non-blocking, keep source arming at the content-change event, and prove arm/release/cleanup in `tests/test_led_state_manager.py`.
+- (AWR-235) Idle ambient freewheel: `_dispatch_led_idle_ambient` clears
+  `_led_idle_freewheel_since` on entry, but a same-`role_key` repeat must restore
+  the captured timestamp before `_led_retry_idle_dispatch` returns. Do not move
+  the `_led_rt_permitted=False` / smart-drop-blackout-key clears. Gated early
+  returns must still clear the freewheel. Prove the three cases in
+  `tests/test_led_state_manager.py` (repeat keeps freewheel+anchor; gated
+  blackout/manual still clears; role_key change re-dispatches and re-stamps).
 - For realtime-to-cloud handoff changes, `force_deactivate()` must not perform transport socket
   calls on the caller/push-loop thread; prove teardown on the runner thread in
   `tests/test_govee_realtime_runner.py`.

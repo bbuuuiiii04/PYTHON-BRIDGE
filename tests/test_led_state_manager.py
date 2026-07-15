@@ -2494,6 +2494,128 @@ class LEDStateManagerTests(unittest.TestCase):
         self.assertTrue(first.permitted)
         self.assertGreater(second.abs_beat_pos, first.abs_beat_pos)
 
+    def test_idle_freewheel_survives_repeat_same_role_key(self) -> None:
+        """AWR-235 regression pin: a second idle pass with the same role_key must
+        keep the freewheel (old code cleared it at the top of every pass)."""
+        now = 200.0
+
+        def fake_monotonic() -> float:
+            return now
+
+        director = _AutomationLEDLookDirector()
+        director.role_decisions["ambient"] = LEDLookDecision(
+            look="rt_twinkle",
+            target="room_perimeter",
+            action="realtime",
+            scene_ref="rt_twinkle",
+            reason="role_entry:ambient",
+            source="automation",
+            priority=2,
+            role="ambient",
+            backend="realtime_razer",
+            params={},
+        )
+        sm = _make_sm(director=director, adapter=_StubLEDAdapter())
+        d = sm._deck[1]
+        d.load_gen = 11
+        d.meta.filepath = "/tracks/current.wav"
+
+        with patch("rb_ss_bridge_v2.led_dispatch_policy.time.monotonic", fake_monotonic):
+            sm._dispatch_led_idle_ambient(active=1, d=d, reason="test")
+            started = sm._led_idle_freewheel_since
+            self.assertIsNotNone(started)
+            now = 200.5
+            sm._dispatch_led_idle_ambient(active=1, d=d, reason="test")
+            self.assertEqual(sm._led_idle_freewheel_since, started)
+            anchor = sm.get_active_beat_anchor()
+
+        self.assertIsNotNone(anchor)
+        assert anchor is not None
+        self.assertTrue(anchor.playing)
+        self.assertEqual(anchor.bpm, LED_IDLE_FREEWHEEL_BPM)
+
+    def test_idle_gated_pass_still_clears_freewheel(self) -> None:
+        """Blackout / manual-override idle passes must keep clearing the freewheel."""
+        director = _AutomationLEDLookDirector()
+        director.role_decisions["ambient"] = LEDLookDecision(
+            look="rt_twinkle",
+            target="room_perimeter",
+            action="realtime",
+            scene_ref="rt_twinkle",
+            reason="role_entry:ambient",
+            source="automation",
+            priority=2,
+            role="ambient",
+            backend="realtime_razer",
+            params={},
+        )
+        sm = _make_sm(director=director, adapter=_StubLEDAdapter())
+        d = sm._deck[1]
+        d.load_gen = 11
+        d.meta.filepath = "/tracks/current.wav"
+
+        sm._dispatch_led_idle_ambient(active=1, d=d, reason="test")
+        self.assertIsNotNone(sm._led_idle_freewheel_since)
+
+        sm._led_manual_override = "room_manual"
+        sm._dispatch_led_idle_ambient(active=1, d=d, reason="test")
+        self.assertIsNone(sm._led_idle_freewheel_since)
+        self.assertIsNone(sm.get_active_beat_anchor())
+
+        # Re-arm freewheel on a fresh idle role (gate left the old latch).
+        sm._led_manual_override = False
+        sm._led_last_idle_role_key = ""
+        sm._dispatch_led_idle_ambient(active=1, d=d, reason="test")
+        self.assertIsNotNone(sm._led_idle_freewheel_since)
+
+        sm._handle_event(BridgeEvent(kind=Ev.LED_BLACKOUT, deck=0, payload={}, source="test"))
+        self.assertIsNone(sm.get_active_beat_anchor())
+        # Gated idle pass while blackout is active must keep the freewheel cleared.
+        sm._dispatch_led_idle_ambient(active=1, d=d, reason="test")
+        self.assertIsNone(sm._led_idle_freewheel_since)
+
+    def test_idle_role_key_change_redispatches_and_resets_freewheel(self) -> None:
+        now = 300.0
+
+        def fake_monotonic() -> float:
+            return now
+
+        director = _AutomationLEDLookDirector()
+        director.role_decisions["ambient"] = LEDLookDecision(
+            look="rt_twinkle",
+            target="room_perimeter",
+            action="realtime",
+            scene_ref="rt_twinkle",
+            reason="role_entry:ambient",
+            source="automation",
+            priority=2,
+            role="ambient",
+            backend="realtime_razer",
+            params={},
+        )
+        adapter = _StubLEDAdapter()
+        sm = _make_sm(director=director, adapter=adapter)
+        d = sm._deck[1]
+        d.load_gen = 11
+        d.meta.filepath = "/tracks/current.wav"
+
+        with patch("rb_ss_bridge_v2.led_dispatch_policy.time.monotonic", fake_monotonic):
+            sm._dispatch_led_idle_ambient(active=1, d=d, reason="test")
+            first_fw = sm._led_idle_freewheel_since
+            first_triggers = len(adapter.trigger_calls)
+            self.assertIsNotNone(first_fw)
+
+            now = 301.0
+            d.load_gen = 12  # changes role_key
+            sm._dispatch_led_idle_ambient(active=1, d=d, reason="test")
+            second_fw = sm._led_idle_freewheel_since
+
+        self.assertEqual(len(adapter.trigger_calls), first_triggers + 1)
+        self.assertIsNotNone(second_fw)
+        self.assertEqual(second_fw, 301.0)
+        self.assertNotEqual(second_fw, first_fw)
+        self.assertEqual(sm._led_last_idle_role_key, "1:12:idle_ambient:True")
+
     def test_idle_freewheel_clears_on_blackout(self) -> None:
         sm = _make_sm(director=_AutomationLEDLookDirector(), adapter=_StubLEDAdapter())
         sm._led_idle_freewheel_since = 100.0

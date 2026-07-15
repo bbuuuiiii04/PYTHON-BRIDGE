@@ -1602,6 +1602,10 @@ class LEDDispatchPolicyMixin:
         d: DeckState,
         reason: str,
     ) -> None:
+        # Capture before the unconditional clear so a same-role_key repeat can
+        # restore it (repeat idle tick must not kill the running freewheel;
+        # every other path keeps today's clear-on-entry behavior).
+        fw_since = self._led_idle_freewheel_since
         self._led_rt_permitted = False
         self._led_idle_freewheel_since = None
         self._led_smart_drop_blackout_key = ""
@@ -1623,6 +1627,8 @@ class LEDDispatchPolicyMixin:
             self._gate_led_automation("manual_override", active_deck=active, role="ambient")
             return
         if role_key == self._led_last_idle_role_key:
+            # Repeat idle tick must not kill the running freewheel.
+            self._led_idle_freewheel_since = fw_since
             self._led_retry_idle_dispatch(role_key=role_key, active=active)
             return
         self._led_idle_retry = None  # a new idle role_key supersedes any pending retry

@@ -560,6 +560,13 @@ LED idle/pause ambient fix (2026-07-07):
   (`[RGB] idle-freewheel-start`) so the realtime runner keeps rendering while
   playback is paused. Blackout, manual commands, and playing automation clear
   that freewheel before normal playback resumes.
+- AWR-235 (2026-07-14): a same-`role_key` repeat idle tick restores the
+  captured freewheel timestamp before returning, so the running realtime
+  ambient look keeps its beat anchor across push-loop passes. Gated early
+  returns (not configured / disabled / blackout / manual override) still clear
+  the freewheel exactly as before; a changed idle `role_key` still re-dispatches
+  and re-stamps the freewheel on accept. This closes the July-7 regression that
+  left `desired_effect=rt_twinkle` with zero frames rendered.
 - If the realtime runner still reaches idle-grace teardown, it now sends a
   blackout frame before deactivating and logs
   `[RGB] deactivate reason=idle_grace blackout_sent=1`, so the failure mode is
@@ -1020,7 +1027,10 @@ Tests:
   ambient decision from the last audible deck, accepted realtime ambient
   decisions freewheel a synthetic beat anchor, blackout/playing automation
   clear the freewheel, and idle-grace teardown blackouts before deactivate.
-  This is software validation only.
+  AWR-235 pins that a same-`role_key` repeat idle pass keeps `_led_idle_freewheel_since`
+  and a playing anchor, that gated blackout/manual-override idle passes still
+  clear it, and that a changed idle `role_key` re-dispatches and re-stamps the
+  freewheel. This is software validation only.
 - Govee health reporting coverage lives in `tests/test_govee_runtime_sender.py`
   and `tests/test_govee_scene_adapter.py`: mirror target failure/recovery logs
   emit only on transitions while primary return semantics stay unchanged, and

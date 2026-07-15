@@ -18,6 +18,10 @@ validation_scope: Packages 2-3 plus AWR-121 gesture v2 software-tested; AWR-207 
 > with operator answers folded in.
 > Per AGENTS.md §1, **code wins over this doc** — verify every claim against current code.
 > Claims are labelled **confirmed / assumed / unknown / operator-decided**.
+>
+> AWR-235 (2026-07-14) restores idle-ambient freewheel across same-`role_key`
+> repeat ticks in `led_dispatch_policy`; this design's palette/gesture surface
+> is unchanged.
 
 This is current truth for Packages 2, 3, and AWR-121 gesture v2. Package 3
 (Laser Solo pad, zero-RNG auto-solo tiers, finale guarantee, track personality,

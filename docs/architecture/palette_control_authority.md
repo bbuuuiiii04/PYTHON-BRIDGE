@@ -27,6 +27,10 @@ recoveries are now logged as health transitions, and stale `circuit_open`
 degraded status clears after a successful send. This changes LED/Govee reporting
 only; palette-control behavior and pad semantics are unchanged.
 
+Status-surface note (AWR-235, 2026-07-14): idle-ambient freewheel latch restore
+is LED dispatch-only (`led_dispatch_policy._dispatch_led_idle_ambient`); palette
+authority and Stream Deck pad semantics are unchanged.
+
 ## Meaning
 
 The Stream Deck is the operator's live hands on color and room state. The

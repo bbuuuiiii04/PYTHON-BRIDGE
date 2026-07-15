@@ -16,6 +16,9 @@ Audit P1 (2026-07-03): no hardware, SoundSwitch app, Rekordbox, laser, LED, Gove
 Enttec validation was performed. The changes are software-tested cleanup and command-status truth
 only.
 
+AWR-235 (2026-07-14): idle-ambient freewheel latch restore is software-tested only;
+no bridge restart, Govee, or room-visible hardware action was performed for this fix.
+
 Audit P2 (2026-07-03): no hardware, SoundSwitch app, Rekordbox, laser, LED, Govee, MIDI, DMX, or
 Enttec validation was performed. Injector gating, pack-status overlay diagnostics, and committed
 LED drop eligibility are software-tested only.
