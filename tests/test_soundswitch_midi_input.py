@@ -1,6 +1,7 @@
 """Tests for soundswitch_midi_input — no MIDI/serial/Art-Net hardware opened."""
 import logging
 import sys
+import threading
 import time
 import types
 import unittest
@@ -703,6 +704,70 @@ class TestClearOnEvent(unittest.TestCase):
                 time.sleep(0.01)
             a.stop()
         self.assertGreaterEqual(len(attempts), 2)
+
+    def test_invalid_port_error_mid_run_survives_and_rebinds(self):
+        """AWR-238 LATCH 3: live rtmidi InvalidPortError must not kill the worker.
+
+        Foreign-Mac 2026-07-15: Stream Deck virtual port unplug logged
+        ``worker died: error=InvalidPortError`` instead of rebinding. The
+        helper already reconnects; the SS-MIDI worker must match.
+        """
+        from rb_ss_bridge_v2 import soundswitch_midi_input as ssmi
+
+        class InvalidPortError(Exception):
+            """Name must match python-rtmidi's exception class name."""
+
+        attempts = {"n": 0}
+
+        def factory():
+            attempts["n"] += 1
+
+            def gen():
+                # Become ready, then simulate the live unplug exception.
+                yield None
+                if attempts["n"] == 1:
+                    raise InvalidPortError("MidiIn::getMessage(): error looking up port")
+                while True:
+                    time.sleep(0.01)
+                    yield None
+
+            return gen()
+
+        def wait_for(predicate, timeout_s=1.5):
+            deadline = time.time() + timeout_s
+            while time.time() < deadline:
+                if predicate():
+                    return
+                time.sleep(0.01)
+            self.fail("condition not reached")
+
+        a = _adapter(_SLOT8)
+        with mock.patch.object(ssmi, "_PORT_RETRY_INTERVAL_S", 0.05):
+            a.start("fake-port", _message_source=factory, readiness_timeout_s=0.5)
+            try:
+                wait_for(lambda: a.snapshot().worker_alive and a.snapshot().error is None)
+                first_thread = a._thread
+                self.assertIsNotNone(first_thread)
+                self.assertTrue(first_thread.is_alive())
+
+                wait_for(lambda: a.snapshot().error == "input_port_gone")
+                # Thread must still be the same retrying worker, not dead.
+                self.assertIs(a._thread, first_thread)
+                self.assertTrue(first_thread.is_alive())
+                self.assertNotIn(
+                    "worker_error:InvalidPortError",
+                    a.snapshot().error or "",
+                )
+
+                wait_for(lambda: a.snapshot().worker_alive and a.snapshot().error is None)
+                self.assertIs(a._thread, first_thread)
+                self.assertTrue(first_thread.is_alive())
+                self.assertGreaterEqual(attempts["n"], 2)
+                _note_on(a, _SLOT8)
+                self.assertEqual(_slots(a), (8,))
+            finally:
+                a.stop()
+            self.assertFalse(first_thread.is_alive())
 
 
 class TestPortGoneLogEdgeTrigger(unittest.TestCase):

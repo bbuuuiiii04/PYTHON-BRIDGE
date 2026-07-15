@@ -83,6 +83,17 @@ class _InputPortGone(Exception):
     pass
 
 
+def _is_port_gone_error(exc: BaseException) -> bool:
+    """True for domain port-gone and live rtmidi InvalidPortError (AWR-238 LATCH 3).
+
+    python-rtmidi raises ``InvalidPortError`` when a bound port disappears
+    mid-poll; that must re-enter the wait/rebind loop, not kill the worker.
+    """
+    if isinstance(exc, _InputPortGone):
+        return True
+    return type(exc).__name__ == "InvalidPortError"
+
+
 class SoundSwitchMidiInputAdapter:
     """Bounded non-blocking MIDI input adapter for SoundSwitch learned controls.
 
@@ -481,17 +492,27 @@ class SoundSwitchMidiInputAdapter:
                 match = SoundSwitchMidiInputAdapter._exact_port_index(ports, port_name)
                 if match is None:
                     raise _InputPortGone(port_name)
-                midi_in.open_port(match)
+                try:
+                    midi_in.open_port(match)
+                except Exception as exc:
+                    if _is_port_gone_error(exc):
+                        raise _InputPortGone(port_name) from exc
+                    raise
                 next_check = 0.0
                 while True:
-                    now = time.monotonic()
-                    if now >= next_check:
-                        next_check = now + _PORT_CHECK_INTERVAL_S
-                        if not SoundSwitchMidiInputAdapter._port_present(
-                            midi_in.get_ports(), port_name,
-                        ):
-                            raise _InputPortGone(port_name)
-                    msg = midi_in.get_message()
+                    try:
+                        now = time.monotonic()
+                        if now >= next_check:
+                            next_check = now + _PORT_CHECK_INTERVAL_S
+                            if not SoundSwitchMidiInputAdapter._port_present(
+                                midi_in.get_ports(), port_name,
+                            ):
+                                raise _InputPortGone(port_name)
+                        msg = midi_in.get_message()
+                    except Exception as exc:
+                        if _is_port_gone_error(exc):
+                            raise _InputPortGone(port_name) from exc
+                        raise
                     if msg is not None:
                         data, _delta = msg
                         if len(data) >= 3:
@@ -508,6 +529,31 @@ class SoundSwitchMidiInputAdapter:
                 except Exception:
                     pass
         return factory
+
+    def _handle_port_gone(
+        self,
+        *,
+        source: Iterator[tuple[int, int, int] | None] | None,
+        gone_key: str,
+        ready: bool,
+        ever_ready: bool,
+    ) -> None:
+        """Mark input unavailable and log; caller waits then rebinds."""
+        try:
+            close = getattr(source, "close", None)
+            if callable(close):
+                close()
+        finally:
+            pass
+        # Same clear-held seam as mark_unavailable / input_port_gone: drop held
+        # layers so pack overlay does not stick while the physical port is gone.
+        if ready or not ever_ready:
+            self._mark_port_gone()
+            self._ready_event.set()
+        if bf.log_changed(gone_key, True):
+            log.warning("[SS-MIDI] input port gone; retrying exact port")
+        else:
+            log.debug("[SS-MIDI] input port gone; retrying exact port")
 
     def _worker(
         self,
@@ -551,20 +597,16 @@ class SoundSwitchMidiInputAdapter:
                         self._feed_raw_message(status, data1, data2)
                     if not self._stop_event.is_set():
                         raise _InputPortGone(port_name)
-                except _InputPortGone:
-                    try:
-                        close = getattr(source, "close", None)
-                        if callable(close):
-                            close()
-                    finally:
-                        source = None
-                    if ready or not ever_ready:
-                        self._mark_port_gone()
-                        self._ready_event.set()
-                    if bf.log_changed(gone_key, True):
-                        log.warning("[SS-MIDI] input port gone; retrying exact port")
-                    else:
-                        log.debug("[SS-MIDI] input port gone; retrying exact port")
+                except Exception as exc:
+                    if not _is_port_gone_error(exc):
+                        raise
+                    self._handle_port_gone(
+                        source=source,
+                        gone_key=gone_key,
+                        ready=ready,
+                        ever_ready=ever_ready,
+                    )
+                    source = None
                     # A device that has never once appeared retries by opening and
                     # tearing down its own MIDI client every interval, forever.
                     # Proved live (2026-06-30) that doing this at 0.25s churns the
@@ -573,7 +615,10 @@ class SoundSwitchMidiInputAdapter:
                     # the process (DDJ-800 absent, retrying fast, broke Stream
                     # Deck's open connection). A device that WAS connected and just
                     # dropped still retries fast for quick recovery.
-                    interval = _PORT_RETRY_INTERVAL_S if ever_ready else _PORT_NEVER_SEEN_RETRY_INTERVAL_S
+                    interval = (
+                        _PORT_RETRY_INTERVAL_S if ever_ready
+                        else _PORT_NEVER_SEEN_RETRY_INTERVAL_S
+                    )
                     ready = False
                     self._stop_event.wait(interval)
                     continue
@@ -598,7 +643,6 @@ class SoundSwitchMidiInputAdapter:
                     self._worker_alive = False
                     self._refresh_snapshot_locked()
                 log.info("[SS-MIDI] worker stopped")
-
 
 class SoundSwitchMidiInputGroup:
     """Own one input adapter per render-affecting controller as one lifecycle.
