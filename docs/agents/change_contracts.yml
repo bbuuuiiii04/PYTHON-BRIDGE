@@ -733,6 +733,7 @@ contracts:
       - docs/plans/active/spectral_ear_benchmark_spec_2026_07_10.md
       - docs/research/spectral_ear_benchmark_stage1_report_2026_07_10.md
       - docs/plans/active/spectral_gold_label_intake_spec_2026_07_11.md
+      - docs/plans/active/spectral_ai_phase0_protocol_spec_2026_07_14.md
     tests:
       - python3 -m unittest discover tests
       - python3 -m unittest tests.test_hardness_v0
