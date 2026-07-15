@@ -107,14 +107,8 @@ function markDirty() {
 }
 
 function updateCalibrationBadge() {
-  const allowed = ["relative", "measured"];
-  const statuses = [String(state.profile.calibration_status)];
-  if (state.profile.calibration_domains) {
-    statuses.push(...["color", "timing", "spatial"].map((key) => String(state.profile.calibration_domains[key])));
-  }
-  const status = statuses.every((value) => allowed.includes(value))
-    ? (statuses.includes("relative") ? "relative" : "measured")
-    : "unmeasured";
+  const candidate = String(state.profile.calibration_status);
+  const status = ["unmeasured", "relative", "measured"].includes(candidate) ? candidate : "unmeasured";
   const badge = $("calibration-badge");
   badge.textContent = status.toUpperCase();
   badge.classList.toggle("warning", status !== "measured");
@@ -124,14 +118,15 @@ function calibrationSupportsSlew() {
   const allowed = ["relative", "measured"];
   const status = String(state.profile.calibration_status);
   const timingStatus = state.profile.calibration_domains?.timing;
-  return allowed.includes(status) && (timingStatus === undefined || allowed.includes(String(timingStatus)));
+  return allowed.includes(status) && allowed.includes(String(timingStatus));
 }
 
 function invalidateCalibration() {
   state.profile.calibration_status = "unmeasured";
   state.profile.calibration_domains = {color: "unmeasured", timing: "unmeasured", spatial: "unmeasured"};
+  state.profile.calibration_evidence = {};
   for (const key of [
-    "calibration_evidence", "calibration_evidence_id", "calibration_measured_at",
+    "calibration_evidence_id", "calibration_measured_at",
     "measurement_evidence", "measurement_id", "measured_at", "evidence",
   ]) delete state.profile[key];
   state.display = null;
@@ -215,7 +210,7 @@ function fillSourcePicker() {
   $("source-name-row").hidden = kind === "replay";
   renderButton.hidden = kind === "replay";
   renderButton.textContent = {
-    look: "Render look",
+    look: "Render configured look",
     effect: "Render effect",
     lab: "Render lab draft",
   }[kind] || "Render preview";
@@ -264,7 +259,7 @@ function renderRequestBody() {
   if (kind === "look") {
     const entry = state.catalog.looks.ok ? state.catalog.looks.looks[name] : null;
     if (!entry) {
-      showError("Choose a production look first.");
+      showError("Choose a configured look first.");
       return null;
     }
     name = entry.effect;
@@ -295,7 +290,8 @@ async function doRender() {
   $("view-title").textContent = $("source-name").selectedOptions[0]?.textContent || body.name;
   loadFrames(result.frames, result.fps, result.t_ms, [], {
     durationMs: result.duration_ms,
-    provenance: result.provenance || result.pipeline || "server render",
+    durationSource: result.duration_source,
+    provenance: result.frame_source || result.provenance || result.pipeline || "server render",
     timingSource: result.timing_source,
   });
 }
@@ -311,7 +307,8 @@ async function doReplayLoad() {
   $("view-title").textContent = result.meta?.name || "Recorded frames";
   loadFrames(result.frames, result.fps, result.t_ms, result.meta?.markers || [], {
     durationMs: result.duration_ms ?? result.meta?.duration_ms,
-    provenance: result.provenance || result.meta?.provenance || "recorded JSONL",
+    durationSource: result.duration_source,
+    provenance: result.frame_source || result.provenance || result.meta?.frame_source || result.meta?.provenance || "recorded JSONL",
     timingSource: result.timing_source || result.meta?.timing_source,
   });
 }
@@ -322,7 +319,8 @@ async function doTestCard(kind) {
   $("view-title").textContent = `Reference · ${kind}`;
   loadFrames(result.frames, result.fps, result.t_ms, [{frame: 0, label: kind}], {
     durationMs: result.duration_ms,
-    provenance: result.provenance || "generated reference",
+    durationSource: result.duration_source,
+    provenance: result.frame_source || result.provenance || "generated reference",
     timingSource: result.timing_source,
   });
   stopPlayback();
@@ -337,12 +335,13 @@ async function doCalibration(name) {
   $("view-title").textContent = `Calibration · ${name.replaceAll("_", " ")}`;
   loadFrames(result.frames, result.fps, result.t_ms, result.markers, {
     durationMs: result.duration_ms,
-    provenance: result.provenance || "generated calibration",
+    durationSource: result.duration_source,
+    provenance: result.frame_source || result.provenance || "generated calibration",
     timingSource: result.timing_source,
   });
 }
 
-function buildTimeline(frameCount, fps, supplied, explicitDuration, reportedSource) {
+function buildTimeline(frameCount, fps, supplied, explicitDuration, reportedSource, reportedDurationSource) {
   const suppliedTimes = Array.isArray(supplied) ? supplied.map(Number) : [];
   const suppliedValid = suppliedTimes.length === frameCount && suppliedTimes.every((value, index) => (
     Number.isFinite(value) && value >= 0 && (!index || value >= suppliedTimes[index - 1])
@@ -358,7 +357,12 @@ function buildTimeline(frameCount, fps, supplied, explicitDuration, reportedSour
   const lastTimestamp = frameTimes[frameTimes.length - 1];
   const explicit = Number(explicitDuration);
   if (explicitDuration !== undefined && explicitDuration !== null && Number.isFinite(explicit) && explicit > lastTimestamp) {
-    return {frameTimes, durationMs: explicit, timingSource, durationSource: "explicit duration"};
+    return {
+      frameTimes,
+      durationMs: explicit,
+      timingSource,
+      durationSource: reportedDurationSource || "explicit duration",
+    };
   }
 
   const idealGrid = frameTimes.every((value, index) => value === Math.round(index * 1000 / fps));
@@ -376,6 +380,7 @@ function loadFrames(frames, fps, tMs, markers = [], options = {}) {
     tMs,
     options.durationMs,
     options.timingSource,
+    options.durationSource,
   );
   state.frameTimes = timeline.frameTimes;
   state.durationMs = timeline.durationMs;
@@ -411,20 +416,20 @@ function indexAtTime(timeMs) {
 }
 
 function positionForElapsed(elapsed) {
-  if (!state.frames.length) return {index: 0, ordinal: 0, ended: false};
-  if (elapsed < 0) return {index: 0, ordinal: 0, ended: false};
+  if (!state.frames.length) return {index: 0, ordinal: 0, ended: false, pending: false};
+  if (elapsed < 0) return {index: 0, ordinal: null, ended: false, pending: true};
   if (state.loop && state.durationMs > 0) {
     const cycle = Math.floor(elapsed / state.durationMs);
     const local = elapsed - cycle * state.durationMs;
     const index = indexAtTime(local);
-    return {index, ordinal: cycle * state.frames.length + index, ended: false};
+    return {index, ordinal: cycle * state.frames.length + index, ended: false, pending: false};
   }
   if (!state.loop && elapsed >= state.durationMs) {
     const index = state.frames.length - 1;
-    return {index, ordinal: index, ended: true};
+    return {index, ordinal: index, ended: true, pending: false};
   }
   const index = indexAtTime(elapsed);
-  return {index, ordinal: index, ended: false};
+  return {index, ordinal: index, ended: false, pending: false};
 }
 
 function currentPosition(now) {
@@ -518,7 +523,10 @@ function tick(now) {
       && state.profile.hold_mode === "slew"
       && Number(state.profile.slew_ms) > 0
     );
-    if (state.lastPresentedOrdinal !== position.ordinal || slewing) {
+    if (position.pending) {
+      $("marker-label").textContent = "Holding the previous output for measured latency";
+      $("time-label").textContent = "LATENCY";
+    } else if (state.lastPresentedOrdinal !== position.ordinal || slewing) {
       if (state.lastPresentedOrdinal !== null && position.ordinal > state.lastPresentedOrdinal + 1) {
         state.missedFrames += position.ordinal - state.lastPresentedOrdinal - 1;
       }
@@ -526,11 +534,13 @@ function tick(now) {
       state.drawCount += 1;
       state.lastPresentedOrdinal = position.ordinal;
     }
-    state.manualIdx = index;
-    $("scrub").value = String(index);
-    $("frame-label").textContent = `${index + 1} / ${state.frames.length}`;
-    $("time-label").textContent = `${((state.frameTimes[index] || 0) / 1000).toFixed(3)} s`;
-    $("marker-label").textContent = markerFor(index) || "60 command segments · six repeated emitters per segment";
+    if (!position.pending) {
+      state.manualIdx = index;
+      $("scrub").value = String(index);
+      $("frame-label").textContent = `${index + 1} / ${state.frames.length}`;
+      $("time-label").textContent = `${((state.frameTimes[index] || 0) / 1000).toFixed(3)} s`;
+      $("marker-label").textContent = markerFor(index) || "60 command segments · display calibration applied";
+    }
   }
   updatePaintHealth(now);
   state.lastTick = now;

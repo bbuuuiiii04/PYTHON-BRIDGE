@@ -12,6 +12,10 @@ Current repo-facing hardware validation status:
 
 > **HARDWARE-UNVALIDATED**
 
+AWR-238 (2026-07-15): pack startup retry + laser MIDI `port_unavailable` reopen are
+SOFTWARE-TESTED only. Foreign-Mac hot-plug (Enttec/IAC appearing after bridge start)
+remains live-unvalidated — no hardware run recorded here.
+
 Audit P1 (2026-07-03): no hardware, SoundSwitch app, Rekordbox, laser, LED, Govee, MIDI, DMX, or
 Enttec validation was performed. The changes are software-tested cleanup and command-status truth
 only.

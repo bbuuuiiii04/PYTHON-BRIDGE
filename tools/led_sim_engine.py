@@ -2,11 +2,11 @@
 
 Offline tooling only. This module NEVER contacts the Govee device: no UDP, no
 transport/discovery imports (`govee_realtime_transport`, `govee_lan_discovery`
-are forbidden here), no subprocesses. Production frames are captured from the
-real `GoveeRealtimeRunner` immediately before its transport boundary, so the
-sim reimplements neither effects nor runtime frame composition. Device-side
-optical and timing behavior begins after that boundary and remains calibration
-work.
+are forbidden here), no subprocesses. Production frames are composed offline
+by the real `GoveeRealtimeRunner` and collected immediately before its transport
+boundary, so the sim reimplements neither effects nor runtime frame composition.
+The runner is driven on an explicit ideal grid; this is not a live timing
+capture. Device-side optical and timing behavior remains calibration work.
 
 The pad lane's `tools.led_pad_lab` (AWR-193 fence) is imported READ-ONLY and
 lazily inside function bodies; any failure there degrades lab features while
@@ -71,6 +71,7 @@ MAX_DURATION_S = 30.0
 MIN_BEAT_DIVISION = 0.01
 MAX_BEAT_DIVISION = 16.0
 CALIBRATION_SEQUENCE_VERSION = "h612d-cal-v2"
+CALIBRATION_CAPTURE_FPS = (10, 20, 30, 40, 60)
 FRAME_SOURCE_CALIBRATION_GENERATED = "calibration_generated_offline"
 
 
@@ -581,6 +582,8 @@ def write_frames_jsonl(
         raise ValueError("t_ms values must be non-negative integers")
     if any(current < previous for previous, current in zip(stamps, stamps[1:])):
         raise ValueError("t_ms values must be nondecreasing")
+    if duration_ms is not None and stamps and duration_ms <= stamps[-1]:
+        raise ValueError("duration_ms must be greater than the final t_ms")
     header = {"v": 1, "kind": "header", "fps": rate, "segments": segments, "meta": dict(meta or {})}
     if duration_ms is not None:
         header["duration_ms"] = duration_ms
@@ -662,6 +665,8 @@ def read_frames_jsonl(path: Path | str) -> dict[str, Any]:
                 fail(line_no, "each pixel must be [r, g, b] ints in [0, 255]")
         frames.append(frame)
         t_ms.append(stamp)
+    if duration_ms is not None and t_ms and duration_ms <= t_ms[-1]:
+        fail(1, "header duration_ms must be greater than the final t_ms")
     if duration_ms is None:
         duration_ms = int(round(t_ms[-1] + 1000.0 / fps)) if t_ms else 0
         duration_source = "derived_from_timestamps_and_fps"
@@ -842,6 +847,7 @@ def calibration_sequence(name: str, *, segments: int = H612D_SEGMENTS, fps: int 
         "fps": rate,
         "segments": count,
         "duration_ms": int(round(len(frames) * 1000.0 / rate)),
+        "duration_source": "generated_exact",
         "frame_source": FRAME_SOURCE_CALIBRATION_GENERATED,
         "timing_source": TIMING_SOURCE_IDEAL_GRID,
         "sequence_version": CALIBRATION_SEQUENCE_VERSION,

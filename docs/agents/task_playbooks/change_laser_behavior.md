@@ -11,6 +11,11 @@ validation_scope: software-only
 Use when:
 - The requested work is specifically about laser behavior changes.
 
+AWR-238 note: boot-time MIDI `port_unavailable` recovers via the same throttled
+reopen as `send_error` (`midi_output.py`). Do not reintroduce a permanent latch.
+Pack late-attach uses `LaserSceneExecutor.set_backend` — keep that seam for hot-plug
+pack recovery; never put blocking MIDI/serial I/O on the push loop.
+
 Read first:
 1. `AGENTS.md`
 2. `docs/agents/change_contracts.yml`

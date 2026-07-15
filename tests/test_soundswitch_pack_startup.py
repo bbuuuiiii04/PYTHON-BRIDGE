@@ -5,6 +5,8 @@ import inspect
 import os
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from types import MappingProxyType
@@ -702,6 +704,162 @@ class DualTriggerBackendTests(unittest.TestCase):
 
         dual.trigger(LaserMidiMessage(scene_name="phrase"))
         self.assertEqual(dual.last_accepted_identity, "SSAutoLoop1.ssfile")
+
+
+class PackStartupRetrySupervisorTests(unittest.TestCase):
+    """AWR-238: pack_start_failed at boot retries until the bundle can start."""
+
+    def test_retry_after_n_failures_attaches_live_bundle(self):
+        events = []
+        attempts = {"n": 0}
+        attached = []
+        stop = threading.Event()
+
+        class _FailThenOk:
+            def __init__(self, name):
+                self.name = name
+                self.stopped = False
+
+            def start(self):
+                events.append(f"{self.name}.start")
+
+            def stop(self):
+                self.stopped = True
+                events.append(f"{self.name}.stop")
+
+        def build_fn(cfg_result, **_kwargs):
+            attempts["n"] += 1
+            if attempts["n"] < 3:
+                return bridge_main.SoundSwitchPackStartupBundle(
+                    None, _pack(), ("player", _pack()), None, None, "pack_start_failed",
+                )
+            sender = _FailThenOk("sender")
+            midi = _FailThenOk("input")
+            backend = PackOutputBackend(
+                scene_to_identity={"phrase": "SSAutoLoop1.ssfile"},
+                frame_sender=sender,
+            )
+            return bridge_main.SoundSwitchPackStartupBundle(
+                backend, _pack(), ("player", _pack()), midi, sender, "pack",
+            )
+
+        def start_fn(bundle):
+            if bundle.reason != "pack":
+                return bundle
+            if bundle.midi_input is not None:
+                bundle.midi_input.start()
+            if bundle.frame_sender is not None:
+                bundle.frame_sender.start()
+            return bundle
+
+        class _FakeSM:
+            def __init__(self):
+                self.runtime = None
+
+            def set_pack_runtime(self, runtime):
+                self.runtime = runtime
+
+        sm = _FakeSM()
+        owners = {"sender": None, "midi_input": None, "truth_sink": None}
+        executor = mock.Mock()
+        cfg = _result()
+
+        def attach_fn(bundle, *, sm, pack_output_owners, laser_executor, cfg_result):
+            attached.append(bundle)
+            bridge_main._attach_pack_startup_bundle(
+                bundle,
+                sm=sm,
+                pack_output_owners=pack_output_owners,
+                laser_executor=laser_executor,
+                cfg_result=cfg_result,
+            )
+
+        thread = bridge_main._start_pack_startup_retry_supervisor(
+            stop_event=stop,
+            initial_bundle=bridge_main.SoundSwitchPackStartupBundle(
+                None, _pack(), ("player", _pack()), None, None, "pack_start_failed",
+            ),
+            cfg_loader=lambda: cfg,
+            build_kwargs={},
+            sm_holder={"sm": sm},
+            pack_output_owners=owners,
+            laser_executor_holder={"executor": executor},
+            interval_s=0.05,
+            build_fn=build_fn,
+            start_fn=start_fn,
+            attach_fn=attach_fn,
+        )
+        self.assertIsNotNone(thread)
+        self.assertTrue(thread.is_alive())
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and sm.runtime is None:
+            time.sleep(0.02)
+        stop.set()
+        thread.join(timeout=1.0)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(attempts["n"], 3)
+        self.assertEqual(len(attached), 1)
+        self.assertIsNotNone(sm.runtime)
+        self.assertTrue(sm.runtime.enabled)
+        self.assertEqual(sm.runtime.reason, "pack")
+        self.assertIs(owners["sender"], attached[0].frame_sender)
+        self.assertIs(owners["midi_input"], attached[0].midi_input)
+        executor.set_backend.assert_called_once_with(attached[0].laser_backend)
+        self.assertIn("input.start", events)
+        self.assertIn("sender.start", events)
+
+    def test_happy_path_boot_does_not_start_supervisor(self):
+        stop = threading.Event()
+        thread = bridge_main._start_pack_startup_retry_supervisor(
+            stop_event=stop,
+            initial_bundle=bridge_main.SoundSwitchPackStartupBundle(
+                PackOutputBackend(), _pack(), ("player", _pack()), None, object(), "pack",
+            ),
+            cfg_loader=lambda: _result(),
+            build_kwargs={},
+            sm_holder={"sm": object()},
+            pack_output_owners={},
+            laser_executor_holder={},
+            interval_s=0.05,
+            build_fn=lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("no rebuild")),
+            start_fn=lambda b: b,
+        )
+        self.assertIsNone(thread)
+
+    def test_stop_during_retry_exits_promptly(self):
+        stop = threading.Event()
+        builds = {"n": 0}
+
+        def build_fn(cfg_result, **_kwargs):
+            builds["n"] += 1
+            return bridge_main.SoundSwitchPackStartupBundle(
+                None, _pack(), ("player", _pack()), None, None, "pack_start_failed",
+            )
+
+        thread = bridge_main._start_pack_startup_retry_supervisor(
+            stop_event=stop,
+            initial_bundle=bridge_main.SoundSwitchPackStartupBundle(
+                None, _pack(), ("player", _pack()), None, None, "pack_start_failed",
+            ),
+            cfg_loader=lambda: _result(),
+            build_kwargs={},
+            sm_holder={"sm": object()},
+            pack_output_owners={},
+            laser_executor_holder={},
+            interval_s=0.05,
+            build_fn=build_fn,
+            start_fn=lambda b: b,
+            attach_fn=lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("no attach")),
+        )
+        self.assertIsNotNone(thread)
+        time.sleep(0.12)
+        t0 = time.monotonic()
+        stop.set()
+        thread.join(timeout=1.0)
+        elapsed = time.monotonic() - t0
+        self.assertFalse(thread.is_alive())
+        self.assertLess(elapsed, 0.5)
+        self.assertGreaterEqual(builds["n"], 1)
 
 
 if __name__ == "__main__":

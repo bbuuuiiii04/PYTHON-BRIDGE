@@ -3,7 +3,7 @@ doc_status: current
 truth_level: operator-authoritative target behavior
 last_verified_commit: b16792a
 last_verified_date: 2026-07-07
-validation_scope: Package 1 re-wire implemented and software-tested in current worktree; no live or hardware validation implied. Reconfirmed unchanged by the 2026-07-07 laser-color menu/follow-LED layer — that feature only sets CH8/CH9 on the injected snapshot and still loses to blackout/emergency downstream.
+validation_scope: Package 1 re-wire implemented and software-tested in current worktree; no live or hardware validation implied. Reconfirmed unchanged by the 2026-07-07 laser-color menu/follow-LED layer — that feature only sets CH8/CH9 on the injected snapshot and still loses to blackout/emergency downstream. AWR-238 (pack/MIDI hot-plug recovery) does not change blackout ownership or emergency latch rules.
 ---
 
 # Laser Blackout Authority

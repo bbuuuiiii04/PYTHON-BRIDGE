@@ -3,7 +3,7 @@ doc_status: current
 truth_level: design-intent plus code-verified Package 4 plumbing and 2026-07-07 menu/follow-LED layer
 last_verified_commit: b16792a
 last_verified_date: 2026-07-07
-validation_scope: software-only; held-snapshot CH8/CH9 forwarding and menu/follow-LED/brightness-floor/CH9=90 layer verified in tests, hardware-unvalidated
+validation_scope: software-only; held-snapshot CH8/CH9 forwarding and menu/follow-LED/brightness-floor/CH9=90 layer verified in tests, hardware-unvalidated. AWR-238 does not change this design (transport hot-plug only).
 ---
 
 # Laser Color — Design Spec (pre-handoff)

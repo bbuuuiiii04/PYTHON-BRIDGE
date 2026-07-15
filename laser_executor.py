@@ -78,6 +78,14 @@ class LaserSceneExecutor:
             self._personality = personality
         self.reset_runtime_state(reason="set_personality", reset_cursors=True)
 
+    def set_backend(self, backend: LaserOutputBackend) -> None:
+        """Late-attach a pack/MIDI backend (AWR-238 hot-plug pack recovery).
+
+        Single reference assignment is GIL-atomic; the push loop at worst reads
+        one tick stale. Does not touch blackout/cooldown/personality state.
+        """
+        self._backend = backend
+
     def smart_drop_blackout_enabled(self) -> bool:
         """Return whether Smart Drop should use blackout-mask timing."""
         return str(getattr(self._config, "smart_drop_mode", "blackout_mask")) == "blackout_mask"

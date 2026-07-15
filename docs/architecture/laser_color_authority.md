@@ -3,7 +3,7 @@ doc_status: current
 truth_level: operator-authoritative target behavior
 last_verified_commit: b16792a
 last_verified_date: 2026-07-07
-validation_scope: behavior contract plus software-tested Package 4 plumbing and the 2026-07-07 menu/follow-LED/brightness-floor/CH9=90 layer; held CH8/CH9 forwarding verified in software; menu chase CH8 values (172/68/100/164/72) are NOT hardware-validated (CH3/CH4 stay authored); no live or hardware validation
+validation_scope: behavior contract plus software-tested Package 4 plumbing and the 2026-07-07 menu/follow-LED/brightness-floor/CH9=90 layer; held CH8/CH9 forwarding verified in software; menu chase CH8 values (172/68/100/164/72) are NOT hardware-validated (CH3/CH4 stay authored); no live or hardware validation. AWR-238 hot-plug recovery is transport-only and does not change color authority.
 ---
 
 # Laser Color Authority

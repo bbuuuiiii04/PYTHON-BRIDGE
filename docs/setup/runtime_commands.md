@@ -25,6 +25,8 @@ when the bridge is running and pack output is enabled, and waits for a fresh
 stopped or disabled pack runtime receives no reload command. The SoundSwitch-connection auto-switch
 does send `set_soundswitch_pack action=enable`, with one bounded retry after a fresh disconnected
 `pack_start_failed`; there is no manual pack button and no implicit hot-enable.
+AWR-238: a boot-time `pack_start_failed` is also retried by the bridge supervisor
+until the pack path recovers (status stays `pack_start_failed` while down).
 
 The additive schema-1 `soundswitch_pack` object is:
 

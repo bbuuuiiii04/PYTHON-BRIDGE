@@ -481,6 +481,179 @@ def _start_soundswitch_pack_workers(
     return bundle
 
 
+_PACK_START_RETRY_S = 10.0
+
+
+def _pack_runtime_from_started_bundle(
+    bundle: SoundSwitchPackStartupBundle,
+    cfg_result: SoundSwitchPackPlayerConfigResult,
+) -> PackRuntime:
+    """Build the PackRuntime published at boot and on AWR-238 late attach."""
+    pack_sha256 = (getattr(bundle.pack, "manifest_sha256", "") or "")
+    return PackRuntime(
+        enabled=(bundle.reason in ("pack", "artnet_truth_check")),
+        reason=bundle.reason,
+        player=bundle.player,
+        midi_input=bundle.midi_input,
+        backend=bundle.laser_backend,
+        frame_sender=bundle.frame_sender,
+        pack_sha12=pack_sha256[:12],
+        pack_sha256=pack_sha256,
+        phase_offset_beats=(
+            cfg_result.config.phase_offset_beats
+            if cfg_result.config is not None else 0.0
+        ),
+        truth_sink=bundle.truth_sink,
+        truth_check_reason=bundle.truth_check_reason,
+    )
+
+
+def _attach_pack_startup_bundle(
+    bundle: SoundSwitchPackStartupBundle,
+    *,
+    sm: Any,
+    pack_output_owners: dict[str, Any],
+    laser_executor: Any,
+    cfg_result: SoundSwitchPackPlayerConfigResult,
+) -> None:
+    """Wire a started pack bundle into the same consumers the boot path uses.
+
+    Late-attach seam (AWR-238): update cleanup owners, swap the laser executor
+    backend when pack DMX is live, and publish one immutable PackRuntime via
+    StateManager.set_pack_runtime. Never called from the 200 Hz push loop.
+    """
+    old_sender = pack_output_owners.get("sender")
+    old_midi = pack_output_owners.get("midi_input")
+    old_truth = pack_output_owners.get("truth_sink")
+    pack_output_owners["sender"] = bundle.frame_sender
+    pack_output_owners["midi_input"] = bundle.midi_input
+    pack_output_owners["truth_sink"] = bundle.truth_sink
+    if laser_executor is not None and bundle.laser_backend is not None:
+        set_backend = getattr(laser_executor, "set_backend", None)
+        if callable(set_backend):
+            set_backend(bundle.laser_backend)
+    sm.set_pack_runtime(_pack_runtime_from_started_bundle(bundle, cfg_result))
+    # Drop leftovers from a prior failed attempt that are not the live objects.
+    for old, new, stopper in (
+        (old_sender, bundle.frame_sender, "stop"),
+        (old_midi, bundle.midi_input, "stop"),
+        (old_truth, bundle.truth_sink, "stop"),
+    ):
+        if old is None or old is new:
+            continue
+        try:
+            getattr(old, stopper)()
+        except Exception:
+            pass
+
+
+def _start_pack_startup_retry_supervisor(
+    *,
+    stop_event: threading.Event,
+    initial_bundle: SoundSwitchPackStartupBundle,
+    cfg_loader,
+    build_kwargs: dict[str, Any],
+    sm_holder: dict[str, Any],
+    pack_output_owners: dict[str, Any],
+    laser_executor_holder: dict[str, Any],
+    interval_s: float = _PACK_START_RETRY_S,
+    build_fn=_build_soundswitch_pack_startup,
+    start_fn=_start_soundswitch_pack_workers,
+    attach_fn=_attach_pack_startup_bundle,
+) -> Optional[threading.Thread]:
+    """Retry pack construction/start until it succeeds or stop_event fires.
+
+    Only armed when boot left reason=pack_start_failed. Happy-path boot does
+    not start this thread (byte-identical no-supervisor churn).
+    """
+    if initial_bundle.reason != "pack_start_failed":
+        return None
+
+    def _worker() -> None:
+        waiting_logged = False
+        while not stop_event.is_set():
+            if stop_event.wait(interval_s):
+                return
+            try:
+                cfg_result = cfg_loader()
+                bundle = build_fn(cfg_result, **build_kwargs)
+                bundle = start_fn(bundle)
+            except Exception:
+                if not waiting_logged:
+                    log.warning(
+                        "[MAIN] soundswitch-pack still down  reason=pack_start_failed  "
+                        "retrying",
+                        exc_info=True,
+                    )
+                    waiting_logged = True
+                else:
+                    log.debug(
+                        "[MAIN] soundswitch-pack retry failed; still waiting",
+                        exc_info=True,
+                    )
+                continue
+            if bundle.reason not in ("pack", "artnet_truth_check"):
+                if not waiting_logged:
+                    log.warning(
+                        "[MAIN] soundswitch-pack still down  startup=%s  retrying",
+                        bundle.reason,
+                    )
+                    waiting_logged = True
+                else:
+                    log.debug(
+                        "[MAIN] soundswitch-pack still down  startup=%s",
+                        bundle.reason,
+                    )
+                # Partial leftovers from a failed rebuild must not leak ports.
+                for obj in (bundle.frame_sender, bundle.midi_input, bundle.truth_sink):
+                    if obj is None:
+                        continue
+                    try:
+                        obj.stop()
+                    except Exception:
+                        pass
+                continue
+            if stop_event.is_set():
+                for obj in (bundle.frame_sender, bundle.midi_input, bundle.truth_sink):
+                    if obj is None:
+                        continue
+                    try:
+                        obj.stop()
+                    except Exception:
+                        pass
+                return
+            sm = sm_holder.get("sm")
+            if sm is None:
+                for obj in (bundle.frame_sender, bundle.midi_input, bundle.truth_sink):
+                    if obj is None:
+                        continue
+                    try:
+                        obj.stop()
+                    except Exception:
+                        pass
+                continue
+            attach_fn(
+                bundle,
+                sm=sm,
+                pack_output_owners=pack_output_owners,
+                laser_executor=laser_executor_holder.get("executor"),
+                cfg_result=cfg_result,
+            )
+            log.info(
+                "[MAIN] soundswitch-pack recovered  startup=%s",
+                bundle.reason,
+            )
+            return
+
+    thread = threading.Thread(
+        target=_worker,
+        name="soundswitch-pack-startup-retry",
+        daemon=True,
+    )
+    thread.start()
+    return thread
+
+
 def _build_led_startup_wiring(
     cfg_result: LEDConfigResult,
 ) -> LEDStartupBundle:
@@ -972,12 +1145,16 @@ def main() -> None:
     # rest of bridge startup is still in progress.
     pack_output_owners: dict[str, Any] = {"sender": None, "midi_input": None, "truth_sink": None}
     _sm_holder: dict[str, Any] = {"sm": None}  # set after StateManager is built
+    _laser_executor_holder: dict[str, Any] = {"executor": None}
+    _pack_retry_stop = threading.Event()
+    _pack_retry_thread: Optional[threading.Thread] = None
 
     def _cleanup_pack_outputs() -> None:
         _shutdown_zero_pack_outputs(pack_output_owners, _sm_holder["sm"])
 
     def _early_shutdown(sig, frame):
         log.info("[MAIN] shutdown  sig=%d  phase=startup", sig)
+        _pack_retry_stop.set()
         _cleanup_pack_outputs()
         raise SystemExit(0)
 
@@ -1045,6 +1222,7 @@ def main() -> None:
     )
     laser_director = laser_bundle.laser_director
     laser_executor = laser_bundle.laser_executor
+    _laser_executor_holder["executor"] = laser_executor
     laser_status_provider = laser_bundle.status_provider
     laser_personality_provider = laser_bundle.personality_provider
     midi_output = laser_bundle.midi_output
@@ -1055,21 +1233,9 @@ def main() -> None:
     # T7e: one immutable runtime bundle published to StateManager. enabled only when
     # pack output or default-off truth-check workers actually started.
     pack_sha256 = (getattr(soundswitch_pack_bundle.pack, "manifest_sha256", "") or "")
-    soundswitch_pack_runtime = PackRuntime(
-        enabled=(soundswitch_pack_bundle.reason in ("pack", "artnet_truth_check")),
-        reason=soundswitch_pack_bundle.reason,
-        player=soundswitch_pack_player,
-        midi_input=soundswitch_midi_input,
-        backend=soundswitch_pack_bundle.laser_backend,
-        frame_sender=soundswitch_frame_sender,
-        pack_sha12=pack_sha256[:12],
-        pack_sha256=pack_sha256,
-        phase_offset_beats=(
-            soundswitch_pack_cfg_result.config.phase_offset_beats
-            if soundswitch_pack_cfg_result.config is not None else 0.0
-        ),
-        truth_sink=soundswitch_truth_sink,
-        truth_check_reason=soundswitch_pack_bundle.truth_check_reason,
+    soundswitch_pack_runtime = _pack_runtime_from_started_bundle(
+        soundswitch_pack_bundle,
+        soundswitch_pack_cfg_result,
     )
     log.info(
         "[MAIN] soundswitch-pack-config  reason=%s  available=%s  enabled=%s  startup=%s",
@@ -1206,6 +1372,24 @@ def main() -> None:
         mixer_authority_enabled=mixer_authority,
     )
     _sm_holder["sm"] = sm
+    if soundswitch_pack_bundle.reason == "pack_start_failed":
+        _pack_retry_thread = _start_pack_startup_retry_supervisor(
+            stop_event=_pack_retry_stop,
+            initial_bundle=soundswitch_pack_bundle,
+            cfg_loader=load_soundswitch_pack_player_config,
+            build_kwargs={
+                "event_sink": _pad_event_sink,
+                "extra_midi_bindings": palette_control_bindings,
+            },
+            sm_holder=_sm_holder,
+            pack_output_owners=pack_output_owners,
+            laser_executor_holder=_laser_executor_holder,
+        )
+        log.warning(
+            "[MAIN] soundswitch-pack startup failed; retrying every %.0fs "
+            "until Enttec/MIDI appear",
+            _PACK_START_RETRY_S,
+        )
     if led_bundle.realtime_runner is not None:
         led_bundle.realtime_runner.set_beat_provider(sm.get_active_beat_anchor)
         led_bundle.realtime_runner.start()
@@ -1829,6 +2013,7 @@ def main() -> None:
     def _shutdown(sig, frame):
         log.info("[MAIN] shutdown  sig=%d", sig)
         # Push direct-DMX zero before any potentially slow watcher/thread joins.
+        _pack_retry_stop.set()
         _cleanup_pack_outputs()
         config_reloader.stop()
         status_writer.stop()
@@ -1847,6 +2032,8 @@ def main() -> None:
             midi_output.stop()
         if led_scene_adapter is not None:
             led_scene_adapter.shutdown()
+        if _pack_retry_thread is not None and _pack_retry_thread.is_alive():
+            _pack_retry_thread.join(timeout=2.0)
         if led_bundle.realtime_runner is not None:
             led_bundle.realtime_runner.stop()
         discovery.stop()

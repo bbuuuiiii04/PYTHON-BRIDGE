@@ -227,6 +227,8 @@ Update:
 Forbidden assumptions:
 
 - A matching sim command frame does not prove device receipt or visible hardware behavior; the sim never contacts the Govee device.
+- `production_runner_offline` means real runner composition on an ideal tool clock; it is not a live bridge timing capture or measured FPS parity.
+- Configured-look parameters are read before live runtime color and state injection; they are not necessarily the final live `EffectSpec`.
 - Sim profile defaults (gamma, channel gains, glow, bleed, latency, and slew) are calibration assumptions, not device measurements.
 - Six displayed emitters per segment model the H612D control grouping; they are not six independently commanded pixels.
 

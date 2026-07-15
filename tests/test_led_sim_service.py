@@ -68,6 +68,8 @@ class LedSimServiceTests(unittest.TestCase):
         self.assertEqual(catalog["device"]["physical_leds"], 360)
         self.assertEqual(catalog["device"]["leds_per_segment"], 6)
         self.assertIn("timing_response", catalog["calibration_sequences"])
+        self.assertEqual(catalog["calibration_sequence_version"], "h612d-cal-v2")
+        self.assertEqual(catalog["calibration_capture_fps"], [10, 20, 30, 40, 60])
         self.assertEqual(catalog["profile_error"], "")
         self.assertIn("looks", catalog)
         self.assertIn("lab", catalog)
@@ -220,6 +222,9 @@ class LedSimServiceTests(unittest.TestCase):
             status, result = _request(port, "POST", "/api/render_card", {"kind": "gray50"})
             self.assertEqual(status, 200)
             self.assertEqual(result["frames"][0][0], [128, 128, 128])
+            self.assertEqual(result["duration_ms"], 1000)
+            self.assertEqual(result["frame_source"], "reference_generated_offline")
+            self.assertEqual(result["timing_source"], "ideal_grid")
             status, result = _request(port, "POST", "/api/render_card", {"kind": "nope"})
         self.assertEqual(status, 400)
 

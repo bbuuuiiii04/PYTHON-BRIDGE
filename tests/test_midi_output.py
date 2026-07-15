@@ -269,6 +269,46 @@ class MidiOutputTests(unittest.TestCase):
             finally:
                 out.stop()
 
+    def test_port_unavailable_reopens_after_cooldown_and_sends(self) -> None:
+        # AWR-238: boot-time missing IAC latched forever; reopen like send_error.
+        recording = _RecordingPort()
+        opens = {"n": 0}
+
+        def open_output(_name):
+            opens["n"] += 1
+            if opens["n"] == 1:
+                raise OSError("port missing at boot")
+            return recording
+
+        fake_mido = SimpleNamespace(
+            open_output=open_output,
+            Message=lambda msg_type, **kwargs: SimpleNamespace(type=msg_type, kwargs=kwargs),
+        )
+        out = MidiOutput(port_name="IAC Driver Bus 1", dry_run=False)
+        logger, handler, prior_level, records = _capture_health()
+        self.addCleanup(logger.setLevel, prior_level)
+        self.addCleanup(logger.removeHandler, handler)
+        with patch("rb_ss_bridge_v2.midi_output.importlib.import_module", return_value=fake_mido):
+            out.start()
+            try:
+                self.assertEqual(out.status()["degraded_reason"], "port_unavailable")
+                # First trigger reopens (cooldown was 0) and queues successfully.
+                self.assertTrue(
+                    out.trigger(LaserMidiMessage(kind="note_on", channel=1, note=71, velocity=100))
+                )
+                self.assertGreaterEqual(opens["n"], 2)
+                self.assertTrue(
+                    _wait_until(lambda: any(m.type == "note_on" for _, m in recording.messages))
+                )
+                status = out.status()
+                self.assertFalse(status["degraded"])
+                self.assertEqual(status["degraded_reason"], "")
+                self.assertTrue(_wait_until(lambda: any(
+                    r.levelname == "INFO" and "recovered" in r.getMessage() for r in records
+                )))
+            finally:
+                out.stop()
+
     def test_live_note_on_logs_at_debug_after_transport_send(self) -> None:
         # AWR-125 W4: [MIDI] tx demoted INFO -> DEBUG (hot-path hygiene).
         port = _RecordingPort()

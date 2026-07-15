@@ -124,7 +124,14 @@ class MidiOutput:
                 degraded = self._degraded
                 degraded_reason = self._degraded_reason
                 running = self._running
-            if degraded and degraded_reason == "send_error" and running:
+            # AWR-238: port_unavailable at boot used to latch forever; reopen on the
+            # same throttled cadence as send_error recovery (IAC/Enttec can appear
+            # after the bridge starts).
+            if (
+                degraded
+                and degraded_reason in ("send_error", "port_unavailable")
+                and running
+            ):
                 degraded = not self._attempt_send_error_recovery()
             if degraded or not running:
                 self._record_rejection()

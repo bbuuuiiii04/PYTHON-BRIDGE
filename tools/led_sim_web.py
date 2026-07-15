@@ -72,6 +72,8 @@ class LedSimService:
             "lab_error": lab.get("error", ""),
             "test_cards": list(engine.TEST_CARD_KINDS),
             "calibration_sequences": list(engine.CALIBRATION_SEQUENCE_NAMES),
+            "calibration_sequence_version": engine.CALIBRATION_SEQUENCE_VERSION,
+            "calibration_capture_fps": list(engine.CALIBRATION_CAPTURE_FPS),
             "device": {
                 "model": engine.H612D_MODEL,
                 "segments": engine.H612D_SEGMENTS,
@@ -229,9 +231,8 @@ def build_handler(service: LedSimService) -> type[BaseHTTPRequestHandler]:
             if not isinstance(params, dict):
                 self._bad_request("params must be a JSON object")
                 return
-            try:
-                seed = int(body.get("seed", 0))
-            except (TypeError, ValueError):
+            seed = body.get("seed", 0)
+            if not isinstance(seed, int) or isinstance(seed, bool):
                 self._bad_request("seed must be an integer")
                 return
             try:
@@ -281,6 +282,7 @@ def build_handler(service: LedSimService) -> type[BaseHTTPRequestHandler]:
                 ),
                 "timing_source": engine.TIMING_SOURCE_IDEAL_GRID,
                 "duration_ms": int(round(duration_s * 1000.0)),
+                "duration_source": "generated_exact",
             })
 
         def _handle_render_card(self, body: dict[str, Any]) -> None:
@@ -290,7 +292,16 @@ def build_handler(service: LedSimService) -> type[BaseHTTPRequestHandler]:
                 return
             segments = service.segments()
             frames = engine.test_card_frames(kind, segments)
-            self._send_json({"frames": frames, "fps": 1, "segments": segments, "t_ms": [0]})
+            self._send_json({
+                "frames": frames,
+                "fps": 1,
+                "segments": segments,
+                "t_ms": [0],
+                "duration_ms": 1000,
+                "duration_source": "generated_exact",
+                "frame_source": "reference_generated_offline",
+                "timing_source": engine.TIMING_SOURCE_IDEAL_GRID,
+            })
 
         def _handle_calibration(self, body: dict[str, Any]) -> None:
             name = body.get("name")
@@ -333,6 +344,8 @@ def build_handler(service: LedSimService) -> type[BaseHTTPRequestHandler]:
                 self._bad_request(f"replay segments must be {engine.H612D_SEGMENTS}")
                 return
             payload["path"] = str(resolved)
+            payload["frame_source"] = str(payload["meta"].get("frame_source") or "recorded_jsonl")
+            payload["timing_source"] = str(payload["meta"].get("timing_source") or "jsonl_timestamps")
             self._send_json(payload)
 
     return _LedSimHandler

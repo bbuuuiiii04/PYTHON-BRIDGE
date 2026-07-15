@@ -130,6 +130,24 @@ class CodecTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, r":3: t_ms must be nondecreasing"):
                 engine.read_frames_jsonl(path)
 
+    def test_duration_must_extend_past_final_timestamp(self) -> None:
+        frames = [[(0, 0, 0)], [(1, 2, 3)]]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "short-duration.jsonl"
+            with self.assertRaisesRegex(ValueError, "greater than the final t_ms"):
+                engine.write_frames_jsonl(path, frames, fps=60, t_ms=[0, 20], duration_ms=20)
+            header = json.dumps({
+                "v": 1, "kind": "header", "fps": 60, "segments": 1,
+                "duration_ms": 20, "meta": {},
+            })
+            lines = (
+                json.dumps({"v": 1, "t_ms": 0, "frame": [[0, 0, 0]]}),
+                json.dumps({"v": 1, "t_ms": 20, "frame": [[1, 2, 3]]}),
+            )
+            path.write_text(f"{header}\n{lines[0]}\n{lines[1]}\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "greater than the final t_ms"):
+                engine.read_frames_jsonl(path)
+
     def test_corrupt_line_raises_with_line_number(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "bad.jsonl"

@@ -36,7 +36,7 @@
         <span class="section-label">SOURCE</span>
         <label class="field">Type
           <select id="source-kind">
-            <option value="look">Production look</option>
+            <option value="look">Configured look (before live injection)</option>
             <option value="effect">Production effect</option>
             <option value="lab">Lab draft</option>
             <option value="replay">Recorded frames</option>
@@ -72,17 +72,17 @@
       <div>
         <span class="section-label">CAPTURE SEQUENCES</span>
         <h2>Measure the strip</h2>
-        <p class="muted">These previews generate the exact frames for a later synchronized hardware capture. Nothing is sent now.</p>
+        <p class="muted">These previews generate deterministic measurement frames for a later synchronized hardware capture. Nothing is sent now.</p>
       </div>
 
       <button class="sequence-card" data-sequence="segment_map" type="button">
-        <strong>Segment map</strong><span>Walk all 60 controllable groups</span>
+        <strong>Segment map</strong><span>Walk all 60 groups at levels 16, 64, and 255</span>
       </button>
       <button class="sequence-card" data-sequence="color_response" type="button">
-        <strong>Color response</strong><span>RGBW ramps plus mixed colors</span>
+        <strong>Color response</strong><span>Near-black RGBW/mixed ramps at isolated, alternating, and full-strip loads</span>
       </button>
       <button class="sequence-card" data-sequence="timing_response" type="button">
-        <strong>Timing response</strong><span>Frame steps, holds, and fast chases</span>
+        <strong>Timing response</strong><span>Three identifiable constant-load counter passes, then holds and fast chases</span>
       </button>
 
       <details class="advanced">
@@ -127,7 +127,7 @@
     <div class="stage-header">
       <div>
         <span class="section-label">FIXTURE VIEW</span>
-        <h2 id="view-title">H612D command frame</h2>
+        <h2 id="view-title">H612D fixture-response preview</h2>
       </div>
       <div class="readouts">
         <span id="pipeline-badge">PROVENANCE UNKNOWN</span>

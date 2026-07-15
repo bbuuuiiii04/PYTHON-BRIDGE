@@ -75,7 +75,7 @@ source of truth when documents conflict. A doc is *active* only if it is listed 
 | `docs/led_look_mapping_workflow.md` | CURRENT SUPPORTING — operator mapping workflow. |
 | `docs/govee_capability_notes.md` | CURRENT SUPPORTING — Govee device capability notes. |
 | `docs/guides/*.md` (5, `led_sim.md` listed separately) | CURRENT SUPPORTING — laser MIDI mapping, rollout checklist, Laser Pad live-toggle/draft behavior, LED Pad/Template Lab operator guide. |
-| `docs/guides/led_sim.md` | CURRENT SUPPORTING — H612D LED Studio operator guide (AWR-196): 60 controlled segments shown as 360 grouped emitters, offline capture of real runner command frames, timestamp-held replay, measurement sequences, profile fields, frames-JSONL format, and the `ledsim-view.js` seam; the studio never contacts the device. |
+| `docs/guides/led_sim.md` | CURRENT SUPPORTING — H612D LED Studio operator guide (AWR-196): 60 controlled segments shown as 360 grouped emitters, offline real-runner frame composition on an explicitly ideal clock, source/timing provenance, timestamp-held replay, measurement protocol and evidence states, profile fields, frames-JSONL format, and the `ledsim-view.js` seam; the studio never contacts the device. |
 | `docs/subsystems/logging.md` | CURRENT SUPPORTING — matches `bridge_log.py`/`bridge_view.py` (AWR-125; `logging_manager.py` is retired). |
 | `docs/data/offsets-*.yaml` (3) | CURRENT SUPPORTING — Rekordbox offset reference data. |
 | `docs/data/cues_*.md` (2) | GENERATED OUTPUT — relocated cue dumps; not in the reading path. |

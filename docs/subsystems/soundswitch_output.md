@@ -3,7 +3,7 @@ doc_status: current
 truth_level: code-verified
 last_verified_commit: HEAD-2026-07-12-awr219-worktree
 last_verified_date: 2026-07-12
-validation_scope: software-only; AWR-219 dead-write and initial-open Enttec reconnect paths tested; no bridge restart, serial open, or hardware action
+validation_scope: software-only; AWR-219 dead-write and initial-open Enttec reconnect paths tested; AWR-238 pack-startup retry + MIDI port_unavailable reopen software-tested; no bridge restart, serial open, or hardware action
 ---
 
 # SoundSwitch Output
@@ -17,6 +17,11 @@ Status:
 Purpose:
 - Send VirtualDJ-shaped OS2L messages and helper fanout to SoundSwitch.
 
+AWR-238 (2026-07-15): if pack construction/start fails at boot (`startup=pack_start_failed`), a
+supervisor thread retries ~every 10 s (warn-once then DEBUG) until Enttec/IAC appear, then
+late-attaches the same consumers as boot (`set_pack_runtime`, cleanup owners, laser executor
+backend). Happy-path boot starts no supervisor. Status stays honest while down. SOFTWARE-TESTED;
+foreign-Mac hot-plug live-unvalidated.
 Audit P1 (2026-07-03): `SoundSwitchEngine` documentation now describes the current routing/send
 facade instead of the obsolete no-op scaffold text. Runtime send ordering and output behavior are
 unchanged.
