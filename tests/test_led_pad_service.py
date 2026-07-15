@@ -524,6 +524,27 @@ class LedPadServiceTests(unittest.TestCase):
             self.assertEqual(entry["status"], "accepted")
             self.assertEqual(entry["params"], {"level": 0.3})
 
+    def test_session_test_palette_live_updates_playing_lab_draft(self) -> None:
+        """AWR-243 F5: test_palette must color-push while a lab_* scene is playing."""
+        with tempfile.TemporaryDirectory() as td:
+            service, playback = self._lab_service(td)
+            service.lab_save({"name": "pulse", "kind": "slot", "fn": "pulse", "params": {"level": 0.5}, "cue_beats": 8})
+            service.session({"test_palette": "blue_cyan"})
+            play = service.lab_play({"name": "pulse"})
+            self.assertTrue(play["ok"])
+            self.assertTrue(str(service._playing_name).startswith("lab_"))
+            self.assertIsNone(service._last_play_editor)
+            before = copy.deepcopy(playback.play_calls[-1]["spec"]["params"]["slot_colors"])
+            playback.update_calls.clear()
+
+            service.session({"test_palette": "violet"})
+
+            self.assertEqual(len(playback.update_calls), 1)
+            after = playback.update_calls[0]["params"]["slot_colors"]
+            self.assertEqual(len(after), 6)
+            self.assertEqual(after[5], (255, 255, 255))
+            self.assertNotEqual(after, before)
+
     def test_lab_preview_honors_posted_params_without_prior_save(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             service, _playback = self._lab_service(td)

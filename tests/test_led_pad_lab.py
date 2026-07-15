@@ -187,8 +187,20 @@ class LedPadLabTests(unittest.TestCase):
             raw = json.loads((registry.lab_dir / "drafts.json").read_text(encoding="utf-8"))
 
             self.assertEqual(flags, {"beat_chase": True, "pulse": False})
+            self.assertFalse(flags["pulse"], "non-colliding draft must not flag production_collision")
             for item in raw["entries"]:
                 self.assertNotIn("production_collision", item)
+
+    def test_list_production_collision_false_for_non_production_name(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            registry = LabRegistry(Path(td) / "led_lab")
+            registry.save({"name": "comet_pingpong_dual", "kind": "slot", "fn": "comet_pingpong_dual", "params": {}})
+            registry.save({"name": "pair_rainbow", "kind": "slot", "fn": "pair_rainbow", "params": {}})
+
+            flags = {item["name"]: item["production_collision"] for item in registry.list()}
+
+            self.assertFalse(flags["comet_pingpong_dual"])
+            self.assertFalse(flags["pair_rainbow"])
 
     def test_registry_delete_removes_entry_and_unknown_name_raises(self) -> None:
         with tempfile.TemporaryDirectory() as td:

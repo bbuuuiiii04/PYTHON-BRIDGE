@@ -621,6 +621,7 @@ class LedPadService:
 
     def session(self, payload: dict[str, Any]) -> dict[str, Any]:
         update_after = False
+        lab_palette_name = ""
         with self._lock:
             session = self._session(self._draft)
             if "bpm" in payload:
@@ -632,6 +633,14 @@ class LedPadService:
             if "test_palette" in payload:
                 session["test_palette"] = str(payload["test_palette"])
                 update_after = bool(self._playing_name and self._last_play_editor)
+                # Lab play/switch clear _last_play_editor, so pad-editor update_after
+                # never fires for lab_* — push a color-only re-resolve via lab_update.
+                if (
+                    not update_after
+                    and self._playing_name
+                    and str(self._playing_name).startswith("lab_")
+                ):
+                    lab_palette_name = str(self._playing_name).removeprefix("lab_")
             if "loop" in payload:
                 session["loop"] = bool(payload["loop"])
                 self._playback.set_loop(bool(payload["loop"]))
@@ -639,6 +648,8 @@ class LedPadService:
             out = copy.deepcopy(session)
         if update_after and self._last_play_editor:
             self.update({"name": self._playing_name, "editor": self._last_play_editor})
+        elif lab_palette_name:
+            self.lab_update({"name": lab_palette_name})
         return {"ok": True, "session": out}
 
     def _look_state(self, config: dict[str, Any], name: str, editor: dict[str, Any] | None) -> tuple[dict[str, Any], dict[str, Any], float]:

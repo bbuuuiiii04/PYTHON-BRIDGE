@@ -170,20 +170,34 @@
       label.className = "lab-health-label";
       serverEl.appendChild(label);
     }
-    label.textContent = serverOk ? "Server" : `Server (${ago}s ago)`;
+    label.textContent = serverOk ? "ok" : `stale (${ago}s)`;
+    serverEl.title = "Server: green ok (<3s), red stale/error";
 
     const labEl = $("healthLab");
     const labDot = labEl.querySelector(".lab-health-dot");
-    labDot.dataset.state = state.health.labOk === true ? "ok" : state.health.labOk === false ? "bad" : "unknown";
+    const labLabel = labEl.querySelector(".lab-health-label");
+    if (state.health.labOk === true) {
+      labDot.dataset.state = "ok";
+      if (labLabel) labLabel.textContent = "loaded ✓";
+    } else if (state.health.labOk === false) {
+      labDot.dataset.state = "bad";
+      if (labLabel) labLabel.textContent = "load failed";
+    } else {
+      labDot.dataset.state = "unknown";
+      if (labLabel) labLabel.textContent = "not loaded yet";
+    }
+    labEl.title = "Lab code: amber not loaded yet, green loaded ✓, red load failed (click for traceback)";
 
     const pbEl = $("healthPlayback");
     const pbDot = pbEl.querySelector(".lab-health-dot");
     const playing = Boolean(state.health.playingName);
     pbDot.dataset.state = playing ? "ok" : "idle";
     const beat = state.health.playingBeat;
+    const playName = playing ? state.health.playingName.replace(/^lab_/, "") : "";
     $("healthPlaybackText").textContent = playing
-      ? `playing ${state.health.playingName.replace(/^lab_/, "")}${typeof beat === "number" ? ` · beat ${Math.floor(beat)}` : ""}`
+      ? `playing ${playName}${typeof beat === "number" ? ` · beat ${Math.floor(beat)}` : ""}`
       : "idle";
+    pbEl.title = playing ? `Playback: playing ${playName}` : "Playback: green playing <name>, gray idle";
   }
 
   async function refresh() {
@@ -229,8 +243,10 @@
     $("rejectedToggle").textContent = `Archived (${state.entries.filter(archived).length})`;
     state.showRejected = state.filters.rejected;
 
-    const visible = state.entries.filter(matchesFilters);
-    $("draftsDrawerCount").textContent = String(visible.length);
+    const selectedName = state.current && state.current.name;
+    // Selected draft always stays visible (Accept with Accepted=off must not vanish).
+    const visible = state.entries.filter(e => matchesFilters(e) || (selectedName && e.name === selectedName));
+    $("draftsDrawerCount").textContent = String(state.entries.filter(matchesFilters).length);
 
     const groups = [
       {key: "iterating", label: "Iterating", items: []},
@@ -305,13 +321,15 @@
     if (!e) {
       $("paramControls").innerHTML = "";
       $("collisionBanner").hidden = true;
+      $("appliedHint").hidden = true;
       $("draftTitle").textContent = "Select a draft";
       $("kindText").textContent = "";
       $("statusText").textContent = "";
       $("notesSummary").textContent = "Notes";
       return;
     }
-    $("collisionBanner").hidden = !(e.production_collision && e.status !== "promoted");
+    // F1: banner only when list decoration says so (CSS also honors [hidden]).
+    $("collisionBanner").hidden = !e.production_collision;
     $("draftTitle").textContent = e.name;
     $("draftFn").textContent = `${e.kind} · ${e.fn}`;
     $("briefInput").value = e.brief || "";
@@ -421,22 +439,45 @@
     try {
       const mine = labScene(state.current.name);
       if (state.playingLook && state.playingLook.startsWith("lab_") && state.playingLook !== mine) {
-        const sw = await api.labSwitch({name: state.current.name, params: JSON.parse($("paramsInput").value || "{}")});
-        if (sw.ok) {
-          renderSwatches(sw.spec && sw.spec.params && sw.spec.params.slot_colors);
-          await updateRuntime();
-          return;
+        try {
+          const sw = await api.labSwitch({name: state.current.name, params: JSON.parse($("paramsInput").value || "{}")});
+          if (sw.ok) {
+            state.health.labOk = true;
+            setAppliedHint(false);
+            renderSwatches(sw.spec && sw.spec.params && sw.spec.params.slot_colors);
+            await updateRuntime();
+            return;
+          }
+        } catch (err) {
+          if (err && err.message === "ownership_required") {
+            PadModal.confirm("The bridge owns the LEDs right now. Take over?", "LEDs go dark on the bridge side until you release.", "Take over", () => play(true));
+            return;
+          }
+          throw err;
         }
       }
       const res = await api.labPlay({name: state.current.name, params: JSON.parse($("paramsInput").value || "{}"), cue_beats:cue(), takeover});
-      if (!res.ok && res.error === "ownership_required") {
+      state.health.labOk = true;
+      setAppliedHint(false);
+      renderSwatches(res.spec && res.spec.params && res.spec.params.slot_colors);
+      await updateRuntime();
+    } catch (err) {
+      if (err && err.message === "ownership_required") {
         PadModal.confirm("The bridge owns the LEDs right now. Take over?", "LEDs go dark on the bridge side until you release.", "Take over", () => play(true));
         return;
       }
-      if (!res.ok) throw new Error(res.error || "lab play failed");
-      renderSwatches(res.spec && res.spec.params && res.spec.params.slot_colors);
-      await updateRuntime();
-    } catch (err) { showError(err); }
+      showError(err);
+    }
+  }
+
+  let reloadConfirmTimer = 0;
+  function flashReloadConfirm(ok, text) {
+    const el = $("reloadConfirm");
+    el.hidden = false;
+    el.className = ok ? "lab-reload-confirm" : "lab-reload-confirm bad";
+    el.textContent = text;
+    clearTimeout(reloadConfirmTimer);
+    reloadConfirmTimer = setTimeout(() => { el.hidden = true; el.textContent = ""; }, 2000);
   }
 
   async function reloadCode() {
@@ -446,9 +487,11 @@
     state.health.labTrace = res.traceback || res.error || "";
     renderHealth();
     if (!res.ok) {
+      flashReloadConfirm(false, "Reload failed");
       showError(`Your effect code failed to load: ${String(res.error || "").split("\n")[0]}`);
       if (DEV) $("tracePanel").open = true;
     } else {
+      flashReloadConfirm(true, `Loaded ${(res.effects || []).length} effects ✓`);
       $("tracePanel").open = false;
     }
     return res;
@@ -500,16 +543,20 @@
   }
 
   let applyTimer = 0;
+  function setAppliedHint(show) {
+    $("appliedHint").hidden = !show;
+  }
   function queueAutoApply() {
     clearTimeout(applyTimer);
     applyTimer = setTimeout(async () => {
-      if (!state.current || state.playingLook !== labScene(state.current.name)) return;
+      if (!state.current) return;
       let params;
       try { params = JSON.parse($("paramsInput").value || "{}"); } catch { showError("Params JSON invalid — live apply paused"); return; }
       try {
         const res = await api.labSave(currentPayload());
         state.current = res.entry;
-        await api.labUpdate({name: state.current.name, params});
+        const upd = await api.labUpdate({name: state.current.name, params});
+        setAppliedHint(upd && upd.applied === false);
         clearError();
       } catch (err) { showError(err); }
     }, 400);
@@ -609,16 +656,22 @@
   }
 
   const preview = {frames: [], fps: 40, raf: 0};
+  function setPreviewHint(show) {
+    const hint = $("previewHint");
+    if (hint) hint.hidden = !show;
+  }
   function stopPreview() {
     cancelAnimationFrame(preview.raf);
     preview.frames = [];
     const canvas = $("previewStrip");
     canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+    setPreviewHint(true);
     if (beatUI.mode === "preview") setBeatMode("off");
   }
   async function previewDraft() {
     if (!state.current) return;
     stopPreview();
+    setPreviewHint(true);
     // No implicit save: preview posts the current editor params directly.
     const params = JSON.parse($("paramsInput").value || "{}");
     const res = await api.labPreview({name: state.current.name, params});
@@ -630,6 +683,8 @@
       if (DEV) $("tracePanel").open = true;
       throw new Error(`Your effect code failed to load: ${String(res.error || "preview failed").split("\n")[0]}`);
     }
+    state.health.labOk = true;
+    renderHealth();
     renderSwatches(res.slot_colors);
     const canvas = $("previewStrip");
     sizePreviewCanvas();
@@ -637,6 +692,7 @@
     const ctx = canvas.getContext("2d");
     preview.frames = res.frames;
     preview.fps = res.fps;
+    setPreviewHint(false);
     const bpm = Number(res.bpm) || Number($("bpmInput").value) || 128;
     setBeatMode("preview", {bpm, fps: preview.fps, frameIndex: 0});
     let start;
@@ -687,14 +743,17 @@
     panel.hidden = false;
     const lines = [];
     const add = (ok, text) => { lines.push(`${ok ? "✓" : "✗"} ${text}`); panel.innerHTML = lines.map(l => `<div>${esc(l)}</div>`).join(""); };
+    let allOk = true;
 
     let reloadOk = false;
     try {
       const res = await reloadCode();
       reloadOk = Boolean(res.ok);
       add(reloadOk, reloadOk ? "Reload code ok" : `Reload failed: ${String(res.error || "").split("\n")[0] || "error"}`);
+      if (!reloadOk) allOk = false;
     } catch (err) {
       add(false, `Reload failed: ${(err && err.message) || err}`);
+      allOk = false;
     }
 
     if (!state.current) {
@@ -706,19 +765,27 @@
       const res = await api.labPreview({name: state.current.name, params, beats: 2});
       const ok = Boolean(res.ok);
       add(ok, ok ? "Preview response ok" : `Preview failed: ${String(res.error || "").split("\n")[0] || "error"}`);
-      if (!ok) return;
+      if (!ok) { allOk = false; return; }
       const hasFrames = Array.isArray(res.frames) && res.frames.length > 0;
       add(hasFrames, hasFrames ? `Frames non-empty (${res.frames.length})` : "Frames empty");
+      if (!hasFrames) allOk = false;
       const lit = framesNotAllBlack(res.frames);
       add(lit, lit ? "Frames not all-black" : "Frames are all-black");
+      if (!lit) allOk = false;
       if (state.current.kind === "slot") {
         const slots = Array.isArray(res.slot_colors) && res.slot_colors.length > 0;
         add(slots, slots ? "slot_colors non-empty" : "slot_colors empty");
+        if (!slots) allOk = false;
       } else {
         add(true, "slot_colors N/A (frame kind)");
       }
     } catch (err) {
       add(false, `Preview failed: ${(err && err.message) || err}`);
+      allOk = false;
+    }
+    if (allOk) {
+      state.health.labOk = true;
+      renderHealth();
     }
   }
 

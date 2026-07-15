@@ -25,9 +25,9 @@
       </form>
       <div class="transport lab-transport">
         <div id="healthStrip" class="lab-health" aria-label="Health">
-          <span class="lab-health-item" id="healthServer" title="Server"><span class="lab-health-dot" data-state="unknown"></span><span class="lab-health-label">Server</span></span>
-          <span class="lab-health-item" id="healthLab" title="Lab code" role="button" tabindex="0"><span class="lab-health-dot" data-state="unknown"></span><span class="lab-health-label">Lab code</span></span>
-          <span class="lab-health-item" id="healthPlayback" title="Playback"><span class="lab-health-dot" data-state="idle"></span> <span id="healthPlaybackText">idle</span></span>
+          <span class="lab-health-item" id="healthServer" title="Server: green ok (&lt;3s), red stale/error"><span class="lab-health-dot" data-state="unknown"></span><span class="lab-health-label">Server</span></span>
+          <span class="lab-health-item" id="healthLab" title="Lab code: amber not loaded yet, green loaded ✓, red load failed (click for traceback)" role="button" tabindex="0"><span class="lab-health-dot" data-state="unknown"></span><span class="lab-health-label">not loaded yet</span></span>
+          <span class="lab-health-item" id="healthPlayback" title="Playback: green playing &lt;name&gt;, gray idle"><span class="lab-health-dot" data-state="idle"></span> <span id="healthPlaybackText">idle</span></span>
           <button id="selfTestBtn" type="button" class="ghost lab-selftest-btn">Self-test</button>
         </div>
         <div id="selfTestPanel" class="lab-selftest-panel" hidden></div>
@@ -40,7 +40,7 @@
   <main>
     <div id="errorBanner" class="error-banner" hidden></div>
     <section class="lab-layout">
-      <button id="draftsDrawerBtn" type="button" class="lab-drawer-toggle" aria-expanded="false">Drafts ▾ (<span id="draftsDrawerCount">0</span>)</button>
+      <button id="draftsDrawerBtn" type="button" class="lab-drawer-toggle" aria-expanded="false"><span class="lab-drawer-label">Drafts ▾ (<span id="draftsDrawerCount">0</span>)</span></button>
       <section class="lab-detail-panel">
         <!-- Z1 Header -->
         <div class="panel-head lab-z1">
@@ -84,7 +84,10 @@
 
         <!-- Z2 Preview hero -->
         <div class="lab-preview-hero">
-          <canvas id="previewStrip" height="64" aria-label="Draft preview strip"></canvas>
+          <div class="lab-preview-wrap">
+            <canvas id="previewStrip" height="64" aria-label="Draft preview strip"></canvas>
+            <div id="previewHint" class="lab-preview-hint">◉ Preview renders here — press Preview</div>
+          </div>
           <div class="lab-transport-row">
             <button id="previewBtn" type="button" class="ghost">◉ Preview</button>
             <button id="playDraftBtn" type="button" class="primary">▶ Play</button>
@@ -102,6 +105,7 @@
         <!-- Z3 Tuning card -->
         <div class="lab-tuning-card">
           <div id="paramControls" class="param-controls"></div>
+          <div id="appliedHint" class="lab-applied-hint" hidden>Edits saved to the draft — press ▶ Play to hear them live</div>
           <div class="lab-tuning-footer">
             <div class="cue-wrap"><span class="panel-label">Cue length (beats)</span><div class="cue-group" role="group" aria-label="Cue length (beats)"></div></div>
             <div class="lab-tuning-actions">
@@ -135,6 +139,7 @@
         <!-- Z6 Footer utility -->
         <div class="lab-footer-utils">
           <button id="reloadBtn" type="button" class="ghost">⟳ Reload code</button>
+          <span id="reloadConfirm" class="lab-reload-confirm" aria-live="polite" hidden></span>
           <button id="archiveUtilBtn" type="button" class="ghost">Archive</button>
           <button id="deleteBtn" type="button" class="danger ghost">Delete</button>
         </div>

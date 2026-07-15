@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: software-tested
-last_verified_commit: 8f46585
+last_verified_commit: bb3a310
 last_verified_date: 2026-07-15
-validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (live-apply + variant switch + preview), Round 2 (param_specs sliders/toggles, slot swatches, JSON demoted to Advanced), Round 3 (rejected-drafts filter, draft delete), QR same-network access, the iOS/iPad touch pass, the editor unset-param-defaults fix, the AWR-193 pad/lab overhaul (accept snapshot, decoupled preview, archive flow, fn fallback, effective bounds, color pickers + regime badges, reconnect, freshness watchdog + live fingerprint + no-cache), the AWR-202 commit read-modify-merge with the gate fix that tracks look CONTENT (`touched`) separately from role-bank PLACEMENT (`moved`) so a params-only edit keeps the look's LIVE bank while an explicit pad move still applies, AWR-240 pad offline v2 stand-down so Test Palette still injects slot_colors, AWR-241 Template Lab beat meter + metronome click (preview exact / live server-synced), and AWR-242 Template Lab UX overhaul (search/filter/group draft list, target_role phrase tags, settable timing_mode, detail restructure, health strip + self-test); SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
+validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (live-apply + variant switch + preview), Round 2 (param_specs sliders/toggles, slot swatches, JSON demoted to Advanced), Round 3 (rejected-drafts filter, draft delete), QR same-network access, the iOS/iPad touch pass, the editor unset-param-defaults fix, the AWR-193 pad/lab overhaul (accept snapshot, decoupled preview, archive flow, fn fallback, effective bounds, color pickers + regime badges, reconnect, freshness watchdog + live fingerprint + no-cache), the AWR-202 commit read-modify-merge with the gate fix that tracks look CONTENT (`touched`) separately from role-bank PLACEMENT (`moved`) so a params-only edit keeps the look's LIVE bank while an explicit pad move still applies, AWR-240 pad offline v2 stand-down so Test Palette still injects slot_colors, AWR-241 Template Lab beat meter + metronome click (preview exact / live server-synced), AWR-242 Template Lab UX overhaul (search/filter/group draft list, target_role phrase tags, settable timing_mode, detail restructure, health strip + self-test), and AWR-243 Template Lab functional fix round (collision banner gate, selected-draft list pin, ownership takeover catch, applied:false hint, live test_palette for lab play, header/phone/preview/health/utility UX); SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # LED Pad
@@ -201,7 +201,7 @@ Each draft also stores optional `target_role` (empty or one of the pad role bank
 buildup, pre_drop, drop, post_drop, breakdown, utility). The Phrase select in the detail header
 writes it on Save; list rows show a 3-letter phrase chip so you can see which moment a draft is for.
 
-### Lab UI layout (AWR-242)
+### Lab UI layout (AWR-242 / AWR-243)
 
 The `/lab` page (lab-route only — Pad markup and playwright selectors are untouched) is reorganized:
 
@@ -210,17 +210,33 @@ The `/lab` page (lab-route only — Pad markup and playwright selectors are unto
   eight roles). Rows group by status with counts, sort by updated desc inside each group, and stay
   one line: phrase chip · name (ellipsis) · status dot · relative date. Timing badges and full
   status pills are gone from the list. Under 900px the list is a **Drafts ▾ (N)** drawer above the
-  detail panel; picking a draft closes it.
-- **Detail (top → bottom).** Header (name / kind / status once + Phrase + Timing + LIVE) → preview
-  hero (64px / 48px phone canvas + Preview/Play/Stop + AWR-241 beat meter IDs unchanged) → tuning
-  card (labeled sliders with min/max under the track; cue segmented control without the duplicate
-  value chip; Save + dirty) → Accept (solid green) / Reject (outline red) verdict bar → Brief
-  (2 rows) + Notes in a collapsed details → Advanced JSON / Traceback → footer Reload · Archive ·
-  Delete.
-- **Health strip (client-only).** Top-bar right cluster: Server (green if last
-  `/api/runtime_status` succeeded &lt;3s ago), Lab code (last `/api/lab/reload`), Playback (playing
-  name · beat or idle), plus **Self-test** (reload → preview 2 beats → checks ok / frames /
-  not-all-black / slot_colors for slot kind). No new backend endpoints.
+  detail panel (one left-aligned inline label); picking a draft closes it. **The selected draft
+  always stays in the list** even when its status chip is off (Accept with Accepted=off no longer
+  makes the row vanish); it drops out only after you select something else or change filters.
+- **Detail (top → bottom).** Header flows title → Phrase/Timing → collision banner **only when**
+  `production_collision` is true → preview hero (64px / 48px phone canvas with a dim “press
+  Preview” placeholder until frames arrive + Preview/Play/Stop + AWR-241 beat meter IDs unchanged)
+  → tuning card (labeled sliders; on phone, label+value on one line and full-width track below with
+  ≥32px thumbs; cue segmented control; Save + dirty; dim hint when `/api/lab/update` returns
+  `applied:false`: “Edits saved to the draft — press ▶ Play to hear them live”) → Accept (solid
+  green) / Reject (outline red) verdict bar → Brief (2 rows) + Notes in a collapsed details →
+  Advanced JSON / Traceback → footer Reload (transient “Loaded N effects ✓”) · Archive · Delete
+  (Archive/Delete/Save/Accept/Reject disabled with no selection).
+- **Health strip (client-only).** Top-bar right cluster with title tooltips:
+  - **Server** — green `ok` when last `/api/runtime_status` succeeded &lt;3s ago; red `stale` otherwise.
+  - **Lab code** — amber `not loaded yet` before first successful reload/play/preview; green
+    `loaded ✓` after any of those succeed; red `load failed` (click opens traceback). Self-test
+    pass also sets green.
+  - **Playback** — green `playing <name>` while a look is up; gray `idle` otherwise.
+  Plus **Self-test** (reload → preview 2 beats → checks ok / frames / not-all-black / slot_colors
+  for slot kind). No new backend endpoints.
+- **Ownership takeover (AWR-243).** `pad-core.js` `request()` attaches the JSON payload on thrown
+  `{ok:false, error}` errors so Lab Play can catch `ownership_required` and show the PadModal
+  takeover confirm (Pad route already used catch-based handling).
+
+While a `lab_*` scene is playing, changing **Test Palette** re-resolves colors and pushes a
+color-only update through the existing lab update path (lab play/switch clear the pad editor
+pointer, so the pad-look session path alone was not enough).
 
 The AWR-194 wave-1 sweep rendered every draft for 16 seconds at 20 fps through `LabRenderer`:
 25/25 rendered without an exception, 25/25 changed across the sampled cue, and none were
@@ -455,8 +471,12 @@ live-changed fingerprint + no-cache) are implemented/software-tested. AWR-241 ad
 beat meter + optional metronome click (preview exact from frame math; live phase-locked to
 `status.beat`; JS is manual-smoke only). AWR-242 reworks the `/lab` UI (search/filter/group list,
 `target_role` phrase tags, settable `timing_mode`, preview-first detail, health strip + Self-test;
-styles scoped under `.lab-route`; Pad route untouched). AWR-193/241/242 JS/UI behavior has no
-automated harness — it is code-review + manual-smoke covered only (registry `target_role` is
-unit-tested). Locked Palette and renderer param unlock behavior is covered by software tests only.
+styles scoped under `.lab-route`; Pad route untouched). AWR-243 is the functional fix round on that
+UI (collision banner only when `production_collision`, selected-draft list pin, ownership
+takeover catch via `err.payload`, `applied:false` slider hint, live Test Palette while a lab scene
+plays, plus header/phone/preview/health/utility polish). AWR-193/241/242/243 JS/UI behavior has no
+automated harness — it is code-review + manual-smoke covered only (registry `production_collision`
++ session lab palette live-update are unit-tested). Locked Palette and renderer param unlock
+behavior is covered by software tests only.
 All LED Pad and Template Lab playback/UI claims are SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
 The iOS/iPad touch pass is implemented/software-tested only; on-device verification is pending.

@@ -4,7 +4,11 @@
     if (init.body && typeof init.body !== "string") init.body = JSON.stringify(init.body);
     const res = await fetch(path, init);
     const json = await res.json();
-    if (!json.ok && json.error) throw new Error(json.error);
+    if (!json.ok && json.error) {
+      const err = new Error(json.error);
+      err.payload = json;
+      throw err;
+    }
     return json;
   }
   // Shared modal used by both the pad page and Template Lab, so neither page
