@@ -293,110 +293,55 @@ def perimeter_preset_points(room_mm: tuple[float, float] | list[float] | None = 
     ]
 
 
-def _pack_serpentine_mm(
-    *,
-    start: tuple[float, float],
-    length_mm: float,
-    x_left: float,
-    x_right: float,
-    y_min: float,
-    row_pitch: float,
-) -> list[list[float]]:
-    """Append a downward serpentine of exactly length_mm (or as much as fits)."""
-    points: list[list[float]] = []
-    x, y = float(start[0]), float(start[1])
-    remaining = float(length_mm)
-    at_right = abs(x - x_right) <= abs(x - x_left)
-    pitch = max(20.0, float(row_pitch))
-    guard = 0
-    while remaining > 1e-6 and guard < 10000:
-        guard += 1
-        down_room = y - y_min
-        if down_room > 1e-9:
-            dv = min(down_room, remaining, pitch)
-            y -= dv
-            points.append([x, y])
-            remaining -= dv
-            if remaining <= 1e-6:
-                break
-        target_x = x_left if at_right else x_right
-        span = abs(target_x - x)
-        if span <= 1e-9:
-            if y <= y_min + 1e-9:
-                break
-            continue
-        move = min(span, remaining)
-        x = x + (target_x - x) * (move / span)
-        points.append([x, y])
-        remaining -= move
-        if move >= span - 1e-9:
-            at_right = not at_right
-        if y <= y_min + 1e-9 and remaining > 1e-6 and abs(x - target_x) <= 1e-9:
-            # Tighten pitch at the floor to keep packing length.
-            pitch = max(8.0, pitch * 0.5)
-            if pitch <= 8.0 + 1e-9 and down_room <= 1e-9:
-                break
-    return points
-
-
 def snake_preset_points(room_mm: tuple[float, float] | list[float] | None = None) -> list[list[float]]:
-    """S-path in true room mm; total = strip length; junction at top-right bend.
+    """Big-S path: exactly 3 horizontal runs + 2 vertical connectors.
 
-    First half (exactly H612D_JUNCTION_MM): three horizontal runs + two rises
-    ending at the top-right bend. Second half: downward serpentine packing the
-    remaining H612D_JUNCTION_MM inside the room. No LED-spacing stretch.
+    Total path length is exactly H612D_LENGTH_MM in true room mm. Runs are near
+    full room width when possible; connectors take the remainder and are spaced
+    evenly over the room height. The absolute junction (7498.08 mm) falls on the
+    middle run for the operator room — it is not forced onto a corner.
     """
     width, height = room_size_mm({"room_mm": list(room_mm)} if room_mm is not None else None)
-    half = H612D_JUNCTION_MM
+    strip = H612D_LENGTH_MM
     margin = min(200.0, min(width, height) * 0.05)
     avail_w = max(1.0, width - 2.0 * margin)
     avail_h = max(1.0, height - 2.0 * margin)
 
-    # Prefer a taller first-half S (TR near the top).
-    rise_span = min(avail_h * 0.55, half * 0.35)
-    v = rise_span / 2.0
-    run = (half - 2.0 * v) / 3.0
+    # Prefer connectors that span the full available height (even spacing).
+    connector = avail_h / 2.0
+    run = (strip - 2.0 * connector) / 3.0
     if run > avail_w:
         run = avail_w
-        v = (half - 3.0 * run) / 2.0
-    if run <= 0.0 or v < 0.0:
-        # Extreme rooms: fall back to max-width runs and whatever rise fits the half.
-        run = min(avail_w, half / 3.0)
-        v = max(0.0, (half - 3.0 * run) / 2.0)
+        connector = (strip - 3.0 * run) / 2.0
+    if run <= 0.0:
+        run = min(avail_w, strip / 3.0)
+        connector = max(0.0, (strip - 3.0 * run) / 2.0)
+    if connector < 0.0:
+        connector = 0.0
+        run = strip / 3.0
 
-    left = margin + (avail_w - run) / 2.0
+    left = margin + max(0.0, (avail_w - run) / 2.0)
     right = left + run
-    y0 = margin
-    y1 = y0 + v
-    y2 = y1 + v
-    if y2 > height - margin:
-        scale = (height - margin - y0) / max(y2 - y0, 1e-9)
-        y1 = y0 + (y1 - y0) * scale
-        y2 = y0 + (y2 - y0) * scale
-        v = (y2 - y0) / 2.0
-        run = (half - 2.0 * v) / 3.0
-        left = margin + (avail_w - run) / 2.0
+    if 2.0 * connector <= avail_h + 1e-9:
+        y0 = margin + (avail_h - 2.0 * connector) / 2.0
+    else:
+        y0 = margin
+        connector = avail_h / 2.0
+        run = (strip - 2.0 * connector) / 3.0
+        left = margin + max(0.0, (avail_w - run) / 2.0)
         right = left + run
+    y1 = y0 + connector
+    y2 = y1 + connector
 
-    points: list[list[float]] = [
+    # Bottom → right, up, left, up, right (classic S).
+    return [
         [left, y0],
         [right, y0],
         [right, y1],
         [left, y1],
         [left, y2],
-        [right, y2],  # top-right bend = junction at absolute 7498.08 mm
+        [right, y2],
     ]
-
-    row_pitch = max(40.0, min(140.0, (y2 - margin) / 10.0))
-    points.extend(_pack_serpentine_mm(
-        start=(points[5][0], points[5][1]),
-        length_mm=half,
-        x_left=left,
-        x_right=right,
-        y_min=margin,
-        row_pitch=row_pitch,
-    ))
-    return points
 
 
 def preset_layout_points(preset: str, room_mm: tuple[float, float] | list[float] | None = None) -> list[list[float]]:

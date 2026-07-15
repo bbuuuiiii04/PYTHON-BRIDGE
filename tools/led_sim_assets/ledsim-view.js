@@ -54,75 +54,42 @@ export function perimeterPresetPoints(roomMm) {
   ];
 }
 
-function packSerpentineMm({start, lengthMm, xLeft, xRight, yMin, rowPitch}) {
-  const points = [];
-  let x = start[0];
-  let y = start[1];
-  let remaining = lengthMm;
-  let atRight = Math.abs(x - xRight) <= Math.abs(x - xLeft);
-  let pitch = Math.max(20, rowPitch);
-  let guard = 0;
-  while (remaining > 1e-6 && guard < 10000) {
-    guard += 1;
-    const downRoom = y - yMin;
-    if (downRoom > 1e-9) {
-      const dv = Math.min(downRoom, remaining, pitch);
-      y -= dv;
-      points.push([x, y]);
-      remaining -= dv;
-      if (remaining <= 1e-6) break;
-    }
-    const targetX = atRight ? xLeft : xRight;
-    const span = Math.abs(targetX - x);
-    if (span <= 1e-9) {
-      if (y <= yMin + 1e-9) break;
-      continue;
-    }
-    const move = Math.min(span, remaining);
-    x += (targetX - x) * (move / span);
-    points.push([x, y]);
-    remaining -= move;
-    if (move >= span - 1e-9) atRight = !atRight;
-    if (y <= yMin + 1e-9 && remaining > 1e-6 && Math.abs(x - targetX) <= 1e-9) {
-      pitch = Math.max(8, pitch * 0.5);
-      if (pitch <= 8 + 1e-9 && downRoom <= 1e-9) break;
-    }
-  }
-  return points;
-}
-
 export function snakePresetPoints(roomMm) {
+  // Big S: exactly 3 horizontal runs + 2 vertical connectors (mirrors engine).
   const [width, height] = roomMm && roomMm.length === 2 ? roomMm.map(Number) : DEFAULT_ROOM_MM;
-  const half = H612D_JUNCTION_MM;
+  const strip = H612D_LENGTH_MM;
   const margin = Math.min(200, Math.min(width, height) * 0.05);
   const availW = Math.max(1, width - 2 * margin);
   const availH = Math.max(1, height - 2 * margin);
-  let riseSpan = Math.min(availH * 0.55, half * 0.35);
-  let v = riseSpan / 2;
-  let run = (half - 2 * v) / 3;
+  let connector = availH / 2;
+  let run = (strip - 2 * connector) / 3;
   if (run > availW) {
     run = availW;
-    v = (half - 3 * run) / 2;
+    connector = (strip - 3 * run) / 2;
   }
-  if (run <= 0 || v < 0) {
-    run = Math.min(availW, half / 3);
-    v = Math.max(0, (half - 3 * run) / 2);
+  if (run <= 0) {
+    run = Math.min(availW, strip / 3);
+    connector = Math.max(0, (strip - 3 * run) / 2);
   }
-  let left = margin + (availW - run) / 2;
+  if (connector < 0) {
+    connector = 0;
+    run = strip / 3;
+  }
+  let left = margin + Math.max(0, (availW - run) / 2);
   let right = left + run;
-  const y0 = margin;
-  let y1 = y0 + v;
-  let y2 = y1 + v;
-  if (y2 > height - margin) {
-    const scale = (height - margin - y0) / Math.max(y2 - y0, 1e-9);
-    y1 = y0 + (y1 - y0) * scale;
-    y2 = y0 + (y2 - y0) * scale;
-    v = (y2 - y0) / 2;
-    run = (half - 2 * v) / 3;
-    left = margin + (availW - run) / 2;
+  let y0;
+  if (2 * connector <= availH + 1e-9) {
+    y0 = margin + (availH - 2 * connector) / 2;
+  } else {
+    y0 = margin;
+    connector = availH / 2;
+    run = (strip - 2 * connector) / 3;
+    left = margin + Math.max(0, (availW - run) / 2);
     right = left + run;
   }
-  const points = [
+  const y1 = y0 + connector;
+  const y2 = y1 + connector;
+  return [
     [left, y0],
     [right, y0],
     [right, y1],
@@ -130,15 +97,6 @@ export function snakePresetPoints(roomMm) {
     [left, y2],
     [right, y2],
   ];
-  const rowPitch = Math.max(40, Math.min(140, (y2 - margin) / 10));
-  return points.concat(packSerpentineMm({
-    start: points[5],
-    lengthMm: half,
-    xLeft: left,
-    xRight: right,
-    yMin: margin,
-    rowPitch,
-  }));
 }
 
 export function defaultLayout(roomMm) {
@@ -544,6 +502,8 @@ export function createLedSimView(canvas, initialProfile) {
     const height = viewHeight;
     const screen = ensureScreenCache();
     const {transform, leds, points, boundaries, junction, start, end, pathEnd, layout} = screen;
+    const roomCx = transform.originX + transform.drawW / 2;
+    const roomCy = transform.originY + transform.drawH / 2;
 
     const backdrop = ctx.createLinearGradient(0, 0, 0, height);
     backdrop.addColorStop(0, "#0a0c14");
@@ -551,17 +511,20 @@ export function createLedSimView(canvas, initialProfile) {
     ctx.fillStyle = backdrop;
     ctx.fillRect(0, 0, width, height);
 
-    ctx.fillStyle = "rgba(18, 22, 34, .92)";
-    ctx.strokeStyle = "rgba(255,255,255,.1)";
-    ctx.lineWidth = 1.5;
-    roundedRect(transform.originX, transform.originY, transform.drawW, transform.drawH, 8);
-    ctx.fill();
-    ctx.stroke();
+    // Flat room floor + clear wall rectangle (never reuse the strip path for fill).
+    ctx.beginPath();
+    ctx.fillStyle = "rgba(16, 20, 32, .95)";
+    ctx.fillRect(transform.originX, transform.originY, transform.drawW, transform.drawH);
+    ctx.strokeStyle = "rgba(200, 210, 230, .28)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([]);
+    ctx.strokeRect(transform.originX + 0.5, transform.originY + 0.5, transform.drawW - 1, transform.drawH - 1);
+    ctx.beginPath();
 
-    // Strip path (solid through placed length; dashed excess beyond strip end).
+    // Strip path — stroke only; always beginPath afterward so nothing can fill it.
     if (points.length >= 2) {
       const stripEndArc = layout.placed_length_mm;
-      ctx.strokeStyle = "rgba(138,108,255,.35)";
+      ctx.strokeStyle = "rgba(138,108,255,.4)";
       ctx.lineWidth = 2;
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
@@ -599,6 +562,7 @@ export function createLedSimView(canvas, initialProfile) {
         walked = to;
       }
       if (started) ctx.stroke();
+      ctx.beginPath();
 
       if (layout.excess_path_mm > 0 && end && pathEnd) {
         ctx.strokeStyle = "rgba(138,108,255,.22)";
@@ -633,6 +597,7 @@ export function createLedSimView(canvas, initialProfile) {
         }
         if (started) ctx.stroke();
         ctx.setLineDash([]);
+        ctx.beginPath();
       }
     }
 
@@ -642,24 +607,7 @@ export function createLedSimView(canvas, initialProfile) {
       const segment = Math.floor(led / H612D_LEDS_PER_SEGMENT);
       drawEmitter(leds[led].x, leds[led].y, emitterRadius, transformed[segment]);
     }
-
-    if (labelsVisible) {
-      ctx.fillStyle = "rgba(195,202,220,.55)";
-      ctx.strokeStyle = "rgba(195,202,220,.35)";
-      ctx.font = "600 10px ui-monospace, SFMono-Regular, Menlo, monospace";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "bottom";
-      for (let segment = 0; segment < H612D_SEGMENTS; segment += 10) {
-        const point = boundaries[segment];
-        if (!point) continue;
-        ctx.beginPath();
-        ctx.moveTo(point.x, point.y - 6);
-        ctx.lineTo(point.x, point.y + 6);
-        ctx.stroke();
-        const distLabel = formatLengthMm(segment * H612D_SEGMENT_MM);
-        ctx.fillText(`${String(segment).padStart(2, "0")} · ${distLabel}`, point.x, point.y - 8);
-      }
-    }
+    ctx.beginPath();
 
     if (start) {
       ctx.fillStyle = "#7ee0b6";
@@ -674,28 +622,16 @@ export function createLedSimView(canvas, initialProfile) {
       ctx.fill();
     }
     if (junction) drawControlBox(junction.x, junction.y);
+    ctx.beginPath();
 
     if (labelsVisible) {
-      ctx.font = "700 11px ui-sans-serif, -apple-system, sans-serif";
-      ctx.textBaseline = "middle";
-      if (start) {
-        ctx.fillStyle = "#7ee0b6";
-        ctx.textAlign = "left";
-        ctx.fillText("start", start.x + 8, start.y);
-      }
-      if (end) {
-        ctx.fillStyle = "#ff7690";
-        ctx.textAlign = "left";
-        ctx.fillText(`end · ${formatLengthMm(layout.placed_length_mm)}`, end.x + 8, end.y);
-      }
-      if (junction) {
-        ctx.fillStyle = "#c4b5ff";
-        ctx.textAlign = "left";
-        ctx.fillText("center · control box · 24.6 ft", junction.x + 12, junction.y);
-      }
+      drawRoomLabels({
+        layout, transform, boundaries, junction, start, end, roomCx, roomCy,
+      });
     }
 
     if (layout.unplaced_mm > 0) {
+      ctx.beginPath();
       ctx.fillStyle = "rgba(255, 193, 92, .95)";
       ctx.font = "700 12px ui-sans-serif, -apple-system, sans-serif";
       ctx.textAlign = "left";
@@ -710,6 +646,7 @@ export function createLedSimView(canvas, initialProfile) {
         ctx.lineWidth = 2;
         ctx.strokeRect(end.x - 8, end.y - 8, 16, 16);
       }
+      ctx.beginPath();
     }
 
     if (editing) {
@@ -723,6 +660,138 @@ export function createLedSimView(canvas, initialProfile) {
         ctx.fill();
         ctx.stroke();
       }
+      ctx.beginPath();
+    }
+  }
+
+  function pathTangentAt(layout, arcMm) {
+    const pts = layout.points_mm;
+    let walked = 0;
+    for (let index = 1; index < pts.length; index += 1) {
+      const a = pts[index - 1];
+      const b = pts[index];
+      const edge = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (edge <= 1e-12) continue;
+      if (walked + edge >= arcMm - 1e-9) {
+        return {dx: (b[0] - a[0]) / edge, dy: (b[1] - a[1]) / edge};
+      }
+      walked += edge;
+    }
+    if (pts.length >= 2) {
+      const a = pts[pts.length - 2];
+      const b = pts[pts.length - 1];
+      const edge = Math.max(1e-9, Math.hypot(b[0] - a[0], b[1] - a[1]));
+      return {dx: (b[0] - a[0]) / edge, dy: (b[1] - a[1]) / edge};
+    }
+    return {dx: 1, dy: 0};
+  }
+
+  function outwardNormal(tangent, screenPoint, roomCx, roomCy) {
+    // Perpendicular; pick the direction pointing away from room center.
+    let nx = -tangent.dy;
+    let ny = tangent.dx;
+    const len = Math.hypot(nx, ny) || 1;
+    nx /= len;
+    ny /= len;
+    const toCenterX = roomCx - screenPoint.x;
+    const toCenterY = roomCy - screenPoint.y;
+    if (nx * toCenterX + ny * toCenterY > 0) {
+      nx = -nx;
+      ny = -ny;
+    }
+    return {nx, ny};
+  }
+
+  function boxesOverlap(a, b, pad = 3) {
+    return !(
+      a.x + a.w + pad < b.x
+      || b.x + b.w + pad < a.x
+      || a.y + a.h + pad < b.y
+      || b.y + b.h + pad < a.y
+    );
+  }
+
+  function drawRoomLabels({layout, transform, boundaries, junction, start, end, roomCx, roomCy}) {
+    const placed = [];
+    const font = "700 11px ui-sans-serif, -apple-system, sans-serif";
+    const tickFont = "600 10px ui-monospace, SFMono-Regular, Menlo, monospace";
+
+    function measure(text, useFont) {
+      ctx.font = useFont;
+      const metrics = ctx.measureText(text);
+      const w = metrics.width;
+      const h = 12;
+      return {w, h};
+    }
+
+    function tryDraw(text, anchor, arcMm, options = {}) {
+      const useFont = options.font || font;
+      const size = measure(text, useFont);
+      const tangent = pathTangentAt(layout, arcMm);
+      // mm y-up → screen y-down: flip tangent dy for screen-space normals.
+      const screenTangent = {dx: tangent.dx, dy: -tangent.dy};
+      const screenNormal = outwardNormal(screenTangent, anchor, roomCx, roomCy);
+      const offset = options.offset ?? 14;
+      const stack = options.stack || 0;
+      let x = anchor.x + screenNormal.nx * offset;
+      let y = anchor.y + screenNormal.ny * offset + stack;
+      if (options.align === "center") {
+        x -= size.w / 2;
+        y -= size.h / 2;
+      } else if (screenNormal.nx < 0) {
+        x -= size.w;
+      }
+      const box = {x, y, w: size.w, h: size.h};
+      if (placed.some((other) => boxesOverlap(box, other))) return false;
+      placed.push(box);
+      ctx.font = useFont;
+      ctx.fillStyle = options.color || "#c4b5ff";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      ctx.fillText(text, box.x, box.y);
+      return true;
+    }
+
+    // Priority: center > start > end > ticks
+    if (junction) {
+      tryDraw("center · control box · 24.6 ft", junction, H612D_JUNCTION_MM, {
+        color: "#c4b5ff", offset: 16,
+      });
+    }
+
+    // Start/end near the same gap: stack vertically when close.
+    const gapClose = start && end && Math.hypot(start.x - end.x, start.y - end.y) < 40;
+    if (start) {
+      tryDraw("start", start, 0, {
+        color: "#7ee0b6",
+        offset: 14,
+        stack: gapClose ? -10 : 0,
+      });
+    }
+    if (end) {
+      tryDraw(`end · ${formatLengthMm(layout.placed_length_mm)}`, end, layout.placed_length_mm, {
+        color: "#ff7690",
+        offset: 14,
+        stack: gapClose ? 10 : 0,
+      });
+    }
+
+    for (let segment = 0; segment < H612D_SEGMENTS; segment += 10) {
+      const point = boundaries[segment];
+      if (!point) continue;
+      ctx.beginPath();
+      ctx.strokeStyle = "rgba(195,202,220,.35)";
+      ctx.lineWidth = 1;
+      ctx.moveTo(point.x, point.y - 5);
+      ctx.lineTo(point.x, point.y + 5);
+      ctx.stroke();
+      ctx.beginPath();
+      const label = `${String(segment).padStart(2, "0")} · ${formatLengthMm(segment * H612D_SEGMENT_MM)}`;
+      tryDraw(label, point, segment * H612D_SEGMENT_MM, {
+        color: "rgba(195,202,220,.7)",
+        font: tickFont,
+        offset: 12,
+      });
     }
   }
 

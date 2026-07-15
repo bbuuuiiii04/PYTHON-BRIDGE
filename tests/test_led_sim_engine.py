@@ -315,19 +315,28 @@ class LayoutTests(unittest.TestCase):
         self.assertAlmostEqual(at_junction[0], top_center[0], places=6)
         self.assertAlmostEqual(at_junction[1], top_center[1], places=6)
 
-    def test_snake_total_and_junction_are_absolute(self) -> None:
+    def test_snake_is_three_runs_with_absolute_junction(self) -> None:
         room = [5216.0, 2284.0]
         points = engine.snake_preset_points(room)
-        self.assertAlmostEqual(engine.polyline_arc_length(points), engine.H612D_LENGTH_MM, places=5)
-        self.assertAlmostEqual(
-            engine.polyline_arc_length(points[:6]), engine.H612D_JUNCTION_MM, places=5,
-        )
+        self.assertEqual(len(points), 6)  # 3 runs + 2 connectors
+        path_len = engine.polyline_arc_length(points)
+        self.assertAlmostEqual(path_len, engine.H612D_LENGTH_MM, places=5)
+        # Three equal horizontal runs, two equal vertical connectors.
+        run = abs(points[1][0] - points[0][0])
+        conn = abs(points[2][1] - points[1][1])
+        self.assertAlmostEqual(abs(points[3][0] - points[2][0]), run, places=5)
+        self.assertAlmostEqual(abs(points[5][0] - points[4][0]), run, places=5)
+        self.assertAlmostEqual(abs(points[4][1] - points[3][1]), conn, places=5)
+        self.assertAlmostEqual(3.0 * run + 2.0 * conn, engine.H612D_LENGTH_MM, places=5)
         result = engine.layout_led_positions(_profile(room_mm=room, layout={
             "preset": "snake", "points_mm": points, "flip_chain": False,
         }))
-        self.assertAlmostEqual(result["junction_mm"][0], points[5][0], places=5)
-        self.assertAlmostEqual(result["junction_mm"][1], points[5][1], places=5)
         self.assertEqual(result["unplaced_mm"], 0.0)
+        # Junction is absolute 7498.08 mm — on the middle run for this room, not a corner claim.
+        mid_y = points[2][1]
+        self.assertAlmostEqual(result["junction_mm"][1], mid_y, places=5)
+        self.assertGreater(result["junction_mm"][0], min(points[2][0], points[3][0]))
+        self.assertLess(result["junction_mm"][0], max(points[2][0], points[3][0]))
 
     def test_path_longer_than_strip_truncates_without_stretch(self) -> None:
         result = engine.layout_led_positions(_profile(layout={

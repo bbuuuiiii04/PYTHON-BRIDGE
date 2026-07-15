@@ -89,8 +89,9 @@ Presets:
 - **Perimeter** — rectangle loop whose path length equals the strip when the
   room perimeter is ≥ 49.2 ft. For the operator room (2×(5216+2284)=15000 mm)
   the bottom gap is the real **3.84 mm** shortfall; junction at top-center.
-- **Snake** — S-path solved in room mm so total = 14996.16 mm with the junction
-  on the top-right bend (second half packed as a downward serpentine).
+- **Snake** — classic S: exactly 3 horizontal runs + 2 vertical connectors,
+  lengths solved so total = 14996.16 mm. The absolute junction (24.6 ft) falls
+  on the middle run for the operator room; the card does not claim a corner.
 - **Custom** — current points, freely editable on the canvas.
 
 The Python engine function `layout_led_positions(profile)` is the tested
