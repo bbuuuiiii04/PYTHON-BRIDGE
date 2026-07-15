@@ -1,25 +1,28 @@
 {
-  "schema": 1,
+  "schema": 2,
   "device_model": "H612D",
   "segments": 60,
   "physical_leds": 360,
   "leds_per_segment": 6,
   "strip_length_mm": 14996.16,
-  "room_mm": [5216, 2284],
-  "layout": {
-    "preset": "perimeter",
-    "points_mm": [
-      [2606.08, 0.0],
-      [0.0, 0.0],
-      [0.0, 2284.0],
-      [2608.0, 2284.0],
-      [5216.0, 2284.0],
-      [5216.0, 0.0],
-      [2609.92, 0.0]
-    ],
-    "flip_chain": false
+  "layouts": {
+    "Home": {
+      "preset": "perimeter",
+      "points_mm": [
+        [2606.08, 0.0],
+        [0.0, 0.0],
+        [0.0, 2284.0],
+        [2608.0, 2284.0],
+        [5216.0, 2284.0],
+        [5216.0, 0.0],
+        [2609.92, 0.0]
+      ],
+      "flip_chain": false,
+      "room_mm": [5216, 2284],
+      "layout_locked": false
+    }
   },
-  "layout_locked": false,
+  "active_layout": "Home",
   "calibration_locked": false,
   "gamma": 1.0,
   "white_point": [1.0, 1.0, 1.0],

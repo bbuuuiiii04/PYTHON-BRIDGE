@@ -1,18 +1,18 @@
 ---
 doc_status: current
 truth_level: software-tested
-last_verified_commit: 23a9611
+last_verified_commit: 3947216
 last_verified_date: 2026-07-15
 validation_scope: >
-  H612D LED Studio (AWR-196 + AWR-244 room-view + round-3 lighting-console
-  shell): offline production-runner frame composition, room polyline layout
-  with arc-length LED placement, perimeter/snake/custom presets, layout and
-  calibration lockers, timestamp-held playback, calibration sequence v2,
-  profile evidence guards, and the local web service are software-tested.
-  Optics (glow/bleed/gamma) remain uncalibrated assumptions. Generated timing
-  uses an ideal grid. Device color, PWM, latency, physical response, packet
-  delivery, and hardware cadence remain unmeasured; SOFTWARE-VALIDATED ONLY /
-  HARDWARE-UNVALIDATED.
+  H612D LED Studio (AWR-196 + AWR-244 room-view + AWR-246 layout library):
+  offline production-runner frame composition, room polyline layout with
+  arc-length LED placement, named layouts library (schema v2) with Home/Venue
+  style isolation, perimeter/snake/custom presets, layout and calibration
+  lockers, timestamp-held playback, calibration sequence v2, profile evidence
+  guards, and the local web service are software-tested. Optics (glow/bleed/
+  gamma) remain uncalibrated assumptions. Generated timing uses an ideal grid.
+  Device color, PWM, latency, physical response, packet delivery, and hardware
+  cadence remain unmeasured; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
 ---
 
 # H612D LED Studio
@@ -77,28 +77,35 @@ The two badges over the fixture state the frame source and timing source. The
 calibration badge describes only the saved evidence state. With the committed
 profile it reads `UNMEASURED`, so the identity transfer is visibly an assumption.
 
-## Room layout (AWR-244)
+## Room layout (AWR-244 + AWR-246 library)
 
-Profile field `layout`:
-
-| Field | Meaning |
-| --- | --- |
-| `preset` | `perimeter`, `snake`, or `custom` |
-| `points_mm` | Ordered polyline vertices in room coordinates (≥2 points) |
-| `flip_chain` | When true, segment 0 is the other end of the path |
-
-Top-level lockers (bool, default false):
+**AWR-246** stores multiple named room layouts in one profile (Home vs Venue
+rooms differ). Schema **v2** fields:
 
 | Field | Meaning |
 | --- | --- |
-| `layout_locked` | Disables vertex drag, room-size edits, and preset changes; hides handles |
-| `calibration_locked` | Disables calibration knobs until unlocked |
+| `layouts` | Object of 1–24 named entries. Each name is 1–40 characters, unique. |
+| `active_layout` | Name of the layout currently on the stage. |
+| `layouts[name].preset` | `perimeter`, `snake`, or `custom` |
+| `layouts[name].points_mm` | Ordered polyline vertices in that layout's room coordinates (≥2) |
+| `layouts[name].flip_chain` | When true, segment 0 is the other end of the path |
+| `layouts[name].room_mm` | `[width, height]` for that layout (default `[5216, 2284]`) |
+| `layouts[name].layout_locked` | Disables vertex drag / room-size / presets for that layout only |
 
-`room_mm` is `[width, height]` (default `[5216, 2284]`). Profiles without
-`layout` get the perimeter preset derived from `room_mm`. Legacy keys
-(`corner_segments`, `start_corner`, `direction`, wash fields) are accepted and
-ignored. Points beyond the room (±2 mm tolerance) emit a soft **warning** via
-`profile_warnings()` — saves still succeed so edge dragging stays fluid.
+Top-level `calibration_locked` stays global (Calibrate tab). Layout lock lives
+**inside** each layout entry so Home and Venue can lock independently.
+
+`layout_led_positions` / the JS mirror always resolve the **active** layout.
+`validate_profile` accepts both schema v1 (single top-level `layout` +
+`room_mm` + `layout_locked`) and schema v2; garbage libraries (empty, missing
+active, dangling active, bad names, >24) are rejected. Loading a v1 profile
+auto-wraps it as `layouts={"Home": …}` + `active_layout="Home"`. The next
+**Save** writes schema v2 and drops the old top-level keys.
+
+Legacy keys (`corner_segments`, `start_corner`, `direction`, wash fields) are
+accepted and ignored. Points beyond the room (±2 mm tolerance) emit a soft
+**warning** via `profile_warnings()` — saves still succeed so edge dragging
+stays fluid.
 
 Presets:
 
@@ -127,13 +134,17 @@ every frame. UI lengths are **feet primary** with metric secondary
 except the junction arc (segment 30) where the tick is suppressed under the
 control-box label.
 
-The Layout tab supports preset cards, room-size fields (presets rescale),
-drag handles (≥32 px hit target), double-click (desktop) / long-press (touch)
-to insert or delete vertices (minimum two; long-press cancels once the pointer
-moves ~6 px), flip chain, reset to the last chosen perimeter/snake preset, a
-bounded undo stack (up to 20 layout edits, Cmd/Ctrl-Z on the Layout tab), and the layout locker.
-**Save layout** uses the existing validated profile POST. Unsaved badges are
-scoped: layout edits do not light the calibration badge, and vice versa.
+The Layout tab opens with a **layout slot picker** (select + Save as… / Rename /
+Delete). Switching swaps the stage immediately and respects that layout's own
+lock. Save as duplicates the active entry (prompt prefilled `Copy of <name>`);
+delete refuses the last layout and switches away before removing the active one.
+Room W/H, presets, and the editor operate on the active layout only. The
+dimension bar is unchanged. Preset cards, drag handles (≥32 px), double-click /
+long-press vertex edit, flip chain, reset, bounded undo (up to 20, Cmd/Ctrl-Z
+on the Layout tab), and the per-layout locker still apply.
+**Save layout** persists the whole library via the existing validated profile
+POST. Unsaved badges are scoped: layout edits do not light the calibration
+badge, and vice versa.
 
 ## What is not exact yet
 
@@ -241,8 +252,8 @@ separate approval. The current studio contains no hardware sender.
 
 | Field | Meaning |
 | --- | --- |
-| `room_mm` | Room width and height in millimetres (layout canvas). |
-| `layout` | Strip polyline preset/points/`flip_chain` (see Room layout). |
+| `layouts` / `active_layout` | Named room-layout library (schema v2; see Room layout). |
+| `calibration_locked` | Global Calibrate-tab edit lock. |
 | `gamma` | Fitted command-value to visible-level curve. |
 | `white_point` | Fitted red, green, and blue channel gains. |
 | `brightness` | Fitted overall display level. |
@@ -262,9 +273,9 @@ evidence. Editing any transfer or timing control in the UI resets all domains to
 forward silently. Slew is used only when both the whole profile and timing
 domain are relative or measured.
 
-Old room-layout profiles without `layout` inherit the perimeter preset from
-`room_mm` (or the example defaults) in memory. They are not silently rewritten
-until **Save** is pressed.
+Old schema-v1 profiles (top-level `layout` / `room_mm` / `layout_locked`) load
+as a single `Home` library entry in memory. They are rewritten to schema v2 on
+the next **Save**.
 
 ## Frames-JSONL
 

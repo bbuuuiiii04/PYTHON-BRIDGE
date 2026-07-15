@@ -19,6 +19,23 @@ _VIEW_JS = Path(__file__).resolve().parents[1] / "tools" / "led_sim_assets" / "l
 
 def _profile(**overrides) -> dict:
     base = json.loads(_EXAMPLE_PATH.read_text(encoding="utf-8"))
+    # Legacy override path: passing layout/room_mm without layouts → v1 shape for old tests.
+    if (
+        ("layout" in overrides or "room_mm" in overrides or "layout_locked" in overrides)
+        and "layouts" not in overrides
+    ):
+        base.pop("layouts", None)
+        base.pop("active_layout", None)
+        base["schema"] = 1
+        if "layout" not in overrides and "layout" not in base:
+            pass
+        # Reconstruct a v1 top-level layout from the former Home entry when needed.
+        if "layout" not in overrides:
+            # example is v2 — rebuild a default v1 layout from defaults
+            room = overrides.get("room_mm", [5216, 2284])
+            base["room_mm"] = room
+            base["layout"] = engine.default_layout(room)
+            base["layout_locked"] = False
     base.update(overrides)
     return base
 
@@ -617,6 +634,156 @@ class CalibrationSequenceTests(unittest.TestCase):
         self.assertEqual(len({tuple(frame) for frame in coded}), 256)
         lit_counts = {sum(pixel != (0, 0, 0) for pixel in frame) for frame in coded}
         self.assertEqual(lit_counts, {28})
+
+
+class LayoutLibraryTests(unittest.TestCase):
+    def test_example_is_schema_v2_library(self) -> None:
+        profile = json.loads(_EXAMPLE_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(profile["schema"], 2)
+        self.assertIn("Home", profile["layouts"])
+        self.assertEqual(profile["active_layout"], "Home")
+        self.assertNotIn("layout", profile)
+        self.assertNotIn("room_mm", profile)
+        self.assertEqual(engine.validate_profile(profile), [])
+
+    def test_migrate_v1_wraps_as_home_and_strips_old_keys(self) -> None:
+        v1 = _profile(layout=engine.default_layout(), room_mm=[5216, 2284], layout_locked=True)
+        self.assertEqual(v1["schema"], 1)
+        migrated = engine.migrate_profile_to_v2(v1)
+        self.assertEqual(migrated["schema"], 2)
+        self.assertEqual(migrated["active_layout"], "Home")
+        self.assertEqual(set(migrated["layouts"]), {"Home"})
+        self.assertEqual(migrated["layouts"]["Home"]["layout_locked"], True)
+        self.assertEqual(migrated["layouts"]["Home"]["room_mm"], [5216.0, 2284.0])
+        for key in ("layout", "room_mm", "layout_locked"):
+            self.assertNotIn(key, migrated)
+        self.assertEqual(engine.validate_profile(migrated), [])
+
+    def test_save_round_trip_writes_v2_without_legacy_keys(self) -> None:
+        v1 = _profile(layout=engine.default_layout(), room_mm=[4000, 2000], layout_locked=False)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "profile.json"
+            engine.save_profile(path, v1)
+            loaded = engine.load_profile(path)
+        self.assertEqual(loaded["schema"], 2)
+        self.assertIn("layouts", loaded)
+        self.assertNotIn("layout", loaded)
+        self.assertNotIn("room_mm", loaded)
+        self.assertNotIn("layout_locked", loaded)
+        self.assertEqual(engine.validate_profile(loaded), [])
+
+    def test_validate_rejects_empty_library(self) -> None:
+        profile = _profile()
+        profile["layouts"] = {}
+        errors = engine.validate_profile(profile)
+        self.assertTrue(any("at least one layout" in error for error in errors), errors)
+
+    def test_validate_rejects_missing_active(self) -> None:
+        profile = _profile()
+        profile.pop("active_layout", None)
+        errors = engine.validate_profile(profile)
+        self.assertTrue(any("active_layout" in error for error in errors), errors)
+
+    def test_validate_rejects_dangling_active(self) -> None:
+        profile = _profile()
+        profile["active_layout"] = "Venue"
+        errors = engine.validate_profile(profile)
+        self.assertTrue(any("not in layouts" in error for error in errors), errors)
+
+    def test_validate_rejects_bad_layout_name(self) -> None:
+        profile = _profile()
+        entry = profile["layouts"]["Home"]
+        profile["layouts"] = {" " * 2: entry}
+        profile["active_layout"] = "  "
+        errors = engine.validate_profile(profile)
+        self.assertTrue(any("layouts name" in error for error in errors), errors)
+
+    def test_validate_rejects_too_many_layouts(self) -> None:
+        profile = _profile()
+        entry = profile["layouts"]["Home"]
+        profile["layouts"] = {f"L{i:02d}": dict(entry) for i in range(25)}
+        profile["active_layout"] = "L00"
+        errors = engine.validate_profile(profile)
+        self.assertTrue(any("at most 24" in error for error in errors), errors)
+
+    def test_active_layout_drives_positions_and_room_size(self) -> None:
+        home = engine.make_layout_entry(room_mm=[5216, 2284])
+        venue = engine.make_layout_entry(
+            preset="snake",
+            points_mm=engine.snake_preset_points([6000, 3000]),
+            room_mm=[6000, 3000],
+            layout_locked=True,
+        )
+        profile = _profile(
+            layouts={"Home": home, "Venue": venue},
+            active_layout="Venue",
+            schema=2,
+        )
+        profile.pop("layout", None)
+        profile.pop("room_mm", None)
+        profile.pop("layout_locked", None)
+        self.assertEqual(engine.room_size_mm(profile), (6000.0, 3000.0))
+        self.assertEqual(engine.resolve_layout(profile)["preset"], "snake")
+        self.assertTrue(engine.active_layout_entry(profile)["layout_locked"])
+        switched = dict(profile)
+        switched["active_layout"] = "Home"
+        self.assertEqual(engine.room_size_mm(switched), (5216.0, 2284.0))
+        self.assertEqual(engine.resolve_layout(switched)["preset"], "perimeter")
+
+    def test_v1_and_v2_shapes_both_validate(self) -> None:
+        v1 = _profile(layout=engine.default_layout(), room_mm=[5216, 2284])
+        v2 = engine.migrate_profile_to_v2(v1)
+        self.assertEqual(engine.validate_profile(v1), [])
+        self.assertEqual(engine.validate_profile(v2), [])
+
+    @unittest.skipUnless(shutil.which("node"), "node not on PATH")
+    def test_js_layout_led_positions_parity_on_v2_library(self) -> None:
+        home = engine.make_layout_entry()
+        venue = engine.make_layout_entry(
+            preset="snake",
+            points_mm=engine.snake_preset_points([4800, 2400]),
+            room_mm=[4800, 2400],
+        )
+        profile = _profile(
+            layouts={"Home": home, "Venue": venue},
+            active_layout="Venue",
+            schema=2,
+        )
+        for key in ("layout", "room_mm", "layout_locked"):
+            profile.pop(key, None)
+        py = engine.layout_led_positions(profile)
+        sample_idx = [0, 1, 30, 179, 180, 358, 359]
+        script = (
+            f"import {{ layoutLedPositions }} from {_VIEW_JS.resolve().as_uri()!r};\n"
+            f"const profile = {json.dumps(profile)};\n"
+            "const r = layoutLedPositions(profile);\n"
+            f"const sampleIdx = {json.dumps(sample_idx)};\n"
+            "process.stdout.write(JSON.stringify({\n"
+            "  path_length_mm: r.path_length_mm,\n"
+            "  junction_mm: r.junction_mm,\n"
+            "  unplaced_mm: r.unplaced_mm,\n"
+            "  excess_path_mm: r.excess_path_mm,\n"
+            "  leds: sampleIdx.map((i) => r.leds_mm[i]),\n"
+            "}));\n"
+        )
+        proc = subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        js = json.loads(proc.stdout)
+        self.assertAlmostEqual(js["path_length_mm"], py["path_length_mm"], delta=1e-6)
+        self.assertAlmostEqual(js["unplaced_mm"], py["unplaced_mm"], delta=1e-6)
+        self.assertAlmostEqual(js["excess_path_mm"], py["excess_path_mm"], delta=1e-6)
+        self.assertAlmostEqual(js["junction_mm"][0], py["junction_mm"][0], delta=1e-6)
+        self.assertAlmostEqual(js["junction_mm"][1], py["junction_mm"][1], delta=1e-6)
+        for index, (got, expected) in enumerate(zip(js["leds"], (py["leds_mm"][i] for i in sample_idx))):
+            self.assertIsNotNone(got)
+            self.assertIsNotNone(expected)
+            self.assertAlmostEqual(got[0], expected[0], delta=1e-6, msg=f"led sample {index} x")
+            self.assertAlmostEqual(got[1], expected[1], delta=1e-6, msg=f"led sample {index} y")
 
 
 if __name__ == "__main__":

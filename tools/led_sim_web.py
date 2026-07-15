@@ -42,37 +42,33 @@ class LedSimService:
         self.profile_path = Path(profile_path) if profile_path else engine.DEFAULT_PROFILE_PATH
 
     def profile_state(self) -> tuple[dict[str, Any], str]:
-        """Current profile + error string; old profiles inherit new defaults."""
+        """Current profile + error string; always returns schema-v2 (legacy auto-wraps)."""
         error = ""
         try:
-            example = engine.load_profile(engine.EXAMPLE_PROFILE_PATH)
+            example = engine.migrate_profile_to_v2(engine.load_profile(engine.EXAMPLE_PROFILE_PATH))
         except Exception as exc:
             return {}, f"{engine.EXAMPLE_PROFILE_PATH.name}: {exc}"
 
-        def with_lock_defaults(profile: dict[str, Any]) -> dict[str, Any]:
-            # Always present so the UI lockers have a real key to flip/persist.
-            if not isinstance(profile.get("layout_locked"), bool):
-                profile["layout_locked"] = False
-            if not isinstance(profile.get("calibration_locked"), bool):
-                profile["calibration_locked"] = False
-            return profile
-
         if self.profile_path.exists():
             try:
-                profile = {**example, **engine.load_profile(self.profile_path)}
-                # Independent repairs — layout missing and room_mm missing can both apply.
-                if not isinstance(profile.get("layout"), dict):
-                    profile["layout"] = engine.default_layout(engine.room_size_mm(profile))
-                if not isinstance(profile.get("room_mm"), (list, tuple)):
-                    profile["room_mm"] = list(engine.DEFAULT_ROOM_MM)
-                profile = with_lock_defaults(profile)
+                live = engine.load_profile(self.profile_path)
+                live_v2 = engine.migrate_profile_to_v2(live)
+                # Inherit new top-level defaults from the example; live layouts win.
+                profile = {**example, **live_v2}
+                profile["layouts"] = live_v2["layouts"]
+                profile["active_layout"] = live_v2["active_layout"]
+                profile["schema"] = engine.SCHEMA_V2
+                if not isinstance(profile.get("calibration_locked"), bool):
+                    profile["calibration_locked"] = False
                 errors = engine.validate_profile(profile)
                 if not errors:
                     return profile, ""
                 error = f"{self.profile_path.name}: " + "; ".join(errors)
             except Exception as exc:
                 error = f"{self.profile_path.name}: {exc}"
-        return with_lock_defaults(dict(example)), error
+        if not isinstance(example.get("calibration_locked"), bool):
+            example["calibration_locked"] = False
+        return example, error
 
     def catalog(self) -> dict[str, Any]:
         profile, profile_error = self.profile_state()
@@ -333,16 +329,22 @@ def build_handler(service: LedSimService) -> type[BaseHTTPRequestHandler]:
             self._send_json(engine.calibration_sequence(name, segments=service.segments(), fps=fps))
 
         def _handle_profile_save(self, body: dict[str, Any]) -> None:
-            errors = engine.validate_profile(body)
+            # Accept v1 or v2 on the wire; persist and echo schema-v2.
+            try:
+                migrated = engine.migrate_profile_to_v2(body)
+            except Exception as exc:
+                self._bad_request(str(exc))
+                return
+            errors = engine.validate_profile(migrated)
             if errors:
                 self._send_json({"ok": False, "errors": errors}, HTTPStatus.BAD_REQUEST)
                 return
-            engine.save_profile(service.profile_path, body)
+            engine.save_profile(service.profile_path, migrated)
             self._send_json({
                 "ok": True,
-                "profile": body,
+                "profile": migrated,
                 "path": str(service.profile_path),
-                "warnings": engine.profile_warnings(body),
+                "warnings": engine.profile_warnings(migrated),
             })
 
         def _handle_replay_load(self, body: dict[str, Any]) -> None:

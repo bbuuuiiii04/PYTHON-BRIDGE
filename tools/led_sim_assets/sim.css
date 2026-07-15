@@ -336,6 +336,15 @@ body.sidecar-collapsed .sidecar { width: var(--rail-w); }
 .panel-head-row {
   display: flex; justify-content: space-between; align-items: center; gap: 8px;
 }
+.layout-slot-row {
+  display: grid; gap: 8px; margin-bottom: 10px;
+  padding-bottom: 10px; border-bottom: 1px solid var(--border);
+}
+.layout-slot-field select { width: 100%; min-height: 36px; }
+.layout-slot-actions { margin-top: 0; }
+.name-dialog { z-index: 40; max-width: 320px; }
+.name-dialog .field { display: grid; gap: 4px; margin: 10px 0; }
+.name-dialog input[type="text"] { min-height: 36px; width: 100%; }
 .lock-toggle {
   min-height: 32px; font-size: 11px; font-weight: 700;
 }

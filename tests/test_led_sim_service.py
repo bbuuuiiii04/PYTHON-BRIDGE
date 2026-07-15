@@ -196,18 +196,21 @@ class LedSimServiceTests(unittest.TestCase):
         self.assertEqual(result["profile_error"], "")
 
     def test_room_mm_repair_runs_even_when_layout_present(self) -> None:
-        # U-9: layout present must not skip room_mm repair (independent ifs).
+        # AWR-246: v2 layouts carry room_mm inside each entry; migrate fills defaults.
         example = json.loads(
             (Path(__file__).resolve().parents[1] / "config" / "led_sim_profile.example.json").read_text()
         )
-        example.pop("room_mm", None)
+        home = dict(example["layouts"]["Home"])
+        home.pop("room_mm", None)
+        example["layouts"] = {"Home": home}
         self.profile_path.write_text(json.dumps(example), encoding="utf-8")
         with _server(self.profile_path) as port:
             status, result = _request(port, "GET", "/api/profile")
         self.assertEqual(status, 200)
-        self.assertEqual(result["profile"]["room_mm"], list(led_sim_engine.DEFAULT_ROOM_MM))
+        active = result["profile"]["layouts"][result["profile"]["active_layout"]]
+        self.assertEqual(active["room_mm"], list(led_sim_engine.DEFAULT_ROOM_MM))
         self.assertIn("profile_warnings", result)
-        self.assertEqual(result["profile"].get("layout_locked"), False)
+        self.assertEqual(active.get("layout_locked"), False)
         self.assertEqual(result["profile"].get("calibration_locked"), False)
 
     def test_catalog_includes_profile_warnings(self) -> None:
@@ -216,14 +219,15 @@ class LedSimServiceTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("profile_warnings", catalog)
         self.assertIsInstance(catalog["profile_warnings"], list)
-        self.assertIs(catalog["profile"]["layout_locked"], False)
+        active = catalog["profile"]["layouts"][catalog["profile"]["active_layout"]]
+        self.assertIs(active["layout_locked"], False)
         self.assertIs(catalog["profile"]["calibration_locked"], False)
 
     def test_lock_flags_roundtrip_on_profile_save(self) -> None:
         example = json.loads(
             (Path(__file__).resolve().parents[1] / "config" / "led_sim_profile.example.json").read_text()
         )
-        example["layout_locked"] = True
+        example["layouts"]["Home"]["layout_locked"] = True
         example["calibration_locked"] = True
         with _server(self.profile_path) as port:
             status, result = _request(port, "POST", "/api/profile", example)
@@ -231,7 +235,8 @@ class LedSimServiceTests(unittest.TestCase):
             self.assertTrue(result["ok"])
             status, after = _request(port, "GET", "/api/profile")
         self.assertEqual(status, 200)
-        self.assertIs(after["profile"]["layout_locked"], True)
+        active = after["profile"]["layouts"][after["profile"]["active_layout"]]
+        self.assertIs(active["layout_locked"], True)
         self.assertIs(after["profile"]["calibration_locked"], True)
 
         # F-1: Calibrate-tab flow — start unlocked on disk, then POST with only
@@ -239,12 +244,12 @@ class LedSimServiceTests(unittest.TestCase):
         unlocked = json.loads(
             (Path(__file__).resolve().parents[1] / "config" / "led_sim_profile.example.json").read_text()
         )
-        unlocked["layout_locked"] = False
+        unlocked["layouts"]["Home"]["layout_locked"] = False
         unlocked["calibration_locked"] = False
         with _server(self.profile_path) as port:
             status, _ = _request(port, "POST", "/api/profile", unlocked)
             self.assertEqual(status, 200)
-            toggled = dict(unlocked)
+            toggled = json.loads(json.dumps(unlocked))
             toggled["calibration_locked"] = True
             status, result = _request(port, "POST", "/api/profile", toggled)
             self.assertEqual(status, 200, result)
@@ -252,7 +257,52 @@ class LedSimServiceTests(unittest.TestCase):
             status, after = _request(port, "GET", "/api/profile")
         self.assertEqual(status, 200)
         self.assertIs(after["profile"]["calibration_locked"], True)
-        self.assertIs(after["profile"]["layout_locked"], False)
+        active = after["profile"]["layouts"][after["profile"]["active_layout"]]
+        self.assertIs(active["layout_locked"], False)
+
+    def test_v1_profile_migrates_on_get_and_save(self) -> None:
+        v1 = {
+            "schema": 1,
+            "device_model": "H612D",
+            "segments": 60,
+            "physical_leds": 360,
+            "leds_per_segment": 6,
+            "strip_length_mm": 14996.16,
+            "room_mm": [5216, 2284],
+            "layout": led_sim_engine.default_layout([5216, 2284]),
+            "layout_locked": True,
+            "calibration_locked": False,
+            "gamma": 1.0,
+            "white_point": [1.0, 1.0, 1.0],
+            "brightness": 1.0,
+            "glow_radius": 1.0,
+            "glow_gain": 1.0,
+            "bleed": 0.0,
+            "fps": 60,
+            "latency_ms": 0,
+            "hold_mode": "zoh",
+            "slew_ms": 0,
+            "bpm": 128,
+            "calibration_status": "unmeasured",
+            "calibration_domains": {
+                "color": "unmeasured", "timing": "unmeasured", "spatial": "unmeasured",
+            },
+            "calibration_evidence": {},
+        }
+        self.profile_path.write_text(json.dumps(v1), encoding="utf-8")
+        with _server(self.profile_path) as port:
+            status, result = _request(port, "GET", "/api/profile")
+            self.assertEqual(status, 200)
+            self.assertEqual(result["profile"]["schema"], 2)
+            self.assertEqual(result["profile"]["active_layout"], "Home")
+            self.assertTrue(result["profile"]["layouts"]["Home"]["layout_locked"])
+            self.assertNotIn("layout", result["profile"])
+            status, saved = _request(port, "POST", "/api/profile", result["profile"])
+            self.assertEqual(status, 200, saved)
+        disk = json.loads(self.profile_path.read_text(encoding="utf-8"))
+        self.assertEqual(disk["schema"], 2)
+        self.assertNotIn("layout", disk)
+        self.assertNotIn("room_mm", disk)
 
     def test_lab_degradation_keeps_catalog_serving(self) -> None:
         with mock.patch.object(led_sim_engine, "_import_lab", side_effect=RuntimeError("lab exploded")):

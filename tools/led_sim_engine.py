@@ -69,6 +69,13 @@ LAYOUT_BOUNDS_TOLERANCE_MM = 2.0
 
 DEFAULT_ROOM_MM = (5216.0, 2284.0)
 LAYOUT_PRESETS = ("perimeter", "snake", "custom")
+SCHEMA_V1 = 1
+SCHEMA_V2 = 2
+DEFAULT_LAYOUT_NAME = "Home"
+MIN_LAYOUTS = 1
+MAX_LAYOUTS = 24
+MIN_LAYOUT_NAME_LEN = 1
+MAX_LAYOUT_NAME_LEN = 40
 
 FRAME_SOURCE_PRODUCTION_RUNNER_OFFLINE = "production_runner_offline"
 TIMING_SOURCE_IDEAL_GRID = "ideal_grid"
@@ -99,13 +106,271 @@ def _check_number(profile: Mapping[str, Any], key: str, lo: float, hi: float, er
         errors.append(f"{key} must be a number in [{lo}, {hi}]")
 
 
+def _valid_room_mm(room: Any) -> bool:
+    return (
+        isinstance(room, (list, tuple))
+        and len(room) == 2
+        and all(isinstance(v, (int, float)) and not isinstance(v, bool) and float(v) > 0 for v in room)
+    )
+
+
+def layout_name_ok(name: Any) -> bool:
+    return (
+        isinstance(name, str)
+        and MIN_LAYOUT_NAME_LEN <= len(name) <= MAX_LAYOUT_NAME_LEN
+        and name == name.strip()
+        and name.strip() != ""
+    )
+
+
+def _validate_layout_body(layout: Mapping[str, Any], *, prefix: str, errors: list[str]) -> None:
+    preset = layout.get("preset")
+    if preset not in LAYOUT_PRESETS:
+        errors.append(f"{prefix}.preset must be one of {list(LAYOUT_PRESETS)}")
+    flip = layout.get("flip_chain", False)
+    if not isinstance(flip, bool):
+        errors.append(f"{prefix}.flip_chain must be a boolean")
+    points = layout.get("points_mm")
+    if not isinstance(points, (list, tuple)) or len(points) < 2:
+        errors.append(f"{prefix}.points_mm must be a list of ≥2 [x, y] points")
+    else:
+        for index, point in enumerate(points):
+            if (
+                not isinstance(point, (list, tuple))
+                or len(point) != 2
+                or not all(
+                    isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(float(v))
+                    for v in point
+                )
+            ):
+                errors.append(f"{prefix}.points_mm[{index}] must be a finite [x, y] pair")
+                break
+
+
+def _validate_layout_entry(entry: Any, *, prefix: str, errors: list[str]) -> None:
+    if not isinstance(entry, Mapping):
+        errors.append(f"{prefix} must be an object")
+        return
+    _validate_layout_body(entry, prefix=prefix, errors=errors)
+    if not _valid_room_mm(entry.get("room_mm")):
+        errors.append(f"{prefix}.room_mm must be [width_mm, height_mm] with positive numbers")
+    locked = entry.get("layout_locked", False)
+    if not isinstance(locked, bool):
+        errors.append(f"{prefix}.layout_locked must be a boolean")
+
+
+def _validate_layouts_library(profile: Mapping[str, Any], errors: list[str]) -> None:
+    layouts = profile.get("layouts")
+    if not isinstance(layouts, Mapping):
+        errors.append("layouts must be an object")
+        return
+    if len(layouts) < MIN_LAYOUTS:
+        errors.append("layouts must contain at least one layout")
+    if len(layouts) > MAX_LAYOUTS:
+        errors.append(f"layouts must contain at most {MAX_LAYOUTS} layouts")
+    names = list(layouts.keys())
+    if len(names) != len(set(names)):
+        errors.append("layouts names must be unique")
+    for name, entry in layouts.items():
+        if not layout_name_ok(name):
+            errors.append(
+                f"layouts name {name!r} must be a {MIN_LAYOUT_NAME_LEN}-{MAX_LAYOUT_NAME_LEN} "
+                "char non-empty string with no leading/trailing space"
+            )
+        _validate_layout_entry(entry, prefix=f"layouts[{name!r}]", errors=errors)
+    active = profile.get("active_layout")
+    if not isinstance(active, str) or not active:
+        errors.append("active_layout must be a non-empty string")
+    elif active not in layouts:
+        errors.append(f"active_layout {active!r} is not in layouts")
+
+
+def has_layout_library(profile: Mapping[str, Any] | None) -> bool:
+    return isinstance((profile or {}).get("layouts"), Mapping)
+
+
+def make_layout_entry(
+    *,
+    preset: str = "perimeter",
+    points_mm: list[list[float]] | None = None,
+    flip_chain: bool = False,
+    room_mm: tuple[float, float] | list[float] | None = None,
+    layout_locked: bool = False,
+) -> dict[str, Any]:
+    room = list(room_mm) if room_mm is not None else list(DEFAULT_ROOM_MM)
+    points = points_mm if points_mm is not None else perimeter_preset_points(room)
+    return {
+        "preset": preset if preset in LAYOUT_PRESETS else "custom",
+        "points_mm": [[float(p[0]), float(p[1])] for p in points],
+        "flip_chain": bool(flip_chain),
+        "room_mm": [float(room[0]), float(room[1])],
+        "layout_locked": bool(layout_locked),
+    }
+
+
+def migrate_profile_to_v2(profile: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a schema-v2 profile. Legacy top-level layout wraps as layouts.Home.
+
+    Old keys ``layout`` / ``room_mm`` / ``layout_locked`` are removed. Does not
+    mutate the input mapping.
+    """
+    if not isinstance(profile, Mapping):
+        raise ValueError("profile must be a JSON object")
+    out = dict(profile)
+    if has_layout_library(out) and out.get("layouts"):
+        layouts: dict[str, Any] = {}
+        for name, entry in out["layouts"].items():
+            if not isinstance(entry, Mapping):
+                continue
+            room = entry.get("room_mm")
+            if not _valid_room_mm(room):
+                room = out.get("room_mm") if _valid_room_mm(out.get("room_mm")) else list(DEFAULT_ROOM_MM)
+            locked = entry.get("layout_locked")
+            if not isinstance(locked, bool):
+                locked = out.get("layout_locked") if isinstance(out.get("layout_locked"), bool) else False
+            body = {
+                "preset": entry.get("preset", "custom"),
+                "points_mm": entry.get("points_mm"),
+                "flip_chain": entry.get("flip_chain", False),
+            }
+            if body["preset"] not in LAYOUT_PRESETS:
+                body["preset"] = "custom"
+            if not isinstance(body["points_mm"], (list, tuple)) or len(body["points_mm"]) < 2:
+                body["points_mm"] = preset_layout_points(
+                    body["preset"] if body["preset"] in ("perimeter", "snake") else "perimeter",
+                    room,
+                )
+                if body["preset"] not in ("perimeter", "snake"):
+                    body["preset"] = "perimeter"
+            layouts[str(name)] = make_layout_entry(
+                preset=str(body["preset"]),
+                points_mm=[list(p) for p in body["points_mm"]],
+                flip_chain=bool(body["flip_chain"]) if isinstance(body["flip_chain"], bool) else False,
+                room_mm=room,
+                layout_locked=locked,
+            )
+        if not layouts:
+            layouts = {
+                DEFAULT_LAYOUT_NAME: make_layout_entry(
+                    room_mm=out.get("room_mm") if _valid_room_mm(out.get("room_mm")) else DEFAULT_ROOM_MM,
+                    layout_locked=bool(out.get("layout_locked"))
+                    if isinstance(out.get("layout_locked"), bool) else False,
+                )
+            }
+        active = out.get("active_layout")
+        if not isinstance(active, str) or active not in layouts:
+            active = next(iter(layouts))
+        out["layouts"] = layouts
+        out["active_layout"] = active
+    else:
+        room = out.get("room_mm") if _valid_room_mm(out.get("room_mm")) else list(DEFAULT_ROOM_MM)
+        layout = out.get("layout") if isinstance(out.get("layout"), Mapping) else None
+        if layout is None:
+            entry = make_layout_entry(room_mm=room)
+        else:
+            preset = layout.get("preset", "perimeter")
+            if preset not in LAYOUT_PRESETS:
+                preset = "custom"
+            points = layout.get("points_mm")
+            if not isinstance(points, (list, tuple)) or len(points) < 2:
+                points = preset_layout_points(
+                    preset if preset in ("perimeter", "snake") else "perimeter", room
+                )
+                if preset not in ("perimeter", "snake"):
+                    preset = "perimeter"
+            flip = layout.get("flip_chain", False)
+            entry = make_layout_entry(
+                preset=str(preset),
+                points_mm=[list(p) for p in points],
+                flip_chain=bool(flip) if isinstance(flip, bool) else False,
+                room_mm=room,
+                layout_locked=bool(out.get("layout_locked"))
+                if isinstance(out.get("layout_locked"), bool) else False,
+            )
+        if isinstance(out.get("layout_locked"), bool):
+            entry["layout_locked"] = out["layout_locked"]
+        out["layouts"] = {DEFAULT_LAYOUT_NAME: entry}
+        out["active_layout"] = DEFAULT_LAYOUT_NAME
+    out["schema"] = SCHEMA_V2
+    for key in ("layout", "room_mm", "layout_locked"):
+        out.pop(key, None)
+    if not isinstance(out.get("calibration_locked"), bool):
+        out["calibration_locked"] = False
+    return out
+
+
+def active_layout_entry(profile: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Active layout record (library or legacy auto-wrap). Always returns a copy."""
+    if not isinstance(profile, Mapping):
+        return make_layout_entry()
+    if has_layout_library(profile) and profile.get("layouts"):
+        layouts = profile["layouts"]
+        active = profile.get("active_layout")
+        entry = layouts.get(active) if isinstance(active, str) else None
+        if not isinstance(entry, Mapping):
+            entry = next((v for v in layouts.values() if isinstance(v, Mapping)), None)
+        if isinstance(entry, Mapping):
+            room = entry.get("room_mm") if _valid_room_mm(entry.get("room_mm")) else list(DEFAULT_ROOM_MM)
+            locked = entry.get("layout_locked") if isinstance(entry.get("layout_locked"), bool) else False
+            preset = entry.get("preset", "perimeter")
+            if preset not in LAYOUT_PRESETS:
+                preset = "custom"
+            points = entry.get("points_mm")
+            if not isinstance(points, (list, tuple)) or len(points) < 2:
+                points = preset_layout_points(
+                    preset if preset in ("perimeter", "snake") else "perimeter", room
+                )
+                if preset not in ("perimeter", "snake"):
+                    preset = "perimeter"
+            flip = entry.get("flip_chain", False)
+            return make_layout_entry(
+                preset=str(preset),
+                points_mm=[list(p) for p in points],
+                flip_chain=bool(flip) if isinstance(flip, bool) else False,
+                room_mm=room,
+                layout_locked=locked,
+            )
+    room = profile.get("room_mm") if _valid_room_mm(profile.get("room_mm")) else list(DEFAULT_ROOM_MM)
+    layout = profile.get("layout") if isinstance(profile.get("layout"), Mapping) else None
+    if layout is None:
+        return make_layout_entry(
+            room_mm=room,
+            layout_locked=bool(profile.get("layout_locked"))
+            if isinstance(profile.get("layout_locked"), bool) else False,
+        )
+    preset = layout.get("preset", "perimeter")
+    if preset not in LAYOUT_PRESETS:
+        preset = "custom"
+    points = layout.get("points_mm")
+    if not isinstance(points, (list, tuple)) or len(points) < 2:
+        points = preset_layout_points(
+            preset if preset in ("perimeter", "snake") else "perimeter", room
+        )
+        if preset not in ("perimeter", "snake"):
+            preset = "perimeter"
+    flip = layout.get("flip_chain", False)
+    return make_layout_entry(
+        preset=str(preset),
+        points_mm=[list(p) for p in points],
+        flip_chain=bool(flip) if isinstance(flip, bool) else False,
+        room_mm=room,
+        layout_locked=bool(profile.get("layout_locked"))
+        if isinstance(profile.get("layout_locked"), bool) else False,
+    )
+
+
 def validate_profile(profile: Mapping[str, Any]) -> list[str]:
-    """Return error strings; empty list = valid. Unknown keys are allowed."""
+    """Return error strings; empty list = valid. Unknown keys are allowed.
+
+    Accepts schema v1 (single top-level layout) and schema v2 (layouts library).
+    Garbage libraries (empty, missing/dangling active, bad names) are rejected.
+    """
     errors: list[str] = []
     if not isinstance(profile, Mapping):
         return ["profile must be a JSON object"]
-    if profile.get("schema") != 1:
-        errors.append("schema must be 1")
+    schema = profile.get("schema")
+    if schema not in (SCHEMA_V1, SCHEMA_V2):
+        errors.append("schema must be 1 or 2")
     if profile.get("device_model") != H612D_MODEL:
         errors.append(f"device_model must be {H612D_MODEL}")
     segments = profile.get("segments")
@@ -141,9 +406,10 @@ def validate_profile(profile: Mapping[str, Any]) -> list[str]:
     _check_number(profile, "bpm", 20.0, 300.0, errors)
     if profile.get("calibration_status") not in _CALIBRATION_STATUSES:
         errors.append(f"calibration_status must be one of {sorted(_CALIBRATION_STATUSES)}")
-    for lock_key in ("layout_locked", "calibration_locked"):
-        if lock_key in profile and not isinstance(profile.get(lock_key), bool):
-            errors.append(f"{lock_key} must be a boolean")
+    if "calibration_locked" in profile and not isinstance(profile.get("calibration_locked"), bool):
+        errors.append("calibration_locked must be a boolean")
+    if "layout_locked" in profile and not isinstance(profile.get("layout_locked"), bool):
+        errors.append("layout_locked must be a boolean")
     domains = profile.get("calibration_domains")
     if not isinstance(domains, Mapping):
         errors.append("calibration_domains must be an object")
@@ -200,41 +466,18 @@ def validate_profile(profile: Mapping[str, Any]) -> list[str]:
         ):
             errors.append("calibration_evidence.reference_instrument is required for measured status")
 
-    room = profile.get("room_mm")
-    if room is not None:
-        if (
-            not isinstance(room, (list, tuple))
-            or len(room) != 2
-            or not all(isinstance(v, (int, float)) and not isinstance(v, bool) and float(v) > 0 for v in room)
-        ):
+    if has_layout_library(profile) or schema == SCHEMA_V2:
+        _validate_layouts_library(profile, errors)
+    else:
+        room = profile.get("room_mm")
+        if room is not None and not _valid_room_mm(room):
             errors.append("room_mm must be [width_mm, height_mm] with positive numbers")
-
-    layout = profile.get("layout")
-    if layout is not None:
-        if not isinstance(layout, Mapping):
-            errors.append("layout must be an object")
-        else:
-            preset = layout.get("preset")
-            if preset not in LAYOUT_PRESETS:
-                errors.append(f"layout.preset must be one of {list(LAYOUT_PRESETS)}")
-            flip = layout.get("flip_chain", False)
-            if not isinstance(flip, bool):
-                errors.append("layout.flip_chain must be a boolean")
-            points = layout.get("points_mm")
-            if not isinstance(points, (list, tuple)) or len(points) < 2:
-                errors.append("layout.points_mm must be a list of ≥2 [x, y] points")
+        layout = profile.get("layout")
+        if layout is not None:
+            if not isinstance(layout, Mapping):
+                errors.append("layout must be an object")
             else:
-                for index, point in enumerate(points):
-                    if (
-                        not isinstance(point, (list, tuple))
-                        or len(point) != 2
-                        or not all(
-                            isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(float(v))
-                            for v in point
-                        )
-                    ):
-                        errors.append(f"layout.points_mm[{index}] must be a finite [x, y] pair")
-                        break
+                _validate_layout_body(layout, prefix="layout", errors=errors)
     return errors
 
 
@@ -243,12 +486,9 @@ def profile_warnings(profile: Mapping[str, Any]) -> list[str]:
     warnings: list[str] = []
     if not isinstance(profile, Mapping):
         return warnings
-    room = room_size_mm(profile)
-    width, height = room
-    layout = profile.get("layout")
-    if not isinstance(layout, Mapping):
-        return warnings
-    points = layout.get("points_mm")
+    entry = active_layout_entry(profile)
+    width, height = float(entry["room_mm"][0]), float(entry["room_mm"][1])
+    points = entry.get("points_mm")
     if not isinstance(points, (list, tuple)):
         return warnings
     tol = LAYOUT_BOUNDS_TOLERANCE_MM
@@ -289,13 +529,17 @@ def format_length_mm(mm: float) -> str:
 
 
 def room_size_mm(profile: Mapping[str, Any] | None = None) -> tuple[float, float]:
-    """Room width/height in mm; defaults to the operator room when absent."""
-    room = (profile or {}).get("room_mm") if profile else None
-    if (
-        isinstance(room, (list, tuple))
-        and len(room) == 2
-        and all(isinstance(v, (int, float)) and not isinstance(v, bool) and float(v) > 0 for v in room)
-    ):
+    """Room width/height in mm from the active layout (legacy top-level fallback)."""
+    if profile is None:
+        return (float(DEFAULT_ROOM_MM[0]), float(DEFAULT_ROOM_MM[1]))
+    # Fast path for preset helpers that pass {"room_mm": [...]} only — avoid
+    # recursing through make_layout_entry → perimeter_preset_points.
+    room = profile.get("room_mm") if isinstance(profile, Mapping) else None
+    if _valid_room_mm(room) and not has_layout_library(profile) and not isinstance(profile.get("layout"), Mapping):
+        return (float(room[0]), float(room[1]))
+    entry = active_layout_entry(profile)
+    room = entry.get("room_mm")
+    if _valid_room_mm(room):
         return (float(room[0]), float(room[1]))
     return (float(DEFAULT_ROOM_MM[0]), float(DEFAULT_ROOM_MM[1]))
 
@@ -408,27 +652,12 @@ def default_layout(room_mm: tuple[float, float] | list[float] | None = None) -> 
 
 
 def resolve_layout(profile: Mapping[str, Any]) -> dict[str, Any]:
-    """Return a concrete layout object; synthesize perimeter when missing."""
-    layout = profile.get("layout")
-    room = room_size_mm(profile)
-    if not isinstance(layout, Mapping):
-        return default_layout(room)
-    preset = layout.get("preset", "custom")
-    if preset not in LAYOUT_PRESETS:
-        preset = "custom"
-    points = layout.get("points_mm")
-    if preset in ("perimeter", "snake") and (
-        not isinstance(points, (list, tuple)) or len(points) < 2
-    ):
-        points = preset_layout_points(preset, room)
-    elif not isinstance(points, (list, tuple)) or len(points) < 2:
-        points = perimeter_preset_points(room)
-        preset = "perimeter"
-    flip = layout.get("flip_chain", False)
+    """Return a concrete layout object for the ACTIVE layout; synthesize when missing."""
+    entry = active_layout_entry(profile)
     return {
-        "preset": preset if preset in LAYOUT_PRESETS else "custom",
-        "points_mm": [[float(p[0]), float(p[1])] for p in points],
-        "flip_chain": bool(flip) if isinstance(flip, bool) else False,
+        "preset": entry["preset"],
+        "points_mm": [[float(p[0]), float(p[1])] for p in entry["points_mm"]],
+        "flip_chain": bool(entry["flip_chain"]),
     }
 
 
@@ -543,8 +772,13 @@ def layout_led_positions(profile: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def save_profile(path: Path | str, profile: Mapping[str, Any]) -> None:
-    """Validate then atomically write (tmp + rename). Raises ValueError when invalid."""
-    errors = validate_profile(profile)
+    """Validate then atomically write schema-v2 (tmp + rename). Raises ValueError when invalid.
+
+    Legacy v1 profiles are migrated to a layouts library before write; old top-level
+    ``layout`` / ``room_mm`` / ``layout_locked`` keys are dropped.
+    """
+    migrated = migrate_profile_to_v2(profile)
+    errors = validate_profile(migrated)
     if errors:
         raise ValueError("; ".join(errors))
     target = Path(path)
@@ -555,7 +789,7 @@ def save_profile(path: Path | str, profile: Mapping[str, Any]) -> None:
             "w", encoding="utf-8", delete=False, dir=str(target.parent), prefix=f"{target.name}.tmp-"
         ) as fp:
             temp_path = Path(fp.name)
-            json.dump(dict(profile), fp, indent=2, sort_keys=True)
+            json.dump(migrated, fp, indent=2, sort_keys=True)
             fp.write("\n")
         temp_path.replace(target)
     except Exception:

@@ -2,18 +2,16 @@
 
 import {
   createLedSimView,
-  defaultLayout,
   feetToMm,
   formatLengthMm,
   mmToFeet,
   perimeterPresetPoints,
-  resolveLayout,
   snakePresetPoints,
 } from "./ledsim-view.js";
 
 const $ = (id) => document.getElementById(id);
 
-const LAYOUT_KEYS = ["room_mm", "layout", "layout_locked"];
+const LAYOUT_KEYS = ["layouts", "active_layout"];
 const CALIBRATION_KEYS = [
   "gamma", "white_point", "brightness", "glow_radius", "glow_gain", "bleed",
   "fps", "latency_ms", "hold_mode", "slew_ms", "bpm",
@@ -22,6 +20,9 @@ const CALIBRATION_KEYS = [
 ];
 const UNDO_LIMIT = 20;
 const LONG_PRESS_MOVE_PX = 6;
+const MAX_LAYOUTS = 24;
+const DEFAULT_LAYOUT_NAME = "Home";
+const DEFAULT_ROOM_MM = [5216, 2284];
 
 const state = {
   profile: null,
@@ -152,14 +153,66 @@ const KNOBS = [
 
 function ensureLockDefaults(profile = state.profile) {
   if (!profile || typeof profile !== "object") return profile;
-  if (typeof profile.layout_locked !== "boolean") profile.layout_locked = false;
   if (typeof profile.calibration_locked !== "boolean") profile.calibration_locked = false;
+  ensureLayoutLibrary(profile);
   return profile;
+}
+
+function makeLayoutEntry(source = {}) {
+  const room = Array.isArray(source.room_mm) && source.room_mm.length === 2
+    ? [Number(source.room_mm[0]), Number(source.room_mm[1])]
+    : DEFAULT_ROOM_MM.slice();
+  let preset = source.preset || "perimeter";
+  if (!["perimeter", "snake", "custom"].includes(preset)) preset = "custom";
+  let points = source.points_mm;
+  if (!Array.isArray(points) || points.length < 2) {
+    points = preset === "snake" ? snakePresetPoints(room) : perimeterPresetPoints(room);
+    if (preset !== "snake") preset = "perimeter";
+  }
+  return {
+    preset,
+    points_mm: points.map((point) => [Number(point[0]), Number(point[1])]),
+    flip_chain: typeof source.flip_chain === "boolean" ? source.flip_chain : false,
+    room_mm: room,
+    layout_locked: typeof source.layout_locked === "boolean" ? source.layout_locked : false,
+  };
+}
+
+function ensureLayoutLibrary(profile = state.profile) {
+  if (!profile || typeof profile !== "object") return profile;
+  if (!profile.layouts || typeof profile.layouts !== "object" || !Object.keys(profile.layouts).length) {
+    const entry = makeLayoutEntry({
+      ...(profile.layout && typeof profile.layout === "object" ? profile.layout : {}),
+      room_mm: profile.room_mm,
+      layout_locked: profile.layout_locked,
+    });
+    profile.layouts = {[DEFAULT_LAYOUT_NAME]: entry};
+    profile.active_layout = DEFAULT_LAYOUT_NAME;
+    delete profile.layout;
+    delete profile.room_mm;
+    delete profile.layout_locked;
+    profile.schema = 2;
+  }
+  if (typeof profile.active_layout !== "string" || !profile.layouts[profile.active_layout]) {
+    profile.active_layout = Object.keys(profile.layouts)[0];
+  }
+  const entry = profile.layouts[profile.active_layout];
+  if (!entry || typeof entry !== "object") {
+    profile.layouts[profile.active_layout] = makeLayoutEntry();
+  } else {
+    profile.layouts[profile.active_layout] = makeLayoutEntry(entry);
+  }
+  return profile;
+}
+
+function activeEntry(profile = state.profile) {
+  ensureLayoutLibrary(profile);
+  return profile.layouts[profile.active_layout];
 }
 
 function layoutLocked() {
   ensureLockDefaults();
-  return state.profile?.layout_locked === true;
+  return activeEntry()?.layout_locked === true;
 }
 
 function calibrationLocked() {
@@ -261,7 +314,8 @@ function syncLockUi() {
 
 function toggleLayoutLock() {
   ensureLockDefaults();
-  state.profile.layout_locked = !state.profile.layout_locked;
+  const entry = activeEntry();
+  entry.layout_locked = !entry.layout_locked;
   syncLockUi();
   markDirty();
 }
@@ -279,22 +333,19 @@ function pushProfileToView() {
   updateCalibrationBadge();
   syncLayoutForm();
   syncLockUi();
+  syncLayoutPicker();
 }
 
 function ensureProfileLayout() {
-  if (!state.profile.room_mm || state.profile.room_mm.length !== 2) {
-    state.profile.room_mm = [5216, 2284];
-  }
   ensureLockDefaults();
-  state.profile.layout = resolveLayout(state.profile);
-  return state.profile.layout;
+  return activeEntry();
 }
 
 function pushUndo() {
-  ensureProfileLayout();
+  const entry = ensureProfileLayout();
   state.layoutUndoStack.push(clone({
-    room_mm: state.profile.room_mm,
-    layout: state.profile.layout,
+    name: state.profile.active_layout,
+    entry,
   }));
   if (state.layoutUndoStack.length > UNDO_LIMIT) state.layoutUndoStack.shift();
   syncUndoButton();
@@ -309,16 +360,18 @@ function undoLayout() {
   if (state.activeTab !== "layout") return;
   if (!state.layoutUndoStack.length || layoutLocked()) return;
   const previous = state.layoutUndoStack.pop();
-  state.profile.room_mm = previous.room_mm;
-  state.profile.layout = previous.layout;
+  ensureLayoutLibrary();
+  if (previous.name && state.profile.layouts[previous.name]) {
+    state.profile.active_layout = previous.name;
+    state.profile.layouts[previous.name] = makeLayoutEntry(previous.entry);
+  }
   syncUndoButton();
   pushProfileToView();
   refreshPresetThumbs();
 }
 
 function markLayoutCustom() {
-  ensureProfileLayout();
-  state.profile.layout.preset = "custom";
+  ensureProfileLayout().preset = "custom";
   syncPresetCards();
   updateResetLabel();
 }
@@ -336,9 +389,9 @@ function syncPresetCards() {
 }
 
 function syncLayoutForm() {
-  ensureProfileLayout();
-  const widthMm = Number(state.profile.room_mm[0]);
-  const heightMm = Number(state.profile.room_mm[1]);
+  const entry = ensureProfileLayout();
+  const widthMm = Number(entry.room_mm[0]);
+  const heightMm = Number(entry.room_mm[1]);
   $("room-width-ft").value = String(Math.round(mmToFeet(widthMm) * 10) / 10);
   $("room-height-ft").value = String(Math.round(mmToFeet(heightMm) * 10) / 10);
   $("room-width-mm-hint").textContent = `${Math.round(widthMm)} mm`;
@@ -353,7 +406,7 @@ function syncLayoutForm() {
   const roomH = heightMm;
   const tol = 2;
   let outside = 0;
-  for (const point of state.profile.layout.points_mm || []) {
+  for (const point of activeEntry().points_mm || []) {
     const x = Number(point[0]);
     const y = Number(point[1]);
     if (x < -tol || y < -tol || x > roomW + tol || y > roomH + tol) outside += 1;
@@ -411,27 +464,173 @@ function drawPresetThumb(canvas, points, room) {
 }
 
 function refreshPresetThumbs() {
-  const room = state.profile?.room_mm || [5216, 2284];
+  const room = activeEntry()?.room_mm || DEFAULT_ROOM_MM.slice();
   drawPresetThumb($("thumb-perimeter"), perimeterPresetPoints(room), room);
   drawPresetThumb($("thumb-snake"), snakePresetPoints(room), room);
+}
+
+function syncLayoutPicker() {
+  const select = $("layout-slot");
+  if (!select || !state.profile) return;
+  ensureLayoutLibrary();
+  const names = Object.keys(state.profile.layouts).sort((a, b) => a.localeCompare(b));
+  const active = state.profile.active_layout;
+  select.innerHTML = "";
+  for (const name of names) select.add(new Option(name, name));
+  select.value = active;
+  const onlyOne = names.length <= 1;
+  const del = $("layout-delete");
+  if (del) del.disabled = onlyOne;
+  const saveAs = $("layout-save-as");
+  if (saveAs) saveAs.disabled = names.length >= MAX_LAYOUTS;
+}
+
+function layoutNameError(name, {allowExisting = false, allowName = null} = {}) {
+  const trimmed = String(name || "").trim();
+  if (!trimmed) return "Name is required";
+  if (trimmed.length > 40) return "Name must be 1–40 characters";
+  if (trimmed !== String(name || "")) return "No leading or trailing spaces";
+  if (!allowExisting && state.profile.layouts[trimmed] && trimmed !== allowName) {
+    return "That name already exists";
+  }
+  return "";
+}
+
+function promptLayoutName({title, initial, allowName = null}) {
+  return new Promise((resolve) => {
+    const dialog = $("name-dialog");
+    const input = $("name-dialog-input");
+    const err = $("name-dialog-error");
+    const titleEl = $("name-dialog-title");
+    titleEl.textContent = title;
+    input.value = initial;
+    err.hidden = true;
+    err.textContent = "";
+    dialog.hidden = false;
+    input.focus();
+    input.select();
+
+    const cleanup = (value) => {
+      dialog.hidden = true;
+      $("name-dialog-ok").onclick = null;
+      $("name-dialog-cancel").onclick = null;
+      input.onkeydown = null;
+      resolve(value);
+    };
+    const submit = () => {
+      const name = input.value.trim();
+      const error = layoutNameError(name, {allowExisting: false, allowName});
+      if (error) {
+        err.textContent = error;
+        err.hidden = false;
+        return;
+      }
+      cleanup(name);
+    };
+    $("name-dialog-ok").onclick = submit;
+    $("name-dialog-cancel").onclick = () => cleanup(null);
+    input.onkeydown = (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        submit();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        cleanup(null);
+      }
+    };
+  });
+}
+
+function switchActiveLayout(name) {
+  ensureLayoutLibrary();
+  if (!state.profile.layouts[name] || name === state.profile.active_layout) {
+    syncLayoutPicker();
+    return;
+  }
+  state.profile.active_layout = name;
+  state.layoutUndoStack = [];
+  const preset = activeEntry().preset;
+  if (preset === "snake" || preset === "perimeter") state.lastChosenPreset = preset;
+  view?.invalidateLayout?.();
+  pushProfileToView();
+  syncUndoButton();
+  refreshPresetThumbs();
+}
+
+async function saveAsLayout() {
+  ensureLayoutLibrary();
+  if (Object.keys(state.profile.layouts).length >= MAX_LAYOUTS) {
+    showError(`At most ${MAX_LAYOUTS} layouts`);
+    return;
+  }
+  const current = state.profile.active_layout;
+  const name = await promptLayoutName({
+    title: "Save layout as",
+    initial: `Copy of ${current}`,
+  });
+  if (!name) return;
+  state.profile.layouts[name] = makeLayoutEntry(activeEntry());
+  state.profile.active_layout = name;
+  state.layoutUndoStack = [];
+  pushProfileToView();
+  syncUndoButton();
+}
+
+async function renameActiveLayout() {
+  ensureLayoutLibrary();
+  const current = state.profile.active_layout;
+  const name = await promptLayoutName({
+    title: "Rename layout",
+    initial: current,
+    allowName: current,
+  });
+  if (!name || name === current) return;
+  // promptLayoutName rejects existing names; allow rename-to-self already handled.
+  if (state.profile.layouts[name]) {
+    showError("That name already exists");
+    return;
+  }
+  state.profile.layouts[name] = state.profile.layouts[current];
+  delete state.profile.layouts[current];
+  state.profile.active_layout = name;
+  pushProfileToView();
+}
+
+function deleteActiveLayout() {
+  ensureLayoutLibrary();
+  const names = Object.keys(state.profile.layouts);
+  if (names.length <= 1) {
+    showError("Cannot delete the last layout");
+    return;
+  }
+  const current = state.profile.active_layout;
+  const others = names.filter((name) => name !== current);
+  if (!window.confirm(`Delete layout “${current}”? Switch to “${others[0]}” first is required — delete switches automatically.`)) {
+    return;
+  }
+  // Spec: cannot delete the active without switching first — switch then delete.
+  const next = others.sort((a, b) => a.localeCompare(b))[0];
+  state.profile.active_layout = next;
+  delete state.profile.layouts[current];
+  state.layoutUndoStack = [];
+  view?.invalidateLayout?.();
+  pushProfileToView();
+  syncUndoButton();
+  refreshPresetThumbs();
 }
 
 function applyPreset(preset) {
   if (layoutLocked()) return;
   pushUndo();
   ensureProfileLayout();
-  const room = state.profile.room_mm;
+  const room = activeEntry().room_mm;
   if (preset === "custom") {
-    state.profile.layout.preset = "custom";
+    activeEntry().preset = "custom";
   } else {
     state.lastChosenPreset = preset;
-    state.profile.layout = {
-      preset,
-      points_mm: preset === "snake" ? snakePresetPoints(room) : perimeterPresetPoints(room),
-      flip_chain: typeof state.profile.layout.flip_chain === "boolean"
-        ? state.profile.layout.flip_chain
-        : false,
-    };
+    const entry = activeEntry();
+    entry.preset = preset;
+    entry.points_mm = preset === "snake" ? snakePresetPoints(room) : perimeterPresetPoints(room);
   }
   pushProfileToView();
   refreshPresetThumbs();
@@ -580,17 +779,24 @@ function wireLayoutEditor() {
     button.addEventListener("click", () => applyPreset(button.dataset.preset));
   }
 
+  $("layout-slot")?.addEventListener("change", (event) => {
+    switchActiveLayout(event.target.value);
+  });
+  $("layout-save-as")?.addEventListener("click", () => { saveAsLayout(); });
+  $("layout-rename")?.addEventListener("click", () => { renameActiveLayout(); });
+  $("layout-delete")?.addEventListener("click", () => { deleteActiveLayout(); });
+
   const onRoomSize = () => {
     if (layoutLocked()) return;
     pushUndo();
     const widthFt = Math.max(1, Number($("room-width-ft").value) || mmToFeet(5216));
     const heightFt = Math.max(1, Number($("room-height-ft").value) || mmToFeet(2284));
-    state.profile.room_mm = [feetToMm(widthFt), feetToMm(heightFt)];
+    activeEntry().room_mm = [feetToMm(widthFt), feetToMm(heightFt)];
     const preset = ensureProfileLayout().preset;
     if (preset === "perimeter" || preset === "snake") {
-      state.profile.layout.points_mm = preset === "snake"
-        ? snakePresetPoints(state.profile.room_mm)
-        : perimeterPresetPoints(state.profile.room_mm);
+      activeEntry().points_mm = preset === "snake"
+        ? snakePresetPoints(activeEntry().room_mm)
+        : perimeterPresetPoints(activeEntry().room_mm);
     }
     pushProfileToView();
     refreshPresetThumbs();
@@ -602,7 +808,7 @@ function wireLayoutEditor() {
     if (layoutLocked()) return;
     pushUndo();
     ensureProfileLayout();
-    state.profile.layout.flip_chain = !state.profile.layout.flip_chain;
+    activeEntry().flip_chain = !activeEntry().flip_chain;
     pushProfileToView();
   });
   $("layout-reset").addEventListener("click", () => {
@@ -662,12 +868,12 @@ function wireLayoutEditor() {
 
   function storedIndex(displayIndex) {
     const count = ensureProfileLayout().points_mm.length;
-    return state.profile.layout.flip_chain ? count - 1 - displayIndex : displayIndex;
+    return activeEntry().flip_chain ? count - 1 - displayIndex : displayIndex;
   }
 
   function insertIndexForEdge(displayEdgeIndex) {
     const count = ensureProfileLayout().points_mm.length;
-    if (!state.profile.layout.flip_chain) return displayEdgeIndex + 1;
+    if (!activeEntry().flip_chain) return displayEdgeIndex + 1;
     return count - 1 - displayEdgeIndex;
   }
 
@@ -676,9 +882,9 @@ function wireLayoutEditor() {
     const vertexHit = view.hitTestVertex(point.x, point.y, HIT);
     ensureProfileLayout();
     if (vertexHit >= 0) {
-      if (state.profile.layout.points_mm.length <= 2) return;
+      if (activeEntry().points_mm.length <= 2) return;
       pushUndo();
-      state.profile.layout.points_mm.splice(storedIndex(vertexHit), 1);
+      activeEntry().points_mm.splice(storedIndex(vertexHit), 1);
       state.selectedVertex = -1;
       markLayoutCustom();
       pushProfileToView();
@@ -687,7 +893,7 @@ function wireLayoutEditor() {
     const edge = view.hitTestEdge(point.x, point.y, HIT);
     if (!edge) return;
     pushUndo();
-    state.profile.layout.points_mm.splice(insertIndexForEdge(edge.edgeIndex), 0, [edge.mm.x, edge.mm.y]);
+    activeEntry().points_mm.splice(insertIndexForEdge(edge.edgeIndex), 0, [edge.mm.x, edge.mm.y]);
     markLayoutCustom();
     pushProfileToView();
   }
@@ -710,9 +916,9 @@ function wireLayoutEditor() {
     }
     const mm = view.canvasToMm(point.x, point.y);
     ensureProfileLayout();
-    const points = state.profile.layout.points_mm.map((entry) => [entry[0], entry[1]]);
+    const points = activeEntry().points_mm.map((entry) => [entry[0], entry[1]]);
     points[storedIndex(state.dragVertex)] = [mm.x, mm.y];
-    state.profile.layout.points_mm = points;
+    activeEntry().points_mm = points;
     state.selectedVertex = state.dragVertex;
     markLayoutCustom();
     pushProfileToView();
@@ -1152,12 +1358,12 @@ function tick(now) {
 function nudgeSelectedVertex(dxMm, dyMm) {
   if (layoutLocked() || state.selectedVertex < 0 || view.getViewMode() !== "room") return;
   ensureProfileLayout();
-  const count = state.profile.layout.points_mm.length;
+  const count = activeEntry().points_mm.length;
   const displayIndex = state.selectedVertex;
-  const stored = state.profile.layout.flip_chain ? count - 1 - displayIndex : displayIndex;
+  const stored = activeEntry().flip_chain ? count - 1 - displayIndex : displayIndex;
   pushUndo();
-  const point = state.profile.layout.points_mm[stored];
-  state.profile.layout.points_mm[stored] = [Number(point[0]) + dxMm, Number(point[1]) + dyMm];
+  const point = activeEntry().points_mm[stored];
+  activeEntry().points_mm[stored] = [Number(point[0]) + dxMm, Number(point[1]) + dyMm];
   markLayoutCustom();
   pushProfileToView();
 }
@@ -1228,11 +1434,7 @@ async function boot() {
   state.catalog = await api("GET", "/api/catalog");
   state.profile = state.catalog.profile;
   ensureLockDefaults(state.profile);
-  if (!state.profile.layout) {
-    state.profile.layout = defaultLayout(state.profile.room_mm || [5216, 2284]);
-  }
-  if (!state.profile.room_mm) state.profile.room_mm = [5216, 2284];
-  const preset = state.profile.layout?.preset;
+  const preset = activeEntry().preset;
   if (preset === "snake" || preset === "perimeter") state.lastChosenPreset = preset;
   state.savedProfile = clone(state.profile);
   ensureLockDefaults(state.savedProfile);
@@ -1246,6 +1448,7 @@ async function boot() {
   wireShell();
   wireLayoutEditor();
   syncLayoutForm();
+  syncLayoutPicker();
   refreshPresetThumbs();
   wireKeyboard();
   setActiveTab("play");

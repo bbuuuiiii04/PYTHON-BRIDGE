@@ -28,16 +28,76 @@ function roundHalfEven(value) {
   return floor % 2 === 0 ? floor : floor + 1;
 }
 
-function roomSizeMm(profile) {
-  const room = profile?.room_mm;
-  if (
-    Array.isArray(room)
+function validRoomMm(room) {
+  return Array.isArray(room)
     && room.length === 2
-    && room.every((value) => Number.isFinite(Number(value)) && Number(value) > 0)
-  ) {
-    return [Number(room[0]), Number(room[1])];
+    && room.every((value) => Number.isFinite(Number(value)) && Number(value) > 0);
+}
+
+/** Active layout record — mirrors led_sim_engine.active_layout_entry. */
+export function activeLayoutEntry(profile) {
+  const layouts = profile?.layouts;
+  if (layouts && typeof layouts === "object") {
+    const names = Object.keys(layouts);
+    if (names.length) {
+      let entry = (typeof profile?.active_layout === "string")
+        ? layouts[profile.active_layout]
+        : null;
+      if (!entry || typeof entry !== "object") {
+        entry = layouts[names[0]];
+      }
+      if (entry && typeof entry === "object") {
+        const room = validRoomMm(entry.room_mm) ? entry.room_mm.map(Number) : [...DEFAULT_ROOM_MM];
+        let preset = entry.preset || "perimeter";
+        if (!["perimeter", "snake", "custom"].includes(preset)) preset = "custom";
+        let points = entry.points_mm;
+        if ((preset === "perimeter" || preset === "snake") && (!Array.isArray(points) || points.length < 2)) {
+          points = preset === "snake" ? snakePresetPoints(room) : perimeterPresetPoints(room);
+        } else if (!Array.isArray(points) || points.length < 2) {
+          points = perimeterPresetPoints(room);
+          preset = "perimeter";
+        }
+        return {
+          preset,
+          points_mm: points.map((point) => [Number(point[0]), Number(point[1])]),
+          flip_chain: typeof entry.flip_chain === "boolean" ? entry.flip_chain : false,
+          room_mm: room,
+          layout_locked: typeof entry.layout_locked === "boolean" ? entry.layout_locked : false,
+        };
+      }
+    }
   }
-  return [...DEFAULT_ROOM_MM];
+  const room = validRoomMm(profile?.room_mm) ? profile.room_mm.map(Number) : [...DEFAULT_ROOM_MM];
+  const layout = profile?.layout;
+  if (!layout || typeof layout !== "object") {
+    return {
+      preset: "perimeter",
+      points_mm: perimeterPresetPoints(room),
+      flip_chain: false,
+      room_mm: room,
+      layout_locked: typeof profile?.layout_locked === "boolean" ? profile.layout_locked : false,
+    };
+  }
+  let preset = layout.preset || "custom";
+  if (!["perimeter", "snake", "custom"].includes(preset)) preset = "custom";
+  let points = layout.points_mm;
+  if ((preset === "perimeter" || preset === "snake") && (!Array.isArray(points) || points.length < 2)) {
+    points = preset === "snake" ? snakePresetPoints(room) : perimeterPresetPoints(room);
+  } else if (!Array.isArray(points) || points.length < 2) {
+    points = perimeterPresetPoints(room);
+    preset = "perimeter";
+  }
+  return {
+    preset,
+    points_mm: points.map((point) => [Number(point[0]), Number(point[1])]),
+    flip_chain: typeof layout.flip_chain === "boolean" ? layout.flip_chain : false,
+    room_mm: room,
+    layout_locked: typeof profile?.layout_locked === "boolean" ? profile.layout_locked : false,
+  };
+}
+
+function roomSizeMm(profile) {
+  return activeLayoutEntry(profile).room_mm.slice();
 }
 
 export function formatLengthMm(mm) {
@@ -134,23 +194,12 @@ export function defaultLayout(roomMm) {
 }
 
 export function resolveLayout(profile) {
-  const room = roomSizeMm(profile);
-  const layout = profile?.layout;
-  if (!layout || typeof layout !== "object") return defaultLayout(room);
-  let preset = layout.preset || "custom";
-  if (!["perimeter", "snake", "custom"].includes(preset)) preset = "custom";
-  let points = layout.points_mm;
-  if ((preset === "perimeter" || preset === "snake") && (!Array.isArray(points) || points.length < 2)) {
-    points = preset === "snake" ? snakePresetPoints(room) : perimeterPresetPoints(room);
-  } else if (!Array.isArray(points) || points.length < 2) {
-    points = perimeterPresetPoints(room);
-    preset = "perimeter";
-  }
+  const entry = activeLayoutEntry(profile);
   return {
-    preset,
-    points_mm: points.map((point) => [Number(point[0]), Number(point[1])]),
+    preset: entry.preset,
+    points_mm: entry.points_mm.map((point) => [Number(point[0]), Number(point[1])]),
     // Strict boolean — mirror engine resolve_layout (non-bool → False).
-    flip_chain: typeof layout.flip_chain === "boolean" ? layout.flip_chain : false,
+    flip_chain: Boolean(entry.flip_chain),
   };
 }
 

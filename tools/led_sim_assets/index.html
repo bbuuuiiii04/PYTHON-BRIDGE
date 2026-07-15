@@ -42,6 +42,18 @@
   <p class="fine-print">Editing gestures are off while Layout is locked. Undo only applies on the Layout tab.</p>
 </div>
 
+<div id="name-dialog" class="help-popover name-dialog" hidden role="dialog" aria-modal="true" aria-labelledby="name-dialog-title">
+  <h2 class="panel-label" id="name-dialog-title">Layout name</h2>
+  <label class="field">Name
+    <input type="text" id="name-dialog-input" maxlength="40" autocomplete="off">
+  </label>
+  <p id="name-dialog-error" class="layout-warnings" hidden role="alert"></p>
+  <div class="button-row wrap">
+    <button type="button" id="name-dialog-cancel">Cancel</button>
+    <button type="button" id="name-dialog-ok" class="primary">OK</button>
+  </div>
+</div>
+
 <div id="error-banner" class="banner error" hidden role="alert"></div>
 <div id="warnings" class="banner warn" hidden role="status"></div>
 
@@ -132,6 +144,16 @@
       </section>
 
       <section id="layout-panel" class="panel-stack" data-panel="layout" hidden role="tabpanel" aria-labelledby="tab-layout">
+        <div class="layout-slot-row" role="group" aria-label="Layout library">
+          <label class="field layout-slot-field">Layout
+            <select id="layout-slot" aria-label="Active layout"></select>
+          </label>
+          <div class="button-row wrap layout-slot-actions">
+            <button type="button" id="layout-save-as" title="Duplicate the active layout">Save as…</button>
+            <button type="button" id="layout-rename" title="Rename the active layout">Rename</button>
+            <button type="button" id="layout-delete" title="Delete the active layout">Delete</button>
+          </div>
+        </div>
         <div class="panel-head-row">
           <span class="panel-label">Strip layout</span>
           <button id="layout-lock" type="button" class="lock-toggle" aria-pressed="false" title="Lock layout editing">🔓 Unlocked</button>
