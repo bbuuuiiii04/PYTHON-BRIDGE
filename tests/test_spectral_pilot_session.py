@@ -197,6 +197,56 @@ class OneSessionPerDayTests(unittest.TestCase):
             self.assertTrue(True)
 
 
+class OperatorOverrideTests(unittest.TestCase):
+    """spec B6 operator-decided one-per-day override (Brandon 2026-07-15)."""
+
+    def _committed_runner(self, d):
+        """A runner that already holds a same-day (D1) commit, so a new session refuses."""
+        r = runner(Path(d), Clock(), date="D1")
+        r.start_session("A")
+        r.commit("c0", "state", "genuine", "genuine", recognized=False, response_seconds=1.0)
+        return r
+
+    def test_default_still_refuses_same_day(self):
+        with tempfile.TemporaryDirectory() as d:
+            r = self._committed_runner(d)
+            with self.assertRaises(WorkloadError):
+                r.start_session("P1")            # no override -> unchanged refusal
+
+    def test_override_starts_and_writes_row(self):
+        with tempfile.TemporaryDirectory() as d:
+            r = self._committed_runner(d)
+            seg = r.start_session("P1", operator_override_one_per_day=True)
+            self.assertEqual(r.current_session, "P1")
+            ov = [json.loads(x) for x in (Path(d) / "playbacks.jsonl").read_text().splitlines()
+                  if json.loads(x).get("kind") == "override"]
+            self.assertEqual(len(ov), 1)
+            self.assertEqual(set(ov[0]), {"kind", "rule", "utc", "session_index", "segment_index"})
+            self.assertEqual(ov[0]["rule"], "one_per_day")
+            self.assertEqual(ov[0]["session_index"], "P1")
+            self.assertEqual(ov[0]["segment_index"], seg)
+            # durable: a fresh runner reloads the override row without complaint
+            self.assertEqual(sum(pb.get("kind") == "override" for pb in runner(Path(d), Clock()).playbacks), 1)
+
+    def test_override_does_not_touch_113_ceiling(self):
+        with tempfile.TemporaryDirectory() as d:
+            r = self._committed_runner(d)
+            r.start_session("P1", operator_override_one_per_day=True)
+            r.responses = [{"segment_index": 1}] * S.MAX_DECISIONS
+            with self.assertRaises(WorkloadError):
+                r.commit("c1", "state", "genuine", "genuine", recognized=False, response_seconds=1.0)
+
+    def test_override_does_not_touch_65_min_ceiling(self):
+        with tempfile.TemporaryDirectory() as d:
+            r = self._committed_runner(d)
+            seg = r.start_session("P1", operator_override_one_per_day=True)
+            t0 = datetime.fromtimestamp(0, tz=timezone.utc).isoformat()
+            t1 = datetime.fromtimestamp(65 * 60, tz=timezone.utc).isoformat()
+            r.playbacks = [{"segment_index": seg, "utc": t0}, {"segment_index": seg, "utc": t1}]
+            with self.assertRaises(WorkloadError):
+                r.commit("c1", "state", "genuine", "genuine", recognized=False, response_seconds=1.0)
+
+
 class FenceAndFreezeTests(unittest.TestCase):
     def test_write_outside_workspace_refused(self):
         with tempfile.TemporaryDirectory() as d:

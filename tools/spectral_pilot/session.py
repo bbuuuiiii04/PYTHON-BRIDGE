@@ -218,15 +218,22 @@ class SessionRunner:
             last = idx
 
     # --- session lifecycle ----------------------------------------------------
-    def start_session(self, session_index: str, *, resume=False):
+    def start_session(self, session_index: str, *, resume=False,
+                      operator_override_one_per_day=False):
         """Open a session or a resumed segment.
 
         A NEW session may not start on a local date that already holds any commit
         (spec B6, one session per calendar day). A resumed segment inherits its
         origin session and bypasses that rule.
+
+        ``operator_override_one_per_day`` (spec B6 operator-decided, Brandon
+        2026-07-15) lets the operator explicitly permit a second NEW session on a
+        date that already holds a commit. It must be passed by hand, is refused by
+        default, and writes a durable ``override`` row so the ledger carries the
+        caveat permanently. It does not touch the 65-min / 113-decision ceilings.
         """
         today = self.local_date()
-        if not resume:
+        if not resume and not operator_override_one_per_day:
             for r in self.responses:
                 if r.get("local_date") == today:
                     raise WorkloadError(
@@ -239,6 +246,13 @@ class SessionRunner:
             self._frozen_checked = True
         self.segment_index += 1
         self.current_session = session_index
+        # Only a NEW session actually overrides the one-per-day rule; on a resume the
+        # rule never applied, so there is nothing to record.
+        if operator_override_one_per_day and not resume:
+            row = {"kind": "override", "rule": "one_per_day", "utc": self.clock(),
+                   "session_index": session_index, "segment_index": self.segment_index}
+            self._append(self.playbacks_path, row)
+            self.playbacks.append(row)
         return self.segment_index
 
     # --- durable actions ------------------------------------------------------
