@@ -78,6 +78,16 @@ class LedSimServiceTests(unittest.TestCase):
             for look in catalog["looks"]["looks"].values()
         ))
 
+    def test_static_css_preserves_hidden_panel_semantics(self) -> None:
+        with _server(self.profile_path) as port:
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            conn.request("GET", "/sim.css")
+            response = conn.getresponse()
+            css = response.read().decode("utf-8")
+            conn.close()
+        self.assertEqual(response.status, 200)
+        self.assertIn("[hidden] { display: none !important; }", css)
+
     def test_render_counts_and_caps(self) -> None:
         with _server(self.profile_path) as port:
             status, result = _request(port, "POST", "/api/render", {
