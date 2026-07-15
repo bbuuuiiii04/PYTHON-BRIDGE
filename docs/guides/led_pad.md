@@ -3,7 +3,7 @@ doc_status: current
 truth_level: software-tested
 last_verified_commit: 8f46585
 last_verified_date: 2026-07-15
-validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (live-apply + variant switch + preview), Round 2 (param_specs sliders/toggles, slot swatches, JSON demoted to Advanced), Round 3 (rejected-drafts filter, draft delete), QR same-network access, the iOS/iPad touch pass, the editor unset-param-defaults fix, the AWR-193 pad/lab overhaul (accept snapshot, decoupled preview, archive flow, fn fallback, effective bounds, color pickers + regime badges, reconnect, freshness watchdog + live fingerprint + no-cache), the AWR-202 commit read-modify-merge with the gate fix that tracks look CONTENT (`touched`) separately from role-bank PLACEMENT (`moved`) so a params-only edit keeps the look's LIVE bank while an explicit pad move still applies, AWR-240 pad offline v2 stand-down so Test Palette still injects slot_colors, and AWR-241 Template Lab beat meter + metronome click (preview exact / live server-synced); SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
+validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (live-apply + variant switch + preview), Round 2 (param_specs sliders/toggles, slot swatches, JSON demoted to Advanced), Round 3 (rejected-drafts filter, draft delete), QR same-network access, the iOS/iPad touch pass, the editor unset-param-defaults fix, the AWR-193 pad/lab overhaul (accept snapshot, decoupled preview, archive flow, fn fallback, effective bounds, color pickers + regime badges, reconnect, freshness watchdog + live fingerprint + no-cache), the AWR-202 commit read-modify-merge with the gate fix that tracks look CONTENT (`touched`) separately from role-bank PLACEMENT (`moved`) so a params-only edit keeps the look's LIVE bank while an explicit pad move still applies, AWR-240 pad offline v2 stand-down so Test Palette still injects slot_colors, AWR-241 Template Lab beat meter + metronome click (preview exact / live server-synced), and AWR-242 Template Lab UX overhaul (search/filter/group draft list, target_role phrase tags, settable timing_mode, detail restructure, health strip + self-test); SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # LED Pad
@@ -190,11 +190,37 @@ pad process from `config/led_lab/effects_lab.py` and tracks draft metadata in
 
 `/api/renders` now labels every production effect with `timing_mode` (`beat`, `time`, `mixed`, or
 `static`) and `beat_synced`. LED Pad look cards show the matching badge. Template Lab entries carry
-the same timing fields in `/api/lab/list`; its draft list and detail panel show **beat sync**,
-**beat + time**, **time driven**, **static**, or **timing unknown**. The Template Lab control is now
-labeled **Beat-sync BPM**. It is enabled only for `beat` and `mixed` drafts; mixed means BPM changes
-the beat-driven layer while a wall-clock layer keeps its seconds-based rate. Time/static/unknown
-drafts disable the control and say why.
+the same timing fields in `/api/lab/list`. The detail header has a **Timing** select
+(`beat` / `mixed` / `time` / `static`) that writes `timing_mode` on Save — that is how you clear
+"timing unknown" on older drafts. Beat-sync BPM is enabled only for `beat` and `mixed`; when the
+selected draft's timing is still unset, a short hint under BPM says **Set timing (header) to enable
+BPM**. Mixed means BPM changes the beat-driven layer while a wall-clock layer keeps its
+seconds-based rate.
+
+Each draft also stores optional `target_role` (empty or one of the pad role banks: ambient, groove,
+buildup, pre_drop, drop, post_drop, breakdown, utility). The Phrase select in the detail header
+writes it on Save; list rows show a 3-letter phrase chip so you can see which moment a draft is for.
+
+### Lab UI layout (AWR-242)
+
+The `/lab` page (lab-route only — Pad markup and playwright selectors are untouched) is reorganized:
+
+- **Draft list.** Sticky search (name substring), status chips (Iterating on by default; Accepted /
+  Rejected off — Rejected also covers archived/`promoted`), and a Phrase dropdown (All / Untagged /
+  eight roles). Rows group by status with counts, sort by updated desc inside each group, and stay
+  one line: phrase chip · name (ellipsis) · status dot · relative date. Timing badges and full
+  status pills are gone from the list. Under 900px the list is a **Drafts ▾ (N)** drawer above the
+  detail panel; picking a draft closes it.
+- **Detail (top → bottom).** Header (name / kind / status once + Phrase + Timing + LIVE) → preview
+  hero (64px / 48px phone canvas + Preview/Play/Stop + AWR-241 beat meter IDs unchanged) → tuning
+  card (labeled sliders with min/max under the track; cue segmented control without the duplicate
+  value chip; Save + dirty) → Accept (solid green) / Reject (outline red) verdict bar → Brief
+  (2 rows) + Notes in a collapsed details → Advanced JSON / Traceback → footer Reload · Archive ·
+  Delete.
+- **Health strip (client-only).** Top-bar right cluster: Server (green if last
+  `/api/runtime_status` succeeded &lt;3s ago), Lab code (last `/api/lab/reload`), Playback (playing
+  name · beat or idle), plus **Self-test** (reload → preview 2 beats → checks ok / frames /
+  not-all-black / slot_colors for slot kind). No new backend endpoints.
 
 The AWR-194 wave-1 sweep rendered every draft for 16 seconds at 20 fps through `LabRenderer`:
 25/25 rendered without an exception, 25/25 changed across the sampled cue, and none were
@@ -209,16 +235,17 @@ name, but an existing entry whose name later became a production effect stays fu
 source draft's Save/Accept/Reject). Such entries are flagged `production_collision` in
 `/api/lab/list`, get an "in production" chip and an archive banner in the UI, and can be filed
 away with one confirm-gated Archive tap (`POST /api/lab/archive` → status `promoted`; the
-Rejected list toggle is now "Archived (n)" covering rejected + promoted). Drafts play as
+Rejected status chip covers rejected + promoted, folding the old Archived toggle). Drafts play as
 `lab_<name>` through the same standalone playback slot as LED Pad looks, so starting a lab draft
 preempts pad playback and starting a pad look preempts lab playback. Play and preview resolve the
 effect name-first with the entry's `fn` as fallback (AWR-193 Task 2), so a renamed draft keeps
 rendering while `effects_lab.py` still registers the original fn.
 
 The Lab page supports draft brief/notes, param controls (see below), cue length, Play/Stop, Reload
-code, Accept/Reject/Archive status, and a plain-language error banner (the raw traceback panel is
-agent-facing and renders only with `?dev=1` in the URL). Accepting a draft does not promote code by
-itself; promotion is a later agent task — see the runbook below.
+code, Accept/Reject/Archive status, health strip + self-test, and a plain-language error banner (the
+raw traceback panel is agent-facing and renders only with `?dev=1` in the URL; a failed Lab-code
+health dot also opens it). Accepting a draft does not promote code by itself; promotion is a later
+agent task — see the runbook below.
 
 ### Promotion runbook (agent-facing)
 
@@ -332,22 +359,21 @@ whether a pulse is per-beat vs per-2-beats:
   click = **synced to server clock (± poll jitter)**. Clicks stop when preview/play stops or the
   tab hides.
 
-### Rejected filter and delete (Round 3)
+### Rejected filter and delete (Round 3 → AWR-242 chips)
 
-The drafts list hides `rejected`-status entries by default; a `Rejected (n)` chip next to **New**
-toggles them back into view (`n` = the rejected count). The filter is pure UI — `GET /api/lab/list`
-always returns every entry regardless of status, so an agent driving the API directly still sees
-rejected drafts (the "don't re-pitch this" record) even while the operator's list view hides them.
-Selecting a draft that the filter later hides keeps it selected; only the list row disappears, the
-detail panel is unaffected.
+The drafts list status chips hide `accepted` / `rejected` / `promoted` by default (Iterating on).
+Turning on **Rejected** shows rejected + promoted (the old Archived toggle). The filter is pure UI —
+`GET /api/lab/list` always returns every entry regardless of status, so an agent driving the API
+directly still sees rejected drafts (the "don't re-pitch this" record) even while the operator's
+list view hides them. Selecting a draft that the filter later hides keeps it selected; only the
+list row disappears, the detail panel is unaffected.
 
 `POST /api/lab/delete {"name"}` removes a draft's `drafts.json` entry only — it never touches the
 function inside `effects_lab.py` (that cleanup stays a separate manual/agent step) and it refuses
 while that exact draft is the one currently playing (`{"ok": false, "error": "stop_playback_first"}`)
-instead of stopping playback on the operator's behalf. The Lab page's **Delete draft** button lives
-in a separated danger zone at the bottom of the detail panel (AWR-193 Task 7 — no longer in the
-Accept/Reject action row), confirms through the shared `PadModal`, shows "Stop playback first." on
-refusal, and otherwise clears the selection and refreshes the list.
+instead of stopping playback on the operator's behalf. The Lab page's **Delete** button lives in the
+footer utility row (AWR-242 — no floating danger zone), confirms through the shared `PadModal`, shows
+"Stop playback first." on refusal, and otherwise clears the selection and refreshes the list.
 
 ## Ownership And Recovery
 
@@ -427,8 +453,10 @@ archive, fn fallback, accept snapshot + dirty chip, decoupled preview, effective
 pickers + regime badges, operator-clean surface, reconnect helper, freshness watchdog +
 live-changed fingerprint + no-cache) are implemented/software-tested. AWR-241 adds a Template Lab
 beat meter + optional metronome click (preview exact from frame math; live phase-locked to
-`status.beat`; JS is manual-smoke only). AWR-193's JS/UI behavior has no automated harness — it is
-code-review + manual-smoke covered only.
-Locked Palette and renderer param unlock behavior is covered by software tests only. All LED Pad
-and Template Lab playback/UI claims are SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED. The
-iOS/iPad touch pass is implemented/software-tested only; on-device verification is pending.
+`status.beat`; JS is manual-smoke only). AWR-242 reworks the `/lab` UI (search/filter/group list,
+`target_role` phrase tags, settable `timing_mode`, preview-first detail, health strip + Self-test;
+styles scoped under `.lab-route`; Pad route untouched). AWR-193/241/242 JS/UI behavior has no
+automated harness — it is code-review + manual-smoke covered only (registry `target_role` is
+unit-tested). Locked Palette and renderer param unlock behavior is covered by software tests only.
+All LED Pad and Template Lab playback/UI claims are SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
+The iOS/iPad touch pass is implemented/software-tested only; on-device verification is pending.

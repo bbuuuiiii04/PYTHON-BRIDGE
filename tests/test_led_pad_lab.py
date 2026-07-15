@@ -114,6 +114,26 @@ class LedPadLabTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "timing_mode"):
                 registry.save({"name": "bad", "kind": "slot", "fn": "pulse", "timing_mode": "sometimes"})
 
+    def test_registry_target_role_accepts_valid_rejects_invalid_preserves_on_partial(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            registry = LabRegistry(Path(td) / "led_lab")
+
+            saved = registry.save({"name": "pulse", "kind": "slot", "fn": "pulse"})
+            self.assertEqual(saved["entry"]["target_role"], "")
+
+            for role in ("ambient", "groove", "buildup", "pre_drop", "drop", "post_drop", "breakdown", "utility"):
+                entry = registry.save({"name": "pulse", "target_role": role})["entry"]
+                self.assertEqual(entry["target_role"], role)
+                listed = next(item for item in registry.list() if item["name"] == "pulse")
+                self.assertEqual(listed["target_role"], role)
+
+            with self.assertRaisesRegex(ValueError, "target_role"):
+                registry.save({"name": "pulse", "target_role": "chorus"})
+
+            registry.save({"name": "pulse", "notes": "keep role"})
+            self.assertEqual(registry.get("pulse")["target_role"], "utility")
+            self.assertEqual(registry.get("pulse")["notes"], "keep role")
+
     def _write_colliding_entry(self, lab_dir: Path, name: str) -> None:
         # Simulates the live-bricked state: the entry was written when the name
         # was free, then the name became a production effect. save() would

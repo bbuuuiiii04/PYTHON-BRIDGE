@@ -23,7 +23,14 @@
         <label>Test Palette <select id="paletteSelect"></select></label>
         <label class="switch">Loop <input id="loopToggle" type="checkbox"><span id="loopLabel">On</span></label>
       </form>
-      <div class="transport">
+      <div class="transport lab-transport">
+        <div id="healthStrip" class="lab-health" aria-label="Health">
+          <span class="lab-health-item" id="healthServer" title="Server"><span class="lab-health-dot" data-state="unknown"></span><span class="lab-health-label">Server</span></span>
+          <span class="lab-health-item" id="healthLab" title="Lab code" role="button" tabindex="0"><span class="lab-health-dot" data-state="unknown"></span><span class="lab-health-label">Lab code</span></span>
+          <span class="lab-health-item" id="healthPlayback" title="Playback"><span class="lab-health-dot" data-state="idle"></span> <span id="healthPlaybackText">idle</span></span>
+          <button id="selfTestBtn" type="button" class="ghost lab-selftest-btn">Self-test</button>
+        </div>
+        <div id="selfTestPanel" class="lab-selftest-panel" hidden></div>
         <span id="ownershipPill" class="pill">Free</span>
         <button id="ownershipBtn" type="button" class="ghost">Take over</button>
         <button id="stopBtn" type="button" class="danger" aria-label="Emergency stop">■ STOP</button>
@@ -33,57 +40,135 @@
   <main>
     <div id="errorBanner" class="error-banner" hidden></div>
     <section class="lab-layout">
-      <aside class="lab-list-panel">
-        <div class="panel-head"><h2 class="panel-label">Drafts</h2><button id="rejectedToggle" type="button" class="ghost"></button><button id="newDraftBtn" type="button" class="primary">New</button></div>
-        <div id="draftList" class="lab-list"></div>
-      </aside>
+      <button id="draftsDrawerBtn" type="button" class="lab-drawer-toggle" aria-expanded="false">Drafts ▾ (<span id="draftsDrawerCount">0</span>)</button>
       <section class="lab-detail-panel">
-        <div class="panel-head">
-          <div><h2 id="draftTitle">Select a draft</h2><div id="draftFn" class="mono dim"></div></div>
-          <span id="labLive" class="live-chip" hidden>LIVE</span>
+        <!-- Z1 Header -->
+        <div class="panel-head lab-z1">
+          <div class="lab-z1-title">
+            <h2 id="draftTitle">Select a draft</h2>
+            <span id="kindText" class="lab-kind-chip mono"></span>
+            <span id="statusText" class="status-pill">iterating</span>
+            <span id="labLive" class="live-chip" hidden>LIVE</span>
+          </div>
+          <div class="lab-z1-selects">
+            <label>Phrase
+              <select id="targetRoleSelect" aria-label="Target phrase role">
+                <option value="">— unset —</option>
+                <option value="ambient">ambient</option>
+                <option value="groove">groove</option>
+                <option value="buildup">buildup</option>
+                <option value="pre_drop">pre_drop</option>
+                <option value="drop">drop</option>
+                <option value="post_drop">post_drop</option>
+                <option value="breakdown">breakdown</option>
+                <option value="utility">utility</option>
+              </select>
+            </label>
+            <label>Timing
+              <select id="timingModeSelect" aria-label="Timing mode">
+                <option value="unknown">— unset —</option>
+                <option value="beat">beat</option>
+                <option value="mixed">mixed</option>
+                <option value="time">time</option>
+                <option value="static">static</option>
+              </select>
+            </label>
+          </div>
+          <div id="draftFn" class="mono dim" hidden></div>
+          <span id="timingText" class="badge" hidden></span>
         </div>
         <div id="collisionBanner" class="collision-banner" hidden>
           <span>This name is now a production effect — archive the draft.</span>
           <button id="archiveBtn" type="button" class="ghost">Archive draft</button>
         </div>
-        <label>Brief <textarea id="briefInput" rows="3"></textarea></label>
-        <label>Notes <textarea id="notesInput" rows="4"></textarea></label>
-        <div class="lab-meta"><span id="kindText" class="mono"></span><span id="timingText" class="badge"></span><span id="statusText" class="status-pill">iterating</span></div>
-        <div id="paramControls" class="param-controls"></div>
-        <div id="slotSwatches" class="slot-swatches" aria-label="Test palette slot colors"></div>
+
+        <!-- Z2 Preview hero -->
+        <div class="lab-preview-hero">
+          <canvas id="previewStrip" height="64" aria-label="Draft preview strip"></canvas>
+          <div class="lab-transport-row">
+            <button id="previewBtn" type="button" class="ghost">◉ Preview</button>
+            <button id="playDraftBtn" type="button" class="primary">▶ Play</button>
+            <button id="stopDraftBtn" type="button" class="ghost">■ Stop</button>
+            <div id="beatMeter" class="beat-meter" hidden>
+              <button id="clickToggle" type="button" class="ghost" aria-pressed="false" title="Metronome click (off by default)">🔊 off</button>
+              <span id="beatDot" class="beat-dot" aria-hidden="true"></span>
+              <span id="beatCounter" class="mono">—</span>
+              <span id="beatHonesty" class="dim"></span>
+            </div>
+          </div>
+          <div id="slotSwatches" class="slot-swatches" aria-label="Test palette slot colors"></div>
+        </div>
+
+        <!-- Z3 Tuning card -->
+        <div class="lab-tuning-card">
+          <div id="paramControls" class="param-controls"></div>
+          <div class="lab-tuning-footer">
+            <div class="cue-wrap"><span class="panel-label">Cue length (beats)</span><div class="cue-group" role="group" aria-label="Cue length (beats)"></div></div>
+            <div class="lab-tuning-actions">
+              <button id="saveDraftBtn" type="button" class="primary">Save</button>
+              <span id="labDirtyChip" class="dim" aria-live="polite"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Z4 Verdict bar -->
+        <div class="lab-verdict-bar">
+          <button id="acceptBtn" type="button" class="lab-accept">Accept</button>
+          <button id="rejectBtn" type="button" class="lab-reject">Reject</button>
+        </div>
+
+        <!-- Z5 Text -->
+        <label class="lab-brief-label">Brief <textarea id="briefInput" rows="2"></textarea></label>
+        <details class="lab-notes-details">
+          <summary id="notesSummary">Notes</summary>
+          <textarea id="notesInput" rows="4"></textarea>
+        </details>
         <details class="advanced-panel">
           <summary>Advanced (raw JSON)</summary>
           <label>Params JSON <textarea id="paramsInput" class="mono" rows="8"></textarea></label>
         </details>
-        <div class="editor-transport lab-actions">
-          <div class="cue-wrap"><span class="panel-label">Cue length (beats)</span><div class="cue-group" role="group" aria-label="Cue length (beats)"></div></div>
-          <button id="saveDraftBtn" type="button" class="primary">Save</button>
-          <span id="labDirtyChip" class="dim" aria-live="polite"></span>
-          <button id="playDraftBtn" type="button" class="primary">▶ Play</button>
-          <button id="stopDraftBtn" type="button" class="ghost">■ Stop</button>
-          <button id="reloadBtn" type="button" class="ghost">⟳ Reload code</button>
-          <button id="acceptBtn" type="button" class="ghost">Accept</button>
-          <button id="rejectBtn" type="button" class="ghost">Reject</button>
-        </div>
-        <div class="preview-row">
-          <button id="previewBtn" type="button" class="ghost">◉ Preview</button>
-          <canvas id="previewStrip" height="24" aria-label="Draft preview strip"></canvas>
-        </div>
-        <div id="beatMeter" class="beat-meter" hidden>
-          <button id="clickToggle" type="button" class="ghost" aria-pressed="false" title="Metronome click (off by default)">🔊 off</button>
-          <span id="beatDot" class="beat-dot" aria-hidden="true"></span>
-          <span id="beatCounter" class="mono">—</span>
-          <span id="beatHonesty" class="dim"></span>
-        </div>
         <details id="tracePanel" class="trace-panel" hidden>
           <summary>Traceback</summary>
           <pre id="traceText"></pre>
         </details>
-        <div class="danger-zone">
-          <span class="panel-label">Danger zone</span>
-          <button id="deleteBtn" type="button" class="danger ghost">Delete draft</button>
+
+        <!-- Z6 Footer utility -->
+        <div class="lab-footer-utils">
+          <button id="reloadBtn" type="button" class="ghost">⟳ Reload code</button>
+          <button id="archiveUtilBtn" type="button" class="ghost">Archive</button>
+          <button id="deleteBtn" type="button" class="danger ghost">Delete</button>
         </div>
       </section>
+      <aside class="lab-list-panel" id="labListPanel">
+        <div class="lab-list-sticky">
+          <div class="panel-head">
+            <h2 class="panel-label">Drafts</h2>
+            <button id="newDraftBtn" type="button" class="primary">New</button>
+          </div>
+          <input id="draftSearch" type="search" placeholder="Search drafts…" aria-label="Search drafts">
+          <div class="lab-filter-row" role="group" aria-label="Status filters">
+            <button type="button" class="lab-filter-chip on" data-status-filter="iterating">Iterating</button>
+            <button type="button" class="lab-filter-chip" data-status-filter="accepted">Accepted</button>
+            <button type="button" class="lab-filter-chip" data-status-filter="rejected">Rejected</button>
+          </div>
+          <label class="lab-phrase-filter">Phrase
+            <select id="phraseFilter" aria-label="Phrase filter">
+              <option value="all">All</option>
+              <option value="untagged">Untagged</option>
+              <option value="ambient">ambient</option>
+              <option value="groove">groove</option>
+              <option value="buildup">buildup</option>
+              <option value="pre_drop">pre_drop</option>
+              <option value="drop">drop</option>
+              <option value="post_drop">post_drop</option>
+              <option value="breakdown">breakdown</option>
+              <option value="utility">utility</option>
+            </select>
+          </label>
+        </div>
+        <div id="draftList" class="lab-list"></div>
+        <button id="rejectedToggle" type="button" class="ghost" hidden aria-hidden="true"></button>
+      </aside>
     </section>
   </main>
   <script src="/static/pad-core.js"></script>

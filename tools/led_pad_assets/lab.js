@@ -2,7 +2,23 @@
   const api = window.LedPadApi;
   const $ = (id) => document.getElementById(id);
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
-  const state = {entries: [], current: null, playingLook: "", showRejected: false};
+  const ROLE_ABBREV = {ambient:"AMB", groove:"GRV", buildup:"BLD", pre_drop:"PRE", drop:"DRP", post_drop:"PST", breakdown:"BRK", utility:"UTL"};
+  const state = {
+    entries: [],
+    current: null,
+    playingLook: "",
+    showRejected: false, // kept for archived semantics; driven by Rejected chip
+    filters: {search: "", iterating: true, accepted: false, rejected: false, phrase: "all"},
+    drawerOpen: false,
+    health: {
+      serverOkAt: 0,
+      serverFailAt: 0,
+      labOk: null, // null unknown, true/false
+      labTrace: "",
+      playingBeat: null,
+      playingName: "",
+    },
+  };
   // Raw tracebacks are agent-facing: render the panel only with ?dev=1.
   const DEV = new URLSearchParams(location.search).get("dev") === "1";
 
@@ -15,7 +31,28 @@
   function labScene(name) { return `lab_${name}`; }
   function cue() { return Number(($("cueCustom") || {}).value || (state.current || {}).cue_beats || 16); }
   function timingLabel(mode) { return ({beat:"♫ beat sync", mixed:"♫ beat + time", time:"◷ time driven", static:"static", unknown:"timing unknown"})[mode] || "timing unknown"; }
-  function timingBadge(entry) { return `<span class="badge">${timingLabel(entry.timing_mode)}</span>`; }
+  function roleOf(entry) { return String((entry && entry.target_role) || ""); }
+  function phraseChip(role) {
+    if (!role) return `<span class="lab-phrase-chip untagged" title="untagged">—</span>`;
+    const abbr = ROLE_ABBREV[role] || "—";
+    return `<span class="lab-phrase-chip role-${esc(role)}" title="${esc(role)}">${abbr}</span>`;
+  }
+  function relativeDate(iso) {
+    if (!iso) return "—";
+    const t = Date.parse(iso);
+    if (!Number.isFinite(t)) return "—";
+    const sec = Math.max(0, Math.round((Date.now() - t) / 1000));
+    if (sec < 60) return `${sec}s`;
+    const min = Math.round(sec / 60);
+    if (min < 60) return `${min}m`;
+    const hr = Math.round(min / 60);
+    if (hr < 48) return `${hr}h`;
+    const days = Math.round(hr / 24);
+    return `${days}d`;
+  }
+  function statusDot(status) {
+    return `<span class="lab-status-dot ${esc(status)}" title="${esc(status)}"></span>`;
+  }
 
   // Pure beat → bar/beat-in-bar (frame 0 = bar 1 beat 1). Shared by preview + live.
   function beatParts(beat) {
@@ -119,14 +156,46 @@
     beatUI.raf = requestAnimationFrame(beatLoop);
   }
 
+  function renderHealth() {
+    const now = performance.now();
+    const ageMs = state.health.serverOkAt ? now - state.health.serverOkAt : Infinity;
+    const serverOk = Number.isFinite(ageMs) && ageMs < 3000;
+    const serverEl = $("healthServer");
+    const serverDot = serverEl.querySelector(".lab-health-dot");
+    serverDot.dataset.state = serverOk ? "ok" : "bad";
+    const ago = Number.isFinite(ageMs) && ageMs < 1e12 ? Math.max(0, Math.round(ageMs / 1000)) : "?";
+    let label = serverEl.querySelector(".lab-health-label");
+    if (!label) {
+      label = document.createElement("span");
+      label.className = "lab-health-label";
+      serverEl.appendChild(label);
+    }
+    label.textContent = serverOk ? "Server" : `Server (${ago}s ago)`;
+
+    const labEl = $("healthLab");
+    const labDot = labEl.querySelector(".lab-health-dot");
+    labDot.dataset.state = state.health.labOk === true ? "ok" : state.health.labOk === false ? "bad" : "unknown";
+
+    const pbEl = $("healthPlayback");
+    const pbDot = pbEl.querySelector(".lab-health-dot");
+    const playing = Boolean(state.health.playingName);
+    pbDot.dataset.state = playing ? "ok" : "idle";
+    const beat = state.health.playingBeat;
+    $("healthPlaybackText").textContent = playing
+      ? `playing ${state.health.playingName.replace(/^lab_/, "")}${typeof beat === "number" ? ` · beat ${Math.floor(beat)}` : ""}`
+      : "idle";
+  }
+
   async function refresh() {
     clearError();
     const [cfg, palettes, lab] = await Promise.all([api.config(), api.palettes(), api.labList()]);
     state.entries = lab.entries || [];
     renderSession(cfg.config._pad_meta.ui, palettes.palettes || []);
     renderList();
-    if (!state.current && state.entries[0]) selectDraft(state.entries[0].name);
-    else if (state.current) {
+    if (!state.current) {
+      const firstVisible = state.entries.find(matchesFilters) || state.entries[0];
+      if (firstVisible) selectDraft(firstVisible.name);
+    } else {
       const fresh = state.entries.find(e => e.name === state.current.name);
       if (fresh) selectDraft(fresh.name);
     }
@@ -141,17 +210,77 @@
     $("loopLabel").textContent = $("loopToggle").checked ? "On" : "Off";
   }
 
+  function matchesFilters(e) {
+    const q = state.filters.search.trim().toLowerCase();
+    if (q && !String(e.name || "").toLowerCase().includes(q)) return false;
+    const role = roleOf(e);
+    if (state.filters.phrase === "untagged" && role) return false;
+    if (state.filters.phrase !== "all" && state.filters.phrase !== "untagged" && role !== state.filters.phrase) return false;
+    // Status chips: rejected chip also covers promoted (old Archived semantics)
+    if (e.status === "iterating") return state.filters.iterating;
+    if (e.status === "accepted") return state.filters.accepted;
+    if (e.status === "rejected" || e.status === "promoted") return state.filters.rejected;
+    return false;
+  }
+
   function renderList() {
+    // Keep rejectedToggle text in sync for any leftover callers / a11y.
     const archived = (e) => e.status === "rejected" || e.status === "promoted";
     $("rejectedToggle").textContent = `Archived (${state.entries.filter(archived).length})`;
-    const visible = state.entries.filter(e => state.showRejected || !archived(e));
-    $("draftList").innerHTML = visible.length ? visible.map(e => `
-      <button type="button" class="lab-row ${state.current && state.current.name === e.name ? "active" : ""}" data-name="${esc(e.name)}">
-        <span>${esc(e.name)}${e.production_collision && e.status !== "promoted" ? ` <span class="prod-chip">in production</span>` : ""} ${timingBadge(e)}</span>
-        <span class="status-pill ${esc(e.status)}">${esc(e.status)}</span>
-        <span class="dim">${esc((e.updated || "").slice(0, 10))}</span>
-      </button>`).join("") : `<div class="empty"><span class="panel-label">No drafts</span><span>Create one with New.</span></div>`;
-    $("draftList").querySelectorAll("button").forEach(btn => btn.onclick = () => selectDraft(btn.dataset.name));
+    state.showRejected = state.filters.rejected;
+
+    const visible = state.entries.filter(matchesFilters);
+    $("draftsDrawerCount").textContent = String(visible.length);
+
+    const groups = [
+      {key: "iterating", label: "Iterating", items: []},
+      {key: "accepted", label: "Accepted", items: []},
+      {key: "rejected", label: "Rejected", items: []},
+    ];
+    for (const e of visible) {
+      if (e.status === "iterating") groups[0].items.push(e);
+      else if (e.status === "accepted") groups[1].items.push(e);
+      else groups[2].items.push(e); // rejected + promoted
+    }
+    for (const g of groups) {
+      g.items.sort((a, b) => String(b.updated || "").localeCompare(String(a.updated || "")));
+    }
+
+    const parts = [];
+    for (const g of groups) {
+      if (!g.items.length) continue;
+      parts.push(`<div class="lab-group-head">${esc(g.label)} <span class="dim">${g.items.length}</span></div>`);
+      for (const e of g.items) {
+        const active = state.current && state.current.name === e.name ? " active" : "";
+        const prod = e.production_collision && e.status !== "promoted" ? ` <span class="prod-chip">prod</span>` : "";
+        parts.push(`<button type="button" class="lab-row${active}" data-name="${esc(e.name)}">
+          ${phraseChip(roleOf(e))}
+          <span class="lab-row-name">${esc(e.name)}${prod}</span>
+          ${statusDot(e.status)}
+          <span class="lab-row-date dim">${esc(relativeDate(e.updated))}</span>
+        </button>`);
+      }
+    }
+    $("draftList").innerHTML = parts.length
+      ? parts.join("")
+      : `<div class="empty"><span class="panel-label">No drafts</span><span>Adjust filters or create one with New.</span></div>`;
+    $("draftList").querySelectorAll("button.lab-row").forEach(btn => {
+      btn.onclick = () => {
+        selectDraft(btn.dataset.name);
+        closeDrawer();
+      };
+    });
+  }
+
+  function openDrawer() {
+    state.drawerOpen = true;
+    document.body.classList.add("lab-drawer-open");
+    $("draftsDrawerBtn").setAttribute("aria-expanded", "true");
+  }
+  function closeDrawer() {
+    state.drawerOpen = false;
+    document.body.classList.remove("lab-drawer-open");
+    $("draftsDrawerBtn").setAttribute("aria-expanded", "false");
   }
 
   function selectDraft(name) {
@@ -162,26 +291,52 @@
     renderDetail();
   }
 
+  function notesPreview(text) {
+    const line = String(text || "").split(/\r?\n/).find(l => l.trim()) || "";
+    return line ? `Notes — ${line.slice(0, 60)}${line.length > 60 ? "…" : ""}` : "Notes";
+  }
+
   function renderDetail() {
     const e = state.current;
     const disabled = !e;
-    for (const id of ["briefInput", "notesInput", "paramsInput", "saveDraftBtn", "playDraftBtn", "acceptBtn", "rejectBtn", "previewBtn", "deleteBtn"]) $(id).disabled = disabled;
-    if (!e) { $("paramControls").innerHTML = ""; $("collisionBanner").hidden = true; return; }
+    for (const id of ["briefInput", "notesInput", "paramsInput", "saveDraftBtn", "playDraftBtn", "acceptBtn", "rejectBtn", "previewBtn", "deleteBtn", "targetRoleSelect", "timingModeSelect", "archiveUtilBtn"]) {
+      if ($(id)) $(id).disabled = disabled;
+    }
+    if (!e) {
+      $("paramControls").innerHTML = "";
+      $("collisionBanner").hidden = true;
+      $("draftTitle").textContent = "Select a draft";
+      $("kindText").textContent = "";
+      $("statusText").textContent = "";
+      $("notesSummary").textContent = "Notes";
+      return;
+    }
     $("collisionBanner").hidden = !(e.production_collision && e.status !== "promoted");
     $("draftTitle").textContent = e.name;
     $("draftFn").textContent = `${e.kind} · ${e.fn}`;
     $("briefInput").value = e.brief || "";
     $("notesInput").value = e.notes || "";
-    $("kindText").textContent = `${e.kind} · ${e.fn}`;
+    $("notesSummary").textContent = notesPreview(e.notes);
+    $("kindText").textContent = e.kind || "";
     $("timingText").textContent = timingLabel(e.timing_mode);
     $("statusText").textContent = e.status;
     $("statusText").className = `status-pill ${e.status}`;
+    $("targetRoleSelect").value = roleOf(e);
+    $("timingModeSelect").value = e.timing_mode || "unknown";
     $("paramsInput").value = JSON.stringify(e.params || {}, null, 2);
     renderParamControls();
     renderCue();
     renderLive();
     renderBpmScope();
     setDirty();
+    sizePreviewCanvas();
+  }
+
+  function sizePreviewCanvas() {
+    const canvas = $("previewStrip");
+    if (!canvas) return;
+    const phone = window.matchMedia("(max-width: 900px)").matches;
+    canvas.height = phone ? 48 : 64;
   }
 
   function renderBpmScope() {
@@ -191,7 +346,9 @@
     document.querySelectorAll("[data-step]").forEach(btn => { btn.disabled = !enabled; });
     $("bpmScope").textContent = enabled
       ? (mode === "mixed" ? "Changes the beat-synced layer only" : "Changes this draft")
-      : (mode === "time" ? "This draft follows seconds; BPM has no effect" : mode === "static" ? "This draft does not animate" : "Timing metadata missing; BPM disabled");
+      : (mode === "time" ? "This draft follows seconds; BPM has no effect"
+        : mode === "static" ? "This draft does not animate"
+        : "Set timing (header) to enable BPM");
   }
 
   // Dirty chip (pad-ui.js setDirty pattern): editor params vs saved entry params.
@@ -199,7 +356,14 @@
     if (!state.current) { $("labDirtyChip").textContent = ""; return; }
     let params;
     try { params = JSON.parse($("paramsInput").value || "{}"); } catch { params = null; }
-    const dirty = params === null || JSON.stringify(params) !== JSON.stringify(state.current.params || {});
+    const roleDirty = $("targetRoleSelect").value !== roleOf(state.current);
+    const timingDirty = $("timingModeSelect").value !== (state.current.timing_mode || "unknown");
+    const cueDirty = cue() !== Number(state.current.cue_beats || 16);
+    const briefDirty = $("briefInput").value !== (state.current.brief || "");
+    const notesDirty = $("notesInput").value !== (state.current.notes || "");
+    const dirty = params === null
+      || JSON.stringify(params) !== JSON.stringify(state.current.params || {})
+      || roleDirty || timingDirty || cueDirty || briefDirty || notesDirty;
     $("labDirtyChip").textContent = dirty ? "Unsaved tweaks" : "Saved";
     $("labDirtyChip").className = dirty ? "warn-text" : "dim";
   }
@@ -207,13 +371,36 @@
   function renderCue() {
     const values = [4, 8, 16, 32];
     const current = Number((state.current || {}).cue_beats || 16);
-    document.querySelector(".cue-group").innerHTML = values.map(v => `<button type="button" class="${current === v ? "active" : ""}" data-cue="${v}">${v}</button>`).join("") + `<input id="cueCustom" type="number" min="1" step="1" value="${esc(current)}" aria-label="Custom cue length">`;
-    document.querySelectorAll("[data-cue]").forEach(btn => btn.onclick = () => { $("cueCustom").value = btn.dataset.cue; });
+    const isPreset = values.includes(current);
+    // Fix P4 duplicate chip: hide the number input when a preset is selected.
+    document.querySelector(".cue-group").innerHTML =
+      values.map(v => `<button type="button" class="${current === v ? "active" : ""}" data-cue="${v}">${v}</button>`).join("") +
+      `<input id="cueCustom" type="number" min="1" step="1" value="${esc(current)}" aria-label="Custom cue length"${isPreset ? " hidden" : ""}>`;
+    document.querySelectorAll("[data-cue]").forEach(btn => btn.onclick = () => {
+      $("cueCustom").value = btn.dataset.cue;
+      $("cueCustom").hidden = true;
+      document.querySelectorAll("[data-cue]").forEach(b => b.classList.toggle("active", b.dataset.cue === btn.dataset.cue));
+      setDirty();
+    });
+    $("cueCustom").onchange = () => {
+      const v = Number($("cueCustom").value);
+      $("cueCustom").hidden = values.includes(v);
+      document.querySelectorAll("[data-cue]").forEach(b => b.classList.toggle("active", Number(b.dataset.cue) === v));
+      setDirty();
+    };
   }
 
   function currentPayload() {
     const params = JSON.parse($("paramsInput").value || "{}");
-    return {...state.current, brief:$("briefInput").value, notes:$("notesInput").value, params, cue_beats:cue()};
+    return {
+      ...state.current,
+      brief: $("briefInput").value,
+      notes: $("notesInput").value,
+      params,
+      cue_beats: cue(),
+      target_role: $("targetRoleSelect").value,
+      timing_mode: $("timingModeSelect").value,
+    };
   }
 
   async function save() {
@@ -255,40 +442,54 @@
   async function reloadCode() {
     const res = await api.labReload();
     $("traceText").textContent = res.traceback || res.error || `Loaded: ${(res.effects || []).join(", ")}`;
+    state.health.labOk = Boolean(res.ok);
+    state.health.labTrace = res.traceback || res.error || "";
+    renderHealth();
     if (!res.ok) {
       showError(`Your effect code failed to load: ${String(res.error || "").split("\n")[0]}`);
       if (DEV) $("tracePanel").open = true;
     } else {
       $("tracePanel").open = false;
     }
+    return res;
   }
 
   async function updateRuntime() {
-    const rt = await api.runtime();
-    const ownership = (rt.ownership || {}).state || "free";
-    const pb = rt.playback || {};
-    state.playingLook = pb.playing ? (pb.playing_look || "") : "";
-    $("ownershipPill").textContent = ownership === "bridge_owned" ? "Bridge owns LEDs" : ownership === "pad_owned" ? "Pad owns LEDs" : "Free";
-    $("ownershipPill").className = `pill ${ownership === "bridge_owned" ? "bridge" : ownership === "pad_owned" ? "pad" : ""}`;
-    $("ownershipBtn").hidden = ownership === "free";
-    $("ownershipBtn").textContent = ownership === "pad_owned" ? "Release" : "Take over";
-    // Live beat: phase-lock to server status.beat; preview owns the meter while its raf runs.
-    if (beatUI.mode !== "preview") {
-      if (pb.playing && typeof pb.beat === "number") {
-        const bpm = Number(pb.bpm) || Number($("bpmInput").value) || 128;
-        if (beatUI.mode === "live") {
-          // Re-anchor only — keep the raf loop and last-click index.
-          beatUI.polledBeat = pb.beat;
-          beatUI.pollTime = performance.now();
-          beatUI.bpm = bpm;
-        } else {
-          setBeatMode("live", {polledBeat: pb.beat, pollTime: performance.now(), bpm});
+    try {
+      const rt = await api.runtime();
+      state.health.serverOkAt = performance.now();
+      const ownership = (rt.ownership || {}).state || "free";
+      const pb = rt.playback || {};
+      state.playingLook = pb.playing ? (pb.playing_look || "") : "";
+      state.health.playingName = state.playingLook;
+      state.health.playingBeat = typeof pb.beat === "number" ? pb.beat : null;
+      $("ownershipPill").textContent = ownership === "bridge_owned" ? "Bridge owns LEDs" : ownership === "pad_owned" ? "Pad owns LEDs" : "Free";
+      $("ownershipPill").className = `pill ${ownership === "bridge_owned" ? "bridge" : ownership === "pad_owned" ? "pad" : ""}`;
+      $("ownershipBtn").hidden = ownership === "free";
+      $("ownershipBtn").textContent = ownership === "pad_owned" ? "Release" : "Take over";
+      // Live beat: phase-lock to server status.beat; preview owns the meter while its raf runs.
+      if (beatUI.mode !== "preview") {
+        if (pb.playing && typeof pb.beat === "number") {
+          const bpm = Number(pb.bpm) || Number($("bpmInput").value) || 128;
+          if (beatUI.mode === "live") {
+            // Re-anchor only — keep the raf loop and last-click index.
+            beatUI.polledBeat = pb.beat;
+            beatUI.pollTime = performance.now();
+            beatUI.bpm = bpm;
+          } else {
+            setBeatMode("live", {polledBeat: pb.beat, pollTime: performance.now(), bpm});
+          }
+        } else if (beatUI.mode === "live") {
+          setBeatMode("off");
         }
-      } else if (beatUI.mode === "live") {
-        setBeatMode("off");
       }
+      renderLive();
+      renderHealth();
+    } catch (err) {
+      state.health.serverFailAt = performance.now();
+      renderHealth();
+      throw err;
     }
-    renderLive();
   }
 
   function renderLive() {
@@ -360,7 +561,7 @@
       }
       const raw = params[key] === undefined ? spec.min : Number(params[key]);
       const colorish = Boolean(m); // incomplete triplet channel stays a slider
-      rows.push(`<label class="param-row param-slider${slotKind && colorish ? " palette-fed" : ""}"><span>${esc(spec.label)}${slotKind && colorish ? badge : ""}</span><input type="range" data-param="${esc(key)}" data-kind="slider" min="${esc(spec.min)}" max="${esc(spec.max)}" step="${esc(spec.step)}" value="${esc(raw)}"><output>${esc(raw)}</output></label>`);
+      rows.push(`<div class="param-row param-slider${slotKind && colorish ? " palette-fed" : ""}"><span class="param-label">${esc(spec.label)}${slotKind && colorish ? badge : ""}</span><div class="param-slider-col"><input type="range" data-param="${esc(key)}" data-kind="slider" min="${esc(spec.min)}" max="${esc(spec.max)}" step="${esc(spec.step)}" value="${esc(raw)}"><div class="param-range-ends"><span>${esc(spec.min)}</span><span>${esc(spec.max)}</span></div></div><output>${esc(raw)}</output></div>`);
     }
     container.innerHTML = rows.join("");
     container.querySelectorAll("[data-param]").forEach(input => { input.oninput = () => applyParamControl(input); });
@@ -423,11 +624,15 @@
     const res = await api.labPreview({name: state.current.name, params});
     if (!res.ok) {
       $("traceText").textContent = res.traceback || res.error || "preview failed";
+      state.health.labOk = false;
+      state.health.labTrace = res.traceback || res.error || "";
+      renderHealth();
       if (DEV) $("tracePanel").open = true;
       throw new Error(`Your effect code failed to load: ${String(res.error || "preview failed").split("\n")[0]}`);
     }
     renderSwatches(res.slot_colors);
     const canvas = $("previewStrip");
+    sizePreviewCanvas();
     canvas.width = canvas.clientWidth || 600;
     const ctx = canvas.getContext("2d");
     preview.frames = res.frames;
@@ -466,12 +671,64 @@
     if (document.hidden) stopClicks();
   });
 
+  function framesNotAllBlack(frames) {
+    if (!Array.isArray(frames) || !frames.length) return false;
+    for (const frame of frames) {
+      for (const rgb of frame) {
+        const [r, g, b] = Array.isArray(rgb) ? rgb : [0, 0, 0];
+        if ((r || 0) + (g || 0) + (b || 0) > 0) return true;
+      }
+    }
+    return false;
+  }
+
+  async function runSelfTest() {
+    const panel = $("selfTestPanel");
+    panel.hidden = false;
+    const lines = [];
+    const add = (ok, text) => { lines.push(`${ok ? "✓" : "✗"} ${text}`); panel.innerHTML = lines.map(l => `<div>${esc(l)}</div>`).join(""); };
+
+    let reloadOk = false;
+    try {
+      const res = await reloadCode();
+      reloadOk = Boolean(res.ok);
+      add(reloadOk, reloadOk ? "Reload code ok" : `Reload failed: ${String(res.error || "").split("\n")[0] || "error"}`);
+    } catch (err) {
+      add(false, `Reload failed: ${(err && err.message) || err}`);
+    }
+
+    if (!state.current) {
+      add(false, "Preview skipped — no draft selected");
+      return;
+    }
+    try {
+      const params = JSON.parse($("paramsInput").value || "{}");
+      const res = await api.labPreview({name: state.current.name, params, beats: 2});
+      const ok = Boolean(res.ok);
+      add(ok, ok ? "Preview response ok" : `Preview failed: ${String(res.error || "").split("\n")[0] || "error"}`);
+      if (!ok) return;
+      const hasFrames = Array.isArray(res.frames) && res.frames.length > 0;
+      add(hasFrames, hasFrames ? `Frames non-empty (${res.frames.length})` : "Frames empty");
+      const lit = framesNotAllBlack(res.frames);
+      add(lit, lit ? "Frames not all-black" : "Frames are all-black");
+      if (state.current.kind === "slot") {
+        const slots = Array.isArray(res.slot_colors) && res.slot_colors.length > 0;
+        add(slots, slots ? "slot_colors non-empty" : "slot_colors empty");
+      } else {
+        add(true, "slot_colors N/A (frame kind)");
+      }
+    } catch (err) {
+      add(false, `Preview failed: ${(err && err.message) || err}`);
+    }
+  }
+
   $("newDraftBtn").onclick = () => {
     PadModal.prompt("New draft", "", {label:"Draft name", confirmText:"Create"}, async (name) => {
       if (!name) return;
-      await api.labSave({name, kind:"slot", fn:name, params:{}, cue_beats:16, brief:"", notes:"", status:"iterating"});
+      await api.labSave({name, kind:"slot", fn:name, params:{}, cue_beats:16, brief:"", notes:"", status:"iterating", target_role:"", timing_mode:"unknown"});
       await refresh();
       selectDraft(name);
+      closeDrawer();
     });
   };
   $("saveDraftBtn").onclick = () => save().catch(showError);
@@ -480,11 +737,20 @@
   $("reloadBtn").onclick = () => reloadCode().catch(showError);
   $("acceptBtn").onclick = () => state.current && api.labAccept(state.current.name).then(refresh).catch(showError);
   $("rejectBtn").onclick = () => state.current && api.labReject(state.current.name).then(refresh).catch(showError);
-  $("rejectedToggle").onclick = () => { state.showRejected = !state.showRejected; renderList(); };
-  $("archiveBtn").onclick = () => state.current && PadModal.confirm(`Archive draft ${state.current.name}?`, "Marks it promoted and files it under Archived. The drafts.json entry stays for the record.", "Archive", async () => {
-    await api.labArchive({name: state.current.name});
-    await refresh();
-  });
+  $("rejectedToggle").onclick = () => {
+    state.filters.rejected = !state.filters.rejected;
+    document.querySelector('[data-status-filter="rejected"]').classList.toggle("on", state.filters.rejected);
+    renderList();
+  };
+  function archiveCurrent() {
+    if (!state.current) return;
+    PadModal.confirm(`Archive draft ${state.current.name}?`, "Marks it promoted and files it under Rejected (archived). The drafts.json entry stays for the record.", "Archive", async () => {
+      await api.labArchive({name: state.current.name});
+      await refresh();
+    });
+  }
+  $("archiveBtn").onclick = archiveCurrent;
+  $("archiveUtilBtn").onclick = archiveCurrent;
   $("deleteBtn").onclick = () => state.current && PadModal.confirm(`Delete draft ${state.current.name}?`, "Removes the drafts.json entry. Its function in effects_lab.py stays — clean that up separately.", "Delete", async () => {
     try {
       await api.labDelete({name: state.current.name});
@@ -497,13 +763,43 @@
   });
   $("paramsInput").onblur = () => { try { JSON.parse($("paramsInput").value || "{}"); clearError(); } catch (err) { showError(err); } };
   $("paramsInput").oninput = () => { setDirty(); queueAutoApply(); };
+  $("briefInput").oninput = () => setDirty();
+  $("notesInput").oninput = () => { $("notesSummary").textContent = notesPreview($("notesInput").value); setDirty(); };
+  $("targetRoleSelect").onchange = () => setDirty();
+  $("timingModeSelect").onchange = () => { renderBpmScope(); setDirty(); };
+  $("draftSearch").oninput = (ev) => { state.filters.search = ev.target.value; renderList(); };
+  $("phraseFilter").onchange = (ev) => { state.filters.phrase = ev.target.value; renderList(); };
+  document.querySelectorAll("[data-status-filter]").forEach(btn => {
+    btn.onclick = () => {
+      const key = btn.dataset.statusFilter;
+      state.filters[key] = !state.filters[key];
+      btn.classList.toggle("on", state.filters[key]);
+      renderList();
+    };
+  });
+  $("draftsDrawerBtn").onclick = () => { if (state.drawerOpen) closeDrawer(); else openDrawer(); };
+  $("selfTestBtn").onclick = () => runSelfTest().catch(showError);
+  $("healthLab").onclick = () => {
+    if (state.health.labOk === false) {
+      $("tracePanel").hidden = false;
+      $("tracePanel").open = true;
+      if (state.health.labTrace) $("traceText").textContent = state.health.labTrace;
+    }
+  };
   $("bpmInput").onchange = ev => api.session({bpm:Number(ev.target.value)}).catch(showError);
   document.querySelectorAll("[data-step]").forEach(btn => btn.onclick = () => { $("bpmInput").value = Number($("bpmInput").value || 128) + Number(btn.dataset.step); $("bpmInput").dispatchEvent(new Event("change")); });
   $("paletteSelect").onchange = ev => api.session({test_palette:ev.target.value}).catch(showError);
   $("loopToggle").onchange = ev => { $("loopLabel").textContent = ev.target.checked ? "On" : "Off"; api.session({loop:ev.target.checked}).catch(showError); };
   $("stopBtn").onclick = () => api.emergencyStop().then(() => { setBeatMode("off"); return updateRuntime(); }).catch(showError);
   $("ownershipBtn").onclick = async () => { const rt = await api.runtime(); if ((rt.ownership || {}).state === "pad_owned") await api.release(); else await api.takeover(); await updateRuntime(); };
-  document.addEventListener("keydown", ev => { if (ev.key === "Escape" && PadModal.isOpen()) PadModal.close(); });
+  document.addEventListener("keydown", ev => {
+    if (ev.key === "Escape") {
+      if (PadModal.isOpen()) PadModal.close();
+      else if (state.drawerOpen) closeDrawer();
+      else if (!$("selfTestPanel").hidden) $("selfTestPanel").hidden = true;
+    }
+  });
+  window.addEventListener("resize", sizePreviewCanvas);
   $("tracePanel").hidden = !DEV;
   const RECONNECT_TEXT = "Pad server unreachable — reconnecting…";
   PadHealth.start({
@@ -518,5 +814,7 @@
       }
     },
   });
+  // Health strip refresh between PadHealth polls (~1s) so "Ns ago" stays honest.
+  setInterval(renderHealth, 1000);
   refresh().catch(showError);
 }());
