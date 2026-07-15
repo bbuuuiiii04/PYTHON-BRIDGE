@@ -13,6 +13,12 @@
   <div class="brand">
     <span class="eyebrow">LIGHTING CONSOLE</span>
     <h1>H612D Studio</h1>
+    <nav class="route-tabs" aria-label="Routes">
+      <!-- Canonical defaults: pad :8766, sim :8767 -->
+      <a href="http://127.0.0.1:8766/">Pad</a>
+      <a href="http://127.0.0.1:8766/lab">Lab</a>
+      <a class="active" href="http://127.0.0.1:8767/" aria-current="page">Sim</a>
+    </nav>
   </div>
   <div class="device-facts mono" aria-label="Hardware facts">
     <span>60 seg</span><i aria-hidden="true"></i>
@@ -85,6 +91,9 @@
           <span id="marker-label">Choose a look and render</span>
           <span id="time-label" class="mono">0.000 s</span>
         </div>
+        <button type="button" id="room-size-chip" class="chip mono room-size-chip" title="Edit room size on the Layout tab" hidden>
+          —
+        </button>
         <div class="stage-provenance">
           <span id="pipeline-badge" class="chip mono">SOURCE · —</span>
           <span id="timing-readout" class="chip mono">TIMING · —</span>
