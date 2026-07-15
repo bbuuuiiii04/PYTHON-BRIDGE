@@ -51,6 +51,10 @@ class LedSimService:
         if self.profile_path.exists():
             try:
                 profile = {**example, **engine.load_profile(self.profile_path)}
+                if not isinstance(profile.get("layout"), dict):
+                    profile["layout"] = engine.default_layout(engine.room_size_mm(profile))
+                elif not isinstance(profile.get("room_mm"), (list, tuple)):
+                    profile["room_mm"] = list(engine.DEFAULT_ROOM_MM)
                 errors = engine.validate_profile(profile)
                 if not errors:
                     return profile, ""

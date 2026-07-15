@@ -1,12 +1,14 @@
 ---
 doc_status: current
 truth_level: software-tested
-last_verified_commit: 54b9d80
+last_verified_commit: PENDING
 last_verified_date: 2026-07-15
 validation_scope: >
-  H612D LED Studio (AWR-196): offline production-runner frame composition,
-  fixed 60-by-6 emitter view, timestamp-held playback, calibration sequence v2,
-  profile evidence guards, and the local web service are software-tested.
+  H612D LED Studio (AWR-196 + AWR-244 room-view rebuild): offline
+  production-runner frame composition, room polyline layout with arc-length LED
+  placement, perimeter/snake/custom presets, timestamp-held playback,
+  calibration sequence v2, profile evidence guards, and the local web service
+  are software-tested. Optics (glow/bleed/gamma) remain uncalibrated assumptions.
   Generated timing uses an ideal grid. Device color, PWM, latency, physical
   response, packet delivery, and hardware cadence remain unmeasured;
   SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
@@ -16,11 +18,19 @@ validation_scope: >
 
 This local tool shows what the bridge asks the Govee H612D to do. It models the
 known fixture shape: **60 controllable RGB segments, six physical LEDs per
-segment, 360 LEDs total, 49.2 ft / 14,996.16 mm**. Room shape and strip placement
-are deliberately out of scope.
+segment, 360 LEDs total, 49.2 ft / 14,996.16 mm**. Two 7.5 m halves meet at a
+**center junction / control box** (arc-length midpoint = 7498.08 mm, segment
+29|30). Addressing stays one linear 60-segment strip through that junction.
+
+**AWR-244** adds a default **room view**: the strip is a polyline in room
+coordinates. LEDs are placed by arc length along that polyline, scaled so the
+sketch path maps to exactly `strip_length_mm`. The drawing is to scale of
+itself; physical millimetre truth lives in the strip length, not the room
+sketch. A **Strip** toggle keeps the old 6×10 bench grid for command inspection.
 
 Each group of six dots receives one RGB command because the H612D exposes 60
-groups, not 360 separately controllable pixels.
+groups, not 360 separately controllable pixels. Screen optics (gamma, gains,
+glow, bleed) are still uncalibrated assumptions.
 
 ## What is exact today
 
@@ -57,6 +67,38 @@ The two badges over the fixture state the frame source and timing source. The
 calibration badge describes only the saved evidence state. With the committed
 profile it reads `UNMEASURED`, so the identity transfer is visibly an assumption.
 
+## Room layout (AWR-244)
+
+Profile field `layout`:
+
+| Field | Meaning |
+| --- | --- |
+| `preset` | `perimeter`, `snake`, or `custom` |
+| `points_mm` | Ordered polyline vertices in room coordinates (≥2 points) |
+| `flip_chain` | When true, segment 0 is the other end of the path |
+
+`room_mm` is `[width, height]` (default `[5216, 2284]`). Profiles without
+`layout` get the perimeter preset derived from `room_mm`. Legacy keys
+(`corner_segments`, `start_corner`, `direction`, wash fields) are accepted and
+ignored.
+
+Presets:
+
+- **Perimeter** — rectangle loop with a bottom-center gap; chain starts left of
+  the gap, junction at top-center, end right of the gap.
+- **Snake** — S-path; junction at the top-right bend (equal arc-length halves).
+- **Custom** — current points, freely editable on the canvas.
+
+The Python engine function `layout_led_positions(profile)` is the tested
+reference (360 LED centers, segment boundaries, junction). `ledsim-view.js`
+mirrors it. LED screen positions are cached per layout/resize, not recomputed
+every frame.
+
+The layout editor supports preset cards, room-size fields (presets rescale),
+drag handles (≥32 px hit target), double-click / long-press to insert or delete
+vertices (minimum two), flip chain, reset-to-preset, and single-level undo.
+**Save layout** uses the existing validated profile POST.
+
 ## What is not exact yet
 
 The capture boundary is before the network and physical controller. The studio
@@ -67,7 +109,9 @@ does not yet know or prove:
 - the H612D's measured RGB transfer, low-level cutoff, peak brightness, or
   mixed-color behavior;
 - measured latency, color transition time, or phone/camera/display color error;
-- scheduling jitter from a running bridge under real system load.
+- scheduling jitter from a running bridge under real system load;
+- that the room polyline matches the operator's real hang (spatial calibration
+  remains unmeasured until he signs it off).
 
 The current screen model is intentionally small: one gamma value, three channel
 gains, one brightness value, a three-tap neighbor bleed, one latency offset, and
@@ -102,8 +146,8 @@ Choose a source and press its render button:
   directory.
 
 The transport supports play/pause, loop, exact-frame scrubbing, left/right
-frame stepping, and Space to play or pause. The fixture view always shows all
-360 physical emitters grouped into their 60 command segments.
+frame stepping, and Space to play or pause. The room view shows all 360
+physical emitters along the strip path; the Strip toggle shows the bench grid.
 
 ## Calibrate mode
 
@@ -159,6 +203,8 @@ separate approval. The current studio contains no hardware sender.
 
 | Field | Meaning |
 | --- | --- |
+| `room_mm` | Room width and height in millimetres (layout canvas). |
+| `layout` | Strip polyline preset/points/`flip_chain` (see Room layout). |
 | `gamma` | Fitted command-value to visible-level curve. |
 | `white_point` | Fitted red, green, and blue channel gains. |
 | `brightness` | Fitted overall display level. |
@@ -178,8 +224,9 @@ evidence. Editing any transfer or timing control in the UI resets all domains to
 forward silently. Slew is used only when both the whole profile and timing
 domain are relative or measured.
 
-Old room-layout profiles are accepted in memory by overlaying their compatible
-values onto the fixed H612D defaults. They are not silently rewritten.
+Old room-layout profiles without `layout` inherit the perimeter preset from
+`room_mm` (or the example defaults) in memory. They are not silently rewritten
+until **Save** is pressed.
 
 ## Frames-JSONL
 
@@ -205,11 +252,16 @@ python3 -m tools.led_sim_engine render-jsonl --name beat_chase \
 `tools/led_sim_assets/ledsim-view.js` is a drawing-only ES module:
 
 ```js
-createLedSimView(canvas, profile) -> { renderFrame(frame), setProfile(profile), destroy() }
+createLedSimView(canvas, profile) -> {
+  renderFrame(frame), setProfile(profile),
+  setViewMode("room"|"strip"), setLabelsVisible(bool), setEditing(bool),
+  hitTestVertex, hitTestEdge, canvasToMm, mmToCanvas, destroy()
+}
+layoutLedPositions(profile)  // pure; mirrors led_sim_engine.layout_led_positions
 ```
 
 It does not fetch, save, or send frames. The Python engine contains the tested
-reference transfer and linear-bleed calculations mirrored by the view.
+reference transfer, linear-bleed, and layout calculations mirrored by the view.
 
 ## Hard lines and checks
 
@@ -217,19 +269,21 @@ reference transfer and linear-bleed calculations mirrored by the view.
   network contact.
 - POST requests require a local Host header and JSON content type.
 - Reads the LED look config; writes only the chosen simulator profile, and only
-  when **Save values** is pressed after validation.
+  when **Save** is pressed after validation.
 - Matching command frames do not prove device receipt or visible parity.
 - `production_runner_offline` does not mean a live bridge capture, and
   `ideal_grid` does not mean measured FPS parity.
 - Configured-look parameters are read before live runtime injection.
 - Six displayed LEDs per segment are a control-group model, not six individual
   commands.
+- No new pad-lane imports (AWR-193 fence). Pad/lab integration is round 2.
 
 Focused checks:
 
 ```bash
-python3 -m unittest tests.test_led_sim_engine tests.test_led_sim_service
+python3 -m unittest discover tests -p "test_led_sim*"
 ```
 
-Current focused result: **42 tests passed** on 2026-07-15. This is software
-proof for the offline studio only; no H612D hardware was exercised.
+Current focused result: **49 tests passed** on 2026-07-15 (includes layout
+path math). This is software proof for the offline studio only; no H612D
+hardware was exercised. Optics remain uncalibrated.

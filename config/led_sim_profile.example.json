@@ -5,6 +5,20 @@
   "physical_leds": 360,
   "leds_per_segment": 6,
   "strip_length_mm": 14996.16,
+  "room_mm": [5216, 2284],
+  "layout": {
+    "preset": "perimeter",
+    "points_mm": [
+      [2468.0, 0.0],
+      [0.0, 0.0],
+      [0.0, 2284.0],
+      [2608.0, 2284.0],
+      [5216.0, 2284.0],
+      [5216.0, 0.0],
+      [2748.0, 0.0]
+    ],
+    "flip_chain": false
+  },
   "gamma": 1.0,
   "white_point": [1.0, 1.0, 1.0],
   "brightness": 1.0,

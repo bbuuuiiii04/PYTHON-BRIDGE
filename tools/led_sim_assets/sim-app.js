@@ -1,6 +1,12 @@
 // sim-app.js — H612D LED Studio page controller.
 
-import { createLedSimView } from "./ledsim-view.js";
+import {
+  createLedSimView,
+  defaultLayout,
+  perimeterPresetPoints,
+  resolveLayout,
+  snakePresetPoints,
+} from "./ledsim-view.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -29,6 +35,10 @@ const state = {
   drawCount: 0,
   missedFrames: 0,
   frameRequestToken: 0,
+  layoutUndo: null,
+  dragVertex: -1,
+  longPressTimer: null,
+  longPressPoint: null,
 };
 
 let view = null;
@@ -137,6 +147,285 @@ function pushProfileToView() {
   view.setProfile(state.profile);
   markDirty();
   updateCalibrationBadge();
+  syncLayoutForm();
+}
+
+function ensureProfileLayout() {
+  if (!state.profile.room_mm || state.profile.room_mm.length !== 2) {
+    state.profile.room_mm = [5216, 2284];
+  }
+  state.profile.layout = resolveLayout(state.profile);
+  return state.profile.layout;
+}
+
+function snapshotLayout() {
+  ensureProfileLayout();
+  state.layoutUndo = clone({
+    room_mm: state.profile.room_mm,
+    layout: state.profile.layout,
+  });
+}
+
+function markLayoutCustom() {
+  ensureProfileLayout();
+  state.profile.layout.preset = "custom";
+  syncPresetCards();
+}
+
+function syncPresetCards() {
+  const preset = ensureProfileLayout().preset;
+  for (const button of document.querySelectorAll(".preset-card")) {
+    button.setAttribute("aria-selected", button.dataset.preset === preset ? "true" : "false");
+  }
+}
+
+function syncLayoutForm() {
+  ensureProfileLayout();
+  $("room-width").value = String(Math.round(Number(state.profile.room_mm[0])));
+  $("room-height").value = String(Math.round(Number(state.profile.room_mm[1])));
+  syncPresetCards();
+  markDirty();
+  const dirty = JSON.stringify(stripLocal(state.profile)) !== JSON.stringify(state.savedProfile);
+  $("layout-dirty").hidden = !dirty;
+}
+
+function drawPresetThumb(canvas, points, room) {
+  const ctx = canvas.getContext("2d");
+  const width = canvas.width;
+  const height = canvas.height;
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#07090f";
+  ctx.fillRect(0, 0, width, height);
+  const [roomW, roomH] = room;
+  const pad = 8;
+  const scale = Math.min((width - pad * 2) / roomW, (height - pad * 2) / roomH);
+  const ox = (width - roomW * scale) / 2;
+  const oy = (height - roomH * scale) / 2;
+  ctx.strokeStyle = "rgba(255,255,255,.12)";
+  ctx.strokeRect(ox, oy, roomW * scale, roomH * scale);
+  if (!points?.length) return;
+  const toX = (x) => ox + x * scale;
+  const toY = (y) => oy + (roomH - y) * scale;
+  ctx.strokeStyle = "#8a6cff";
+  ctx.lineWidth = 2;
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  ctx.moveTo(toX(points[0][0]), toY(points[0][1]));
+  for (let index = 1; index < points.length; index += 1) {
+    ctx.lineTo(toX(points[index][0]), toY(points[index][1]));
+  }
+  ctx.stroke();
+}
+
+function refreshPresetThumbs() {
+  const room = state.profile?.room_mm || [5216, 2284];
+  drawPresetThumb($("thumb-perimeter"), perimeterPresetPoints(room), room);
+  drawPresetThumb($("thumb-snake"), snakePresetPoints(room), room);
+}
+
+function applyPreset(preset, {resetPoints = true} = {}) {
+  snapshotLayout();
+  ensureProfileLayout();
+  const room = state.profile.room_mm;
+  if (preset === "custom") {
+    state.profile.layout.preset = "custom";
+  } else {
+    state.profile.layout = {
+      preset,
+      points_mm: preset === "snake" ? snakePresetPoints(room) : perimeterPresetPoints(room),
+      flip_chain: Boolean(state.profile.layout.flip_chain),
+    };
+    if (!resetPoints) {
+      // keep flip only
+    }
+  }
+  pushProfileToView();
+  refreshPresetThumbs();
+}
+
+function canvasEventPoint(event) {
+  const rect = $("fixture-canvas").getBoundingClientRect();
+  const source = event.touches?.[0] || event.changedTouches?.[0] || event;
+  return {
+    x: source.clientX - rect.left,
+    y: source.clientY - rect.top,
+  };
+}
+
+function wireLayoutEditor() {
+  view.setEditing(true);
+  view.setViewMode("room");
+  const labelsDefault = window.innerWidth >= 700;
+  $("toggle-labels").checked = labelsDefault;
+  view.setLabelsVisible(labelsDefault);
+
+  $("view-room").addEventListener("click", () => {
+    view.setViewMode("room");
+    $("view-room").classList.add("active");
+    $("view-strip").classList.remove("active");
+    $("layout-panel").hidden = false;
+    view.setEditing(true);
+  });
+  $("view-strip").addEventListener("click", () => {
+    view.setViewMode("strip");
+    $("view-strip").classList.add("active");
+    $("view-room").classList.remove("active");
+    $("layout-panel").hidden = true;
+    view.setEditing(false);
+  });
+  $("toggle-labels").addEventListener("change", () => {
+    view.setLabelsVisible($("toggle-labels").checked);
+  });
+  window.addEventListener("resize", () => {
+    if (window.innerWidth < 700 && $("toggle-labels").checked && !state._labelsUserSet) {
+      $("toggle-labels").checked = false;
+      view.setLabelsVisible(false);
+    }
+  });
+  $("toggle-labels").addEventListener("input", () => {
+    state._labelsUserSet = true;
+  });
+
+  for (const button of document.querySelectorAll(".preset-card")) {
+    button.addEventListener("click", () => applyPreset(button.dataset.preset));
+  }
+
+  const onRoomSize = () => {
+    snapshotLayout();
+    const width = Math.max(500, Number($("room-width").value) || 5216);
+    const height = Math.max(500, Number($("room-height").value) || 2284);
+    state.profile.room_mm = [width, height];
+    const preset = ensureProfileLayout().preset;
+    if (preset === "perimeter" || preset === "snake") {
+      state.profile.layout.points_mm = preset === "snake"
+        ? snakePresetPoints(state.profile.room_mm)
+        : perimeterPresetPoints(state.profile.room_mm);
+    }
+    pushProfileToView();
+    refreshPresetThumbs();
+  };
+  $("room-width").addEventListener("change", onRoomSize);
+  $("room-height").addEventListener("change", onRoomSize);
+
+  $("layout-flip").addEventListener("click", () => {
+    snapshotLayout();
+    ensureProfileLayout();
+    state.profile.layout.flip_chain = !state.profile.layout.flip_chain;
+    pushProfileToView();
+  });
+  $("layout-reset").addEventListener("click", () => {
+    const preset = ensureProfileLayout().preset === "snake" ? "snake" : "perimeter";
+    applyPreset(preset);
+  });
+  $("layout-undo").addEventListener("click", () => {
+    if (!state.layoutUndo) return;
+    const previous = state.layoutUndo;
+    state.layoutUndo = clone({
+      room_mm: state.profile.room_mm,
+      layout: state.profile.layout,
+    });
+    state.profile.room_mm = previous.room_mm;
+    state.profile.layout = previous.layout;
+    pushProfileToView();
+    refreshPresetThumbs();
+  });
+  $("layout-save").addEventListener("click", async () => {
+    ensureProfileLayout();
+    const result = await api("POST", "/api/profile", stripLocal(state.profile));
+    state.savedProfile = clone(result.profile);
+    markDirty();
+    $("layout-dirty").hidden = true;
+  });
+
+  const canvas = $("fixture-canvas");
+  const HIT = 32;
+
+  function clearLongPress() {
+    if (state.longPressTimer) {
+      clearTimeout(state.longPressTimer);
+      state.longPressTimer = null;
+    }
+    state.longPressPoint = null;
+  }
+
+  function pointerDown(event) {
+    if (view.getViewMode() !== "room") return;
+    const point = canvasEventPoint(event);
+    const vertex = view.hitTestVertex(point.x, point.y, HIT);
+    if (vertex >= 0) {
+      event.preventDefault();
+      snapshotLayout();
+      state.dragVertex = vertex;
+      canvas.setPointerCapture?.(event.pointerId);
+      return;
+    }
+    state.longPressPoint = point;
+    state.longPressTimer = setTimeout(() => {
+      mutateAtCanvasPoint(point);
+      clearLongPress();
+    }, 550);
+  }
+
+  function storedIndex(displayIndex) {
+    const count = ensureProfileLayout().points_mm.length;
+    return state.profile.layout.flip_chain ? count - 1 - displayIndex : displayIndex;
+  }
+
+  function insertIndexForEdge(displayEdgeIndex) {
+    const count = ensureProfileLayout().points_mm.length;
+    if (!state.profile.layout.flip_chain) return displayEdgeIndex + 1;
+    return count - 1 - displayEdgeIndex;
+  }
+
+  function mutateAtCanvasPoint(point) {
+    const vertexHit = view.hitTestVertex(point.x, point.y, HIT);
+    ensureProfileLayout();
+    if (vertexHit >= 0) {
+      if (state.profile.layout.points_mm.length <= 2) return;
+      snapshotLayout();
+      state.profile.layout.points_mm.splice(storedIndex(vertexHit), 1);
+      markLayoutCustom();
+      pushProfileToView();
+      return;
+    }
+    const edge = view.hitTestEdge(point.x, point.y, HIT);
+    if (!edge) return;
+    snapshotLayout();
+    state.profile.layout.points_mm.splice(insertIndexForEdge(edge.edgeIndex), 0, [edge.mm.x, edge.mm.y]);
+    markLayoutCustom();
+    pushProfileToView();
+  }
+
+  function pointerMove(event) {
+    if (state.dragVertex < 0) return;
+    event.preventDefault();
+    const point = canvasEventPoint(event);
+    const mm = view.canvasToMm(point.x, point.y);
+    ensureProfileLayout();
+    const points = state.profile.layout.points_mm.map((entry) => [entry[0], entry[1]]);
+    points[storedIndex(state.dragVertex)] = [mm.x, mm.y];
+    state.profile.layout.points_mm = points;
+    markLayoutCustom();
+    pushProfileToView();
+  }
+
+  function pointerUp(event) {
+    clearLongPress();
+    if (state.dragVertex >= 0) {
+      state.dragVertex = -1;
+      try { canvas.releasePointerCapture?.(event.pointerId); } catch (_error) { /* ignore */ }
+    }
+  }
+
+  canvas.addEventListener("pointerdown", pointerDown);
+  canvas.addEventListener("pointermove", pointerMove);
+  canvas.addEventListener("pointerup", pointerUp);
+  canvas.addEventListener("pointercancel", pointerUp);
+  canvas.addEventListener("dblclick", (event) => {
+    if (view.getViewMode() !== "room") return;
+    event.preventDefault();
+    mutateAtCanvasPoint(canvasEventPoint(event));
+  });
 }
 
 function knobsFromProfile() {
@@ -579,6 +868,10 @@ function setLoop(next, now = performance.now()) {
 async function boot() {
   state.catalog = await api("GET", "/api/catalog");
   state.profile = state.catalog.profile;
+  if (!state.profile.layout) {
+    state.profile.layout = defaultLayout(state.profile.room_mm || [5216, 2284]);
+  }
+  if (!state.profile.room_mm) state.profile.room_mm = [5216, 2284];
   state.savedProfile = clone(state.catalog.profile);
   view = createLedSimView($("fixture-canvas"), state.profile);
   view.renderFrame(Array.from({length: 60}, () => [0, 0, 0]));
@@ -586,6 +879,9 @@ async function boot() {
   fillSourcePicker();
   knobsFromProfile();
   wireKnobs();
+  wireLayoutEditor();
+  syncLayoutForm();
+  refreshPresetThumbs();
   wireKeyboard();
 
   $("tab-author").addEventListener("click", () => setMode("author"));

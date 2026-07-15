@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import sys
 import tempfile
 import unittest
@@ -274,6 +275,119 @@ class ProfileTests(unittest.TestCase):
             calibration_evidence=evidence,
         ))
         self.assertTrue(any("reference_instrument" in error for error in errors), errors)
+
+
+class LayoutTests(unittest.TestCase):
+    def test_perimeter_junction_is_top_center_vertex(self) -> None:
+        room = [5216.0, 2284.0]
+        points = engine.perimeter_preset_points(room)
+        profile = _profile(room_mm=room, layout={
+            "preset": "perimeter", "points_mm": points, "flip_chain": False,
+        })
+        result = engine.layout_led_positions(profile)
+        self.assertEqual(len(result["leds_mm"]), 360)
+        self.assertEqual(len(result["segment_boundaries_mm"]), 61)
+        junction = result["junction_mm"]
+        top_center = tuple(points[3])
+        self.assertAlmostEqual(junction[0], top_center[0], places=6)
+        self.assertAlmostEqual(junction[1], top_center[1], places=6)
+        self.assertAlmostEqual(result["strip_length_mm"], engine.H612D_LENGTH_MM)
+        mid = engine._point_at_arc_distance(
+            result["points_mm"],
+            result["sketch_length_mm"] / 2.0,
+            result["sketch_length_mm"],
+        )
+        self.assertAlmostEqual(mid[0], top_center[0], places=6)
+        self.assertAlmostEqual(mid[1], top_center[1], places=6)
+
+    def test_snake_junction_is_top_right_bend(self) -> None:
+        room = [5216.0, 2284.0]
+        points = engine.snake_preset_points(room)
+        profile = _profile(room_mm=room, layout={
+            "preset": "snake", "points_mm": points, "flip_chain": False,
+        })
+        result = engine.layout_led_positions(profile)
+        junction = result["junction_mm"]
+        top_right = tuple(points[5])
+        self.assertAlmostEqual(junction[0], top_right[0], places=6)
+        self.assertAlmostEqual(junction[1], top_right[1], places=6)
+        # Arc-length midpoint in strip space is exactly half the physical strip.
+        half = engine.H612D_JUNCTION_MM
+        self.assertAlmostEqual(half, engine.H612D_LENGTH_MM / 2.0, places=6)
+
+    def test_arc_length_maps_to_strip_length(self) -> None:
+        profile = _profile(layout=engine.default_layout())
+        result = engine.layout_led_positions(profile)
+        start = result["start_mm"]
+        end = result["end_mm"]
+        self.assertEqual(start, result["points_mm"][0])
+        self.assertEqual(end, result["points_mm"][-1])
+        # First LED is near the start; last near the end (centers, not endpoints).
+        self.assertLess(
+            math.hypot(result["leds_mm"][0][0] - start[0], result["leds_mm"][0][1] - start[1]),
+            math.hypot(result["leds_mm"][0][0] - end[0], result["leds_mm"][0][1] - end[1]),
+        )
+        self.assertLess(
+            math.hypot(result["leds_mm"][-1][0] - end[0], result["leds_mm"][-1][1] - end[1]),
+            math.hypot(result["leds_mm"][-1][0] - start[0], result["leds_mm"][-1][1] - start[1]),
+        )
+
+    def test_flip_chain_reverses_led_order(self) -> None:
+        base = engine.default_layout()
+        forward = engine.layout_led_positions(_profile(layout={**base, "flip_chain": False}))
+        flipped = engine.layout_led_positions(_profile(layout={**base, "flip_chain": True}))
+        self.assertEqual(len(flipped["leds_mm"]), len(forward["leds_mm"]))
+        for index, (got, expected) in enumerate(zip(flipped["leds_mm"], reversed(forward["leds_mm"]))):
+            self.assertAlmostEqual(got[0], expected[0], places=9, msg=f"led {index} x")
+            self.assertAlmostEqual(got[1], expected[1], places=9, msg=f"led {index} y")
+        self.assertEqual(flipped["start_mm"], forward["end_mm"])
+        self.assertEqual(flipped["end_mm"], forward["start_mm"])
+        self.assertAlmostEqual(flipped["junction_mm"][0], forward["junction_mm"][0], places=9)
+        self.assertAlmostEqual(flipped["junction_mm"][1], forward["junction_mm"][1], places=9)
+
+    def test_missing_layout_defaults_to_perimeter_from_room(self) -> None:
+        profile = _profile(room_mm=[4000.0, 2000.0])
+        profile.pop("layout", None)
+        result = engine.layout_led_positions(profile)
+        expected = engine.perimeter_preset_points([4000.0, 2000.0])
+        self.assertEqual(result["preset"], "perimeter")
+        self.assertEqual(result["points_mm"], [tuple(p) for p in expected])
+
+    def test_degenerate_polylines_never_crash(self) -> None:
+        two = _profile(layout={
+            "preset": "custom",
+            "points_mm": [[0.0, 0.0], [1000.0, 0.0]],
+            "flip_chain": False,
+        })
+        result = engine.layout_led_positions(two)
+        self.assertEqual(len(result["leds_mm"]), 360)
+        zero_edge = _profile(layout={
+            "preset": "custom",
+            "points_mm": [[0.0, 0.0], [0.0, 0.0], [500.0, 0.0]],
+            "flip_chain": False,
+        })
+        result2 = engine.layout_led_positions(zero_edge)
+        self.assertEqual(len(result2["leds_mm"]), 360)
+        self.assertTrue(all(math.isfinite(x) and math.isfinite(y) for x, y in result2["leds_mm"]))
+
+    def test_layout_validation_accepts_presets_and_rejects_bad_points(self) -> None:
+        self.assertEqual(engine.validate_profile(_profile(layout=engine.default_layout())), [])
+        self.assertEqual(engine.validate_profile(_profile(
+            room_mm=[5216, 2284],
+            layout={"preset": "snake", "points_mm": engine.snake_preset_points(), "flip_chain": False},
+        )), [])
+        errors = engine.validate_profile(_profile(layout={
+            "preset": "custom", "points_mm": [[0, 0]], "flip_chain": False,
+        }))
+        self.assertTrue(any("points_mm" in error for error in errors), errors)
+        legacy = _profile(
+            room_mm=[5216, 2284],
+            corner_segments=[0, 20.9, 33.8, 50.9],
+            start_corner=0,
+            direction="cw",
+        )
+        legacy.pop("layout", None)
+        self.assertEqual(engine.validate_profile(legacy), [])
 
 
 class LookCatalogTests(unittest.TestCase):

@@ -60,6 +60,15 @@ H612D_SEGMENTS = 60
 H612D_LEDS_PER_SEGMENT = 6
 H612D_PHYSICAL_LEDS = 360
 H612D_LENGTH_MM = 14996.16
+H612D_JUNCTION_MM = H612D_LENGTH_MM / 2.0  # 7498.08 — segment 29|30 boundary / center control box
+
+DEFAULT_ROOM_MM = (5216.0, 2284.0)
+LAYOUT_PRESETS = ("perimeter", "snake", "custom")
+# Legacy room-layout keys kept for old profiles; the room view reads `layout` only.
+LEGACY_LAYOUT_KEYS = (
+    "room_mm", "corner_segments", "start_corner", "direction",
+    "wash_reach_mm", "wash_gain", "diffusion_width_seg",
+)
 
 FRAME_SOURCE_PRODUCTION_RUNNER_OFFLINE = "production_runner_offline"
 TIMING_SOURCE_IDEAL_GRID = "ideal_grid"
@@ -187,7 +196,238 @@ def validate_profile(profile: Mapping[str, Any]) -> list[str]:
             or not evidence["reference_instrument"].strip()
         ):
             errors.append("calibration_evidence.reference_instrument is required for measured status")
+
+    room = profile.get("room_mm")
+    if room is not None:
+        if (
+            not isinstance(room, (list, tuple))
+            or len(room) != 2
+            or not all(isinstance(v, (int, float)) and not isinstance(v, bool) and float(v) > 0 for v in room)
+        ):
+            errors.append("room_mm must be [width_mm, height_mm] with positive numbers")
+
+    layout = profile.get("layout")
+    if layout is not None:
+        if not isinstance(layout, Mapping):
+            errors.append("layout must be an object")
+        else:
+            preset = layout.get("preset")
+            if preset not in LAYOUT_PRESETS:
+                errors.append(f"layout.preset must be one of {list(LAYOUT_PRESETS)}")
+            flip = layout.get("flip_chain", False)
+            if not isinstance(flip, bool):
+                errors.append("layout.flip_chain must be a boolean")
+            points = layout.get("points_mm")
+            if not isinstance(points, (list, tuple)) or len(points) < 2:
+                errors.append("layout.points_mm must be a list of ≥2 [x, y] points")
+            else:
+                for index, point in enumerate(points):
+                    if (
+                        not isinstance(point, (list, tuple))
+                        or len(point) != 2
+                        or not all(
+                            isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(float(v))
+                            for v in point
+                        )
+                    ):
+                        errors.append(f"layout.points_mm[{index}] must be a finite [x, y] pair")
+                        break
     return errors
+
+
+# --- strip layout (room polyline → LED positions) ----------------------------
+
+def _as_xy(point: Any) -> tuple[float, float]:
+    return (float(point[0]), float(point[1]))
+
+
+def room_size_mm(profile: Mapping[str, Any] | None = None) -> tuple[float, float]:
+    """Room width/height in mm; defaults to the operator room when absent."""
+    room = (profile or {}).get("room_mm") if profile else None
+    if (
+        isinstance(room, (list, tuple))
+        and len(room) == 2
+        and all(isinstance(v, (int, float)) and not isinstance(v, bool) and float(v) > 0 for v in room)
+    ):
+        return (float(room[0]), float(room[1]))
+    return (float(DEFAULT_ROOM_MM[0]), float(DEFAULT_ROOM_MM[1]))
+
+
+def perimeter_preset_points(room_mm: tuple[float, float] | list[float] | None = None) -> list[list[float]]:
+    """Rectangle loop with a bottom-center gap; junction lands at top-center.
+
+    Chain starts left of the gap, runs CCW, midpoint is top-center, end returns
+    right of the gap. Sketch path length need not equal strip_length_mm — LED
+    placement scales by arc length (see layout_led_positions).
+    """
+    width, height = room_size_mm({"room_mm": list(room_mm)} if room_mm is not None else None)
+    gap = min(width * 0.06, 280.0)
+    half = width / 2.0
+    return [
+        [half - gap / 2.0, 0.0],
+        [0.0, 0.0],
+        [0.0, height],
+        [half, height],
+        [width, height],
+        [width, 0.0],
+        [half + gap / 2.0, 0.0],
+    ]
+
+
+def snake_preset_points(room_mm: tuple[float, float] | list[float] | None = None) -> list[list[float]]:
+    """S-path across the room; arc-length midpoint lands on the top-right bend.
+
+    Built in abstract units so (lower + rise1 + middle + rise2 + top) equals the
+    right drop, then uniformly fitted into room_mm. Path-length normalization in
+    layout_led_positions keeps that vertex at strip_length_mm / 2.
+    """
+    width, height = room_size_mm({"room_mm": list(room_mm)} if room_mm is not None else None)
+    margin = min(width, height) * 0.08
+    # Half = 1: three equal runs + two rises on the first half; drop = that sum.
+    run, rise = 0.28, 0.08
+    drop = 3.0 * run + 2.0 * rise
+    abstract = [
+        (0.0, 0.0),
+        (run, 0.0),
+        (run, rise),
+        (0.0, rise),
+        (0.0, 2.0 * rise),
+        (run, 2.0 * rise),           # top-right bend = junction
+        (run, 2.0 * rise - drop),    # right drop; equal arc length by construction
+    ]
+    xs = [p[0] for p in abstract]
+    ys = [p[1] for p in abstract]
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+    span_x = max(max_x - min_x, 1e-9)
+    span_y = max(max_y - min_y, 1e-9)
+    avail_w = max(1.0, width - 2.0 * margin)
+    avail_h = max(1.0, height - 2.0 * margin)
+    scale = min(avail_w / span_x, avail_h / span_y)
+    offset_x = margin + (avail_w - span_x * scale) / 2.0 - min_x * scale
+    offset_y = margin + (avail_h - span_y * scale) / 2.0 - min_y * scale
+    return [[offset_x + x * scale, offset_y + y * scale] for x, y in abstract]
+
+
+def preset_layout_points(preset: str, room_mm: tuple[float, float] | list[float] | None = None) -> list[list[float]]:
+    if preset == "snake":
+        return snake_preset_points(room_mm)
+    if preset == "perimeter":
+        return perimeter_preset_points(room_mm)
+    raise ValueError(f"unknown layout preset: {preset!r}")
+
+
+def default_layout(room_mm: tuple[float, float] | list[float] | None = None) -> dict[str, Any]:
+    """Perimeter preset derived from room_mm — used when profile has no layout."""
+    return {
+        "preset": "perimeter",
+        "points_mm": perimeter_preset_points(room_mm),
+        "flip_chain": False,
+    }
+
+
+def resolve_layout(profile: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a concrete layout object; synthesize perimeter when missing."""
+    layout = profile.get("layout")
+    room = room_size_mm(profile)
+    if not isinstance(layout, Mapping):
+        return default_layout(room)
+    preset = layout.get("preset", "custom")
+    if preset not in LAYOUT_PRESETS:
+        preset = "custom"
+    points = layout.get("points_mm")
+    if preset in ("perimeter", "snake") and (
+        not isinstance(points, (list, tuple)) or len(points) < 2
+    ):
+        points = preset_layout_points(preset, room)
+    elif not isinstance(points, (list, tuple)) or len(points) < 2:
+        points = perimeter_preset_points(room)
+        preset = "perimeter"
+    flip = layout.get("flip_chain", False)
+    return {
+        "preset": preset if preset in LAYOUT_PRESETS else "custom",
+        "points_mm": [[float(p[0]), float(p[1])] for p in points],
+        "flip_chain": bool(flip) if isinstance(flip, bool) else False,
+    }
+
+
+def polyline_arc_length(points: list[tuple[float, float]] | list[list[float]]) -> float:
+    total = 0.0
+    for start, end in zip(points, points[1:]):
+        x0, y0 = _as_xy(start)
+        x1, y1 = _as_xy(end)
+        total += math.hypot(x1 - x0, y1 - y0)
+    return total
+
+
+def _point_at_arc_distance(
+    points: list[tuple[float, float]] | list[list[float]],
+    distance: float,
+    total_length: float,
+) -> tuple[float, float]:
+    """Sample a polyline at arc distance in [0, total_length]. Zero-length edges skipped."""
+    if not points:
+        return (0.0, 0.0)
+    if len(points) == 1 or total_length <= 0.0:
+        return _as_xy(points[0])
+    target = max(0.0, min(float(distance), total_length))
+    if target >= total_length:
+        return _as_xy(points[-1])
+    walked = 0.0
+    for start, end in zip(points, points[1:]):
+        x0, y0 = _as_xy(start)
+        x1, y1 = _as_xy(end)
+        edge = math.hypot(x1 - x0, y1 - y0)
+        if edge <= 1e-12:
+            continue
+        if walked + edge >= target:
+            t = (target - walked) / edge
+            return (x0 + (x1 - x0) * t, y0 + (y1 - y0) * t)
+        walked += edge
+    return _as_xy(points[-1])
+
+
+def layout_led_positions(profile: Mapping[str, Any]) -> dict[str, Any]:
+    """Map the strip onto the layout polyline by arc length.
+
+    The drawing is to scale of itself: sketch path length is normalized so it
+    maps to exactly strip_length_mm. Physical millimetre truth lives in the
+    strip length, not the room sketch. Junction = arc-length midpoint
+    (H612D_JUNCTION_MM). Returns 360 LED centers, 61 segment-boundary samples
+    (0..60), and marker positions.
+
+    Reference implementation; ledsim-view.js mirrors this — keep in lockstep.
+    """
+    layout = resolve_layout(profile)
+    points = [(_as_xy(p)) for p in layout["points_mm"]]
+    if layout["flip_chain"]:
+        points = list(reversed(points))
+    sketch_length = polyline_arc_length(points)
+    strip_length = float(profile.get("strip_length_mm", H612D_LENGTH_MM))
+    if not math.isfinite(strip_length) or strip_length <= 0:
+        strip_length = H612D_LENGTH_MM
+
+    def sample(strip_mm: float) -> tuple[float, float]:
+        if sketch_length <= 1e-12:
+            return points[0]
+        return _point_at_arc_distance(points, strip_mm / strip_length * sketch_length, sketch_length)
+
+    leds = H612D_PHYSICAL_LEDS
+    led_positions = [sample((index + 0.5) / leds * strip_length) for index in range(leds)]
+    boundaries = [sample(index / H612D_SEGMENTS * strip_length) for index in range(H612D_SEGMENTS + 1)]
+    junction = sample(strip_length / 2.0)
+    return {
+        "leds_mm": led_positions,
+        "segment_boundaries_mm": boundaries,
+        "junction_mm": junction,
+        "start_mm": sample(0.0),
+        "end_mm": sample(strip_length),
+        "points_mm": points,
+        "sketch_length_mm": sketch_length,
+        "strip_length_mm": strip_length,
+        "flip_chain": bool(layout["flip_chain"]),
+        "preset": layout["preset"],
+    }
 
 
 def save_profile(path: Path | str, profile: Mapping[str, Any]) -> None:
