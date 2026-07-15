@@ -167,7 +167,9 @@ or budget is **never** expanded after any prediction or answer exists.
    `unresolved` and excluded.
 4. **Lineages and markers.** Sort eligible lineages by
    `SHA256(pilot_seed || recording_lineage_id)`; take the first 18 (need 18 distinct
-   `recording_lineage_id` AND 18 distinct `audio_duplicate_group`). Per lineage,
+   `recording_lineage_id` AND 18 distinct `audio_duplicate_group`). When a lineage
+   has more than one eligible row, its representative is the row with the lowest
+   `SHA256(pilot_seed || content_id_locator)` — never input order. Per lineage,
    sort eligible markers by `SHA256(audio_sha256 || marker_beat)`; take the first
    two. Those same two markers are that lineage's family montage. Fewer than 18
    surviving lineages ⇒ `INCONCLUSIVE`.
@@ -378,9 +380,12 @@ All under `local/spectral_ai_pilot/spectral-ai-pilot-v1-790c625-2026-07-14/`:
 ```text
 artifact_manifest.json      lineage_manifest.jsonl      card_manifest.jsonl
 candidate_contracts.json    predictions/<method>.jsonl  prediction_hashes.json
-responses.jsonl             metrics.json                resource_report.json
-verdict.json                report.md
+responses.jsonl             playbacks.jsonl             metrics.json
+resource_report.json        verdict.json                report.md
 ```
+
+`playbacks.jsonl` is the durable playback/skip ledger backing the B6 time
+accounting; it rows into `artifact_manifest.json` like every other artifact.
 
 Every artifact-manifest row: type/schema/path/producer/consumer/input hashes,
 output hash, HEAD, environment-lock hash, timestamp, `mutable:false`. `report.md`
@@ -396,10 +401,12 @@ Row schemas (exact; all rows also carry `schema_version` and `pilot_seed`):
   null), `anchor_role` (anchor/hardness cards, else null), `repeat_of_card_id`
   (repeats, else null), `clip_spec` (audio_sha256 + exact beat window), `card_hash`.
 - `responses.jsonl` (append-only): `card_id, commit_index` (the global atomic-
-  decision counter), `displayed_response, canonical_response` (pair answers
-  converted to marker-relative `harder|tied|softer|unsure` before hashing),
-  `recognized` (bool), `response_seconds, commit_utc, session_index,
-  segment_index, prev_row_hash, card_manifest_hash`.
+  decision counter), `question` (which of the card's questions this answers),
+  `displayed_response, canonical_response` (pair answers converted to
+  marker-relative `harder|tied|softer|unsure` before hashing), `recognized`
+  (bool), `response_seconds, commit_utc, local_date` (machine-local date backing
+  the one-session-per-day rule), `session_index, segment_index, prev_row_hash,
+  card_manifest_hash`.
 - `candidate_contracts.json`: per method — `method_version, positive_allowlist,
   scaler_population_hash, retained_field_hash, code_hash, environment_lock_hash,
   development_manifest_hash`.
@@ -418,7 +425,10 @@ Row schemas (exact; all rows also carry `schema_version` and `pilot_seed`):
 **Clip rule (ordinary engineering):** every audio clip in the pilot — marker card,
 hardness pair side, family-montage element, anchor — is that marker's exact
 16-beat window (the `drop_window_vector` width), rendered read-only from the
-source file; any playback temp file lives in `scratch/`.
+source file; any playback temp file lives in `scratch/`. Every card's `clip_spec`
+must locate its clip(s) exactly: anchor rows carry their anchor marker beat (the
+B3.7 gold beats now; Mau P and Anti Up pinned at Phase-1), and a family-montage
+card's `clip_spec` carries **both** marker windows.
 
 ### B8. Metrics, reconciliation, and the verdict function (review §§9.4, 11.4, exact)
 
