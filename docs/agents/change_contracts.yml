@@ -306,6 +306,7 @@ contracts:
   usb_launcher:
     code_globs:
       - usb_launcher*.py
+      - venue_check*.py
       - launch_profile*.py
       - launch_agent_plist.py
       - install_controller.py
@@ -322,6 +323,7 @@ contracts:
     tests:
       - python3 -m unittest tests.test_launch_profile
       - python3 -m unittest tests.test_usb_launcher
+      - python3 -m unittest tests.test_venue_check
       - python3 -m unittest tests.test_launch_agent_plist
       - python3 -m unittest tests.test_make_stick
       - python3 -m unittest tests.test_install_controller

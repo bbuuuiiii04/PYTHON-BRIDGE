@@ -2,10 +2,10 @@
 doc_status: current
 truth_level: code-and-config-grounded
 last_verified_commit: b629b93
-last_verified_date: 2026-07-13
+last_verified_date: 2026-07-15
 validation_scope: >
   Current USB builder, frozen launcher, native install/purge, target
-  Rekordbox patch, and software tests. The patch adds only target
+  Rekordbox patch, Venue Check (AWR-236), and software tests. The patch adds only target
   get-task-allow while preserving existing entitlements. A valid menu verdict
   additionally requires deep+strict signature verification. Target GTA is the expected
   TimecodeLink-style access mechanism. A positive entitlement proves the
@@ -24,7 +24,9 @@ validation_scope: >
   NSAppBundlesUsageDescription for App Management; frozen confirmation/result
   dialogs are native AppKit and the admin escalation stays inside RBSS Bridge.
   This proves the local patch mechanism, not a physical friend-Mac patch or live
-  attach. A dormant Accessibility MEASUREMENT probe is
+  attach. Venue Check is software-tested with fake probes (prompt-herding +
+  functional verification only); Local Network / IAC grants remain manual macOS
+  actions; guest-Mac live Venue Check run pending. A dormant Accessibility MEASUREMENT probe is
   implemented/software-tested and not executed (not a reader; no menu item;
   no runtime wiring). The separate RB7216 Patch Rekordbox menubar action sits
   in the maintenance block with Export/Rebuild (valid target-patch state only;
@@ -304,18 +306,22 @@ carries the secrets it shipped with.
   The menubar may surface `RB reads blocked`, but that is not by itself proof
   of caller denial after a clean GTA path. `unsupported_version` and transient
   `attach_failed` are not standing menubar reasons today; inspect the bridge log.
-- **KNOWN LIMITATION — Local Network (TCC) denial is not detected.** macOS has no
-  Python-visible API for the Local Network permission state, so if the guest denies
-  it, Govee/SoundSwitch discovery just finds nothing. There is no clean signal to
-  surface; if the rig is silent and reads are OK, check System Settings → Privacy →
-  Local Network for "RBSS Bridge".
+- **KNOWN LIMITATION — Local Network (TCC) denial is not detected as a grant
+  bit.** macOS has no Python-visible API for the Local Network permission
+  state. **Venue Check** (Tools → Venue Check…; also auto-runs once after a
+  fresh native install/update relaunch) deliberately triggers the Local Network
+  popup via Govee LAN discovery while the operator is standing there
+  (prompt-herding). Empty discovery surfaces as a warn with the Allow / Wi-Fi
+  hint — it cannot prove the grant was accepted. If the rig is silent and reads
+  are OK, also check System Settings → Privacy → Local Network for "RBSS Bridge".
 - **KNOWN LIMITATION — the IAC Driver is OFF by default on every fresh Mac.** The
   bridge's MIDI look-selection path (laser scene notes out, pack look selection in,
   `soundswitch_midi_input.py`) rides on the macOS "IAC Driver Bus 1" app-to-app MIDI
   bus, and Apple ships it disabled with no API to enable it from software. On a
   guest Mac the bridge degrades with `iac driver bus 1 not available` (surfaced live
-  on a guest 2026-07-11; LEDs/Govee are unaffected — they never touch MIDI). One-time
-  manual fix per guest Mac: Applications → Utilities → **Audio MIDI Setup** →
+  on a guest 2026-07-11; LEDs/Govee are unaffected — they never touch MIDI).
+  **Venue Check** warns when the port is missing and prints the one-time manual
+  fix (lasers only): Applications → Utilities → **Audio MIDI Setup** →
   Window → **Show MIDI Studio** → double-click **IAC Driver** → tick **"Device is
   online"** (the default bus name "Bus 1" is what the bridge expects — don't rename
   it). Then restart the bridge.
@@ -350,6 +356,28 @@ The stick ships no `.command` installers and no duplicate payload. Open
 
 The installed menubar owns **Purge RBSS Bridge…**. Older manifests created by
 the retired shell helpers remain readable so native Purge can clean them safely.
+
+## Venue Check (per-Mac setup — AWR-236)
+
+After Install/Update relaunches the installed copy, **Venue Check** runs
+automatically once (marker
+`~/Library/Application Support/RBSS Bridge/venue_check_seen`; a later
+install/update replaces App Support and clears it). You can also run it anytime
+from **Tools → Venue Check…** (both source and frozen menus).
+
+It is read-only: it never starts the bridge, never opens MIDI/serial ports, and
+never writes device state. One alert lists each probe with a ✓/⚠/✗/• line and a
+one-line fix hint:
+
+- frozen bundle deps (frozen app only)
+- supported Rekordbox version
+- Rekordbox target patch (if unpatched, the alert offers **Patch Rekordbox…**)
+- Govee LAN reachability (also fires the Local Network popup on purpose)
+- IAC Driver Bus 1 (lasers only)
+- Enttec serial presence (informational; metadata only)
+
+Grants for Local Network and IAC remain manual macOS actions — Venue Check
+herds the prompts and diagnoses, it does not flip the switches for you.
 
 ## Patch Rekordbox on a friend's Mac
 

@@ -19,6 +19,7 @@ import objc
 from AppKit import (
     NSAlert,
     NSAlertFirstButtonReturn,
+    NSAlertSecondButtonReturn,
     NSApplication,
     NSApplicationActivationPolicyAccessory,
     NSColor,
@@ -1038,6 +1039,25 @@ def rb_reads_status_title(state: str) -> str:
     }.get(state, "Rekordbox target patch: unknown")
 
 
+def _import_venue_check():
+    """Import venue_check with the same parent-path fix as rekordbox_patch."""
+    parent = str(REPO_ROOT.parent)
+    if not getattr(sys, "frozen", False) and parent not in sys.path:
+        sys.path.insert(0, parent)
+    from rb_ss_bridge_v2 import venue_check
+
+    return venue_check
+
+
+def assemble_venue_alert(
+    report,
+) -> tuple[str, str, bool]:
+    """Pure seam: title, body, and whether to offer Patch Rekordbox…."""
+    venue_check = _import_venue_check()
+    body = venue_check.format_venue_alert_body(report)
+    return "Venue Check", body, bool(report.needs_patch)
+
+
 def _format_child_failure(label: str, returncode: int, stderr_tail: str) -> str:
     """Plain-language dialog text when a spawned child dies at startup (pure seam
     for the frozen bridge / rekordbox-patch spawns, which otherwise fail silent)."""
@@ -1283,6 +1303,7 @@ MENU_BLUEPRINT: tuple = (
     ("submenu", "tools_item", "Tools", None, (
         ("action", "map_lasers_item", "Laser Pad…", "mapLasers:"),
         ("action", "led_pad_item", "LED Pad…", "openLedPad:"),
+        ("action", "venue_check_item", "Venue Check…", "venueCheck:"),
     )),
     ("submenu", "laser_safety_item", "Laser Safety", None, (
         ("action", "laser_blackout_item", "EMERGENCY: Stop All Lasers", "laserBlackout:"),
@@ -1304,7 +1325,11 @@ MENU_BLUEPRINT: tuple = (
 def _menu_visibility(*, frozen: bool, purge: bool) -> dict[str, bool]:
     """Exact source/frozen inventory; the builder is the only consumer."""
     return {
-        "tools_item": not frozen,
+        # Tools stays visible on both editions so Venue Check is always
+        # reachable; Laser/LED Pad remain source-only under it.
+        "tools_item": True,
+        "map_lasers_item": not frozen,
+        "led_pad_item": not frozen,
         "export_item": not frozen,
         "update_usb_item": not frozen,
         # Patch is always visible, so the maintenance separator stays visible
@@ -1395,6 +1420,26 @@ class BridgeMenuBar(NSObject):
                 and not running_from_read_only_location(bundle)
             )
         self._install_required = offer_install
+        self._venue_check_in_progress = False
+        # First-run auto Venue Check: installed frozen copy, marker absent
+        # (install/update replaces App Support so the marker clears naturally).
+        self._auto_venue_check_pending = False
+        if frozen and not offer_install:
+            try:
+                from rb_ss_bridge_v2.install_controller import (
+                    APP_SUPPORT_DIR,
+                    MANIFEST_NAME,
+                )
+                from rb_ss_bridge_v2 import venue_check as _venue_check_mod
+
+                marker = _venue_check_mod.venue_check_seen_path(APP_SUPPORT_DIR)
+                self._auto_venue_check_pending = _venue_check_mod.should_auto_venue_check(
+                    frozen=True,
+                    installed=(APP_SUPPORT_DIR / MANIFEST_NAME).exists(),
+                    marker_exists=marker.exists(),
+                )
+            except Exception:
+                self._auto_venue_check_pending = False
 
         self.status_rows = []
         visibility = _menu_visibility(frozen=frozen, purge=purge_offer)
@@ -1416,6 +1461,14 @@ class BridgeMenuBar(NSObject):
         self._timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
             self._timer_interval, self, "refresh:", None, True
         )
+        if self._auto_venue_check_pending:
+            # Defer off the AppKit init path; Local Network prompt-herding
+            # must not block menu construction.
+            threading.Thread(
+                target=self._run_venue_check_worker,
+                args=(True,),
+                daemon=True,
+            ).start()
         return self
 
     def _add_action(self, title: str, selector: str):
@@ -2644,6 +2697,64 @@ class BridgeMenuBar(NSObject):
             target=open_pad, args=(LED_PAD_URL, LED_PAD_PORT, led_pad_argv()),
             daemon=True,
         ).start()
+
+    def venueCheck_(self, _sender):
+        """Tools → Venue Check… — worker thread, then one NSAlert on main."""
+        threading.Thread(
+            target=self._run_venue_check_worker,
+            args=(False,),
+            daemon=True,
+        ).start()
+
+    def _run_venue_check_worker(self, auto: bool):
+        if self._venue_check_in_progress:
+            return
+        self._venue_check_in_progress = True
+        try:
+            venue_check = _import_venue_check()
+            report = venue_check.run_venue_check(venue_check.default_probes())
+            title, body, needs_patch = assemble_venue_alert(report)
+            if auto:
+                venue_check.write_venue_check_seen()
+            self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                "finishVenueCheck:",
+                {
+                    "title": title,
+                    "body": body,
+                    "needs_patch": bool(needs_patch),
+                    "auto": bool(auto),
+                },
+                False,
+            )
+        except Exception as exc:
+            self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                "finishVenueCheck:",
+                {"error": f"{type(exc).__name__}: {exc}", "auto": bool(auto)},
+                False,
+            )
+
+    def finishVenueCheck_(self, payload):
+        self._venue_check_in_progress = False
+        self._auto_venue_check_pending = False
+        if not isinstance(payload, dict):
+            payload = {}
+        error = payload.get("error")
+        alert = NSAlert.alloc().init()
+        if error:
+            alert.setMessageText_("Venue Check failed")
+            alert.setInformativeText_(str(error))
+            alert.addButtonWithTitle_("OK")
+            alert.runModal()
+            return
+        alert.setMessageText_(str(payload.get("title") or "Venue Check"))
+        alert.setInformativeText_(str(payload.get("body") or ""))
+        alert.addButtonWithTitle_("OK")
+        needs_patch = bool(payload.get("needs_patch"))
+        if needs_patch:
+            alert.addButtonWithTitle_("Patch Rekordbox…")
+        response = alert.runModal()
+        if needs_patch and response == NSAlertSecondButtonReturn:
+            self.enableRekordboxReads_(None)
 
     def toggleLedEngineV2_(self, _sender):
         append_command(led_engine_v2_command(read_status()))

@@ -1061,6 +1061,7 @@ class BridgeMenubarTests(unittest.TestCase):
             sorted([
                 "toggleBridge:", "openLiveLog:", "laserBlackout:",
                 "laserClearBlackout:", "mapLasers:", "openLedPad:",
+                "venueCheck:",
                 "enableRekordboxReads:", "exportFromSS:", "updateUsbBridge:",
                 "purgeBridge:", "restartMenubar:",
             ]),
@@ -1090,7 +1091,8 @@ class BridgeMenubarTests(unittest.TestCase):
 
         common = sorted([
             "toggleBridge:", "openLiveLog:", "laserBlackout:",
-            "laserClearBlackout:", "enableRekordboxReads:", "restartMenubar:",
+            "laserClearBlackout:", "venueCheck:", "enableRekordboxReads:",
+            "restartMenubar:",
         ])
         self.assertEqual(
             visible_selectors(frozen=False, purge=False),
@@ -1145,6 +1147,9 @@ class BridgeMenubarTests(unittest.TestCase):
             self.assertEqual(gates["export_item"], not frozen)
             self.assertEqual(gates["update_usb_item"], not frozen)
             self.assertEqual(gates["purge_item"], frozen and purge)
+            self.assertTrue(gates["tools_item"])
+            self.assertEqual(gates["map_lasers_item"], not frozen)
+            self.assertEqual(gates["led_pad_item"], not frozen)
 
     def test_menu_blueprint_has_only_essential_status_and_no_dead_controls(self) -> None:
         # Locked inventory: Status submenu holds exactly four disabled rows
@@ -2596,6 +2601,177 @@ class PortableLogAndUsbUpdateTests(BridgeMenubarTests):
         with patch.object(bridge_menubar, "write_usb_stamp") as write_stamp:
             bridge_menubar.BridgeMenuBar._record_usb_rebuild_stamp(menu)
         write_stamp.assert_not_called()
+
+
+class VenueCheckMenubarTests(unittest.TestCase):
+    def _import_module(self):
+        scripts_dir = Path(__file__).resolve().parents[1] / "scripts"
+        if str(scripts_dir) not in sys.path:
+            sys.path.insert(0, str(scripts_dir))
+        try:
+            return importlib.import_module("bridge_menubar")
+        except ModuleNotFoundError as exc:
+            if exc.name in {"objc", "AppKit", "Foundation"}:
+                self.skipTest(f"PyObjC unavailable: {exc.name}")
+            raise
+
+    def test_venue_check_action_in_tools_both_editions(self) -> None:
+        bridge_menubar = self._import_module()
+
+        def flatten(blueprint):
+            entries = []
+            for entry in blueprint:
+                entries.append(entry)
+                if entry[0] == "submenu":
+                    entries.extend(entry[4])
+            return entries
+
+        flat = flatten(bridge_menubar.MENU_BLUEPRINT)
+        venue = next(e for e in flat if e[1] == "venue_check_item")
+        self.assertEqual(venue[2], "Venue Check…")
+        self.assertEqual(venue[3], "venueCheck:")
+        tools = next(
+            e for e in bridge_menubar.MENU_BLUEPRINT if e[1] == "tools_item"
+        )
+        child_attrs = [c[1] for c in tools[4]]
+        self.assertIn("venue_check_item", child_attrs)
+        # Always visible (not gated); pads stay source-only.
+        for frozen, purge in ((False, False), (True, False), (True, True)):
+            gates = bridge_menubar._menu_visibility(frozen=frozen, purge=purge)
+            self.assertTrue(gates["tools_item"])
+            self.assertNotIn("venue_check_item", gates)
+
+    def test_venue_check_handler_runs_on_worker_thread(self) -> None:
+        bridge_menubar = self._import_module()
+        source = (
+            Path(__file__).resolve().parents[1] / "scripts" / "bridge_menubar.py"
+        ).read_text(encoding="utf-8")
+        start = source.index("def venueCheck_")
+        body = source[start:start + 350]
+        self.assertIn("threading.Thread", body)
+        self.assertIn("_run_venue_check_worker", body)
+
+    def test_assemble_venue_alert_and_patch_button(self) -> None:
+        bridge_menubar = self._import_module()
+        from rb_ss_bridge_v2 import venue_check as vc
+
+        ok = vc.VenueReport(
+            results=(
+                vc.CheckResult("Bundle deps", vc.STATUS_OK, "fine"),
+                vc.CheckResult("Rekordbox patch", vc.STATUS_OK, "patched"),
+            )
+        )
+        title, body, needs_patch = bridge_menubar.assemble_venue_alert(ok)
+        self.assertEqual(title, "Venue Check")
+        self.assertIn("✓ Bundle deps:", body)
+        self.assertFalse(needs_patch)
+
+        unpatched = vc.VenueReport(
+            results=(
+                vc.CheckResult(
+                    "Rekordbox patch", vc.STATUS_FAIL, "Use Patch Rekordbox…"
+                ),
+            )
+        )
+        _title, body, needs_patch = bridge_menubar.assemble_venue_alert(unpatched)
+        self.assertTrue(needs_patch)
+        self.assertIn("✗ Rekordbox patch:", body)
+
+    def test_finish_venue_check_offers_patch_and_routes(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock()
+        menu._venue_check_in_progress = True
+        menu._auto_venue_check_pending = True
+        alert = Mock()
+        alert.runModal.return_value = bridge_menubar.NSAlertSecondButtonReturn
+        nsalert = Mock()
+        nsalert.alloc.return_value.init.return_value = alert
+        with patch.object(bridge_menubar, "NSAlert", nsalert):
+            bridge_menubar.BridgeMenuBar.finishVenueCheck_.callable(
+                menu,
+                {
+                    "title": "Venue Check",
+                    "body": "✗ Rekordbox patch: need patch",
+                    "needs_patch": True,
+                },
+            )
+        self.assertFalse(menu._venue_check_in_progress)
+        self.assertFalse(menu._auto_venue_check_pending)
+        titles = [c.args[0] for c in alert.addButtonWithTitle_.call_args_list]
+        self.assertEqual(titles, ["OK", "Patch Rekordbox…"])
+        menu.enableRekordboxReads_.assert_called_once_with(None)
+
+    def test_finish_venue_check_ok_only_when_patched(self) -> None:
+        bridge_menubar = self._import_module()
+        menu = Mock()
+        menu._venue_check_in_progress = True
+        alert = Mock()
+        alert.runModal.return_value = bridge_menubar.NSAlertFirstButtonReturn
+        nsalert = Mock()
+        nsalert.alloc.return_value.init.return_value = alert
+        with patch.object(bridge_menubar, "NSAlert", nsalert):
+            bridge_menubar.BridgeMenuBar.finishVenueCheck_.callable(
+                menu,
+                {
+                    "title": "Venue Check",
+                    "body": "✓ all good",
+                    "needs_patch": False,
+                },
+            )
+        titles = [c.args[0] for c in alert.addButtonWithTitle_.call_args_list]
+        self.assertEqual(titles, ["OK"])
+        menu.enableRekordboxReads_.assert_not_called()
+
+    def test_first_run_marker_logic_pure(self) -> None:
+        from rb_ss_bridge_v2 import venue_check as vc
+
+        self.assertTrue(
+            vc.should_auto_venue_check(
+                frozen=True, installed=True, marker_exists=False
+            )
+        )
+        self.assertFalse(
+            vc.should_auto_venue_check(
+                frozen=True, installed=True, marker_exists=True
+            )
+        )
+
+    def test_run_venue_check_worker_writes_marker_on_auto(self) -> None:
+        bridge_menubar = self._import_module()
+        from rb_ss_bridge_v2 import venue_check as vc
+
+        menu = Mock()
+        menu._venue_check_in_progress = False
+        fake_vc = Mock()
+        report = vc.VenueReport(
+            results=(
+                vc.CheckResult("Rekordbox patch", vc.STATUS_OK, "ok"),
+            )
+        )
+        fake_vc.run_venue_check.return_value = report
+        fake_vc.default_probes.return_value = object()
+        with patch.object(
+            bridge_menubar, "_import_venue_check", return_value=fake_vc
+        ), patch.object(
+            bridge_menubar,
+            "assemble_venue_alert",
+            return_value=("Venue Check", "body", False),
+        ):
+            bridge_menubar.BridgeMenuBar._run_venue_check_worker(menu, True)
+        fake_vc.write_venue_check_seen.assert_called_once()
+        menu.performSelectorOnMainThread_withObject_waitUntilDone_.assert_called_once()
+        # Manual path must not stamp the first-run marker.
+        menu._venue_check_in_progress = False
+        fake_vc.write_venue_check_seen.reset_mock()
+        with patch.object(
+            bridge_menubar, "_import_venue_check", return_value=fake_vc
+        ), patch.object(
+            bridge_menubar,
+            "assemble_venue_alert",
+            return_value=("Venue Check", "body", False),
+        ):
+            bridge_menubar.BridgeMenuBar._run_venue_check_worker(menu, False)
+        fake_vc.write_venue_check_seen.assert_not_called()
 
 
 if __name__ == "__main__":
