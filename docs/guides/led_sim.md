@@ -111,6 +111,13 @@ Presets:
   on the middle run for the operator room; the card does not claim a corner.
 - **Custom** — current points, freely editable on the canvas.
 
+**Chain direction.** On the real room hang (∩ / perimeter, junction top-center),
+the post-drop comet chase always starts on the **left** wall (operator-observed
+2026-07-15). That matches `flip_chain: false` with the default perimeter point
+order (start bottom-center → bottom-left → up the left wall → junction → right
+wall → bottom-right). Flip chain only when the physical hang is the opposite
+way; geometry itself does not change.
+
 The Python engine function `layout_led_positions(profile)` is the tested
 reference (fixed pitch, absolute junction, truncation/shortfall). `ledsim-view.js`
 mirrors it. LED screen positions are cached per layout/resize, not recomputed

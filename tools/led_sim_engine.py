@@ -332,6 +332,7 @@ def perimeter_preset_points(room_mm: tuple[float, float] | list[float] | None = 
             [width, 0.0],
         ]
     half = width / 2.0
+    # Operator 2026-07-15: real ∩ hang — post-drop comet always starts LEFT; flip_chain=false is correct.
     return [
         [half - gap / 2.0, 0.0],
         [0.0, 0.0],
