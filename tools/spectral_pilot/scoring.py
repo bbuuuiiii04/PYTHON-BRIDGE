@@ -7,6 +7,8 @@ a paired lineage is win/loss/tie by the sign of its summed row deltas.
 """
 from __future__ import annotations
 
+from datetime import datetime
+
 # decisive family answers that can contradict each other (B8)
 _DECISIVE_FAMILY = frozenset({"WALL", "COMET", "HOUSE", "mixed", "none"})
 _MARKER_OPPOSITE = {("genuine", "not_genuine"), ("not_genuine", "genuine")}
@@ -158,3 +160,21 @@ def stability_flips(rows) -> dict:
 def flip_gap_pp(candidate_flip_rate: float, baseline_flip_rate: float) -> float:
     """Percentage-point gap; positive means the candidate flips more (worse)."""
     return round((candidate_flip_rate - baseline_flip_rate) * 100.0, 6)
+
+
+def prediction_freeze_setup_failures(freeze_utc, first_commit_utc) -> list:
+    """Gate-1 setup check (spec B8): predictions must freeze BEFORE any human
+    response. A ``freeze_utc`` at or after the earliest ``commit_utc`` is a
+    post-label prediction — a setup hard FAIL. Returns named failures (empty if
+    fine, or if there are no responses yet).
+    """
+    if first_commit_utc is None:
+        return []
+    try:
+        frozen = datetime.fromisoformat(freeze_utc)
+        first = datetime.fromisoformat(first_commit_utc)
+    except ValueError:
+        return [f"unparseable freeze/commit timestamp: {freeze_utc!r} / {first_commit_utc!r}"]
+    if frozen >= first:
+        return [f"post_label_prediction: freeze_utc {freeze_utc} >= first commit_utc {first_commit_utc}"]
+    return []

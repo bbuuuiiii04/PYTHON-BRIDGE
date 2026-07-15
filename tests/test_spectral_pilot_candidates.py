@@ -1,10 +1,12 @@
 """Firewall + candidate determinism + abstention (tests D4, D5, D6)."""
+import math
 import unittest
 
 from tools.spectral_pilot import candidates as cand
+from tools.spectral_pilot import scoring, verdict
 from tools.spectral_pilot.canonical import sha256_hex
 from tools.spectral_pilot.firewall import (
-    ALLOWLIST, EligibleDevelopmentRow, FrozenFeatureRow,
+    ALLOWLIST, EligibleDevelopmentRow, FrozenFeatureRow, build_query_row,
 )
 
 
@@ -66,6 +68,90 @@ class FirewallTests(unittest.TestCase):
     def test_str_feature_rejected(self):
         with self.assertRaises(TypeError):
             query(sub_db="loud")  # type: ignore[arg-type]
+
+    def test_raw_ctor_forbidden_feature_key_raises(self):
+        # a leak in the RAW constructor (not just from_window) must still raise (D4)
+        with self.assertRaises(ValueError):
+            FrozenFeatureRow(features={**feats(), "title": "x"}, coverage=16.0, marker_beat=128,
+                             query_lineage_id="l", query_duplicate_group="d")
+
+    def test_candidate_fed_forbidden_field_raises(self):
+        # a development neighbour carrying any forbidden field raises at construction (D4)
+        with self.assertRaises(ValueError):
+            EligibleDevelopmentRow(features={**feats(), "path": "/x"}, coverage=16.0,
+                                   recording_lineage_id="l", audio_duplicate_group="d",
+                                   track_instance_id="t", marker_beat=128, targets={"genuine": "genuine"})
+
+
+class BuildQueryRowSeamTests(unittest.TestCase):
+    def _win(self, **over):
+        w = {k: 0.0 for k in ALLOWLIST}
+        w["coverage"] = 16.0
+        w.update(over)
+        return w
+
+    def test_missing_field_yields_abstain_reasons(self):
+        w = self._win()
+        del w["sub_db"]
+        row, reasons = build_query_row(w, query_lineage_id="l", query_duplicate_group="d", marker_beat=128)
+        self.assertIsNone(row)
+        self.assertIn("missing_field:sub_db", reasons)
+
+    def test_nonfinite_field_yields_abstain_reasons(self):
+        row, reasons = build_query_row(self._win(bass_db=math.inf),
+                                       query_lineage_id="l", query_duplicate_group="d", marker_beat=128)
+        self.assertIsNone(row)
+        self.assertIn("nonfinite_field:bass_db", reasons)
+
+    def test_forbidden_key_still_raises(self):
+        # a leak is never an abstention — build_query_row raises, not returns reasons
+        with self.assertRaises(ValueError):
+            build_query_row({**self._win(), "artist": "x"},
+                            query_lineage_id="l", query_duplicate_group="d", marker_beat=128)
+
+    def test_clean_window_builds_row(self):
+        row, reasons = build_query_row(self._win(sub_db=1.0),
+                                       query_lineage_id="l", query_duplicate_group="d", marker_beat=128)
+        self.assertEqual(reasons, [])
+        self.assertEqual(row.marker_beat, 128)
+
+
+class PredictionFreezeOrderingTests(unittest.TestCase):
+    """A freeze at/after the first human response is a gate-1 setup failure (D4)."""
+
+    def _verdict_inputs(self, setup_failures):
+        return dict(
+            pilot_seed="s", created_from_head="h", input_hashes={}, setup_failures=setup_failures,
+            repeatability=dict(marker_repeats=6, hardness_repeats=6, family_repeats=4,
+                               marker_contradictions=0, hardness_contradictions=0, family_contradictions=0),
+            workload=dict(active_seconds=3000, decisions_total=100, operator_stop_exhausting=False),
+            genuine=dict(comparable_calls=30, comparable_lineages=16, correct_delta=6,
+                         lineage_win_margin=4, candidate_abstentions=2, stopped=False),
+            hardness=dict(comparable_calls=26, comparable_lineages=14, correct_delta=6,
+                          lineage_win_margin=4, candidate_abstentions=2, stopped=False),
+            family=dict(comparable_lineages=14, correct_delta=4, lineage_win_margin=4,
+                        candidate_abstentions=2, decisive_noncommittal_human=2, stopped=False),
+            stability=dict(genuine_central_rows=28, hardness_central_rows=28,
+                           genuine_flip_gap_pp=0.0, hardness_flip_gap_pp=0.0),
+            seed_pool_eligible_lineages=18,
+        )
+
+    def test_late_freeze_is_gate1_setup_failure(self):
+        fails = scoring.prediction_freeze_setup_failures(
+            "2026-07-15T10:00:00+00:00", "2026-07-15T09:00:00+00:00")
+        self.assertTrue(fails)
+        v = verdict.compute_verdict(**self._verdict_inputs(fails))
+        self.assertEqual(v.integrated, "FAIL")
+        self.assertIn("1", v.failed_gates)
+
+    def test_early_freeze_is_clean(self):
+        self.assertEqual(
+            scoring.prediction_freeze_setup_failures(
+                "2026-07-15T08:00:00+00:00", "2026-07-15T09:00:00+00:00"), [])
+
+    def test_no_responses_yet_is_clean(self):
+        self.assertEqual(
+            scoring.prediction_freeze_setup_failures("2026-07-15T08:00:00+00:00", None), [])
 
 
 def _genuine_population():

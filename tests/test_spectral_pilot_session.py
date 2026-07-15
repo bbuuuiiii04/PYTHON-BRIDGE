@@ -131,6 +131,52 @@ class RecoveryTests(unittest.TestCase):
             r.commit("c0", "state", "genuine", "genuine", recognized=False, response_seconds=1.0)
 
 
+class WorkloadAndTailTests(unittest.TestCase):
+    """65-min ceiling, hardness-before-genuine, valid-unterminated tail (D10)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.ws = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_65_min_ceiling_refuses_commit(self):
+        r = runner(self.ws, Clock())
+        r.start_session("P1")
+        # two durable playbacks 3900s apart in segment 1 => active_seconds >= 65 min
+        t0 = datetime.fromtimestamp(0, tz=timezone.utc).isoformat()
+        t1 = datetime.fromtimestamp(65 * 60, tz=timezone.utc).isoformat()
+        r.playbacks = [{"segment_index": 1, "utc": t0}, {"segment_index": 1, "utc": t1}]
+        with self.assertRaises(WorkloadError):
+            r.commit("c0", "state", "genuine", "genuine", recognized=False, response_seconds=1.0)
+
+    def test_hardness_before_genuine_rejected(self):
+        r = runner(self.ws, Clock())
+        r.start_session("P1")
+        r.commit("c0", "state", "not_genuine", "not_genuine", recognized=False, response_seconds=1.0)
+        with self.assertRaises(ValueError):
+            r.commit("c0", "hardness", "harder", "harder", recognized=False, response_seconds=1.0)
+
+    def test_hardness_after_genuine_allowed(self):
+        r = runner(self.ws, Clock())
+        r.start_session("P1")
+        r.commit("c0", "state", "genuine", "genuine", recognized=False, response_seconds=1.0)
+        r.commit("c0", "hardness", "harder", "harder", recognized=False, response_seconds=1.0)
+        self.assertEqual(r.decisions_total(), 2)
+
+    def test_valid_unterminated_tail_dropped(self):
+        r = runner(self.ws, Clock())
+        r.start_session("P1")
+        r.commit("c0", "state", "not_genuine", "not_genuine", recognized=False, response_seconds=1.0)
+        # append a VALID JSON object with NO trailing newline: a torn write, dropped
+        with (self.ws / "responses.jsonl").open("a") as fh:
+            fh.write('{"x":1}')
+        state = runner(self.ws, Clock()).resume()
+        self.assertTrue(state.torn_tail)
+        self.assertEqual(state.decisions_total, 1)          # only the durable row survived
+
+
 class OneSessionPerDayTests(unittest.TestCase):
     def test_new_session_refused_same_local_date(self):
         with tempfile.TemporaryDirectory() as d:

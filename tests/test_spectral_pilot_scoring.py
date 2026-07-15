@@ -85,6 +85,20 @@ class ReconciliationTests(unittest.TestCase):
         self.assertEqual(c["hardness_contradictions"], 1)
         self.assertEqual(c["family_contradictions"], 1)
 
+    def test_re_exposed_repeat_pair_excluded(self):
+        reps = [
+            {"axis": "marker", "answers": ["genuine", "not_genuine"],
+             "source_card_id": "s1", "instance_card_id": "i1"},
+            {"axis": "marker", "answers": ["genuine", "genuine"],
+             "source_card_id": "s2", "instance_card_id": "i2"},
+        ]
+        base = scoring.repeatability_counters(reps)
+        self.assertEqual((base["marker_repeats"], base["marker_contradictions"]), (2, 1))
+        # re-exposing either the source or the instance drops that pair entirely
+        for kill in ("s1", "i1"):
+            c = scoring.repeatability_counters(reps, re_exposed_card_ids={kill})
+            self.assertEqual((c["marker_repeats"], c["marker_contradictions"]), (1, 0), kill)
+
     def test_stability_flip_rate(self):
         rows = [
             {"central": "genuine", "shifts": ["genuine", "genuine", "not_genuine", "invalid"]},

@@ -165,5 +165,75 @@ class RepeatPlacementTests(unittest.TestCase):
         self.assertEqual(len(lineages), 18)
 
 
+class MultiRowLineageRepresentativeTests(unittest.TestCase):
+    """A lineage with >1 eligible row picks a hash-stable representative (D5, B3.4)."""
+
+    def _corpus(self):
+        rows = [make_row(i) for i in range(18)]
+        # a SECOND eligible row in lineage lin-0, distinct dup group + content id
+        rows.append(make_row(0, content_id_locator="loc-0b", audio_duplicate_group="dup-0b",
+                             audio_sha256="f" * 64))
+        ls = {r.content_id_locator: "confirmed" for r in rows}
+        return rows, ls
+
+    def test_permuted_input_identical_manifest_id(self):
+        rows, ls = self._corpus()
+        a = run(rows, ls)
+        b = run(list(reversed(rows)), ls)
+        self.assertEqual(a.status, "OK")
+        self.assertEqual(a.manifest_id, b.manifest_id)
+
+    def test_representative_is_lowest_content_id_hash(self):
+        rows, ls = self._corpus()
+        r = run(rows, ls)
+        rep = [s.content_id_locator for s in r.selected_rows if s.recording_lineage_id == "lin-0"][0]
+        expected = min(["loc-0", "loc-0b"], key=lambda c: sel.selection_hash(SEED, c))
+        self.assertEqual(rep, expected)
+
+    def test_curator_confirmation_stamped(self):
+        rows, ls = self._corpus()
+        r = sel.build_selection(rows, pilot_seed=SEED, created_from_head=HEAD, dev_content_ids=set(),
+                                dev_lineages=set(), scripted_ids=set(), unresolved_ids=set(),
+                                lineage_states=ls, adjudications={"loc-1": "confirmed_unrelated"})
+        stamped = [s.curator_confirmation for s in r.selected_rows if s.content_id_locator == "loc-1"]
+        self.assertEqual(stamped, ["confirmed_unrelated"])
+        others = {s.curator_confirmation for s in r.selected_rows if s.content_id_locator != "loc-1"}
+        self.assertEqual(others, {"not_applicable"})
+
+
+class CardManifestRowTests(unittest.TestCase):
+    """card_manifest_rows: clip_spec + card_hash, anchor beats, montage windows (B7)."""
+
+    def test_marker_and_montage_clip_specs(self):
+        rows, ls = eligible_corpus()
+        r = run(rows, ls)
+        mrows = sel.card_manifest_rows(SEED, r.cards)
+        by_type = {}
+        for m in mrows:
+            by_type.setdefault(m.card_type, []).append(m)
+        marker = by_type["marker_state"][0]
+        self.assertEqual(sorted(marker.clip_spec), ["audio_sha256", "end_beat", "start_beat"])
+        self.assertEqual(marker.clip_spec["end_beat"] - marker.clip_spec["start_beat"], 16)
+        montage = by_type["family_montage"][0]
+        self.assertEqual(len(montage.clip_spec["windows"]), 2)
+        self.assertIsNotNone(montage.display_left_id)
+        self.assertIsNotNone(montage.display_right_id)
+        self.assertEqual(len({m.card_hash for m in mrows}), len(mrows))
+
+    def test_anchor_cards_carry_marker_beat_and_clip(self):
+        rows, ls = eligible_corpus()
+        # seven anchors, each with its own pinned marker beat
+        anchors = [make_row(100 + i, anchor_marker_beat=128) for i in range(7)]
+        for a in anchors:
+            ls[a.content_id_locator] = "confirmed"
+        r = run(rows, ls, anchor_rows=anchors)
+        mrows = sel.card_manifest_rows(SEED, r.cards)
+        anchor_cards = [m for m in mrows if m.card_type == "anchor_confirm"]
+        self.assertEqual(len(anchor_cards), 7)
+        for m in anchor_cards:
+            self.assertEqual(m.marker_beat, 128)
+            self.assertEqual(m.clip_spec["end_beat"] - m.clip_spec["start_beat"], 16)
+
+
 if __name__ == "__main__":
     unittest.main()
