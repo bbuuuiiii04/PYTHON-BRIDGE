@@ -70,6 +70,7 @@ class FrozenFeatureRow:
     query_duplicate_group: str              # self-exclusion only, never a feature
 
     def __post_init__(self):
+        _reject_forbidden(self.features.keys())      # a leak in the raw ctor still raises
         object.__setattr__(self, "features", _finite_vector(self.features))
         if not math.isfinite(float(self.coverage)):
             raise ValueError("coverage must be finite")
@@ -90,6 +91,35 @@ class FrozenFeatureRow:
         return [self.features[k] for k in retained]
 
 
+def build_query_row(window, *, query_lineage_id, query_duplicate_group, marker_beat):
+    """Construction seam (spec B4/B10). Returns ``(FrozenFeatureRow, [])`` on a clean
+    window, or ``(None, reasons)`` when an allowlist field is MISSING / non-numeric /
+    NONFINITE — so the caller emits a named abstention instead of crashing a freeze.
+
+    A forbidden key still RAISES: a metadata leak is never an abstention.
+    """
+    _reject_forbidden(window.keys())
+    reasons = []
+    for k in ALLOWLIST:
+        if k not in window:
+            reasons.append(f"missing_field:{k}")
+            continue
+        v = window[k]
+        if type(v) not in (int, float):
+            reasons.append(f"nonnumeric_field:{k}")
+        elif not math.isfinite(v):
+            reasons.append(f"nonfinite_field:{k}")
+    if reasons:
+        return None, reasons
+    return FrozenFeatureRow(
+        features={k: float(window[k]) for k in ALLOWLIST},
+        coverage=float(window.get("coverage", 0.0)),
+        marker_beat=int(marker_beat),
+        query_lineage_id=query_lineage_id,
+        query_duplicate_group=query_duplicate_group,
+    ), []
+
+
 @dataclass(frozen=True)
 class EligibleDevelopmentRow:
     """A development neighbour: allowlist vector + grouping keys + per-axis targets.
@@ -106,6 +136,7 @@ class EligibleDevelopmentRow:
     targets: dict = field(default_factory=dict)   # {"genuine": .., "hardness": .., "family": ..}
 
     def __post_init__(self):
+        _reject_forbidden(self.features.keys())      # a candidate-fed leak still raises
         object.__setattr__(self, "features", _finite_vector(self.features))
 
     @classmethod

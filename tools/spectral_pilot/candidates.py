@@ -131,9 +131,9 @@ def _retrieve(query_features, dev_items, scaler, *, query_lineage, query_dup, k=
 
 def _pred(method, axis, target_id, *, prediction, abstained, reasons,
           eligible=(), excluded=(), distances=(), raw_score=None, scaler=None,
-          manifest_hash="", input_hash=""):
+          manifest_hash="", input_hash="", pilot_seed=""):
     return PredictionRow(
-        schema_version=SCHEMA_VERSION, pilot_seed="", method_version=method, axis=axis,
+        schema_version=SCHEMA_VERSION, pilot_seed=pilot_seed, method_version=method, axis=axis,
         target_id=target_id, manifest_hash=manifest_hash, input_hash=input_hash,
         scaler_population_hash=(scaler.scaler_population_hash if scaler else ""),
         eligible_neighbour_ids=list(eligible), excluded_neighbour_ids=list(excluded),
@@ -142,68 +142,69 @@ def _pred(method, axis, target_id, *, prediction, abstained, reasons,
     )
 
 
+def abstain(method, axis, target_id, reasons, *, pilot_seed="", manifest_hash="", input_hash=""):
+    """Named abstention PredictionRow for a build_query_row reason list (spec B4/B10)."""
+    return _pred(method, axis, target_id, prediction=None, abstained=True, reasons=list(reasons),
+                 pilot_seed=pilot_seed, manifest_hash=manifest_hash, input_hash=input_hash)
+
+
 def _coverage_ok(frozen_row) -> bool:
     return frozen_row.coverage >= 16.0
 
 
 # --- candidate C: retrieval ---------------------------------------------------
-def predict_retrieval_genuine(frozen_row, dev_rows, scaler, target_id) -> PredictionRow:
+def predict_retrieval_genuine(frozen_row, dev_rows, scaler, target_id, *,
+                              pilot_seed="", manifest_hash="", input_hash="") -> PredictionRow:
+    def P(**kw):
+        return _pred(CANDIDATE_C, "genuine", target_id, scaler=scaler,
+                     pilot_seed=pilot_seed, manifest_hash=manifest_hash, input_hash=input_hash, **kw)
     if not _coverage_ok(frozen_row):
-        return _pred(CANDIDATE_C, "genuine", target_id, prediction=None, abstained=True,
-                     reasons=["coverage_lt_16"], scaler=scaler)
+        return P(prediction=None, abstained=True, reasons=["coverage_lt_16"])
     if not scaler.retained:
-        return _pred(CANDIDATE_C, "genuine", target_id, prediction=None, abstained=True,
-                     reasons=["zero_retained_fields"], scaler=scaler)
+        return P(prediction=None, abstained=True, reasons=["zero_retained_fields"])
     dev = [r for r in dev_rows if "genuine" in r.targets]
     n_lin, top, nearest = _retrieve(frozen_row.features, dev, scaler,
                                     query_lineage=frozen_row.query_lineage_id,
                                     query_dup=frozen_row.query_duplicate_group)
     if n_lin < 3:
-        return _pred(CANDIDATE_C, "genuine", target_id, prediction=None, abstained=True,
-                     reasons=["lt_3_eligible_lineages"], scaler=scaler)
+        return P(prediction=None, abstained=True, reasons=["lt_3_eligible_lineages"])
     if nearest > scaler.ood_threshold:
-        return _pred(CANDIDATE_C, "genuine", target_id, prediction=None, abstained=True,
-                     reasons=["ood"], scaler=scaler, distances=[nearest])
+        return P(prediction=None, abstained=True, reasons=["ood"], distances=[nearest])
     votes = Counter(r.targets["genuine"] for (_, _, _, r) in top)
     ordered = votes.most_common()
     if len(ordered) > 1 and ordered[0][1] == ordered[1][1]:
-        return _pred(CANDIDATE_C, "genuine", target_id, prediction=None, abstained=True,
-                     reasons=["vote_tie"], scaler=scaler)
+        return P(prediction=None, abstained=True, reasons=["vote_tie"])
     pred = ordered[0][0]
-    return _pred(CANDIDATE_C, "genuine", target_id, prediction=pred, abstained=False,
-                 reasons=[], scaler=scaler,
-                 eligible=[r.track_instance_id for (_, _, _, r) in top],
-                 distances=[d for (d, _, _, _) in top],
-                 raw_score=ordered[0][1] / len(top))
+    return P(prediction=pred, abstained=False, reasons=[],
+             eligible=[r.track_instance_id for (_, _, _, r) in top],
+             distances=[d for (d, _, _, _) in top], raw_score=ordered[0][1] / len(top))
 
 
-def predict_retrieval_hardness(frozen_row, dev_rows, scaler, target_id, anchor_tier) -> PredictionRow:
+def predict_retrieval_hardness(frozen_row, dev_rows, scaler, target_id, anchor_tier, *,
+                               pilot_seed="", manifest_hash="", input_hash="") -> PredictionRow:
+    def P(**kw):
+        return _pred(CANDIDATE_C, "hardness", target_id, scaler=scaler,
+                     pilot_seed=pilot_seed, manifest_hash=manifest_hash, input_hash=input_hash, **kw)
     if not _coverage_ok(frozen_row):
-        return _pred(CANDIDATE_C, "hardness", target_id, prediction=None, abstained=True,
-                     reasons=["coverage_lt_16"], scaler=scaler)
+        return P(prediction=None, abstained=True, reasons=["coverage_lt_16"])
     if anchor_tier not in _TIER_ORD:
-        return _pred(CANDIDATE_C, "hardness", target_id, prediction=None, abstained=True,
-                     reasons=["missing_anchor_tier"], scaler=scaler)
+        return P(prediction=None, abstained=True, reasons=["missing_anchor_tier"])
     if not scaler.retained:
-        return _pred(CANDIDATE_C, "hardness", target_id, prediction=None, abstained=True,
-                     reasons=["zero_retained_fields"], scaler=scaler)
+        return P(prediction=None, abstained=True, reasons=["zero_retained_fields"])
     dev = [r for r in dev_rows if "hardness" in r.targets]
     n_lin, top, nearest = _retrieve(frozen_row.features, dev, scaler,
                                     query_lineage=frozen_row.query_lineage_id,
                                     query_dup=frozen_row.query_duplicate_group)
     if n_lin < 3:
-        return _pred(CANDIDATE_C, "hardness", target_id, prediction=None, abstained=True,
-                     reasons=["lt_3_eligible_lineages"], scaler=scaler)
+        return P(prediction=None, abstained=True, reasons=["lt_3_eligible_lineages"])
     if nearest > scaler.ood_threshold:
-        return _pred(CANDIDATE_C, "hardness", target_id, prediction=None, abstained=True,
-                     reasons=["ood"], scaler=scaler, distances=[nearest])
+        return P(prediction=None, abstained=True, reasons=["ood"], distances=[nearest])
     ords = sorted(_TIER_ORD[r.targets["hardness"]] for (_, _, _, r) in top)
     median_ord = ords[len(ords) // 2]  # k=3 -> middle
     pred = _pair_label(median_ord, _TIER_ORD[anchor_tier])
-    return _pred(CANDIDATE_C, "hardness", target_id, prediction=pred, abstained=False,
-                 reasons=[], scaler=scaler,
-                 eligible=[r.track_instance_id for (_, _, _, r) in top],
-                 distances=[d for (d, _, _, _) in top], raw_score=float(median_ord))
+    return P(prediction=pred, abstained=False, reasons=[],
+             eligible=[r.track_instance_id for (_, _, _, r) in top],
+             distances=[d for (d, _, _, _) in top], raw_score=float(median_ord))
 
 
 def _pair_label(pred_ord, anchor_ord) -> str:
@@ -214,29 +215,28 @@ def _pair_label(pred_ord, anchor_ord) -> str:
     return "tied"
 
 
-def predict_retrieval_family(query_desc, dev_descs, scaler, target_id) -> PredictionRow:
+def predict_retrieval_family(query_desc, dev_descs, scaler, target_id, *,
+                             pilot_seed="", manifest_hash="", input_hash="") -> PredictionRow:
     """Family retrieval over per-lineage montage descriptors (median+IQR)."""
+    def P(**kw):
+        return _pred(CANDIDATE_C, "family", target_id, scaler=scaler,
+                     pilot_seed=pilot_seed, manifest_hash=manifest_hash, input_hash=input_hash, **kw)
     if not scaler.retained:
-        return _pred(CANDIDATE_C, "family", target_id, prediction=None, abstained=True,
-                     reasons=["zero_retained_fields"], scaler=scaler)
+        return P(prediction=None, abstained=True, reasons=["zero_retained_fields"])
     n_lin, top, nearest = _retrieve(query_desc.features, dev_descs, scaler,
                                     query_lineage=query_desc.recording_lineage_id,
                                     query_dup=query_desc.audio_duplicate_group)
     if n_lin < 3:
-        return _pred(CANDIDATE_C, "family", target_id, prediction=None, abstained=True,
-                     reasons=["lt_3_eligible_lineages"], scaler=scaler)
+        return P(prediction=None, abstained=True, reasons=["lt_3_eligible_lineages"])
     if nearest > scaler.ood_threshold:
-        return _pred(CANDIDATE_C, "family", target_id, prediction=None, abstained=True,
-                     reasons=["ood"], scaler=scaler, distances=[nearest])
+        return P(prediction=None, abstained=True, reasons=["ood"], distances=[nearest])
     votes = Counter(r.targets["family"] for (_, _, _, r) in top)
     ordered = votes.most_common()
     if len(ordered) > 1 and ordered[0][1] == ordered[1][1]:
-        return _pred(CANDIDATE_C, "family", target_id, prediction=None, abstained=True,
-                     reasons=["vote_tie"], scaler=scaler)
-    return _pred(CANDIDATE_C, "family", target_id, prediction=ordered[0][0], abstained=False,
-                 reasons=[], scaler=scaler,
-                 eligible=[r.track_instance_id for (_, _, _, r) in top],
-                 distances=[d for (d, _, _, _) in top])
+        return P(prediction=None, abstained=True, reasons=["vote_tie"])
+    return P(prediction=ordered[0][0], abstained=False, reasons=[],
+             eligible=[r.track_instance_id for (_, _, _, r) in top],
+             distances=[d for (d, _, _, _) in top])
 
 
 def montage_descriptor_features(row_a: dict, row_b: dict, allowlist=ALLOWLIST) -> dict:
@@ -253,45 +253,52 @@ FAMILY_ALLOWLIST = tuple(k + s for k in ALLOWLIST for s in ("__med", "__iqr"))
 
 
 # --- baseline A: read-only F2 mapping ----------------------------------------
-def predict_baseline_a_family(target_id, plan_family_a, plan_family_b) -> PredictionRow:
+def predict_baseline_a_family(target_id, plan_family_a, plan_family_b, *,
+                              pilot_seed="", manifest_hash="", input_hash="") -> PredictionRow:
     """Two-moment family from F2 (spec B4): NEUTRAL->none, both match->family, differ->mixed."""
+    prov = dict(pilot_seed=pilot_seed, manifest_hash=manifest_hash, input_hash=input_hash)
     if plan_family_a is None or plan_family_b is None:
         return _pred(BASELINE_A, "family", target_id, prediction=None, abstained=True,
-                     reasons=["f2_plan_missing"])
+                     reasons=["f2_plan_missing"], **prov)
     fa = "none" if plan_family_a == "NEUTRAL" else plan_family_a
     fb = "none" if plan_family_b == "NEUTRAL" else plan_family_b
     pred = fa if fa == fb else "mixed"
-    return _pred(BASELINE_A, "family", target_id, prediction=pred, abstained=False, reasons=[])
+    return _pred(BASELINE_A, "family", target_id, prediction=pred, abstained=False, reasons=[], **prov)
 
 
-def predict_baseline_a_hardness(target_id, marker_tier, anchor_tier) -> PredictionRow:
+def predict_baseline_a_hardness(target_id, marker_tier, anchor_tier, *,
+                                pilot_seed="", manifest_hash="", input_hash="") -> PredictionRow:
+    prov = dict(pilot_seed=pilot_seed, manifest_hash=manifest_hash, input_hash=input_hash)
     if marker_tier not in _TIER_ORD or anchor_tier not in _TIER_ORD:
         return _pred(BASELINE_A, "hardness", target_id, prediction=None, abstained=True,
-                     reasons=["missing_tier"])
+                     reasons=["missing_tier"], **prov)
     return _pred(BASELINE_A, "hardness", target_id,
                  prediction=_pair_label(_TIER_ORD[marker_tier], _TIER_ORD[anchor_tier]),
-                 abstained=False, reasons=[])
+                 abstained=False, reasons=[], **prov)
 
 
-def predict_baseline_a_genuine(target_id) -> PredictionRow:
+def predict_baseline_a_genuine(target_id, *, pilot_seed="", manifest_hash="", input_hash="") -> PredictionRow:
     """F2 has no genuine-marker classifier; it abstains (spec B4)."""
     return _pred(BASELINE_A, "genuine", target_id, prediction=None, abstained=True,
-                 reasons=["f2_abstains_genuine"])
+                 reasons=["f2_abstains_genuine"],
+                 pilot_seed=pilot_seed, manifest_hash=manifest_hash, input_hash=input_hash)
 
 
 # --- baseline B: development majority (genuine axis only) ---------------------
-def predict_baseline_b_genuine(target_id, dev_rows) -> PredictionRow:
+def predict_baseline_b_genuine(target_id, dev_rows, *,
+                               pilot_seed="", manifest_hash="", input_hash="") -> PredictionRow:
+    prov = dict(pilot_seed=pilot_seed, manifest_hash=manifest_hash, input_hash=input_hash)
     labels = [r.targets["genuine"] for r in dev_rows if "genuine" in r.targets]
     votes = Counter(labels)
     ordered = votes.most_common()
     if not ordered:
         return _pred(BASELINE_B, "genuine", target_id, prediction=None, abstained=True,
-                     reasons=["no_comparable_targets"])
+                     reasons=["no_comparable_targets"], **prov)
     if len(ordered) > 1 and ordered[0][1] == ordered[1][1]:
         return _pred(BASELINE_B, "genuine", target_id, prediction=None, abstained=True,
-                     reasons=["dev_majority_tie"])
+                     reasons=["dev_majority_tie"], **prov)
     return _pred(BASELINE_B, "genuine", target_id, prediction=ordered[0][0], abstained=False,
-                 reasons=[], raw_score=ordered[0][1] / len(labels))
+                 reasons=[], raw_score=ordered[0][1] / len(labels), **prov)
 
 
 # --- diagnostics (never in integrated PASS) ----------------------------------
