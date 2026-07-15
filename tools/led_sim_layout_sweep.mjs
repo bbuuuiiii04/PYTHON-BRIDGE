@@ -26,6 +26,7 @@ const ASSETS = join(__dirname, "led_sim_assets");
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const WIDTHS = [];
 for (let w = 900; w <= 1728; w += 100) WIDTHS.push(w);
+if (WIDTHS[WIDTHS.length - 1] !== 1728) WIDTHS.push(1728);
 const HEIGHTS = [700, 900];
 
 const STUB_CATALOG = {

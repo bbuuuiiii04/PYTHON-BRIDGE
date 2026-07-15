@@ -42,9 +42,16 @@ sheet (zero page scroll), tablist semantics, and contrast.
 
 **AWR-248** adds the shared **Pad | Lab | Sim** route tabs in the top bar
 (plain links: pad `:8766`, lab `:8766/lab`, sim `:8767` — canonical defaults)
-and a stage **room-size chip** near the bottom of the room view
-(e.g. `17.1 × 7.5 ft`). Clicking the chip opens the Layout tab and focuses
-Room width so the size is editable where the operator is already looking.
+and a stage **room-size** label near the bottom wall of the room drawing
+(e.g. `17.1 × 7.5 ft`, lowest label priority). Clicking it opens the Layout
+tab and focuses Room width.
+
+**AWR-249** hardens mid-width shell layout (≈900–1280): topbar owns brand+nav
+without clipping; desktop stage+sidecar holds from ≥900px (sidecar ≥300px);
+HUD text lives in a strip **below** the canvas (never over the room); short
+stages hide provenance chips into the `?` help; tick/room labels clamp inside
+the canvas. Layout sweep: `node tools/led_sim_layout_sweep.mjs`
+(playwright-core + system Chrome).
 
 Each group of six dots receives one RGB command because the H612D exposes 60
 groups, not 360 separately controllable pixels. Screen optics (gamma, gains,
