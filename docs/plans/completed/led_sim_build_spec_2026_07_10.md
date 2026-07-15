@@ -1,16 +1,19 @@
 ---
-doc_status: current
-truth_level: build-spec (ACTIVE, AWR-196)
-last_verified_commit: 20329d7
-last_verified_date: 2026-07-10
+doc_status: superseded-spec
+truth_level: historical-build-spec
+last_verified_commit: f800912
+last_verified_date: 2026-07-15
 validation_scope: >
-  Build spec for the ACCURATE LED render & simulation tool (AWR-196, ledsim lane).
-  Every Part A claim re-derived at HEAD 20329d7 by the ledsim manager. Charter:
-  docs/prompts/active/ledsim_charter_2026_07_10.md. Executes on an Opus/HIGH tmux
-  build lane; manager adversarial review + executive gate follow.
+  Historical room-layout simulator build spec for AWR-196. The operator
+  replaced this goal on 2026-07-15 with fixture-level H612D parity and removed
+  room geometry from scope. Do not execute; current truth is the code,
+  docs/guides/led_sim.md, and the AWR-196 registry row.
 ---
 
 # Implementation Spec — LED room simulator (AWR-196)
+
+> **SUPERSEDED 2026-07-15. Do not execute this room-layout spec.** It is kept
+> only as provenance for the first simulator build.
 
 Build a standalone, near-real-life simulator of the operator's Govee H612D
 perimeter LED strip: a local web page that renders what the real room does when

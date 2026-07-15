@@ -1,8 +1,12 @@
 # LEDSIM charter — accurate LED render & simulation (operator order ~23:50)
 
-doc_status: current
-truth_level: dispatch-charter (ACTIVE)
+doc_status: completed-prompt
+truth_level: historical-dispatch-charter
 seat: dedicated Fable/xhigh manager lane `ledsim`, own build workflow, full review chain
+
+> **SUPERSEDED 2026-07-15. Do not dispatch this room-layout charter.** The
+> operator replaced it with fixture-level H612D parity and removed room geometry
+> from scope. Current truth is the code, `docs/guides/led_sim.md`, and AWR-196.
 
 ## Operator order (verbatim intent)
 

@@ -439,7 +439,7 @@ at 12:35 AM.
   └ 374969b overnight program artifacts: spectral refactor charter
     (SOL-review-derived, 5 open questions), wave-1 looks brief, menubar/pad
     … +4 lines (ctrl + t to view transcript)
-    docs/prompts/active/ledsim_state_2026_07_10.md
+    docs/prompts/completed/ledsim_state_2026_07_10.md
     docs/setup/usb_launcher_runbook.md
 
 • Explored

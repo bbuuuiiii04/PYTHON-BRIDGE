@@ -12,17 +12,23 @@ const state = {
   frameTimes: [],
   markers: [],
   framesFps: 60,
-  cycleMs: 0,
+  durationMs: 0,
+  durationSource: "unknown",
+  timingSource: "unknown",
+  provenance: "unknown",
   playing: false,
   loop: true,
   t0: 0,
+  pausedElapsedMs: 0,
   manualIdx: 0,
-  lastPaintedIdx: -1,
+  lastPresentedOrdinal: null,
   display: null,
   lastTick: 0,
-  paintWindowAt: 0,
-  paintCount: 0,
-  skippedPaints: 0,
+  healthWindowAt: 0,
+  rafCount: 0,
+  drawCount: 0,
+  missedFrames: 0,
+  frameRequestToken: 0,
 };
 
 let view = null;
@@ -47,7 +53,8 @@ function showWarnings() {
   element.hidden = warnings.length === 0;
 }
 
-async function api(method, path, body) {
+async function api(method, path, body, frameToken = null) {
+  const current = () => frameToken === null || frameToken === state.frameRequestToken;
   let response;
   try {
     response = await fetch(path, {
@@ -56,17 +63,27 @@ async function api(method, path, body) {
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch (error) {
-    showError(`Could not reach the simulator: ${error}`);
+    if (current()) showError(`Could not reach the simulator: ${error}`);
     throw error;
   }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     const detail = data.errors ? data.errors.join("; ") : (data.error || response.statusText);
-    showError(detail);
+    if (current()) showError(detail);
     throw new Error(detail);
   }
-  showError("");
+  if (current()) showError("");
   return data;
+}
+
+async function latestFrameRequest(path, body) {
+  const token = ++state.frameRequestToken;
+  try {
+    const result = await api("POST", path, body, token);
+    return token === state.frameRequestToken ? result : null;
+  } catch (_error) {
+    return null;
+  }
 }
 
 const KNOBS = [
@@ -90,10 +107,35 @@ function markDirty() {
 }
 
 function updateCalibrationBadge() {
-  const status = String(state.profile.calibration_status || "unmeasured");
+  const allowed = ["relative", "measured"];
+  const statuses = [String(state.profile.calibration_status)];
+  if (state.profile.calibration_domains) {
+    statuses.push(...["color", "timing", "spatial"].map((key) => String(state.profile.calibration_domains[key])));
+  }
+  const status = statuses.every((value) => allowed.includes(value))
+    ? (statuses.includes("relative") ? "relative" : "measured")
+    : "unmeasured";
   const badge = $("calibration-badge");
   badge.textContent = status.toUpperCase();
   badge.classList.toggle("warning", status !== "measured");
+}
+
+function calibrationSupportsSlew() {
+  const allowed = ["relative", "measured"];
+  const status = String(state.profile.calibration_status);
+  const timingStatus = state.profile.calibration_domains?.timing;
+  return allowed.includes(status) && (timingStatus === undefined || allowed.includes(String(timingStatus)));
+}
+
+function invalidateCalibration() {
+  state.profile.calibration_status = "unmeasured";
+  state.profile.calibration_domains = {color: "unmeasured", timing: "unmeasured", spatial: "unmeasured"};
+  for (const key of [
+    "calibration_evidence", "calibration_evidence_id", "calibration_measured_at",
+    "measurement_evidence", "measurement_id", "measured_at", "evidence",
+  ]) delete state.profile[key];
+  state.display = null;
+  state.lastPresentedOrdinal = null;
 }
 
 function pushProfileToView() {
@@ -122,6 +164,7 @@ function wireKnobs() {
     $(id).addEventListener("input", () => {
       state.profile[key] = Number($(id).value);
       $(`${id}-val`).textContent = $(id).value;
+      invalidateCalibration();
       pushProfileToView();
     });
   }
@@ -129,12 +172,13 @@ function wireKnobs() {
     $(`knob-white-${channel}`).addEventListener("input", () => {
       state.profile.white_point[channel] = Number($(`knob-white-${channel}`).value);
       $(`knob-white-${channel}-val`).textContent = $(`knob-white-${channel}`).value;
+      invalidateCalibration();
       pushProfileToView();
     });
   }
   $("knob-hold").addEventListener("change", () => {
     state.profile.hold_mode = $("knob-hold").value;
-    state.display = null;
+    invalidateCalibration();
     pushProfileToView();
   });
 
@@ -147,6 +191,8 @@ function wireKnobs() {
     const result = await api("GET", "/api/profile");
     state.profile = result.profile;
     state.savedProfile = clone(result.profile);
+    state.display = null;
+    state.lastPresentedOrdinal = null;
     knobsFromProfile();
     pushProfileToView();
   });
@@ -163,9 +209,16 @@ function setMode(mode) {
 function fillSourcePicker() {
   const kind = $("source-kind").value;
   const select = $("source-name");
+  const renderButton = $("render");
   select.innerHTML = "";
   $("replay-row").hidden = kind !== "replay";
   $("source-name-row").hidden = kind === "replay";
+  renderButton.hidden = kind === "replay";
+  renderButton.textContent = {
+    look: "Render look",
+    effect: "Render effect",
+    lab: "Render lab draft",
+  }[kind] || "Render preview";
 
   if (kind === "effect") {
     for (const name of state.catalog.effects) select.add(new Option(name, name));
@@ -237,9 +290,14 @@ function renderRequestBody() {
 async function doRender() {
   const body = renderRequestBody();
   if (!body) return;
-  const result = await api("POST", "/api/render", body);
+  const result = await latestFrameRequest("/api/render", body);
+  if (!result) return;
   $("view-title").textContent = $("source-name").selectedOptions[0]?.textContent || body.name;
-  loadFrames(result.frames, result.fps, result.t_ms, [], result.pipeline);
+  loadFrames(result.frames, result.fps, result.t_ms, [], {
+    durationMs: result.duration_ms,
+    provenance: result.provenance || result.pipeline || "server render",
+    timingSource: result.timing_source,
+  });
 }
 
 async function doReplayLoad() {
@@ -248,48 +306,96 @@ async function doReplayLoad() {
     showError("Enter a frames JSONL path.");
     return;
   }
-  const result = await api("POST", "/api/replay/load", {path});
+  const result = await latestFrameRequest("/api/replay/load", {path});
+  if (!result) return;
   $("view-title").textContent = result.meta?.name || "Recorded frames";
-  loadFrames(result.frames, result.fps, result.t_ms, result.meta?.markers || [], "recorded");
+  loadFrames(result.frames, result.fps, result.t_ms, result.meta?.markers || [], {
+    durationMs: result.duration_ms ?? result.meta?.duration_ms,
+    provenance: result.provenance || result.meta?.provenance || "recorded JSONL",
+    timingSource: result.timing_source || result.meta?.timing_source,
+  });
 }
 
 async function doTestCard(kind) {
-  const result = await api("POST", "/api/render_card", {kind});
+  const result = await latestFrameRequest("/api/render_card", {kind});
+  if (!result) return;
   $("view-title").textContent = `Reference · ${kind}`;
-  loadFrames(result.frames, result.fps, result.t_ms, [{frame: 0, label: kind}], "reference");
+  loadFrames(result.frames, result.fps, result.t_ms, [{frame: 0, label: kind}], {
+    durationMs: result.duration_ms,
+    provenance: result.provenance || "generated reference",
+    timingSource: result.timing_source,
+  });
   stopPlayback();
 }
 
 async function doCalibration(name) {
-  const result = await api("POST", "/api/calibration", {
+  const result = await latestFrameRequest("/api/calibration", {
     name,
     fps: Number(state.profile.fps) || 60,
   });
+  if (!result) return;
   $("view-title").textContent = `Calibration · ${name.replaceAll("_", " ")}`;
-  loadFrames(result.frames, result.fps, result.t_ms, result.markers, "calibration");
+  loadFrames(result.frames, result.fps, result.t_ms, result.markers, {
+    durationMs: result.duration_ms,
+    provenance: result.provenance || "generated calibration",
+    timingSource: result.timing_source,
+  });
 }
 
-function normalizeTimes(frameCount, fps, supplied) {
-  if (Array.isArray(supplied) && supplied.length === frameCount) return supplied.map(Number);
-  return Array.from({length: frameCount}, (_, index) => Math.round(index * 1000 / fps));
+function buildTimeline(frameCount, fps, supplied, explicitDuration, reportedSource) {
+  const suppliedTimes = Array.isArray(supplied) ? supplied.map(Number) : [];
+  const suppliedValid = suppliedTimes.length === frameCount && suppliedTimes.every((value, index) => (
+    Number.isFinite(value) && value >= 0 && (!index || value >= suppliedTimes[index - 1])
+  ));
+  const frameTimes = suppliedValid
+    ? suppliedTimes
+    : Array.from({length: frameCount}, (_, index) => Math.round(index * 1000 / fps));
+  const timingSource = reportedSource || (
+    suppliedValid ? "server timestamps" : (Array.isArray(supplied) ? "invalid timestamps · FPS fallback" : "FPS grid")
+  );
+  if (!frameCount) return {frameTimes, durationMs: 0, timingSource, durationSource: "empty"};
+
+  const lastTimestamp = frameTimes[frameTimes.length - 1];
+  const explicit = Number(explicitDuration);
+  if (explicitDuration !== undefined && explicitDuration !== null && Number.isFinite(explicit) && explicit > lastTimestamp) {
+    return {frameTimes, durationMs: explicit, timingSource, durationSource: "explicit duration"};
+  }
+
+  const idealGrid = frameTimes.every((value, index) => value === Math.round(index * 1000 / fps));
+  const durationMs = idealGrid ? frameCount * 1000 / fps : lastTimestamp + 1000 / fps;
+  const invalid = explicitDuration !== undefined && explicitDuration !== null ? "invalid duration_ms · " : "";
+  return {frameTimes, durationMs, timingSource, durationSource: `${invalid}legacy inferred duration`};
 }
 
-function loadFrames(frames, fps, tMs, markers = [], pipeline = "runtime") {
+function loadFrames(frames, fps, tMs, markers = [], options = {}) {
   state.frames = frames || [];
   state.framesFps = Number(fps) || 60;
-  state.frameTimes = normalizeTimes(state.frames.length, state.framesFps, tMs);
+  const timeline = buildTimeline(
+    state.frames.length,
+    state.framesFps,
+    tMs,
+    options.durationMs,
+    options.timingSource,
+  );
+  state.frameTimes = timeline.frameTimes;
+  state.durationMs = timeline.durationMs;
+  state.durationSource = timeline.durationSource;
+  state.timingSource = timeline.timingSource;
+  state.provenance = String(options.provenance || "not reported");
   state.markers = Array.isArray(markers) ? markers : [];
-  state.cycleMs = state.frames.length
-    ? state.frameTimes[state.frameTimes.length - 1] + (1000 / state.framesFps)
-    : 0;
   state.manualIdx = 0;
-  state.lastPaintedIdx = -1;
+  state.pausedElapsedMs = -(Number(state.profile.latency_ms) || 0);
+  state.lastPresentedOrdinal = null;
   state.display = null;
-  state.skippedPaints = 0;
+  state.healthWindowAt = 0;
+  state.rafCount = 0;
+  state.drawCount = 0;
+  state.missedFrames = 0;
   $("scrub").max = String(Math.max(0, state.frames.length - 1));
   $("scrub").value = "0";
-  $("pipeline-badge").textContent = `${String(pipeline).toUpperCase()} PIPELINE`;
-  $("timing-readout").textContent = `${state.framesFps} FPS TARGET`;
+  $("pipeline-badge").textContent = `SOURCE · ${state.provenance.toUpperCase()}`;
+  $("timing-readout").textContent = `${state.framesFps} FPS · ${state.timingSource.toUpperCase()} · ${state.durationSource.toUpperCase()}`;
+  $("paint-health").textContent = "WAITING";
   startPlayback();
 }
 
@@ -304,34 +410,54 @@ function indexAtTime(timeMs) {
   return Math.max(0, Math.min(state.frames.length - 1, low - 1));
 }
 
-function currentIndex(now) {
-  if (!state.frames.length) return 0;
-  if (!state.playing) return Math.min(state.manualIdx, state.frames.length - 1);
-  const latency = Number(state.profile.latency_ms) || 0;
-  let elapsed = now - state.t0 - latency;
-  if (elapsed < 0) return 0;
-  if (state.loop && state.cycleMs > 0) elapsed %= state.cycleMs;
-  if (!state.loop && elapsed >= state.cycleMs) {
-    state.playing = false;
-    state.manualIdx = state.frames.length - 1;
-    $("play-pause").textContent = "Play";
-    return state.manualIdx;
+function positionForElapsed(elapsed) {
+  if (!state.frames.length) return {index: 0, ordinal: 0, ended: false};
+  if (elapsed < 0) return {index: 0, ordinal: 0, ended: false};
+  if (state.loop && state.durationMs > 0) {
+    const cycle = Math.floor(elapsed / state.durationMs);
+    const local = elapsed - cycle * state.durationMs;
+    const index = indexAtTime(local);
+    return {index, ordinal: cycle * state.frames.length + index, ended: false};
   }
-  return indexAtTime(elapsed);
+  if (!state.loop && elapsed >= state.durationMs) {
+    const index = state.frames.length - 1;
+    return {index, ordinal: index, ended: true};
+  }
+  const index = indexAtTime(elapsed);
+  return {index, ordinal: index, ended: false};
+}
+
+function currentPosition(now) {
+  const elapsed = state.playing ? now - state.t0 : state.pausedElapsedMs;
+  const position = positionForElapsed(elapsed);
+  if (state.playing && position.ended) {
+    state.playing = false;
+    state.pausedElapsedMs = state.durationMs;
+    state.manualIdx = position.index;
+    $("play-pause").textContent = "Play";
+  }
+  return position;
 }
 
 function startPlayback() {
   if (!state.frames.length) return;
-  if (!state.loop && state.manualIdx >= state.frames.length - 1) state.manualIdx = 0;
-  const latency = Number(state.profile.latency_ms) || 0;
+  if (!state.loop && state.pausedElapsedMs >= state.durationMs) {
+    state.manualIdx = 0;
+    state.pausedElapsedMs = -(Number(state.profile.latency_ms) || 0);
+  }
   state.playing = true;
-  state.t0 = performance.now() - state.frameTimes[state.manualIdx] - latency;
-  state.lastPaintedIdx = -1;
+  state.t0 = performance.now() - state.pausedElapsedMs;
+  state.lastPresentedOrdinal = null;
   $("play-pause").textContent = "Pause";
 }
 
 function stopPlayback(now = performance.now()) {
-  if (state.playing && state.frames.length) state.manualIdx = currentIndex(now);
+  if (state.playing && state.frames.length) {
+    state.pausedElapsedMs = now - state.t0;
+    const position = positionForElapsed(state.pausedElapsedMs);
+    state.manualIdx = position.index;
+    if (position.ended) state.pausedElapsedMs = state.durationMs;
+  }
   state.playing = false;
   $("play-pause").textContent = "Play";
 }
@@ -346,7 +472,11 @@ function markerFor(index) {
 }
 
 function applyMeasuredSlew(target, now) {
-  if (state.profile.hold_mode !== "slew" || Number(state.profile.slew_ms) <= 0) {
+  if (
+    !calibrationSupportsSlew()
+    || state.profile.hold_mode !== "slew"
+    || Number(state.profile.slew_ms) <= 0
+  ) {
     state.display = null;
     return target;
   }
@@ -366,36 +496,43 @@ function applyMeasuredSlew(target, now) {
 }
 
 function updatePaintHealth(now) {
-  state.paintCount += 1;
-  if (!state.paintWindowAt) state.paintWindowAt = now;
-  const span = now - state.paintWindowAt;
+  if (!state.healthWindowAt) state.healthWindowAt = now;
+  const span = now - state.healthWindowAt;
   if (span < 1000) return;
-  const rate = state.paintCount * 1000 / span;
-  $("paint-health").textContent = `PAINT ${rate.toFixed(1)} · SKIP ${state.skippedPaints}`;
-  state.paintWindowAt = now;
-  state.paintCount = 0;
-  state.skippedPaints = 0;
+  const rafRate = state.rafCount * 1000 / span;
+  const drawRate = state.drawCount * 1000 / span;
+  $("paint-health").textContent = `DRAW ${drawRate.toFixed(1)} · RAF ${rafRate.toFixed(1)} · MISSED ${state.missedFrames}`;
+  state.healthWindowAt = now;
+  state.rafCount = 0;
+  state.drawCount = 0;
+  state.missedFrames = 0;
 }
 
 function tick(now) {
+  state.rafCount += 1;
   if (view && state.frames.length) {
-    const index = currentIndex(now);
-    const slewing = state.profile.hold_mode === "slew" && Number(state.profile.slew_ms) > 0;
-    if (index !== state.lastPaintedIdx || slewing) {
-      if (!slewing && state.lastPaintedIdx >= 0) {
-        const expected = (state.lastPaintedIdx + 1) % state.frames.length;
-        if (index !== expected && index !== state.lastPaintedIdx) state.skippedPaints += 1;
+    const position = currentPosition(now);
+    const index = position.index;
+    const slewing = (
+      calibrationSupportsSlew()
+      && state.profile.hold_mode === "slew"
+      && Number(state.profile.slew_ms) > 0
+    );
+    if (state.lastPresentedOrdinal !== position.ordinal || slewing) {
+      if (state.lastPresentedOrdinal !== null && position.ordinal > state.lastPresentedOrdinal + 1) {
+        state.missedFrames += position.ordinal - state.lastPresentedOrdinal - 1;
       }
       view.renderFrame(applyMeasuredSlew(state.frames[index], now));
-      state.lastPaintedIdx = index;
-      updatePaintHealth(now);
+      state.drawCount += 1;
+      state.lastPresentedOrdinal = position.ordinal;
     }
     state.manualIdx = index;
     $("scrub").value = String(index);
     $("frame-label").textContent = `${index + 1} / ${state.frames.length}`;
     $("time-label").textContent = `${((state.frameTimes[index] || 0) / 1000).toFixed(3)} s`;
-    $("marker-label").textContent = markerFor(index) || "Exact command frame · six physical LEDs per segment";
+    $("marker-label").textContent = markerFor(index) || "60 command segments · six repeated emitters per segment";
   }
+  updatePaintHealth(now);
   state.lastTick = now;
   requestAnimationFrame(tick);
 }
@@ -413,9 +550,20 @@ function wireKeyboard() {
         state.frames.length - 1,
         state.manualIdx + (event.key === "ArrowRight" ? 1 : -1),
       ));
-      state.lastPaintedIdx = -1;
+      state.pausedElapsedMs = state.frameTimes[state.manualIdx];
+      state.lastPresentedOrdinal = null;
     }
   });
+}
+
+function setLoop(next, now = performance.now()) {
+  let elapsed = state.playing ? now - state.t0 : state.pausedElapsedMs;
+  if (elapsed >= 0 && state.durationMs > 0) elapsed %= state.durationMs;
+  state.loop = next;
+  state.pausedElapsedMs = elapsed;
+  if (state.playing) state.t0 = now - elapsed;
+  state.manualIdx = positionForElapsed(elapsed).index;
+  state.lastPresentedOrdinal = null;
 }
 
 async function boot() {
@@ -432,16 +580,23 @@ async function boot() {
 
   $("tab-author").addEventListener("click", () => setMode("author"));
   $("tab-calibrate").addEventListener("click", () => setMode("calibrate"));
-  $("source-kind").addEventListener("change", fillSourcePicker);
-  $("source-name").addEventListener("change", syncParamsFromSource);
+  $("source-kind").addEventListener("change", () => {
+    state.frameRequestToken += 1;
+    fillSourcePicker();
+  });
+  $("source-name").addEventListener("change", () => {
+    state.frameRequestToken += 1;
+    syncParamsFromSource();
+  });
   $("render").addEventListener("click", doRender);
   $("replay-load").addEventListener("click", doReplayLoad);
   $("play-pause").addEventListener("click", () => (state.playing ? stopPlayback() : startPlayback()));
-  $("loop").addEventListener("change", () => { state.loop = $("loop").checked; });
+  $("loop").addEventListener("change", () => setLoop($("loop").checked));
   $("scrub").addEventListener("input", () => {
     stopPlayback();
     state.manualIdx = Number($("scrub").value) || 0;
-    state.lastPaintedIdx = -1;
+    state.pausedElapsedMs = state.frameTimes[state.manualIdx] || 0;
+    state.lastPresentedOrdinal = null;
   });
   for (const button of document.querySelectorAll("[data-card]")) {
     button.addEventListener("click", () => doTestCard(button.dataset.card));

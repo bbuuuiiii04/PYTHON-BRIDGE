@@ -35,10 +35,6 @@ logger = logging.getLogger("led_sim_web")
 
 ASSETS_DIR = Path(__file__).resolve().parent / "led_sim_assets"
 
-MAX_DURATION_S = 30.0
-MAX_FPS = 120
-
-
 class LedSimService:
     """Request-scoped glue over the pure engine; no state cached across requests."""
 
@@ -133,6 +129,22 @@ def build_handler(service: LedSimService) -> type[BaseHTTPRequestHandler]:
         def _bad_request(self, message: str, **extra: Any) -> None:
             self._send_json({"error": message, **extra}, HTTPStatus.BAD_REQUEST)
 
+        def _post_fence_ok(self) -> bool:
+            try:
+                hostname = urlparse(f"//{self.headers.get('Host', '')}").hostname
+            except ValueError:
+                hostname = None
+            if hostname not in {"127.0.0.1", "localhost", "::1"}:
+                self._send_json({"error": "Host must be local"}, HTTPStatus.FORBIDDEN)
+                return False
+            if self.headers.get_content_type() != "application/json":
+                self._send_json(
+                    {"error": "Content-Type must be application/json"},
+                    HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
+                )
+                return False
+            return True
+
         # -- static ------------------------------------------------------------
         def _serve_static(self, path: str) -> None:
             rel = path.lstrip("/") or "index.html"
@@ -178,6 +190,8 @@ def build_handler(service: LedSimService) -> type[BaseHTTPRequestHandler]:
         def do_POST(self) -> None:  # noqa: N802
             path = urlparse(self.path).path
             try:
+                if not self._post_fence_ok():
+                    return
                 try:
                     body = self._read_json_body()
                 except (json.JSONDecodeError, ValueError) as exc:
@@ -217,25 +231,22 @@ def build_handler(service: LedSimService) -> type[BaseHTTPRequestHandler]:
                 return
             try:
                 seed = int(body.get("seed", 0))
-                fps = int(body.get("fps", 60))
-                duration_s = float(body.get("duration_s", 4.0))
-                bpm = float(body.get("bpm", 128.0))
-                beat_division = float(body.get("beat_division", 0.0))
             except (TypeError, ValueError):
-                self._bad_request("seed/fps/duration_s/bpm/beat_division must be numeric")
+                self._bad_request("seed must be an integer")
+                return
+            try:
+                fps, duration_s, bpm, beat_division = engine.validate_render_timing(
+                    fps=body.get("fps", 60),
+                    duration_s=body.get("duration_s", 4.0),
+                    bpm=body.get("bpm", 128.0),
+                    beat_division=body.get("beat_division", 0.0),
+                )
+            except ValueError as exc:
+                self._bad_request(str(exc))
                 return
             sync_mode = body.get("sync_mode", "")
             if not isinstance(sync_mode, str):
                 self._bad_request("sync_mode must be a string")
-                return
-            if not (1 <= fps <= MAX_FPS):
-                self._bad_request(f"fps must be in [1, {MAX_FPS}]")
-                return
-            if not (0.0 < duration_s <= MAX_DURATION_S):
-                self._bad_request(f"duration_s must be in (0, {MAX_DURATION_S:g}]")
-                return
-            if bpm <= 0:
-                self._bad_request("bpm must be positive")
                 return
             segments = service.segments()
             if source == "lab":
@@ -263,6 +274,13 @@ def build_handler(service: LedSimService) -> type[BaseHTTPRequestHandler]:
                 "segments": segments,
                 "t_ms": engine.frame_timestamps(len(frames), fps),
                 "pipeline": "lab" if source == "lab" else "runtime",
+                "frame_source": (
+                    "lab_renderer_offline"
+                    if source == "lab"
+                    else engine.FRAME_SOURCE_PRODUCTION_RUNNER_OFFLINE
+                ),
+                "timing_source": engine.TIMING_SOURCE_IDEAL_GRID,
+                "duration_ms": int(round(duration_s * 1000.0)),
             })
 
         def _handle_render_card(self, body: dict[str, Any]) -> None:
@@ -280,12 +298,9 @@ def build_handler(service: LedSimService) -> type[BaseHTTPRequestHandler]:
                 self._bad_request(f"name must be one of {list(engine.CALIBRATION_SEQUENCE_NAMES)}")
                 return
             try:
-                fps = int(body.get("fps", 60))
-            except (TypeError, ValueError):
-                self._bad_request("fps must be numeric")
-                return
-            if not (1 <= fps <= MAX_FPS):
-                self._bad_request(f"fps must be in [1, {MAX_FPS}]")
+                fps = engine.validate_fps(body.get("fps", 60))
+            except ValueError as exc:
+                self._bad_request(str(exc))
                 return
             self._send_json(engine.calibration_sequence(name, segments=service.segments(), fps=fps))
 
@@ -314,6 +329,9 @@ def build_handler(service: LedSimService) -> type[BaseHTTPRequestHandler]:
             except ValueError as exc:
                 self._bad_request(str(exc))
                 return
+            if payload["segments"] != engine.H612D_SEGMENTS:
+                self._bad_request(f"replay segments must be {engine.H612D_SEGMENTS}")
+                return
             payload["path"] = str(resolved)
             self._send_json(payload)
 
@@ -333,7 +351,7 @@ def run_server(*, port: int = 8767, profile_path: Path | str | None = None) -> N
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Run the local LED room simulator")
+    parser = argparse.ArgumentParser(description="Run the local H612D LED Studio")
     parser.add_argument("--port", type=int, default=8767)
     parser.add_argument("--profile", default=None,
                         help="device profile path (default config/led_sim_profile.json, falling back to the example)")

@@ -226,8 +226,9 @@ Update:
 
 Forbidden assumptions:
 
-- A matching sim render does not prove room-visible hardware behavior; the sim never contacts the Govee device.
-- Sim profile defaults (gamma, bleed, wash, latency) are calibration assumptions, not device measurements.
+- A matching sim command frame does not prove device receipt or visible hardware behavior; the sim never contacts the Govee device.
+- Sim profile defaults (gamma, channel gains, glow, bleed, latency, and slew) are calibration assumptions, not device measurements.
+- Six displayed emitters per segment model the H612D control grouping; they are not six independently commanded pixels.
 
 ## Laser Pad changes
 

@@ -1,9 +1,39 @@
 // ledsim-view.js — H612D fixture view. Draws only; never fetches or persists.
 
+const H612D_SEGMENTS = 60;
+const H612D_LEDS_PER_SEGMENT = 6;
+
 export function createLedSimView(canvas, initialProfile) {
   const ctx = canvas.getContext("2d", {alpha: false});
   let profile = structuredClone(initialProfile || {});
   let lastFrame = [];
+  let viewWidth = 1;
+  let viewHeight = 1;
+  let viewDpr = 1;
+
+  function resize() {
+    const rect = canvas.getBoundingClientRect();
+    const width = Math.max(1, Math.round(rect.width || canvas.clientWidth || 800));
+    const height = Math.max(1, Math.round(rect.height || canvas.clientHeight || 450));
+    const dpr = Math.max(1, Number(window.devicePixelRatio) || 1);
+    const backingWidth = Math.round(width * dpr);
+    const backingHeight = Math.round(height * dpr);
+    const backingChanged = canvas.width !== backingWidth || canvas.height !== backingHeight;
+    const layoutChanged = backingChanged || width !== viewWidth || height !== viewHeight || dpr !== viewDpr;
+    if (backingChanged) {
+      canvas.width = backingWidth;
+      canvas.height = backingHeight;
+    }
+    viewWidth = width;
+    viewHeight = height;
+    viewDpr = dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (layoutChanged) draw(lastFrame);
+  }
+
+  const resizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(resize) : null;
+  if (resizeObserver) resizeObserver.observe(canvas);
+  else window.addEventListener("resize", resize);
 
   function transformColor(rgb) {
     const gamma = Number(profile.gamma) || 1;
@@ -76,11 +106,47 @@ export function createLedSimView(canvas, initialProfile) {
     ctx.stroke();
   }
 
+  function invalidFrameReason(frame) {
+    if (Number(profile.segments) !== H612D_SEGMENTS || Number(profile.leds_per_segment) !== H612D_LEDS_PER_SEGMENT) {
+      return `profile must be ${H612D_SEGMENTS} segments × ${H612D_LEDS_PER_SEGMENT} LEDs`;
+    }
+    if (!Array.isArray(frame) || frame.length !== H612D_SEGMENTS) {
+      return `expected ${H612D_SEGMENTS} RGB segments, received ${Array.isArray(frame) ? frame.length : "non-array"}`;
+    }
+    const badPixel = frame.findIndex((pixel) => (
+      !Array.isArray(pixel)
+      || pixel.length !== 3
+      || pixel.some((channel) => !Number.isFinite(Number(channel)) || Number(channel) < 0 || Number(channel) > 255)
+    ));
+    return badPixel < 0 ? "" : `segment ${badPixel} is not a valid RGB triplet`;
+  }
+
+  function drawInvalid(reason) {
+    ctx.fillStyle = "#19070c";
+    ctx.fillRect(0, 0, viewWidth, viewHeight);
+    ctx.strokeStyle = "#ff496c";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(20, 20, Math.max(1, viewWidth - 40), Math.max(1, viewHeight - 40));
+    ctx.fillStyle = "#ff7690";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = "800 18px ui-monospace, SFMono-Regular, Menlo, monospace";
+    ctx.fillText("INVALID H612D FRAME", viewWidth / 2, viewHeight / 2 - 16);
+    ctx.fillStyle = "#ffc1cc";
+    ctx.font = "600 12px ui-monospace, SFMono-Regular, Menlo, monospace";
+    ctx.fillText(reason, viewWidth / 2, viewHeight / 2 + 18);
+  }
+
   function draw(frame) {
-    const width = canvas.width;
-    const height = canvas.height;
-    const segments = Number(profile.segments) || 60;
-    const ledsPerSegment = Number(profile.leds_per_segment) || 6;
+    const width = viewWidth;
+    const height = viewHeight;
+    const invalid = invalidFrameReason(frame);
+    if (invalid) {
+      drawInvalid(invalid);
+      return;
+    }
+    const segments = H612D_SEGMENTS;
+    const ledsPerSegment = H612D_LEDS_PER_SEGMENT;
     const segmentsPerRow = 10;
     const rows = Math.ceil(segments / segmentsPerRow);
     const padX = 54;
@@ -97,8 +163,7 @@ export function createLedSimView(canvas, initialProfile) {
     ctx.fillStyle = backdrop;
     ctx.fillRect(0, 0, width, height);
 
-    const transformed = applyBleed(frame.slice(0, segments).map(transformColor));
-    while (transformed.length < segments) transformed.push([0, 0, 0]);
+    const transformed = applyBleed(frame.map(transformColor));
 
     ctx.font = "600 11px ui-monospace, SFMono-Regular, Menlo, monospace";
     ctx.textBaseline = "middle";
@@ -142,7 +207,7 @@ export function createLedSimView(canvas, initialProfile) {
     }
   }
 
-  return {
+  const api = {
     renderFrame(frame) {
       lastFrame = frame || [];
       draw(lastFrame);
@@ -152,8 +217,13 @@ export function createLedSimView(canvas, initialProfile) {
       draw(lastFrame);
     },
     destroy() {
+      if (resizeObserver) resizeObserver.disconnect();
+      else window.removeEventListener("resize", resize);
       lastFrame = [];
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.clearRect(0, 0, viewWidth, viewHeight);
     },
   };
+
+  resize();
+  return api;
 }

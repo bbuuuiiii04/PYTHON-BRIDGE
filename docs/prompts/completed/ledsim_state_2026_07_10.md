@@ -1,16 +1,18 @@
 ---
-doc_status: current
-truth_level: manager state brief (ledsim lane, AWR-196)
-last_verified_commit: f01616b
-last_verified_date: 2026-07-10
+doc_status: completed-prompt
+truth_level: historical-manager-state
+last_verified_commit: f800912
+last_verified_date: 2026-07-15
 validation_scope: >
-  Continuity brief for the ledsim manager seat (Fable/XHIGH). If this seat dies,
-  the successor reads: charter docs/prompts/active/ledsim_charter_2026_07_10.md
-  -> spec docs/plans/active/led_sim_build_spec_2026_07_10.md -> AWR-196 registry
-  row -> this file, then verifies every lane FRESH against reality.
+  Historical continuity brief for the completed 2026-07-10 room-layout
+  simulator lane. Superseded by the operator's 2026-07-15 fixture-level H612D
+  goal. Do not resume this lane.
 ---
 
 # ledsim manager state — AWR-196 (updated 2026-07-10 ~01:2x — ROUND CLOSED AT MANAGER LEVEL)
+
+> **SUPERSEDED 2026-07-15. Do not resume this room-layout lane.** Current truth
+> is the code, `docs/guides/led_sim.md`, and the AWR-196 registry row.
 
 **FINAL: build landed (ledsimb, Fable/xhigh), manager adversarial review PASS
 (re-derived at my desk: 24 tests, fence, imports, parity, independent smoke,

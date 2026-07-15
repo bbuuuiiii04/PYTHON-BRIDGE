@@ -31,10 +31,20 @@ def _server(profile_path: Path):
         thread.join(timeout=5)
 
 
-def _request(port: int, method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
+def _request(
+    port: int,
+    method: str,
+    path: str,
+    body: dict | None = None,
+    *,
+    content_type: str | None = "application/json",
+    host: str | None = None,
+) -> tuple[int, dict]:
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=30)
     payload = json.dumps(body) if body is not None else None
-    headers = {"Content-Type": "application/json"} if payload else {}
+    headers = {"Content-Type": content_type} if payload is not None and content_type else {}
+    if host is not None:
+        headers["Host"] = host
     conn.request(method, path, payload, headers)
     response = conn.getresponse()
     data = json.loads(response.read())
@@ -61,6 +71,10 @@ class LedSimServiceTests(unittest.TestCase):
         self.assertEqual(catalog["profile_error"], "")
         self.assertIn("looks", catalog)
         self.assertIn("lab", catalog)
+        self.assertTrue(all(
+            look["params_stage"] == "pre_runtime_injection"
+            for look in catalog["looks"]["looks"].values()
+        ))
 
     def test_render_counts_and_caps(self) -> None:
         with _server(self.profile_path) as port:
@@ -73,6 +87,9 @@ class LedSimServiceTests(unittest.TestCase):
             self.assertTrue(all(len(frame) == 60 for frame in result["frames"]))
             self.assertEqual(len(result["t_ms"]), 30)
             self.assertEqual(result["pipeline"], "runtime")
+            self.assertEqual(result["frame_source"], "production_runner_offline")
+            self.assertEqual(result["timing_source"], "ideal_grid")
+            self.assertEqual(result["duration_ms"], 1000)
 
             status, result = _request(port, "POST", "/api/render", {
                 "source": "effect", "name": "beat_chase", "duration_s": 31,
@@ -85,6 +102,52 @@ class LedSimServiceTests(unittest.TestCase):
             })
             self.assertEqual(status, 400)
             self.assertIn("fps", result["error"])
+
+    def test_render_rejects_fractional_fps_and_bad_timing_numbers(self) -> None:
+        cases = (
+            ("fps", 59.9),
+            ("fps", True),
+            ("duration_s", float("nan")),
+            ("bpm", float("inf")),
+            ("bpm", 301),
+            ("beat_division", 16.1),
+        )
+        with _server(self.profile_path) as port:
+            for field, value in cases:
+                with self.subTest(field=field, value=value):
+                    status, result = _request(port, "POST", "/api/render", {
+                        "source": "effect", "name": "solid", field: value,
+                    })
+                    self.assertEqual(status, 400, result)
+                    self.assertIn(field, result["error"])
+
+            status, result = _request(port, "POST", "/api/calibration", {
+                "name": "segment_map", "fps": 59.9,
+            })
+        self.assertEqual(status, 400, result)
+        self.assertIn("fps", result["error"])
+
+    def test_posts_require_json_content_type_and_local_host(self) -> None:
+        with _server(self.profile_path) as port:
+            status, result = _request(
+                port,
+                "POST",
+                "/api/render_card",
+                {"kind": "red"},
+                content_type="text/plain",
+            )
+            self.assertEqual(status, 415, result)
+            self.assertIn("Content-Type", result["error"])
+
+            status, result = _request(
+                port,
+                "POST",
+                "/api/render_card",
+                {"kind": "red"},
+                host="attacker.example",
+            )
+        self.assertEqual(status, 403, result)
+        self.assertIn("Host", result["error"])
 
     def test_profile_post_validate_reject_writes_nothing(self) -> None:
         with _server(self.profile_path) as port:
@@ -142,6 +205,15 @@ class LedSimServiceTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(result["segments"], 60)
         self.assertEqual(result["frames"][0][0], [255, 0, 0])
+
+    def test_replay_rejects_non_h612d_segment_count(self) -> None:
+        frames = led_sim_engine.test_card_frames("red", 1)
+        jsonl_path = Path(self._tmp.name) / "one-segment.jsonl"
+        led_sim_engine.write_frames_jsonl(jsonl_path, frames, fps=1, meta={})
+        with _server(self.profile_path) as port:
+            status, result = _request(port, "POST", "/api/replay/load", {"path": str(jsonl_path)})
+        self.assertEqual(status, 400, result)
+        self.assertIn("60", result["error"])
 
     def test_render_card(self) -> None:
         with _server(self.profile_path) as port:

@@ -16,5 +16,11 @@
   "hold_mode": "zoh",
   "slew_ms": 0,
   "bpm": 128,
-  "calibration_status": "unmeasured"
+  "calibration_status": "unmeasured",
+  "calibration_domains": {
+    "color": "unmeasured",
+    "timing": "unmeasured",
+    "spatial": "unmeasured"
+  },
+  "calibration_evidence": {}
 }

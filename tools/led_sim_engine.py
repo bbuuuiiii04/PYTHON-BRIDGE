@@ -2,8 +2,11 @@
 
 Offline tooling only. This module NEVER contacts the Govee device: no UDP, no
 transport/discovery imports (`govee_realtime_transport`, `govee_lan_discovery`
-are forbidden here), no subprocesses. Frames come from the real production
-renderer (`GoveeFrameRenderer`) — the sim reimplements zero effects.
+are forbidden here), no subprocesses. Production frames are captured from the
+real `GoveeRealtimeRunner` immediately before its transport boundary, so the
+sim reimplements neither effects nor runtime frame composition. Device-side
+optical and timing behavior begins after that boundary and remains calibration
+work.
 
 The pad lane's `tools.led_pad_lab` (AWR-193 fence) is imported READ-ONLY and
 lazily inside function bodies; any failure there degrades lab features while
@@ -15,6 +18,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import sys
 import tempfile
 from pathlib import Path
@@ -49,12 +53,25 @@ LAB_DIR = _REPO_ROOT / "config" / "led_lab"
 
 _HOLD_MODES = {"zoh", "slew"}
 _CALIBRATION_STATUSES = {"unmeasured", "relative", "measured"}
+_CALIBRATION_DOMAINS = ("color", "timing", "spatial")
 
 H612D_MODEL = "H612D"
 H612D_SEGMENTS = 60
 H612D_LEDS_PER_SEGMENT = 6
 H612D_PHYSICAL_LEDS = 360
 H612D_LENGTH_MM = 14996.16
+
+FRAME_SOURCE_PRODUCTION_RUNNER_OFFLINE = "production_runner_offline"
+TIMING_SOURCE_IDEAL_GRID = "ideal_grid"
+MIN_FPS = 1
+MAX_FPS = 120
+MIN_BPM = 20.0
+MAX_BPM = 300.0
+MAX_DURATION_S = 30.0
+MIN_BEAT_DIVISION = 0.01
+MAX_BEAT_DIVISION = 16.0
+CALIBRATION_SEQUENCE_VERSION = "h612d-cal-v2"
+FRAME_SOURCE_CALIBRATION_GENERATED = "calibration_generated_offline"
 
 
 # --- profile -----------------------------------------------------------------
@@ -104,7 +121,9 @@ def validate_profile(profile: Mapping[str, Any]) -> list[str]:
     _check_number(profile, "glow_radius", 0.1, 6.0, errors)
     _check_number(profile, "glow_gain", 0.0, 4.0, errors)
     _check_number(profile, "bleed", 0.0, 1.0, errors)
-    _check_number(profile, "fps", 1, 120, errors)
+    fps = profile.get("fps")
+    if not isinstance(fps, int) or isinstance(fps, bool) or not (MIN_FPS <= fps <= MAX_FPS):
+        errors.append(f"fps must be an integer in [{MIN_FPS}, {MAX_FPS}]")
     _check_number(profile, "latency_ms", -2000.0, 2000.0, errors)
     if profile.get("hold_mode") not in _HOLD_MODES:
         errors.append("hold_mode must be zoh or slew")
@@ -112,6 +131,61 @@ def validate_profile(profile: Mapping[str, Any]) -> list[str]:
     _check_number(profile, "bpm", 20.0, 300.0, errors)
     if profile.get("calibration_status") not in _CALIBRATION_STATUSES:
         errors.append(f"calibration_status must be one of {sorted(_CALIBRATION_STATUSES)}")
+    domains = profile.get("calibration_domains")
+    if not isinstance(domains, Mapping):
+        errors.append("calibration_domains must be an object")
+    else:
+        for domain in _CALIBRATION_DOMAINS:
+            if domains.get(domain) not in _CALIBRATION_STATUSES:
+                errors.append(
+                    f"calibration_domains.{domain} must be one of {sorted(_CALIBRATION_STATUSES)}"
+                )
+        if all(domains.get(domain) in _CALIBRATION_STATUSES for domain in _CALIBRATION_DOMAINS):
+            values = [domains[domain] for domain in _CALIBRATION_DOMAINS]
+            expected = (
+                "unmeasured" if all(value == "unmeasured" for value in values)
+                else "measured" if all(value == "measured" for value in values)
+                else "relative"
+            )
+            if profile.get("calibration_status") != expected:
+                errors.append(f"calibration_status must be {expected!r} for calibration_domains")
+
+    evidence = profile.get("calibration_evidence")
+    if not isinstance(evidence, Mapping):
+        errors.append("calibration_evidence must be an object")
+    elif profile.get("calibration_status") in {"relative", "measured"}:
+        required_strings = (
+            "sequence_version", "sequence_sha256", "capture_sha256",
+            "device_firmware", "phone_model", "capture_date",
+        )
+        for key in required_strings:
+            if not isinstance(evidence.get(key), str) or not evidence[key].strip():
+                errors.append(f"calibration_evidence.{key} must be a non-empty string")
+        for key in ("sequence_sha256", "capture_sha256"):
+            value = evidence.get(key)
+            if isinstance(value, str) and (
+                len(value) != 64 or any(char not in "0123456789abcdefABCDEF" for char in value)
+            ):
+                errors.append(f"calibration_evidence.{key} must be a 64-character SHA-256 hex digest")
+        if not isinstance(evidence.get("camera_settings"), Mapping) or not evidence["camera_settings"]:
+            errors.append("calibration_evidence.camera_settings must be a non-empty object")
+        measured_fields = evidence.get("measured_fields")
+        if (
+            not isinstance(measured_fields, list)
+            or not measured_fields
+            or not all(isinstance(value, str) and value.strip() for value in measured_fields)
+        ):
+            errors.append("calibration_evidence.measured_fields must be a non-empty string list")
+        if not isinstance(evidence.get("fit_residuals"), Mapping) or not evidence["fit_residuals"]:
+            errors.append("calibration_evidence.fit_residuals must be a non-empty object")
+        unknowns = evidence.get("remaining_unknowns")
+        if not isinstance(unknowns, list) or not all(isinstance(value, str) for value in unknowns):
+            errors.append("calibration_evidence.remaining_unknowns must be a string list")
+        if profile.get("calibration_status") == "measured" and (
+            not isinstance(evidence.get("reference_instrument"), str)
+            or not evidence["reference_instrument"].strip()
+        ):
+            errors.append("calibration_evidence.reference_instrument is required for measured status")
     return errors
 
 
@@ -193,9 +267,45 @@ def expand_segments(
     return [tuple(int(channel) for channel in pixel) for pixel in frame for _ in range(repeat)]
 
 
+def validate_fps(value: Any) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or not (MIN_FPS <= value <= MAX_FPS):
+        raise ValueError(f"fps must be an integer in [{MIN_FPS}, {MAX_FPS}]")
+    return value
+
+
+def validate_render_timing(
+    *, fps: Any, duration_s: Any, bpm: Any, beat_division: Any = 0.0,
+) -> tuple[int, float, float, float]:
+    rate = validate_fps(fps)
+    values = {"duration_s": duration_s, "bpm": bpm, "beat_division": beat_division}
+    normalized: dict[str, float] = {}
+    for name, value in values.items():
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            raise ValueError("duration_s, bpm, and beat_division must be finite numbers")
+        try:
+            normalized[name] = float(value)
+        except (OverflowError, ValueError):
+            raise ValueError("duration_s, bpm, and beat_division must be finite numbers") from None
+        if not math.isfinite(normalized[name]):
+            raise ValueError("duration_s, bpm, and beat_division must be finite numbers")
+    duration = normalized["duration_s"]
+    tempo = normalized["bpm"]
+    division = normalized["beat_division"]
+    if not (0.0 < duration <= MAX_DURATION_S):
+        raise ValueError(f"duration_s must be in (0, {MAX_DURATION_S:g}]")
+    if not (MIN_BPM <= tempo <= MAX_BPM):
+        raise ValueError(f"bpm must be in [{MIN_BPM:g}, {MAX_BPM:g}]")
+    if division != 0.0 and not (MIN_BEAT_DIVISION <= division <= MAX_BEAT_DIVISION):
+        raise ValueError(
+            f"beat_division must be 0 or in [{MIN_BEAT_DIVISION:g}, {MAX_BEAT_DIVISION:g}]"
+        )
+    return rate, duration, tempo, division
+
+
 def frame_timestamps(frame_count: int, fps: int) -> list[int]:
     """Ideal-grid millisecond timestamps; measured captures can replace these."""
-    return [int(round(index * 1000.0 / float(fps))) for index in range(max(0, int(frame_count)))]
+    rate = validate_fps(fps)
+    return [int(round(index * 1000.0 / float(rate))) for index in range(max(0, int(frame_count)))]
 
 
 # --- render adapter ----------------------------------------------------------
@@ -218,17 +328,18 @@ def render_frames(
     rounding chain) so sim frames match lab-preview frames for the same
     (effect, params, seed, bpm, fps).
     """
+    rate, duration, tempo, _ = validate_render_timing(fps=fps, duration_s=duration_s, bpm=bpm)
     renderer = GoveeFrameRenderer()
-    beats = float(duration_s) * float(bpm) / 60.0
-    total = max(1, int(round(beats * 60.0 / float(bpm) * int(fps))))
+    beats = duration * tempo / 60.0
+    total = max(1, int(round(beats * 60.0 / tempo * rate)))
     if max_frames is not None:
         total = min(int(max_frames), total)
     frames: list[Frame] = []
     for index in range(total):
-        t = index / float(fps)
+        t = index / float(rate)
         frames.append(renderer.render(
             name,
-            beat_pos=t * float(bpm) / 60.0,
+            beat_pos=t * tempo / 60.0,
             local_t=t,
             frame_index=index,
             params=params,
@@ -285,13 +396,16 @@ def render_runtime_frames(
     a deterministic monotonic clock, and neutral CFX anchors. Device behavior
     begins after this frame boundary and is calibrated separately.
     """
-    total = max(1, int(round(float(duration_s) * int(fps))))
+    rate, duration, tempo, division = validate_render_timing(
+        fps=fps, duration_s=duration_s, bpm=bpm, beat_division=beat_division,
+    )
+    total = max(1, int(round(duration * rate)))
     transport = _FrameCaptureTransport()
     runner = GoveeRealtimeRunner(
         transport,
         GoveeFrameRenderer(),
         segments=int(segments),
-        fps=int(fps),
+        fps=rate,
         time_fn=lambda: 0.0,
         sleep_fn=lambda _seconds: None,
     )
@@ -301,15 +415,15 @@ def render_runtime_frames(
         seed=int(seed),
         applied_monotonic=0.0,
         sync_mode=str(sync_mode or ""),
-        beat_division=float(beat_division or 0.0),
+        beat_division=division,
     ))
     for index in range(total):
-        now = index / float(fps)
+        now = index / float(rate)
         runner._tick_once(  # noqa: SLF001 - exact production composition is the point of this offline tool
             BeatAnchor(
                 deck=1,
-                abs_beat_pos=now * float(bpm) / 60.0,
-                bpm=float(bpm),
+                abs_beat_pos=now * tempo / 60.0,
+                bpm=tempo,
                 captured_monotonic=now,
                 playing=True,
                 permitted=True,
@@ -423,6 +537,7 @@ def look_params_catalog() -> dict[str, Any]:
         out[look_name] = {
             "effect": effect,
             "params": params,
+            "params_stage": "pre_runtime_injection",
             "known": effect in REALTIME_EFFECT_NAMES,
             "seed": seed,
             "sync_mode": str(params.get("sync_mode") or ""),
@@ -440,15 +555,36 @@ def write_frames_jsonl(
     fps: int,
     meta: Mapping[str, Any] | None = None,
     t_ms: list[int] | None = None,
+    duration_ms: int | None = None,
 ) -> None:
+    rate = validate_fps(fps)
+    if duration_ms is not None and (
+        not isinstance(duration_ms, int) or isinstance(duration_ms, bool) or duration_ms < 0
+    ):
+        raise ValueError("duration_ms must be a non-negative integer")
     segments = len(frames[0]) if frames else 0
-    stamps = list(t_ms) if t_ms is not None else frame_timestamps(len(frames), fps)
+    for frame in frames:
+        if len(frame) != segments:
+            raise ValueError("all frames must have the same segment count")
+        if any(
+            not isinstance(pixel, (list, tuple))
+            or len(pixel) != 3
+            or any(not isinstance(channel, int) or isinstance(channel, bool) or not (0 <= channel <= 255)
+                   for channel in pixel)
+            for pixel in frame
+        ):
+            raise ValueError("each pixel must be [r, g, b] ints in [0, 255]")
+    stamps = list(t_ms) if t_ms is not None else frame_timestamps(len(frames), rate)
     if len(stamps) != len(frames):
         raise ValueError("t_ms length must match frames length")
-    lines = [json.dumps(
-        {"v": 1, "kind": "header", "fps": int(fps), "segments": segments, "meta": dict(meta or {})},
-        separators=(",", ":"),
-    )]
+    if any(not isinstance(stamp, int) or isinstance(stamp, bool) or stamp < 0 for stamp in stamps):
+        raise ValueError("t_ms values must be non-negative integers")
+    if any(current < previous for previous, current in zip(stamps, stamps[1:])):
+        raise ValueError("t_ms values must be nondecreasing")
+    header = {"v": 1, "kind": "header", "fps": rate, "segments": segments, "meta": dict(meta or {})}
+    if duration_ms is not None:
+        header["duration_ms"] = duration_ms
+    lines = [json.dumps(header, separators=(",", ":"))]
     for stamp, frame in zip(stamps, frames):
         lines.append(json.dumps({
             "v": 1,
@@ -472,14 +608,25 @@ def read_frames_jsonl(path: Path | str) -> dict[str, Any]:
         header = json.loads(lines[0])
     except json.JSONDecodeError as exc:
         fail(1, f"invalid JSON header: {exc}")
-    if not isinstance(header, dict) or header.get("v") != 1 or header.get("kind") != "header":
+    if (
+        not isinstance(header, dict)
+        or not isinstance(header.get("v"), int)
+        or isinstance(header.get("v"), bool)
+        or header.get("v") != 1
+        or header.get("kind") != "header"
+    ):
         fail(1, "first line must be a v=1 header object")
     fps = header.get("fps")
     segments = header.get("segments")
-    if not isinstance(fps, int) or fps < 1:
+    if not isinstance(fps, int) or isinstance(fps, bool) or not (MIN_FPS <= fps <= MAX_FPS):
         fail(1, "header fps must be a positive integer")
-    if not isinstance(segments, int) or segments < 1:
+    if not isinstance(segments, int) or isinstance(segments, bool) or segments < 1:
         fail(1, "header segments must be a positive integer")
+    duration_ms = header.get("duration_ms")
+    if "duration_ms" in header and (
+        not isinstance(duration_ms, int) or isinstance(duration_ms, bool) or duration_ms < 0
+    ):
+        fail(1, "header duration_ms must be a non-negative integer")
     meta = header.get("meta")
     if not isinstance(meta, dict):
         fail(1, "header meta must be an object")
@@ -491,11 +638,18 @@ def read_frames_jsonl(path: Path | str) -> dict[str, Any]:
             obj = json.loads(raw)
         except json.JSONDecodeError as exc:
             fail(line_no, f"invalid JSON: {exc}")
-        if not isinstance(obj, dict) or obj.get("v") != 1:
+        if (
+            not isinstance(obj, dict)
+            or not isinstance(obj.get("v"), int)
+            or isinstance(obj.get("v"), bool)
+            or obj.get("v") != 1
+        ):
             fail(line_no, "frame line must be a v=1 object")
         stamp = obj.get("t_ms")
-        if not isinstance(stamp, int) or stamp < 0:
+        if not isinstance(stamp, int) or isinstance(stamp, bool) or stamp < 0:
             fail(line_no, "t_ms must be a non-negative integer")
+        if t_ms and stamp < t_ms[-1]:
+            fail(line_no, "t_ms must be nondecreasing")
         frame = obj.get("frame")
         if not isinstance(frame, list) or len(frame) != segments:
             fail(line_no, f"frame must be a list of {segments} pixels")
@@ -503,12 +657,25 @@ def read_frames_jsonl(path: Path | str) -> dict[str, Any]:
             if (
                 not isinstance(pixel, list)
                 or len(pixel) != 3
-                or not all(isinstance(c, int) and 0 <= c <= 255 for c in pixel)
+                or not all(isinstance(c, int) and not isinstance(c, bool) and 0 <= c <= 255 for c in pixel)
             ):
                 fail(line_no, "each pixel must be [r, g, b] ints in [0, 255]")
         frames.append(frame)
         t_ms.append(stamp)
-    return {"fps": fps, "segments": segments, "meta": meta, "frames": frames, "t_ms": t_ms}
+    if duration_ms is None:
+        duration_ms = int(round(t_ms[-1] + 1000.0 / fps)) if t_ms else 0
+        duration_source = "derived_from_timestamps_and_fps"
+    else:
+        duration_source = "header"
+    return {
+        "fps": fps,
+        "segments": segments,
+        "duration_ms": duration_ms,
+        "duration_source": duration_source,
+        "meta": meta,
+        "frames": frames,
+        "t_ms": t_ms,
+    }
 
 
 # --- test cards ----------------------------------------------------------------
@@ -549,12 +716,10 @@ def calibration_sequence(name: str, *, segments: int = H612D_SEGMENTS, fps: int 
     """Deterministic H612D measurement frames. Generates data; never sends it."""
     if name not in CALIBRATION_SEQUENCE_NAMES:
         raise ValueError(f"unknown calibration sequence: {name!r}")
-    count = int(segments)
-    rate = int(fps)
-    if count != H612D_SEGMENTS:
+    if not isinstance(segments, int) or isinstance(segments, bool) or segments != H612D_SEGMENTS:
         raise ValueError(f"segments must be {H612D_SEGMENTS}")
-    if not (1 <= rate <= 120):
-        raise ValueError("fps must be in [1, 120]")
+    count = segments
+    rate = validate_fps(fps)
 
     frames: list[Frame] = []
     markers: list[dict[str, Any]] = []
@@ -567,8 +732,8 @@ def calibration_sequence(name: str, *, segments: int = H612D_SEGMENTS, fps: int 
         frames.extend([list(frame) for _ in range(max(1, int(hold)))])
 
     short = max(1, round(rate * 0.1))
-    gap = max(1, round(rate / 30.0))
-    sync = max(1, round(rate * 0.25))
+    gap = max(1, round(rate * 0.05))
+    sync = max(1, round(rate * 0.5))
     black = solid((0, 0, 0))
     white = solid((255, 255, 255))
 
@@ -578,29 +743,79 @@ def calibration_sequence(name: str, *, segments: int = H612D_SEGMENTS, fps: int 
 
     if name == "segment_map":
         for segment in range(count):
-            frame = list(black)
-            frame[segment] = (255, 255, 255)
-            add(frame, short, f"segment {segment:02d}")
-            add(black, gap, "gap")
+            for level in (16, 64, 255):
+                frame = list(black)
+                frame[segment] = (level, level, level)
+                add(frame, max(1, round(rate * 0.25)), f"segment {segment:02d} level {level}")
+                add(black, gap, "gap")
     elif name == "color_response":
-        levels = (0, 1, 2, 4, 8, 16, 32, 64, 96, 128, 160, 192, 224, 255)
+        levels = (1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 160, 192, 224, 255)
         channels = (
             ("red", (1, 0, 0)),
             ("green", (0, 1, 0)),
             ("blue", (0, 0, 1)),
             ("white", (1, 1, 1)),
         )
+        loads = ("isolated", "alternating", "full")
+        patch_hold = max(1, round(rate * 0.75))
+        patch_gap = max(1, round(rate * 0.1))
+
+        def load_frame(color: tuple[int, int, int], load: str) -> Frame:
+            if load == "full":
+                return solid(color)
+            frame = list(black)
+            indices = (count // 2,) if load == "isolated" else range(0, count, 2)
+            for index in indices:
+                frame[index] = color
+            return frame
+
         for label, mask in channels:
-            for level in levels:
-                add(solid(tuple(level * value for value in mask)), short, f"{label} {level}")
+            for load in loads:
+                for level in levels:
+                    color = tuple(level * value for value in mask)
+                    add(load_frame(color, load), patch_hold, f"{label} {level} {load}")
+                    add(black, patch_gap, "black reset")
         for label, color in (
             ("cyan", (0, 255, 255)),
             ("magenta", (255, 0, 255)),
             ("yellow", (255, 255, 0)),
+            ("orange", (255, 96, 0)),
+            ("violet", (160, 0, 255)),
         ):
-            for level in (64, 128, 255):
-                add(solid(tuple(round(channel * level / 255) for channel in color)), short, f"{label} {level}")
+            for load in loads:
+                for level in (64, 128, 255):
+                    scaled = tuple(round(channel * level / 255) for channel in color)
+                    add(load_frame(scaled, load), patch_hold, f"{label} {level} {load}")
+                    add(black, patch_gap, "black reset")
     else:
+        def coded_timing_frame(code: int, pass_index: int) -> Frame:
+            """Constant-load visible counter: Gray + complement + binary + checks."""
+            frame = list(black)
+            gray = code ^ (code >> 1)
+            for bit in range(8):
+                gray_on = bool(gray & (1 << bit))
+                binary_on = bool(code & (1 << bit))
+                for offset in (0, 16):
+                    frame[offset + bit] = (255, 255, 255) if gray_on else (0, 0, 0)
+                    frame[offset + 8 + bit] = (0, 0, 0) if gray_on else (255, 255, 255)
+                frame[32 + bit] = (255, 255, 255) if binary_on else (0, 0, 0)
+                frame[40 + bit] = (0, 0, 0) if binary_on else (255, 255, 255)
+            for bit, start in enumerate((48, 50)):
+                on = bool(pass_index & (1 << bit))
+                frame[start] = (255, 255, 255) if on else (0, 0, 0)
+                frame[start + 1] = (0, 0, 0) if on else (255, 255, 255)
+            parity = bool(code.bit_count() & 1)
+            frame[52] = (255, 255, 255) if parity else (0, 0, 0)
+            frame[53] = (0, 0, 0) if parity else (255, 255, 255)
+            frame[54 + (code % 6)] = (255, 255, 255)
+            return frame
+
+        for pass_index, color in enumerate(((255, 0, 0), (0, 255, 0), (0, 0, 255))):
+            add(black, short, f"timing pass {pass_index + 1} preamble black")
+            add(solid(color), short, f"timing pass {pass_index + 1} preamble color")
+            add(black, short, f"timing pass {pass_index + 1} preamble black 2")
+            for code in range(256):
+                add(coded_timing_frame(code, pass_index), 1, f"timing pass {pass_index + 1} code {code:03d}")
         for hold in (1, 2, 3, 4, 6, 8, 12, 18, 30):
             add(white, hold, f"white {hold}f")
             add(black, hold, f"black {hold}f")
@@ -611,10 +826,26 @@ def calibration_sequence(name: str, *, segments: int = H612D_SEGMENTS, fps: int 
                 add(frame, hold, f"chase {hold}f segment {segment:02d}")
 
     add(black, sync, "final black")
+    payload = {
+        "sequence_version": CALIBRATION_SEQUENCE_VERSION,
+        "name": name,
+        "fps": rate,
+        "segments": count,
+        "frames": frames,
+        "markers": markers,
+    }
+    sequence_sha256 = hashlib.sha256(json.dumps(
+        payload, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
     return {
         "name": name,
         "fps": rate,
         "segments": count,
+        "duration_ms": int(round(len(frames) * 1000.0 / rate)),
+        "frame_source": FRAME_SOURCE_CALIBRATION_GENERATED,
+        "timing_source": TIMING_SOURCE_IDEAL_GRID,
+        "sequence_version": CALIBRATION_SEQUENCE_VERSION,
+        "sequence_sha256": sequence_sha256,
         "frames": frames,
         "t_ms": frame_timestamps(len(frames), rate),
         "markers": markers,
@@ -653,7 +884,16 @@ def main(argv: list[str] | None = None) -> int:
         args.out,
         frames,
         fps=args.fps,
-        meta={"name": args.name, "seed": args.seed, "bpm": args.bpm, "params": params, "pipeline": "runtime"},
+        duration_ms=int(round(args.duration_s * 1000.0)),
+        meta={
+            "name": args.name,
+            "seed": args.seed,
+            "bpm": args.bpm,
+            "params": params,
+            "pipeline": "runtime",
+            "frame_source": FRAME_SOURCE_PRODUCTION_RUNNER_OFFLINE,
+            "timing_source": TIMING_SOURCE_IDEAL_GRID,
+        },
     )
     print(f"wrote {len(frames)} frames x {args.segments} segments -> {args.out}")
     return 0

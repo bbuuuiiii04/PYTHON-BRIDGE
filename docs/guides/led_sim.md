@@ -1,135 +1,167 @@
 ---
 doc_status: current
 truth_level: software-tested
-last_verified_commit: 138a2d2
-last_verified_date: 2026-07-10
+last_verified_commit: f800912
+last_verified_date: 2026-07-15
 validation_scope: >
-  LED room simulator (AWR-196): engine + server + browser UI implemented and
-  software-tested (24 unit/service tests). The sim's on-screen accuracy against
-  the real room is operator-calibrated and NEVER hardware-proven by this repo;
+  H612D LED Studio (AWR-196): fixture-level command-frame capture, 60-by-6
+  emitter view, timestamp-held playback, calibration sequences, and local web
+  service are software-tested. Device color, PWM, latency, physical response,
+  packet delivery, and hardware cadence remain unmeasured;
   SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
 ---
 
-# LED Room Simulator
+# H612D LED Studio
 
-A local web page that shows what the room's Govee strip does when the real
-renderer plays an effect — a top-down view of the room with the strip drawn
-around the walls, including the soft wash of light it throws into the room.
+This local tool shows what the bridge asks the Govee H612D to do. It models the
+known fixture shape: **60 controllable RGB segments, six physical LEDs per
+segment, 360 LEDs total, 49.2 ft / 14,996.16 mm**. Room shape and strip placement
+are deliberately out of scope.
 
-The frames come from the exact same code that lights the real strip
-(`govee_frame_renderer.py`). The sim reimplements zero effects: if the sim
-shows a chase turning the corner at segment 21, that is what the renderer
-told it, not a drawing guess.
+Each group of six dots receives one RGB command because the H612D exposes 60
+groups, not 360 separately controllable pixels.
 
-**What it never does:** the sim never talks to the Govee device (no network
-sends of any kind — its only socket is its own local page on port 8767), never
-touches the running bridge, and never edits lighting configs. It only reads
-them. It is safe to leave open during a live mix.
+## What is exact today
+
+For a production effect or look, the server drives the real
+`GoveeRealtimeRunner` with a deterministic beat clock and replaces only its
+network transport with an in-memory capture. The 60 RGB values shown for each
+frame are therefore the values the runner attempted to hand to the transport
+for that controlled input. Production effect rendering, runner fades, strobe
+shaping, and runner composition are not reimplemented in JavaScript.
+
+Recorded frames keep their original `t_ms` timestamps. Playback uses
+sample-and-hold: a frame remains visible until the next timestamp. The browser
+does not invent in-between frames. Its **PAINT** and **SKIP** readout reports
+browser drawing health, not Govee hardware health.
+
+## What is not exact yet
+
+The capture boundary is before the network and physical controller. The studio
+does not yet know or prove:
+
+- whether every packet reaches the controller, or when it arrives;
+- controller buffering, dropped/late-frame behavior, PWM, or refresh scanning;
+- the H612D's measured RGB transfer, low-level cutoff, peak brightness, or
+  mixed-color behavior;
+- measured latency, color transition time, or phone/camera/display color error;
+- scheduling jitter from a running bridge under real system load.
+
+The committed profile is an identity starting point, not a hardware
+measurement. A convincing-looking screen is not validation.
 
 ## Start it
 
 ```bash
-python3 -m tools.led_sim_web            # http://127.0.0.1:8767
+python3 -m tools.led_sim_web
 python3 -m tools.led_sim_web --port 8767 --profile config/led_sim_profile.json
 ```
 
-The pad stays on 8766; the sim takes 8767. Your saved room calibration lives
-in `config/led_sim_profile.json` (gitignored, like other live configs); until
-you save one, the committed example defaults are used.
+Open `http://127.0.0.1:8767`. The server listens on loopback only. The default
+saved profile is `config/led_sim_profile.json`, which is gitignored. If it does
+not exist, the committed example is loaded without writing anything.
 
-## Play something
+## Author mode
 
-Pick a source, hit **Render**, and it plays in the room view:
+Choose a source and press **Render look**:
 
-- **Production effect** — any renderer effect by name.
-- **Production look** — your look configs (`config/led_look_director.json`),
-  resolved to their effect + params.
-- **Lab draft** — Template Lab drafts, through the same lab loader the Pad
-  uses. If the lab module is broken mid-edit, the sim says so and everything
-  else keeps working.
-- **Replay file** — a frames-JSONL file (see below).
+- **Production look** reads the current look config, including its stable seed,
+  effect parameters, sync mode, and beat division, then uses the real runner.
+- **Production effect** runs an effect through the same offline runner capture.
+- **Lab draft** uses the Template Lab preview path and is labeled as a lab
+  pipeline, not a production-runtime capture.
+- **Recorded frames** loads frames-JSONL from this repo or the system temp
+  directory.
 
-Transport: play/pause, loop, scrub. BPM, seed, and duration shape the render
-request exactly like the Pad's previews do — same beat math, so the same
-effect + params + seed + bpm + fps gives identical frames in both tools.
+The transport supports play/pause, loop, exact-frame scrubbing, left/right
+frame stepping, and Space to play or pause. The fixture view always shows all
+360 physical emitters grouped into their 60 command segments.
 
-## Calibrate it to YOUR room (the whole point)
+## Calibrate mode
 
-The defaults are assumptions, not measurements. Two steps, both in the
-**Calibrate** panel:
+These deterministic sequences are generated offline; selecting one does not
+send it to the strip:
 
-1. **Geometry** — where the strip actually sits. Play the same slow effect on
-   the real strip from the Pad (there's a "slow beat_chase" preset button),
-   then drag the four corner handles, slide the seg-0 handle, or click the
-   direction arrow until the sim's motion matches the room: corners turn where
-   the real corners turn, direction matches, start matches.
-2. **Photometrics** — how the strip's light actually looks. Put a test card on
-   the real strip (white / red / green / blue / gray50 / single segment
-   buttons), hold your phone photo next to the canvas, and turn the knobs
-   until they match.
-
-Hit **Save profile** when it looks right. Knobs are local until saved; Revert
-reloads the last save.
-
-### Knob meanings (plain language)
-
-| Knob | What it models |
+| Sequence | Measurement purpose |
 | --- | --- |
-| `gamma` | How the strip compresses dim vs bright values — higher = dims fade faster. |
-| `white R/G/B` | Color cast of the strip's "white" (per-channel gain). |
-| `brightness` | Overall output level. |
-| `diffusion (seg)` | How wide one segment's glow smears along the wall. |
-| `bleed` | How much each segment leaks into its two neighbors (ring-wrapped). |
-| `wash reach mm` | How far the indirect glow reaches into the room. |
-| `wash gain` | How strong that indirect glow is. |
-| `fps` | Playback cadence of rendered frames. |
-| `latency ms` | Delay between "renderer says" and "strip shows". |
-| `hold mode` | `zoh` = frames switch hard; `slew` = colors glide toward each new frame. |
-| `slew ms` | How slow that glide is (models unknown LED controller response). |
+| Segment map | Black/white sync marks, then segments 00 through 59 one at a time; verifies order, direction, group boundaries, and six-LED grouping. |
+| Color response | RGB and white ramps at 0, 1, 2, 4, 8, 16, 32, 64, 96, 128, 160, 192, 224, and 255, followed by cyan, magenta, and yellow references. |
+| Timing response | One- through 30-frame black/white holds plus one- and two-frame 60-segment chases; exposes frame holds, dropped steps, transition time, and slow-motion/PWM clues. |
 
-Every one of these is a calibration knob, not a claim about the hardware —
-your eyes against the real room are the only truth source.
+Static white, red, green, blue, gray-50, and segment-0 frames are also
+available.
 
-## Frames-JSONL (replay format)
+No color checker is required for a first relative profile. A fixed phone on a
+tripod with exposure, white balance, focus, lens, framing, and recording mode
+locked can measure repeatability and relative RGB/timing response. It cannot
+establish absolute colorimetric parity; that claim needs measured reference
+equipment and a characterized laptop display.
 
-Line 1 header, then one line per frame:
+Actual strip capture is a separate, explicit live operation. Before any future
+sender contacts the H612D, the operator must approve the exact phrase:
+`LIVE H612D CALIBRATION APPROVED`. Stopping or restarting the bridge requires a
+separate approval. The current studio contains no hardware sender.
+
+## Device profile
+
+| Field | Meaning |
+| --- | --- |
+| `gamma` | Fitted command-value to visible-level curve. |
+| `white_point` | Fitted red, green, and blue channel gains. |
+| `brightness` | Fitted overall display level. |
+| `glow_radius`, `glow_gain` | Screen-only visualization of one physical emitter's halo. |
+| `bleed` | Fitted light spill into adjacent segments; endpoints never wrap into each other. |
+| `fps` | Requested offline runner and playback cadence. Default 60; not a measured H612D refresh claim. |
+| `latency_ms` | Fitted display offset. Default zero is an assumption. |
+| `hold_mode` | `zoh` holds exact frames; `slew` applies a fitted transition response. |
+| `slew_ms` | Fitted transition constant. Slew is ignored while `calibration_status` is `unmeasured`. |
+| `calibration_status` | `unmeasured`, `relative`, or `measured`; it must describe the evidence honestly. |
+
+Old room-layout profiles are accepted in memory by overlaying their compatible
+values onto the fixed H612D defaults. They are not silently rewritten.
+
+## Frames-JSONL
+
+Line 1 is a header. Every later line carries one 60-segment frame and its
+nondecreasing timestamp:
 
 ```json
-{"v": 1, "kind": "header", "fps": 60, "segments": 60, "meta": {"name": "beat_chase"}}
-{"v": 1, "t_ms": 0, "frame": [[255, 0, 0], [0, 0, 0], "… 60 pixels total"]}
+{"v":1,"kind":"header","fps":60,"segments":60,"meta":{"name":"beat_chase"}}
+{"v":1,"t_ms":0,"frame":[[255,0,0],[0,0,0]]}
 ```
 
-Generate one offline (no server needed):
+The shortened frame above is illustrative; a valid H612D line contains exactly
+60 RGB triples. Generate a production-runtime capture without starting the web
+server:
 
 ```bash
-python3 -m tools.led_sim_engine render-jsonl --name beat_chase --out /tmp/chase.jsonl \
-  --fps 60 --duration-s 8 --bpm 128
+python3 -m tools.led_sim_engine render-jsonl --name beat_chase \
+  --out /tmp/chase.jsonl --fps 60 --duration-s 8 --bpm 128
 ```
 
-The replay loader only accepts files inside this repo or the temp dir. There
-is no live-session frame capture — that would need a runtime tap and is out of
-scope for this round.
+## View seam
 
-## The view seam (for the future Pad integration)
-
-`tools/led_sim_assets/ledsim-view.js` is a self-contained ES module:
+`tools/led_sim_assets/ledsim-view.js` is a drawing-only ES module:
 
 ```js
-createLedSimView(canvas, profile) -> { renderFrame(frame), setProfile(p), hitTest(x, y), destroy() }
+createLedSimView(canvas, profile) -> { renderFrame(frame), setProfile(profile), destroy() }
 ```
 
-It draws only — it never fetches or persists. A future Pad round can mount
-this module and feed it frames; nothing else is coupled. The view's
-photometric/bleed/geometry formulas are deliberate JS mirrors of
-`tools/led_sim_engine.py` (each carries a lockstep comment); the Python twins
-carry the unit tests.
+It does not fetch, save, or send frames. The Python engine contains the tested
+reference transfer and linear-bleed calculations mirrored by the view.
 
-## Hard lines
+## Hard lines and checks
 
-- No device contact, ever: no UDP, no transport/discovery imports, loopback
-  HTTP on 8767 only.
-- Reads `config/led_look_director.json`; writes ONLY
-  `config/led_sim_profile.json`, and only via validated Save.
-- A matching sim render does not prove room-visible hardware behavior.
+- No Govee UDP, discovery, cloud, bridge-runtime, subprocess, or non-loopback
+  network contact.
+- Reads the LED look config; writes only the chosen simulator profile, and only
+  when **Save values** is pressed after validation.
+- Matching command frames do not prove device receipt or visible parity.
+- Six displayed LEDs per segment are a control-group model, not six individual
+  commands.
 
-Tests: `python3 -m unittest tests.test_led_sim_engine tests.test_led_sim_service`.
+Focused checks:
+
+```bash
+python3 -m unittest tests.test_led_sim_engine tests.test_led_sim_service
+```

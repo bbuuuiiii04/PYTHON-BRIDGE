@@ -9,7 +9,7 @@
 <body>
 <header class="topbar">
   <div class="brand">
-    <span class="eyebrow">GOVEE DIGITAL TWIN</span>
+    <span class="eyebrow">GOVEE FRAME PREVIEW</span>
     <h1>H612D LED Studio</h1>
   </div>
   <div class="device-facts" aria-label="Device facts">
@@ -64,8 +64,8 @@
         <label class="field">JSON<textarea id="params" rows="8">{}</textarea></label>
       </details>
 
-      <button id="render" class="primary action" type="button">Render look</button>
-      <p class="fine-print">Production sources run through the real realtime runner before this screen receives a frame.</p>
+      <button id="render" class="primary action" type="button">Render preview</button>
+      <p class="fine-print">The server-reported frame source and timing source appear beside the preview. This page never contacts the strip.</p>
     </section>
 
     <section id="calibrate-panel" class="panel-stack" hidden>
@@ -130,14 +130,14 @@
         <h2 id="view-title">H612D command frame</h2>
       </div>
       <div class="readouts">
-        <span id="pipeline-badge">RUNTIME PIPELINE</span>
-        <span id="timing-readout">60 FPS TARGET</span>
+        <span id="pipeline-badge">PROVENANCE UNKNOWN</span>
+        <span id="timing-readout">TIMING UNKNOWN</span>
         <span id="paint-health">WAITING</span>
       </div>
     </div>
 
     <div class="canvas-wrap">
-      <canvas id="fixture-canvas" width="1600" height="900"></canvas>
+      <canvas id="fixture-canvas" width="1600" height="900" role="img" aria-label="H612D preview with 60 command segments and six repeated emitters per segment"></canvas>
       <div class="canvas-overlay">
         <span id="marker-label">Choose a look and render</span>
         <span id="time-label">0.000 s</span>
