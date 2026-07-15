@@ -340,6 +340,19 @@ class LedSimServiceTests(unittest.TestCase):
         self.assertEqual(disk["active_layout"], "Home")
         self.assertNotIn("Venue Test", disk["layouts"])
 
+    def test_delete_ui_uses_inpage_confirm_not_window_confirm(self) -> None:
+        """AWR-246 third pass: Delete must use DOM confirm — window.confirm is silent-false in e2e."""
+        root = Path(__file__).resolve().parents[1]
+        js = (root / "tools" / "led_sim_assets" / "sim-app.js").read_text(encoding="utf-8")
+        html = (root / "tools" / "led_sim_assets" / "index.html").read_text(encoding="utf-8")
+        self.assertNotIn("window.confirm(", js)
+        self.assertIn("confirmDialog(", js)
+        self.assertIn('id="layout-delete"', html)
+        self.assertIn('id="confirm-dialog"', html)
+        self.assertIn('id="confirm-dialog-ok"', html)
+        self.assertIn('id="confirm-dialog-cancel"', html)
+        self.assertIn('id="error-banner"', html)
+
     def test_lab_degradation_keeps_catalog_serving(self) -> None:
         with mock.patch.object(led_sim_engine, "_import_lab", side_effect=RuntimeError("lab exploded")):
             with _server(self.profile_path) as port:

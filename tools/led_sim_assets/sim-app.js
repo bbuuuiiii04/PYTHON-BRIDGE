@@ -1,11 +1,13 @@
 // sim-app.js — H612D LED Studio lighting-console controller (AWR-244 R3).
 
 import {
+  applyLayoutDelete,
   createLedSimView,
   feetToMm,
   formatLengthMm,
   mmToFeet,
   perimeterPresetPoints,
+  planLayoutDelete,
   snakePresetPoints,
 } from "./ledsim-view.js";
 
@@ -557,6 +559,41 @@ function promptLayoutName({title, initial, allowName = null}) {
   });
 }
 
+/** In-page confirm (DOM OK/Cancel). Never use window.confirm — automation dismisses it as false with no UI. */
+function confirmDialog({title, message, okLabel = "OK"}) {
+  return new Promise((resolve) => {
+    const dialog = $("confirm-dialog");
+    const titleEl = $("confirm-dialog-title");
+    const msgEl = $("confirm-dialog-message");
+    const okBtn = $("confirm-dialog-ok");
+    const cancelBtn = $("confirm-dialog-cancel");
+    titleEl.textContent = title;
+    msgEl.textContent = message;
+    okBtn.textContent = okLabel;
+    dialog.hidden = false;
+    okBtn.focus();
+
+    const cleanup = (value) => {
+      dialog.hidden = true;
+      okBtn.onclick = null;
+      cancelBtn.onclick = null;
+      dialog.onkeydown = null;
+      resolve(value);
+    };
+    okBtn.onclick = () => cleanup(true);
+    cancelBtn.onclick = () => cleanup(false);
+    dialog.onkeydown = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        cleanup(false);
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        cleanup(true);
+      }
+    };
+  });
+}
+
 function switchActiveLayout(name) {
   ensureLayoutLibrary();
   if (!state.profile.layouts[name]) {
@@ -624,31 +661,31 @@ async function renameSelectedLayout() {
 
 function deleteSelectedLayout() {
   ensureLayoutLibrary();
-  const names = Object.keys(state.profile.layouts);
-  if (names.length <= 1) {
-    showError("Cannot delete the last layout.");
+  const plan = planLayoutDelete(state.profile, selectedLayoutName());
+  if (!plan.ok) {
+    showError(plan.message);
     return;
   }
-  const target = selectedLayoutName();
-  if (target === state.profile.active_layout) {
-    showError(`Cannot delete “${target}” while it is active. Select another layout in the picker (keep this one on stage), then Delete.`);
-    return;
-  }
-  if (!state.profile.layouts[target]) {
-    showError(`Layout “${target}” was not found.`);
-    return;
-  }
-  if (!window.confirm(`Delete layout “${target}”?`)) {
-    return;
-  }
-  delete state.profile.layouts[target];
-  state.layoutSelection = state.profile.active_layout;
-  state.layoutUndoStack = [];
-  showError("");
-  view?.invalidateLayout?.();
-  pushProfileToView();
-  syncUndoButton();
-  refreshPresetThumbs();
+  // In-page confirm only — window.confirm is silent-false under browser automation.
+  confirmDialog({
+    title: "Delete layout",
+    message: `Delete layout “${plan.target}”? This removes it from the library immediately; Save layout writes the change to disk.`,
+    okLabel: "Delete",
+  }).then((ok) => {
+    if (!ok) return;
+    const result = applyLayoutDelete(state.profile, plan.target);
+    if (!result.ok) {
+      showError(result.message);
+      return;
+    }
+    state.layoutSelection = state.profile.active_layout;
+    state.layoutUndoStack = [];
+    showError("");
+    view?.invalidateLayout?.();
+    pushProfileToView();
+    syncUndoButton();
+    refreshPresetThumbs();
+  });
 }
 
 function applyPreset(preset) {

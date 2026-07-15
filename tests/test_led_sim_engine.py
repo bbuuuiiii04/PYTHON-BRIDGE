@@ -785,6 +785,45 @@ class LayoutLibraryTests(unittest.TestCase):
             self.assertAlmostEqual(got[0], expected[0], delta=1e-6, msg=f"led sample {index} x")
             self.assertAlmostEqual(got[1], expected[1], delta=1e-6, msg=f"led sample {index} y")
 
+    @unittest.skipUnless(shutil.which("node"), "node not on PATH")
+    def test_plan_and_apply_layout_delete_js(self) -> None:
+        """UI Delete guards: refuse active/last; remove non-active from layouts immediately."""
+        script = (
+            f"import {{ planLayoutDelete, applyLayoutDelete }} from {_VIEW_JS.resolve().as_uri()!r};\n"
+            "const profile = {\n"
+            "  active_layout: 'Home',\n"
+            "  layouts: { Home: {preset:'perimeter'}, DeleteMe: {preset:'snake'} },\n"
+            "};\n"
+            "const refuseActive = planLayoutDelete(profile, 'Home');\n"
+            "const refuseLast = planLayoutDelete({active_layout:'Home', layouts:{Home:{}}}, 'Home');\n"
+            "const allow = planLayoutDelete(profile, 'DeleteMe');\n"
+            "const before = Object.keys(profile.layouts).sort();\n"
+            "const applied = applyLayoutDelete(profile, 'DeleteMe');\n"
+            "process.stdout.write(JSON.stringify({\n"
+            "  refuseActive, refuseLast, allow, before,\n"
+            "  applied, after: Object.keys(profile.layouts).sort(),\n"
+            "  active: profile.active_layout,\n"
+            "}));\n"
+        )
+        proc = subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        result = json.loads(proc.stdout)
+        self.assertFalse(result["refuseActive"]["ok"])
+        self.assertIn("active", result["refuseActive"]["message"])
+        self.assertFalse(result["refuseLast"]["ok"])
+        self.assertIn("last layout", result["refuseLast"]["message"])
+        self.assertTrue(result["allow"]["ok"])
+        self.assertEqual(result["allow"]["target"], "DeleteMe")
+        self.assertEqual(result["before"], ["DeleteMe", "Home"])
+        self.assertTrue(result["applied"]["ok"])
+        self.assertEqual(result["after"], ["Home"])
+        self.assertEqual(result["active"], "Home")
+
 
 if __name__ == "__main__":
     unittest.main()

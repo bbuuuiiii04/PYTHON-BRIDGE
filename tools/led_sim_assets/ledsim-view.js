@@ -96,6 +96,48 @@ export function activeLayoutEntry(profile) {
   };
 }
 
+/**
+ * Guard for Layout-tab Delete. Pure — no DOM.
+ * Refuse last layout and the active layout; otherwise allow deleting `selected`.
+ * @returns {{ok: true, target: string} | {ok: false, message: string}}
+ */
+export function planLayoutDelete(profile, selected) {
+  const layouts = profile?.layouts;
+  if (!layouts || typeof layouts !== "object") {
+    return {ok: false, message: "No layout library loaded."};
+  }
+  const names = Object.keys(layouts);
+  if (names.length <= 1) {
+    return {ok: false, message: "Cannot delete the last layout."};
+  }
+  if (typeof selected !== "string" || !selected) {
+    return {ok: false, message: "No layout selected."};
+  }
+  if (selected === profile.active_layout) {
+    return {
+      ok: false,
+      message: `Cannot delete “${selected}” while it is active. Select another layout in the picker (keep this one on stage), then Delete.`,
+    };
+  }
+  if (!Object.prototype.hasOwnProperty.call(layouts, selected)) {
+    return {ok: false, message: `Layout “${selected}” was not found.`};
+  }
+  return {ok: true, target: selected};
+}
+
+/** Remove a non-active layout from the in-memory profile. Mutates `profile`. */
+export function applyLayoutDelete(profile, target) {
+  const plan = planLayoutDelete(profile, target);
+  if (!plan.ok) return plan;
+  delete profile.layouts[plan.target];
+  if (profile.active_layout === plan.target) {
+    // Should be unreachable when callers honor planLayoutDelete; keep library valid.
+    const remaining = Object.keys(profile.layouts);
+    profile.active_layout = remaining[0];
+  }
+  return {ok: true, target: plan.target, layouts: Object.keys(profile.layouts)};
+}
+
 function roomSizeMm(profile) {
   return activeLayoutEntry(profile).room_mm.slice();
 }
