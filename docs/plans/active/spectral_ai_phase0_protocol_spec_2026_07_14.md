@@ -119,11 +119,19 @@ AST guard test copied from the `tests/test_hardness_v0.py:415` pattern.
 ### B2. Canonical bytes and hashing (ordinary engineering, `proposed`)
 
 - Canonical JSON: UTF-8, `sort_keys=True`, separators `(",", ":")`, no NaN/Inf
-  (nonfinite floats are protocol errors), floats serialized via `repr` round-trip.
+  (nonfinite floats are protocol errors). Numbers cross the serialization boundary
+  only as Python `int`/`float` (NumPy scalar types are rejected there); `-0.0` is
+  normalized to `0.0`; floats serialize via `repr` round-trip.
 - JSONL: one canonical JSON object per line, `\n` terminated.
 - `sha256_hex(obj)` = SHA-256 over canonical bytes. For any artifact that embeds its
   own digest, compute with digest fields omitted, then insert (review §15.1 pattern).
-- Every hash mentioned below is SHA-256 hex, lower-case.
+- Every hash mentioned below is SHA-256 hex, lower-case; `[:16]` means the first 16
+  lower-case hex characters.
+- Selection-hash inputs (`SHA256(a || b || …)`): each field is rendered as a UTF-8
+  string (numbers per the canonical rules above) and the fields are joined with the
+  single byte `0x1F`. No other concatenation is permitted.
+- The environment lock records the Python, NumPy, and `unicodedata.unidata_version`
+  versions; text normalization's "punctuation" means Unicode general category `P*`.
 
 ### B3. Deterministic selection (review §§8–9, exact)
 
@@ -148,7 +156,12 @@ or budget is **never** expanded after any prediction or answer exists.
 3. **Eligibility (frozen before any candidate output):** not in current development
    lineages; non-scripted; exact current v4 payload present and valid; ≥2 existing
    Rekordbox candidate drop markers with full 16-beat coverage; no unresolved
-   duplicate/lineage ambiguity; no cross-partition related group.
+   duplicate/lineage ambiguity; no cross-partition related group. Lineage curation
+   is a per-row requirement independent of pair emission: every selected row needs
+   `lineage_review_state = confirmed` from the 30-minute manual prep; a row whose
+   lineage cannot be confidently assigned inside that cap (including a
+   metadata-stripped or re-encoded sibling that no suspicious-pair rule catches) is
+   `unresolved` and excluded.
 4. **Lineages and markers.** Sort eligible lineages by
    `SHA256(pilot_seed || recording_lineage_id)`; take the first 18 (need 18 distinct
    `recording_lineage_id` AND 18 distinct `audio_duplicate_group`). Per lineage,
@@ -185,8 +198,25 @@ content_id_locator, audio_sha256, audio_duplicate_group, recording_lineage_id,
 split_role, beatgrid_fingerprint, marker_set_fingerprint, label_store_hash,
 exclusion_reason, lineage_review_state, curator_confirmation,
 family_montage_marker_ids`. `track_instance_id =
-SHA256(pilot_seed || content_id_locator)[:16]` (ordinary engineering). Locator/
-title/artist/path are audit fields and never reach a predictor.
+SHA256(pilot_seed || content_id_locator)[:16]` (ordinary engineering; 64-bit
+truncation, uniqueness enforced by B3.8). Locator/title/artist/path are audit
+fields and never reach a predictor.
+
+Enum domains (exact): `split_role ∈ {pilot, development, anchor}`;
+`lineage_review_state ∈ {confirmed, unresolved}`; `curator_confirmation ∈
+{confirmed_related, confirmed_unrelated, unresolved, not_applicable}`;
+`exclusion_reason ∈ {none, development_overlap, scripted, missing_v4, invalid_v4,
+insufficient_markers, unresolved_duplicate, unresolved_lineage,
+cross_partition_related, pool_cap}`.
+
+Card identity (exact): marker cards
+`card_id = SHA256(pilot_seed || audio_sha256 || marker_beat || "marker-card")[:16]`;
+family montage cards `SHA256(pilot_seed || recording_lineage_id ||
+"family-card")[:16]`; anchor cards `SHA256(pilot_seed || "anchor-card" ||
+anchor_role)[:16]`; repeat instances `SHA256(source_card_id ||
+"repeat-instance")[:16]` with `repeat_of_card_id = source_card_id`. A marker card
+carries both the marker-state question and (if genuine) its hardness pair; the
+B3.6 repeat lottery draws over original marker and montage card IDs.
 
 A separate `development_training_manifest` freezes development + anchor row IDs,
 per-axis permitted targets, exclusions, duplicate/lineage groups, scaler population,
@@ -207,8 +237,11 @@ telemetry goes to `resource_report.json` only. All prediction files and
   `lighting_moments_v2.build_track_plan` path read-only at the frozen markers.
   Family mapping for the two-moment target: `NEUTRAL`→`none`; abstain if either
   plan row is missing; both match → that family; differ → `mixed`. Hardness: compare
-  the marker's frozen tier with the anchor's operator-confirmed tier; equality →
-  `tied`; missing tier → abstain. F2 abstains for genuine-marker state.
+  the marker's frozen tier with the anchor's **assigned role tier from B3.5/B3.7**
+  (frozen at selection; session A only confirms the anchor or stops the axis — it
+  never feeds a prediction input, so all predictions freeze before any card
+  including session A's); equality → `tied`; missing tier → abstain. F2 abstains
+  for genuine-marker state.
 - **Baseline B `development_majority_v1`:** exact majority of comparable
   genuine/not-genuine targets in the development-training manifest; an exact tie
   abstains. Genuine-marker axis only.
@@ -226,7 +259,9 @@ telemetry goes to `resource_report.json` only. All prediction files and
   or ordinal median; ties abstain. Equal-distance tie-break: frozen
   `track_instance_id`, then marker beat. OOD: nearest distance above the frozen
   leave-one-lineage-out nearest-distance 95th percentile (NumPy
-  `method="linear"`) ⇒ abstain. Family retrieval pools median + IQR over exactly
+  `method="linear"`) ⇒ abstain. Hardness pair mapping: retrieval's ordinal
+  T1/T2/T3 prediction compares against the anchor's assigned role tier — higher →
+  `harder`, equal → `tied`, lower → `softer`, missing/abstained → abstain. Family retrieval pools median + IQR over exactly
   the two frozen family-montage rows per lineage; its development target uses the
   matching two-row development montage, never a genuine-only subset.
 - **Diagnostics (never in integrated PASS):** `hardness_v0_all_markers_v1` runs
@@ -273,22 +308,31 @@ neutral IDs; recognition is recorded, never prevented.
   montage repeats 1/1/2 per B3.6.
 
 **Atomic decision** = one committed answer to one question (anchor confirmation,
-marker-state call, hardness comparison, family call, or any repeat). Editing before
-commit is free; a re-commit of an already-committed question counts again. The
-runner refuses commits past 113 total and past any per-card maximum.
+marker-state call, hardness comparison, family call, or any repeat). Answers are
+editable before commit (that time counts, per the review) and **immutable after
+commit — there are no re-commits** (review §5: immutable response rows). The
+decision count is therefore the count of committed answers, ≤113 by construction;
+the runner refuses commits past 113 total and past any per-card maximum.
 
 **Active time** = wall clock from a session's first audio playback to its last
-commit, summed across sessions and resumed segments; there is no off-clock
-preparation for Brandon. The runner displays and records both counters; crossing
-65 minutes or 113 decisions ends intake immediately and gate 3 evaluates it.
+durable row, summed across sessions and resumed segments; there is no off-clock
+preparation for Brandon. Every first playback of a card appends a durable
+`playback` row (card_id, UTC), so a crashed segment's elapsed time is
+reconstructed from its own rows — a crash never erases listened time; at most the
+tail between the last durable row and the crash goes uncounted, and every crashed
+segment is reported as such in the burden ledger. The runner displays and records
+both counters; crossing 65 minutes or 113 decisions ends intake immediately and
+gate 3 evaluates it.
 
 **Rules:** `unsure` is always valid, never forced into a class. `marker_wrong_or_
 ambiguous` rows are excluded from acoustic accuracy and reported separately; no
 Rekordbox marker is edited. A skipped card is recorded `skipped` with zero
 decisions and becomes unavailable truth. Fatigue/voluntary stop: Brandon may stop
 any session immediately; the stop reason is recorded; "stopped because exhausting"
-is a workload FAIL by gate 3. Never more than one session per calendar day
-(machine-enforced from commit timestamps).
+is a workload FAIL by gate 3. Never more than one session per calendar day —
+machine-local date, recorded alongside each commit's UTC timestamp; a resumed
+segment belongs to its origin session regardless of date, and a **new** session
+may not start on a local date that already holds any commit.
 
 **Interrupted-session recovery:** every commit is durable (append-only
 `responses.jsonl` with per-row hash chaining to the frozen card manifest). Resume
@@ -296,7 +340,12 @@ re-opens at the first unanswered card in frozen order; committed answers are
 immutable and never re-asked, so recovery adds zero decisions and only the new
 segment's active time. Card order, repeats, and pair sides come from the frozen
 manifest, so drift between segments is impossible; a detected order mismatch is a
-hard FAIL (gate 1).
+hard FAIL (gate 1). A torn trailing record (final line unterminated or invalid) is
+dropped and logged `torn_tail`; an **interior** chain break is gate-1 tampering.
+A card whose audio played without a commit before an interrupt is `re_exposed` on
+resume; if a re-exposed card is a repeat source or instance, that repeat pair is
+excluded from the gate-2 consistency counters (the comparability floors still
+apply).
 
 **Response independence:** `responses.jsonl` lives apart from predictions; the
 session runner reads only `card_manifest.jsonl` + audio and verifies
@@ -357,7 +406,11 @@ source file; any playback temp file lives in `scratch/`.
 
 Every pilot input ends in exactly one state — `predicted`,
 `abstained_with_reason`, `excluded_with_prespecified_reason`, or `hard_failure` —
-and the counts must reconcile to the frozen manifest per method and axis.
+and the counts must reconcile to the frozen manifest per method and axis. The
+human ledger reconciles the same way: per axis, frozen truth rows = answered +
+`human_unavailable` (skipped, `unsure`, marker-wrong, axis stopped), and the two
+ledgers cross-check — a predicted row with no human state, or the reverse, fails
+reconciliation.
 
 Per-axis reporting: genuine-marker state (raw confusion, balanced accuracy when
 both classes exist, abstention, marker-wrong rate, lineage-macro accuracy);
@@ -414,9 +467,10 @@ The exact gates (verdict.py implements these and nothing else):
    wins in ≥4 more lineages than it loses, ≤4 candidate abstentions. More than four
    total `mixed|none|unsure` human answers fails the two-moment family abstraction
    regardless of predictor score.
-7. **Stability availability:** each gated axis ≥28 comparable central rows.
-   **PASS:** neither primary axis's flip rate is more than ten percentage points
-   worse than its named baseline.
+7. **Stability availability:** each gated axis ≥28 comparable central rows,
+   otherwise `INCONCLUSIVE` (an availability miss here is a floor, never the FAIL
+   branch). **PASS:** neither primary axis's flip rate is more than ten percentage
+   points worse than its named baseline.
 
 ```text
 FAIL         if setup, repeatability, workload, genuine, hardness, family, or stability fails;
@@ -467,13 +521,19 @@ Rollback = delete `tools/spectral_pilot/`, its tests, and the pilot workspace
 directory; no other file changed, so current live behavior is untouched by
 construction. Proof obligations (implemented as tests + a runtime check in the
 pilot CLI): (a) AST no-runtime-importer guard; (b) a workspace fence — every write
-path asserts it resolves under the pilot namespace; (c) byte-identity check — the
-pilot run records SHA-256 of the v4 cache directory listing (names+mtimes+sizes),
-`local/labels/*`, and resolved config files before and after a run and fails on any
-difference; (d) zero bridge contact — the package never imports runtime modules
-except the read-only F2/`spectral_profile`/`spectral_cache` call surfaces named in
-B4, and never opens sockets, MIDI, or subprocesses (asserted by test-time audit of
-imports and a no-network guard in the CLI).
+path asserts it resolves under the pilot namespace, and audio decode/playback
+temp files are created only in `scratch/`; (c) byte-identity check — the pilot run
+records SHA-256 of canonically **sorted** directory listings (names+mtimes+sizes)
+of the v4 cache, `local/labels/`, resolved config files, the 60 pool audio files'
+stat identity, the Rekordbox database paths, the sidecar export directory, and
+`~/Library/Logs/rb_ss_bridge/`, before and after a run, and fails on any
+difference; it also asserts zero new files under the repo tree outside the B0
+fence; (d) zero bridge contact — the package never imports runtime modules except
+the read-only F2/`spectral_profile`/`spectral_cache` call surfaces named in B4,
+configures logging into `scratch/` **before** those imports so import-time logger
+setup cannot write outside the namespace, and never opens sockets, MIDI, or
+subprocesses (asserted by test-time audit of imports and a no-network guard in the
+CLI).
 
 ---
 
@@ -536,7 +596,8 @@ Implementation (when separately authorized) is done only when:
 
 - [ ] Every Part B module exists with the exact interfaces above; Part D tests pass.
 - [ ] The four AGENTS.md §8 checks pass; bookkeeping rows updated per the `docs`
-      contract (`docs/agents/change_contracts.yml:796`).
+      contract in `docs/agents/change_contracts.yml` (cite the key, not a line —
+      the file moves).
 - [ ] No file outside the B0 fence changed (diff-stat proof against the fence).
 - [ ] Status language: `planned` → `software-tested offline tooling`; never
       `validated`; the pilot itself stays unexecuted until its own authorization.
