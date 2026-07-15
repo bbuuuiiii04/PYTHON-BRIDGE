@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified adversarial design review with measured local development evidence and current primary-source external research
-last_verified_commit: a6ff90a
+last_verified_commit: 790c625
 last_verified_date: 2026-07-14
 validation_scope: >
   Documentation-only review of the current spectral-v4 extractor, cache, derived
@@ -9,7 +9,8 @@ validation_scope: >
   F1/F2/F4 consumers, lighting authorities, portable sidecar, and the tracked
   33-track HTDemucs pilot. Current gitignored gold was scored read-only at this
   HEAD; external candidate facts were checked against primary sources on
-  2026-07-14. No runtime code, config, cache, label, audio, Rekordbox data,
+  2026-07-14; the operator-supplied SOL4 creative catalog was read as historical
+  product-direction evidence. No runtime code, config, cache, label, audio, Rekordbox data,
   generated evidence, bridge process, output, or hardware was changed or contacted.
   Design only; implementation and execution are not authorized.
   SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
@@ -22,7 +23,7 @@ validation_scope: >
 Every load-bearing statement in this review carries one of these labels:
 
 - **`confirmed-repo`** — verified in current executable code, tests, tracked config,
-  or current repository contracts at `a6ff90a`.
+  or current repository contracts at `790c625`.
 - **`confirmed-external`** — verified against a primary external source, linked near
   the claim and checked on 2026-07-14.
 - **`measured`** — produced by a named local artifact or experiment. It is not
@@ -93,9 +94,11 @@ the deterministic pilot passes and exposes a named residual.
 questions: the current F2 plus failure-correction burden justifies a bounded experiment,
 and the four-session ceiling of 65 active minutes / 113 atomic decisions is acceptable.
 He also assigned Fable 5 as the executive orchestrator and project manager for this
-spectral automation product. This closes the gate to **author a Phase-0 specification
-only**. It does not authorize Phase-0 implementation, pilot execution, model or stem
-work, a library sweep, or any live/runtime action.
+spectral automation product. All product work is to run in separate Claude CLI tmux
+sessions managed by Fable; Fable must never use its Agent tool or spawn internal
+subagents. This closes the gate to **author a Phase-0 specification only**. It does not
+authorize Phase-0 implementation, pilot execution, model or stem work, a library sweep,
+or any live/runtime action.
 
 ## 2. Current-state truth
 
@@ -184,6 +187,32 @@ recombine near the mix, not that each source is semantically correct.
 `shifts` argument. **`confirmed-external`** Demucs defaults that argument to one random
 shift. The retained envelopes therefore are not a deterministic qualification artifact.
 
+### 2.5 SOL4 creative catalog provenance and role
+
+**`operator-decided`** Brandon supplied `SOL4_creative_catalog.txt` as creative product
+input and requires Fable to preserve it through the program. The exact local artifact
+read on 2026-07-14 has SHA-256
+`ac3fdc9d4d8eb4d99735667ec52031143ddd94f662e3fa7264b213ee8c0c74f2`.
+
+**`measured`** The 789-line capture contains 35 numbered LED/laser concepts and a ranked
+top 10. Its source session measured raw v4 cache JSON at an older moving HEAD and reported
+1,306 files / 678,110 beat rows. Those historical raw-file counts are not current-library
+coverage: the strict cache can retain duplicate/stale identities, and current claims must
+resolve the current library path plus beatgrid fingerprint.
+
+**`proposed`** Concepts such as Growl Jaw, Synth-Sustain Skyrail, Sustained Siege,
+Velvet Spark Ceiling and Honest Fuse are a creative backlog, not accepted architecture,
+operator gold, or proof that their signal mappings work. The catalog itself distinguishes
+measured-groundable proposals from speculative proposals, but even the former still need
+current-code verification, independent axis qualification, Brandon's visual judgment,
+and any applicable room/hardware gate.
+
+**`proposed`** Phase 0 may test whether prerequisite family/hardness measurements are
+reliable; it must not implement or score these visual concepts. Fable's Phase-0 spec must
+carry a non-authorizing trace from all 35 concepts to their required measurement/decision
+axes and earliest possible later phase, so the creative intent is neither lost nor
+silently promoted.
+
 ## 3. Problem decomposition
 
 One “AI label” cannot truthfully solve all of these jobs:
@@ -256,7 +285,7 @@ must reconcile to the frozen manifest.
 
 ### 6.1 Baselines that must precede any external model
 
-**`confirmed-repo`** `current_f2_a6ff90a` is the live-software baseline. It emits
+**`confirmed-repo`** `current_f2_790c625` is the live-software baseline. It emits
 family/tier/darkness at existing markers and abstains for genuine-drop classification,
 growl spans, and laser suitability.
 
@@ -488,7 +517,7 @@ fresh clean claim.
 **Default class for this subsection: `proposed`.**
 
 **`proposed`** Phase 0 freezes the literal
-`pilot_seed = spectral-ai-pilot-v1-a6ff90a-2026-07-14` before any row selection. Every
+`pilot_seed = spectral-ai-pilot-v1-790c625-2026-07-14` before any row selection. Every
 seed-pool or selected-manifest row must include:
 
 ```text
@@ -678,7 +707,7 @@ runtime are not inferred from a PASS.
 
 - corpus: the exact 18 lineages / 36 markers selected by §9.2;
 - human anchors: the exact seven in §8.1;
-- baseline A: `current_f2_a6ff90a`;
+- baseline A: `current_f2_790c625`;
 - baseline B: candidate-neutral development majority for genuine-marker state;
 - candidate C: `v4_exact_retrieval_v1` for genuine, hardness and family;
 - diagnostic only: `hardness_v0_all_markers_v1` and `approach_v0_diagnostic_v1`;
@@ -1116,6 +1145,8 @@ not an evidence class or calibrated model confidence.
 | `proposed` | 65-minute/113-decision ceiling | Honest count including repeats and montages | “36 cards/one hour” shorthand | Medium | Brandon sets a lower ceiling |
 | `operator-decided` | The pre-pilot burden and workload gates passed on 2026-07-14 | Brandon answered yes after the four-session/65-minute/113-decision breakdown was explained | Stop before Phase 0 | High | Brandon withdraws or lowers the workload authorization |
 | `operator-decided` | Fable 5 is executive orchestrator and project manager for this spectral automation product | Brandon assigned ownership on 2026-07-14 | Codex or an implementation agent silently managing architecture | High | Brandon reassigns the role |
+| `operator-decided` | All work uses Claude CLI tmux seats; Fable never spawns internal subagents | Brandon corrected the execution topology on 2026-07-14 | Fable Agent-tool fan-out; Codex execution | High | Brandon changes the operating model |
+| `operator-decided` | SOL4's 35-concept catalog is durable creative product input | Brandon supplied the exact capture on 2026-07-14 | Ignore the catalog; treat it as accepted architecture | High | Brandon replaces or retires the catalog |
 | `proposed` | Per-axis PASS and integrated all-axis PASS | Prevents family success from licensing unrelated fields | Blended score | High | Pilot shows an axis should be removed entirely |
 | `proposed` | Whole-track stable family remains unproven | Human and method unit is exactly two shown moments | Presume one track family | High | A later whole-track protocol |
 | `proposed` | No AI prediction is gold | Correctness requires independent human truth | Consensus gold | High | Never |
@@ -1156,7 +1187,9 @@ ceiling. These decisions permit specification work only.
 **Default class for this section: `proposed`.**
 
 Every phase below is **`proposed`** and unauthorized by this review. Each needs a
-separate bounded spec and explicit dispatch.
+separate bounded spec and explicit dispatch. **`operator-decided`** Every authorized
+round is executed in a named Claude CLI tmux session under Fable's management; Fable
+does not use its Agent tool or spawn internal subagents.
 
 ### Phase 0 — Protocol package
 
@@ -1267,7 +1300,9 @@ separate bounded spec and explicit dispatch.
 **`operator-decided`** The single next action is to give Fable 5 the bounded executive-
 manager handoff in
 `docs/prompts/active/spectral_ai_phase0_fable_manager_kickoff_2026_07_14.md`. Fable may
-verify this review and author one Codex-executable Phase-0 protocol specification. It may
+verify this review and author one Claude-CLI-executable Phase-0 protocol specification.
+Any later work is dispatched through named Claude CLI tmux sessions, never Fable's Agent
+tool or internal subagents. Fable may
 not implement the protocol, dispatch pilot execution, or widen the product scope.
 
 **`proposed`** Do not install or run an embedding, run stems, fill the remaining
@@ -1287,7 +1322,7 @@ with a named reason when invalid, leave scripted/manual/emergency paths untouche
 run no model during a show. SoundSwitch, lasers and LEDs/Govee should behave exactly as
 they do now whenever the profile feature is off or invalid.
 
-**`confirmed-repo`** Verified here: current code and contracts at `a6ff90a`, current
+**`confirmed-repo`** Verified here: current code and contracts at `790c625`, current
 F1/F2/F4/sidecar seams, and existing deterministic candidates. **`measured`** The local
 development-score counts/hashes and tracked stem resource/result record were reproduced
 or checked. **`confirmed-external`** The model/tool facts are linked to their checked
