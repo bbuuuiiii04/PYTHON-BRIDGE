@@ -214,7 +214,8 @@ class SelectionResult:
     eligible_lineage_count: int = 0
 
 
-def _selected_row(row, pilot_seed, created_from_head, split_role, montage_ids):
+def _selected_row(row, pilot_seed, created_from_head, split_role, montage_ids, adjudications=None):
+    curator = (adjudications or {}).get(row.content_id_locator, "not_applicable")
     return SelectedRow(
         schema_version=SCHEMA_VERSION, pilot_seed=pilot_seed, created_from_head=created_from_head,
         track_instance_id=track_instance_id(pilot_seed, row.content_id_locator),
@@ -223,18 +224,21 @@ def _selected_row(row, pilot_seed, created_from_head, split_role, montage_ids):
         split_role=split_role, beatgrid_fingerprint=row.beatgrid_fingerprint,
         marker_set_fingerprint=row.marker_set_fingerprint, label_store_hash=row.label_store_hash,
         exclusion_reason="none", lineage_review_state="confirmed",
-        curator_confirmation="not_applicable", family_montage_marker_ids=list(montage_ids),
+        curator_confirmation=curator, family_montage_marker_ids=list(montage_ids),
     )
 
 
 def build_selection(
     locator_rows, *, pilot_seed, created_from_head, dev_content_ids, dev_lineages,
-    scripted_ids, unresolved_ids, lineage_states, anchor_rows=(),
+    scripted_ids, unresolved_ids, lineage_states, anchor_rows=(), adjudications=None,
 ):
     """Run items 1-8. Returns a SelectionResult; INCONCLUSIVE when a floor is missed.
 
     ``anchor_rows`` are the seven B3.7 anchor LocatorRows in ANCHOR_ROLES order,
     pinned at Phase-1; empty in most unit fixtures (anchor cards then absent).
+    ``adjudications`` maps content_id_locator -> curator_confirmation
+    (confirmed_related|confirmed_unrelated|unresolved) from the manual
+    suspicious-pair review; every other selected row stays ``not_applicable``.
     """
     pool = seed_pool(locator_rows, pilot_seed=pilot_seed, dev_content_ids=dev_content_ids,
                      scripted_ids=scripted_ids)
@@ -244,14 +248,22 @@ def build_selection(
                               unresolved_ids=unresolved_ids, lineage_states=lineage_states) == "none"
     ]
 
-    # item 4: 18 lineages, distinct recording_lineage_id AND audio_duplicate_group
-    eligible.sort(key=lambda r: selection_hash(pilot_seed, r.recording_lineage_id))
-    chosen, seen_lin, seen_dup = [], set(), set()
+    # item 4: representative per lineage = lowest SHA256(pilot_seed || content_id_locator)
+    # (spec B3.4 amended — never the stable-sort input order); then order lineages by
+    # SHA256(pilot_seed || recording_lineage_id) and dedup by audio_duplicate_group.
+    reps = {}
     for r in eligible:
-        if r.recording_lineage_id in seen_lin or r.audio_duplicate_group in seen_dup:
+        key = selection_hash(pilot_seed, r.content_id_locator)
+        cur = reps.get(r.recording_lineage_id)
+        if cur is None or key < cur[0]:
+            reps[r.recording_lineage_id] = (key, r)
+    rep_rows = sorted((v[1] for v in reps.values()),
+                      key=lambda r: selection_hash(pilot_seed, r.recording_lineage_id))
+    chosen, seen_dup = [], set()
+    for r in rep_rows:
+        if r.audio_duplicate_group in seen_dup:
             continue
         chosen.append(r)
-        seen_lin.add(r.recording_lineage_id)
         seen_dup.add(r.audio_duplicate_group)
         if len(chosen) == N_LINEAGES:
             break
@@ -281,11 +293,12 @@ def build_selection(
 
     # build selected rows (pilot) + anchors
     selected_rows = [
-        _selected_row(r, pilot_seed, created_from_head, "pilot", montage_by_lineage[r.recording_lineage_id])
+        _selected_row(r, pilot_seed, created_from_head, "pilot",
+                      montage_by_lineage[r.recording_lineage_id], adjudications)
         for r in chosen
     ]
     for role, arow in zip(ANCHOR_ROLES, anchor_rows):
-        selected_rows.append(_selected_row(arow, pilot_seed, created_from_head, "anchor", []))
+        selected_rows.append(_selected_row(arow, pilot_seed, created_from_head, "anchor", [], adjudications))
 
     # sessions: 6 lineages each -> P1,P2,P3 (chosen already in frozen lineage order)
     sessions = {"P1": chosen[0:6], "P2": chosen[6:12], "P3": chosen[12:18]}
