@@ -13,8 +13,8 @@ import unicodedata
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .canonical import selection_hash, sha256_hex
-from .schemas import SCHEMA_VERSION, SelectedRow
+from .canonical import hash_omitting, selection_hash, sha256_hex
+from .schemas import SCHEMA_VERSION, CardManifestRow, SelectedRow
 
 # --- frozen protocol constants (spec B3) -------------------------------------
 POOL_SIZE = 60
@@ -107,6 +107,7 @@ class LocatorRow:
     v4_present: bool = True
     v4_valid: bool = True
     is_scripted: bool = False
+    anchor_marker_beat: Optional[int] = None   # anchor rows only (spec B3.7/B7 clip rule)
 
     def eligible_markers(self) -> tuple:
         """Candidate markers with full 16-beat coverage (marker+16 <= n_beats)."""
@@ -200,6 +201,7 @@ class CardPlan:
     repeat_of_card_id: Optional[str]
     clip_start_beat: Optional[int]
     clip_end_beat: Optional[int]
+    montage_windows: Optional[list] = None   # family cards: the two marker beats
 
 
 @dataclass
@@ -304,24 +306,31 @@ def _build_cards(pilot_seed, sessions, marker_rows, hardness_by_card, montage_by
     beat_of = {cid: (r, b) for (r, b, cid) in marker_rows}
     cards = []
 
-    # Session A: seven anchor-confirm cards (only if anchors provided)
+    # Session A: seven anchor-confirm cards (only if anchors provided). Each anchor
+    # carries its own marker beat + exact 16-beat clip (spec B7 clip rule).
     for role, arow in zip(ANCHOR_ROLES, anchor_rows):
         cid = anchor_card_id(pilot_seed, role)
+        ab = arow.anchor_marker_beat
+        if ab is None:
+            raise ManifestError(f"anchor role {role} has no usable marker beat")
         cards.append(CardPlan(cid, "anchor_confirm", "A", 0, track_instance_id(pilot_seed, arow.content_id_locator),
-                              None, arow.audio_sha256, arow.recording_lineage_id, role, None, None, None, None, None))
+                              ab, arow.audio_sha256, arow.recording_lineage_id, role, None, None, None, ab, ab + WINDOW))
 
     # Sessions P1-P3
     for sess, lineages in sessions.items():
         base = []
         for r in lineages:
-            for cid in montage_by_lineage[r.recording_lineage_id]:
+            ids = montage_by_lineage[r.recording_lineage_id]
+            for cid in ids:
                 mr, beat = beat_of[cid]
                 base.append(CardPlan(cid, "marker_state", sess, 0, track_instance_id(pilot_seed, r.content_id_locator),
                                      beat, r.audio_sha256, r.recording_lineage_id, hardness_by_card[cid],
                                      None, None, None, beat, beat + WINDOW))
             fcid = family_card_id(pilot_seed, r.recording_lineage_id)
+            mbeats = [beat_of[cid][1] for cid in ids]   # both montage windows (spec B7)
             base.append(CardPlan(fcid, "family_montage", sess, 0, track_instance_id(pilot_seed, r.content_id_locator),
-                                 None, r.audio_sha256, r.recording_lineage_id, None, None, None, None, None, None))
+                                 None, r.audio_sha256, r.recording_lineage_id, None, ids[0], ids[1], None, None, None,
+                                 montage_windows=mbeats))
         cards.extend(base)  # order fixed below across the whole session
     _assign_repeats_and_order(pilot_seed, cards, sessions)
     return cards
@@ -368,7 +377,7 @@ def _repeat_card(pilot_seed, src, card_type, sess):
     rid = repeat_instance_id(src.card_id)
     return CardPlan(rid, card_type, sess, 0, src.track_instance_id, src.marker_beat, src.audio_sha256,
                     src.recording_lineage_id, src.anchor_role, src.display_left_id, src.display_right_id,
-                    src.card_id, src.clip_start_beat, src.clip_end_beat)
+                    src.card_id, src.clip_start_beat, src.clip_end_beat, montage_windows=src.montage_windows)
 
 
 def _place_repeats(pilot_seed, base, repeats):
@@ -383,6 +392,32 @@ def _place_repeats(pilot_seed, base, repeats):
         positions[rep.card_id] = valid[h % len(valid)]
     everything = base + repeats
     return sorted(everything, key=lambda c: positions[c.card_id])
+
+
+# --- card manifest producer (spec B7) ----------------------------------------
+def _clip_spec(c: CardPlan) -> dict:
+    """The exact 16-beat clip(s) a card plays (spec B7 clip rule)."""
+    if c.card_type in ("family_montage", "family_repeat"):
+        beats = c.montage_windows or []
+        return {"windows": [{"audio_sha256": c.audio_sha256, "start_beat": b, "end_beat": b + WINDOW}
+                            for b in beats]}
+    return {"audio_sha256": c.audio_sha256, "start_beat": c.marker_beat, "end_beat": c.marker_beat + WINDOW}
+
+
+def card_manifest_rows(pilot_seed, cards):
+    """One CardManifestRow per CardPlan (spec B7): clip_spec + self-embedded card_hash."""
+    rows = []
+    for c in cards:
+        base = dict(
+            schema_version=SCHEMA_VERSION, pilot_seed=pilot_seed, card_id=c.card_id,
+            card_type=c.card_type, session_index=c.session_index, order_index=c.order_index,
+            track_instance_id=c.track_instance_id, marker_beat=c.marker_beat,
+            display_left_id=c.display_left_id, display_right_id=c.display_right_id,
+            anchor_role=c.anchor_role, repeat_of_card_id=c.repeat_of_card_id, clip_spec=_clip_spec(c),
+        )
+        card_hash = hash_omitting({**base, "card_hash": ""}, "card_hash")
+        rows.append(CardManifestRow(**base, card_hash=card_hash))
+    return rows
 
 
 # --- item 8: manifest id + validation ----------------------------------------

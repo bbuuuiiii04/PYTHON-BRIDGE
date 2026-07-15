@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from .canonical import canonical_bytes, jsonl_line, sha256_hex
-from .schemas import SCHEMA_VERSION, ResponseRow
+from .schemas import SCHEMA_VERSION, CardManifestRow, ResponseRow
 
 MAX_DECISIONS = 113
 GENESIS = "0" * 64
@@ -51,6 +51,32 @@ def _safe_path(workspace: Path, name: str) -> Path:
     p = (ws / name).resolve()
     if p != ws and ws not in p.parents:
         raise ValueError(f"refusing write outside workspace: {p}")
+    return p
+
+
+def load_card_manifest(path) -> list:
+    """Read card_manifest.jsonl, validating every row via CardManifestRow (spec B7).
+
+    Returns the validated row dicts (the runner only reads card_id/card_type, but
+    each row must pass the schema first — that is what "consumes validated rows"
+    means).
+    """
+    rows = []
+    for ln in Path(path).read_text(encoding="utf-8").splitlines():
+        if not ln:
+            continue
+        d = json.loads(ln)
+        CardManifestRow.from_dict(d)          # strict: raises on any off-schema row
+        rows.append(d)
+    return rows
+
+
+def write_card_manifest(workspace, rows) -> Path:
+    """Write CardManifestRow dicts to card_manifest.jsonl under the workspace fence."""
+    p = _safe_path(Path(workspace), "card_manifest.jsonl")
+    with p.open("wb") as fh:
+        for d in rows:
+            fh.write(jsonl_line(d))
     return p
 
 
@@ -112,6 +138,11 @@ class SessionRunner:
         self.playbacks_path = _safe_path(self.workspace, "playbacks.jsonl")
         self.segment_index = 0
         self._load()
+
+    @classmethod
+    def from_manifest_file(cls, workspace, manifest_path, **kw):
+        """Build a runner from a card_manifest.jsonl file, validating every row."""
+        return cls(workspace, load_card_manifest(manifest_path), **kw)
 
     # --- durable-log loading + integrity (spec B6 recovery) ------------------
     def _read_jsonl(self, path: Path):
