@@ -9,7 +9,9 @@ validation_scope: >
   arc-length LED placement, named layouts library (schema v2) with Home/Venue
   style isolation, picker Use/Delete targeting selected (refuse active/last
   via error banner; in-page confirm dialog — not window.confirm), Pad|Lab|Sim
-  cross-nav + stage room-size chip (AWR-248), perimeter/snake/custom presets, layout and
+  cross-nav + stage room-size label (AWR-248), mid-width shell hardening
+  (AWR-249: topbar/nav, ≥900 desktop grid, HUD below canvas, label clamp),
+  perimeter/snake/custom presets, layout and
   calibration lockers, timestamp-held playback, calibration sequence v2,
   profile evidence guards, and the local web service are software-tested.
   Optics (glow/bleed/gamma) remain uncalibrated assumptions. Generated timing
