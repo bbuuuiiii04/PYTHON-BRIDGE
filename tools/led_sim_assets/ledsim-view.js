@@ -42,6 +42,15 @@ export function perimeterPresetPoints(roomMm) {
   const perimeter = 2 * (width + height);
   let gap = perimeter - H612D_LENGTH_MM;
   if (gap < 0) gap = Math.min(width * 0.001, 1);
+  // Gap wider than the bottom wall → U-path corner to corner (never outside room).
+  if (gap > width) {
+    return [
+      [0, 0],
+      [0, height],
+      [width, height],
+      [width, 0],
+    ];
+  }
   const half = width / 2;
   return [
     [half - gap / 2, 0],
@@ -123,7 +132,8 @@ export function resolveLayout(profile) {
   return {
     preset,
     points_mm: points.map((point) => [Number(point[0]), Number(point[1])]),
-    flip_chain: Boolean(layout.flip_chain),
+    // Strict boolean — mirror engine resolve_layout (non-bool → False).
+    flip_chain: typeof layout.flip_chain === "boolean" ? layout.flip_chain : false,
   };
 }
 
@@ -730,22 +740,54 @@ export function createLedSimView(canvas, initialProfile) {
       const tangent = pathTangentAt(layout, arcMm);
       // mm y-up → screen y-down: flip tangent dy for screen-space normals.
       const screenTangent = {dx: tangent.dx, dy: -tangent.dy};
-      const screenNormal = outwardNormal(screenTangent, anchor, roomCx, roomCy);
+      let screenNormal = outwardNormal(screenTangent, anchor, roomCx, roomCy);
       const offset = options.offset ?? 14;
       const stack = options.stack || 0;
-      let x = anchor.x + screenNormal.nx * offset;
-      let y = anchor.y + screenNormal.ny * offset + stack;
-      if (options.align === "center") {
-        x -= size.w / 2;
-        y -= size.h / 2;
-      } else if (screenNormal.nx < 0) {
-        x -= size.w;
+      const pad = 6;
+
+      function placeWithNormal(normal) {
+        let x = anchor.x + normal.nx * offset;
+        let y = anchor.y + normal.ny * offset + stack;
+        if (options.align === "center") {
+          x -= size.w / 2;
+          y -= size.h / 2;
+        } else if (normal.nx < 0) {
+          x -= size.w;
+        }
+        return {x, y, w: size.w, h: size.h};
       }
-      const box = {x, y, w: size.w, h: size.h};
+
+      let box = placeWithNormal(screenNormal);
+      // Prefer flipping inward over clipping at the canvas edge.
+      const wouldClip = (
+        box.x < pad
+        || box.y < pad
+        || box.x + box.w > viewWidth - pad
+        || box.y + box.h > viewHeight - pad
+      );
+      if (wouldClip) {
+        const inward = {nx: -screenNormal.nx, ny: -screenNormal.ny};
+        const flipped = placeWithNormal(inward);
+        const flippedClips = (
+          flipped.x < pad
+          || flipped.y < pad
+          || flipped.x + flipped.w > viewWidth - pad
+          || flipped.y + flipped.h > viewHeight - pad
+        );
+        if (!flippedClips || (
+          Math.min(flipped.x, viewWidth - (flipped.x + flipped.w))
+          > Math.min(box.x, viewWidth - (box.x + box.w))
+        )) {
+          box = flipped;
+          screenNormal = inward;
+        }
+      }
+      box.x = Math.max(pad, Math.min(viewWidth - box.w - pad, box.x));
+      box.y = Math.max(pad, Math.min(viewHeight - box.h - pad, box.y));
       if (placed.some((other) => boxesOverlap(box, other))) return false;
       placed.push(box);
       ctx.font = useFont;
-      ctx.fillStyle = options.color || "#c4b5ff";
+      ctx.fillStyle = options.color || "#4dd8e6";
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
       ctx.fillText(text, box.x, box.y);
@@ -755,7 +797,7 @@ export function createLedSimView(canvas, initialProfile) {
     // Priority: center > start > end > ticks
     if (junction) {
       tryDraw("center · control box · 24.6 ft", junction, H612D_JUNCTION_MM, {
-        color: "#c4b5ff", offset: 16,
+        color: "#4dd8e6", offset: 16,
       });
     }
 
@@ -763,20 +805,22 @@ export function createLedSimView(canvas, initialProfile) {
     const gapClose = start && end && Math.hypot(start.x - end.x, start.y - end.y) < 40;
     if (start) {
       tryDraw("start", start, 0, {
-        color: "#7ee0b6",
+        color: "#3fd68f",
         offset: 14,
         stack: gapClose ? -10 : 0,
       });
     }
     if (end) {
       tryDraw(`end · ${formatLengthMm(layout.placed_length_mm)}`, end, layout.placed_length_mm, {
-        color: "#ff7690",
+        color: "#f25f5c",
         offset: 14,
         stack: gapClose ? 10 : 0,
       });
     }
 
     for (let segment = 0; segment < H612D_SEGMENTS; segment += 10) {
+      // AF-4: suppress the tick that coincides with the junction glyph (seg 30).
+      if (Math.abs(segment * H612D_SEGMENT_MM - H612D_JUNCTION_MM) < 1e-6) continue;
       const point = boundaries[segment];
       if (!point) continue;
       ctx.beginPath();
@@ -788,7 +832,7 @@ export function createLedSimView(canvas, initialProfile) {
       ctx.beginPath();
       const label = `${String(segment).padStart(2, "0")} · ${formatLengthMm(segment * H612D_SEGMENT_MM)}`;
       tryDraw(label, point, segment * H612D_SEGMENT_MM, {
-        color: "rgba(195,202,220,.7)",
+        color: "rgba(195,202,220,.85)",
         font: tickFont,
         offset: 12,
       });

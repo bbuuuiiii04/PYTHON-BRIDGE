@@ -428,6 +428,62 @@ class LayoutTests(unittest.TestCase):
         legacy.pop("layout", None)
         self.assertEqual(engine.validate_profile(legacy), [])
 
+    def test_perimeter_large_room_clamps_to_corners(self) -> None:
+        # AF-1: gap wider than bottom wall must never emit coordinates outside [0, room].
+        room = [10000.0, 10000.0]
+        points = engine.perimeter_preset_points(room)
+        self.assertEqual(points[0], [0.0, 0.0])
+        self.assertEqual(points[-1], [10000.0, 0.0])
+        for point in points:
+            self.assertGreaterEqual(point[0], 0.0)
+            self.assertLessEqual(point[0], 10000.0)
+            self.assertGreaterEqual(point[1], 0.0)
+            self.assertLessEqual(point[1], 10000.0)
+        path_len = engine.polyline_arc_length(points)
+        # U-path = W + 2H = 30000 > strip → excess, not outside points.
+        result = engine.layout_led_positions(_profile(room_mm=room, layout={
+            "preset": "perimeter", "points_mm": points, "flip_chain": False,
+        }))
+        self.assertAlmostEqual(path_len, 30000.0, places=6)
+        self.assertGreater(result["excess_path_mm"], 0.0)
+        self.assertEqual(result["unplaced_mm"], 0.0)
+
+    def test_flip_chain_non_bool_coerces_false(self) -> None:
+        resolved = engine.resolve_layout(_profile(layout={
+            "preset": "custom",
+            "points_mm": [[0.0, 0.0], [1000.0, 0.0]],
+            "flip_chain": 1,  # truthy but not bool — engine coerces False
+        }))
+        self.assertIs(resolved["flip_chain"], False)
+        errors = engine.validate_profile(_profile(layout={
+            "preset": "custom",
+            "points_mm": [[0.0, 0.0], [1000.0, 0.0]],
+            "flip_chain": 1,
+        }))
+        self.assertTrue(any("flip_chain" in error for error in errors), errors)
+
+    def test_layout_points_outside_room_warn_not_reject(self) -> None:
+        profile = _profile(
+            room_mm=[5216, 2284],
+            layout={
+                "preset": "custom",
+                "points_mm": [[-100.0, 0.0], [6000.0, 0.0]],
+                "flip_chain": False,
+            },
+        )
+        self.assertEqual(engine.validate_profile(profile), [])
+        warnings = engine.profile_warnings(profile)
+        self.assertTrue(any("outside room bounds" in warning for warning in warnings), warnings)
+
+    def test_layout_and_calibration_locks_validate_as_bool(self) -> None:
+        self.assertEqual(engine.validate_profile(_profile(
+            layout_locked=False, calibration_locked=True,
+        )), [])
+        errors = engine.validate_profile(_profile(layout_locked=1))
+        self.assertTrue(any("layout_locked" in error for error in errors), errors)
+        errors = engine.validate_profile(_profile(calibration_locked="yes"))
+        self.assertTrue(any("calibration_locked" in error for error in errors), errors)
+
     def test_format_length_feet_primary(self) -> None:
         self.assertEqual(engine.format_length_mm(engine.H612D_LENGTH_MM), "49.2 ft · 15.0 m")
         self.assertEqual(engine.format_length_mm(10 * engine.H612D_SEGMENT_MM), "8.2 ft · 2.5 m")

@@ -1,17 +1,18 @@
 ---
 doc_status: current
 truth_level: software-tested
-last_verified_commit: 5622aea
+last_verified_commit: PENDING
 last_verified_date: 2026-07-15
 validation_scope: >
-  H612D LED Studio (AWR-196 + AWR-244 room-view rebuild): offline
-  production-runner frame composition, room polyline layout with arc-length LED
-  placement, perimeter/snake/custom presets, timestamp-held playback,
-  calibration sequence v2, profile evidence guards, and the local web service
-  are software-tested. Optics (glow/bleed/gamma) remain uncalibrated assumptions.
-  Generated timing uses an ideal grid. Device color, PWM, latency, physical
-  response, packet delivery, and hardware cadence remain unmeasured;
-  SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
+  H612D LED Studio (AWR-196 + AWR-244 room-view + round-3 lighting-console
+  shell): offline production-runner frame composition, room polyline layout
+  with arc-length LED placement, perimeter/snake/custom presets, layout and
+  calibration lockers, timestamp-held playback, calibration sequence v2,
+  profile evidence guards, and the local web service are software-tested.
+  Optics (glow/bleed/gamma) remain uncalibrated assumptions. Generated timing
+  uses an ideal grid. Device color, PWM, latency, physical response, packet
+  delivery, and hardware cadence remain unmeasured; SOFTWARE-VALIDATED ONLY /
+  HARDWARE-UNVALIDATED.
 ---
 
 # H612D LED Studio
@@ -29,6 +30,12 @@ Path longer than 49.2 ft → strip ends there; leftover path is a dashed guide.
 Path shorter → live shortfall warning (`Path … / Strip … — … unplaced`).
 Junction is always at absolute **24.6 ft / 7498.08 mm**. A **Strip** toggle keeps
 the old 6×10 bench grid for command inspection.
+
+Round 3 rebuilds the page as a **lighting-console shell**: stage-first room
+canvas, collapsible right sidecar (Play / Layout / Calibrate tabs), bottom
+transport, layout and calibration lockers, and Archivo + mono numeric chrome.
+Pad/lab get the same language in a later round — this change does not touch
+pad or lab files.
 
 Each group of six dots receives one RGB command because the H612D exposes 60
 groups, not 360 separately controllable pixels. Screen optics (gamma, gains,
@@ -79,16 +86,26 @@ Profile field `layout`:
 | `points_mm` | Ordered polyline vertices in room coordinates (≥2 points) |
 | `flip_chain` | When true, segment 0 is the other end of the path |
 
+Top-level lockers (bool, default false):
+
+| Field | Meaning |
+| --- | --- |
+| `layout_locked` | Disables vertex drag, room-size edits, and preset changes; hides handles |
+| `calibration_locked` | Disables calibration knobs until unlocked |
+
 `room_mm` is `[width, height]` (default `[5216, 2284]`). Profiles without
 `layout` get the perimeter preset derived from `room_mm`. Legacy keys
 (`corner_segments`, `start_corner`, `direction`, wash fields) are accepted and
-ignored.
+ignored. Points beyond the room (±2 mm tolerance) emit a soft **warning** via
+`profile_warnings()` — saves still succeed so edge dragging stays fluid.
 
 Presets:
 
 - **Perimeter** — rectangle loop whose path length equals the strip when the
   room perimeter is ≥ 49.2 ft. For the operator room (2×(5216+2284)=15000 mm)
   the bottom gap is the real **3.84 mm** shortfall; junction at top-center.
+  When the gap is wider than the bottom wall (very large rooms), the path
+  clamps to a corner-to-corner U so coordinates never leave `[0, room]`.
 - **Snake** — classic S: exactly 3 horizontal runs + 2 vertical connectors,
   lengths solved so total = 14996.16 mm. The absolute junction (24.6 ft) falls
   on the middle run for the operator room; the card does not claim a corner.
@@ -98,13 +115,17 @@ The Python engine function `layout_led_positions(profile)` is the tested
 reference (fixed pitch, absolute junction, truncation/shortfall). `ledsim-view.js`
 mirrors it. LED screen positions are cached per layout/resize, not recomputed
 every frame. UI lengths are **feet primary** with metric secondary
-(e.g. `49.2 ft · 15.0 m`); segment ticks every 10 show true distance (8.2 ft).
+(e.g. `49.2 ft · 15.0 m`); segment ticks every 10 show true distance (8.2 ft),
+except the junction arc (segment 30) where the tick is suppressed under the
+control-box label.
 
-
-The layout editor supports preset cards, room-size fields (presets rescale),
-drag handles (≥32 px hit target), double-click / long-press to insert or delete
-vertices (minimum two), flip chain, reset-to-preset, and single-level undo.
-**Save layout** uses the existing validated profile POST.
+The Layout tab supports preset cards, room-size fields (presets rescale),
+drag handles (≥32 px hit target), double-click (desktop) / long-press (touch)
+to insert or delete vertices (minimum two; long-press cancels once the pointer
+moves ~6 px), flip chain, reset to the last chosen perimeter/snake preset, a
+bounded undo stack (≥20 layout edits, Cmd/Ctrl-Z), and the layout locker.
+**Save layout** uses the existing validated profile POST. Unsaved badges are
+scoped: layout edits do not light the calibration badge, and vice versa.
 
 ## What is not exact yet
 
@@ -153,8 +174,10 @@ Choose a source and press its render button:
   directory.
 
 The transport supports play/pause, loop, exact-frame scrubbing, left/right
-frame stepping, and Space to play or pause. The room view shows all 360
-physical emitters along the strip path; the Strip toggle shows the bench grid.
+frame stepping, Space to play or pause, **L** for labels, arrow nudge of a
+selected vertex (10 mm, Shift = 100 mm) when layout is unlocked, and a **?**
+shortcuts popover. On phones the sidecar becomes a bottom sheet; the stage
+stays first.
 
 ## Calibrate mode
 

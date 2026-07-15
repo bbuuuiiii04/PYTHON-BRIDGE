@@ -64,6 +64,8 @@ H612D_JUNCTION_MM = H612D_LENGTH_MM / 2.0  # 7498.08 — absolute arc mm, never 
 H612D_LED_PITCH_MM = H612D_LENGTH_MM / H612D_PHYSICAL_LEDS  # 41.656 mm/LED (fixed)
 H612D_SEGMENT_MM = H612D_LENGTH_MM / H612D_SEGMENTS  # ~249.936 mm (~250 mm)
 MM_PER_FOOT = 304.8
+# Soft bounds for layout editor fluidity — outside this → warning, not reject.
+LAYOUT_BOUNDS_TOLERANCE_MM = 2.0
 
 DEFAULT_ROOM_MM = (5216.0, 2284.0)
 LAYOUT_PRESETS = ("perimeter", "snake", "custom")
@@ -144,6 +146,9 @@ def validate_profile(profile: Mapping[str, Any]) -> list[str]:
     _check_number(profile, "bpm", 20.0, 300.0, errors)
     if profile.get("calibration_status") not in _CALIBRATION_STATUSES:
         errors.append(f"calibration_status must be one of {sorted(_CALIBRATION_STATUSES)}")
+    for lock_key in ("layout_locked", "calibration_locked"):
+        if lock_key in profile and not isinstance(profile.get(lock_key), bool):
+            errors.append(f"{lock_key} must be a boolean")
     domains = profile.get("calibration_domains")
     if not isinstance(domains, Mapping):
         errors.append("calibration_domains must be an object")
@@ -238,6 +243,39 @@ def validate_profile(profile: Mapping[str, Any]) -> list[str]:
     return errors
 
 
+def profile_warnings(profile: Mapping[str, Any]) -> list[str]:
+    """Non-fatal warnings. Empty = clean. Does not reject saves."""
+    warnings: list[str] = []
+    if not isinstance(profile, Mapping):
+        return warnings
+    room = room_size_mm(profile)
+    width, height = room
+    layout = profile.get("layout")
+    if not isinstance(layout, Mapping):
+        return warnings
+    points = layout.get("points_mm")
+    if not isinstance(points, (list, tuple)):
+        return warnings
+    tol = LAYOUT_BOUNDS_TOLERANCE_MM
+    outside = 0
+    for point in points:
+        if (
+            not isinstance(point, (list, tuple))
+            or len(point) != 2
+            or not all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in point)
+        ):
+            continue
+        x, y = float(point[0]), float(point[1])
+        if x < -tol or y < -tol or x > width + tol or y > height + tol:
+            outside += 1
+    if outside:
+        warnings.append(
+            f"{outside} layout point{'s' if outside != 1 else ''} "
+            f"outside room bounds (±{tol:g} mm tolerance)"
+        )
+    return warnings
+
+
 # --- strip layout (room polyline → LED positions) ----------------------------
 
 def _as_xy(point: Any) -> tuple[float, float]:
@@ -274,6 +312,10 @@ def perimeter_preset_points(room_mm: tuple[float, float] | list[float] | None = 
     is exactly perimeter - strip (3.84 mm for the operator 5216×2284 room). Path
     length equals the strip when perimeter ≥ strip; otherwise the path is nearly
     closed and layout_led_positions reports the shortfall. Never stretch LEDs.
+
+    When the gap is wider than the bottom wall (room too large for a centered
+    bottom gap), emit a partial U-path from bottom-left to bottom-right corner
+    so every coordinate stays inside [0, room]. Excess/unplaced stay truthful.
     """
     width, height = room_size_mm({"room_mm": list(room_mm)} if room_mm is not None else None)
     perimeter = 2.0 * (width + height)
@@ -281,6 +323,14 @@ def perimeter_preset_points(room_mm: tuple[float, float] | list[float] | None = 
     if gap < 0.0:
         # Room too small for a full strip loop — tiny visual gap; shortfall warned later.
         gap = min(width * 0.001, 1.0)
+    if gap > width:
+        # Gap cannot fit on the bottom wall — clamp to corner-to-corner U-path.
+        return [
+            [0.0, 0.0],
+            [0.0, height],
+            [width, height],
+            [width, 0.0],
+        ]
     half = width / 2.0
     return [
         [half - gap / 2.0, 0.0],

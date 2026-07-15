@@ -195,6 +195,28 @@ class LedSimServiceTests(unittest.TestCase):
         self.assertEqual(result["profile"]["physical_leds"], 360)
         self.assertEqual(result["profile_error"], "")
 
+    def test_room_mm_repair_runs_even_when_layout_present(self) -> None:
+        # U-9: layout present must not skip room_mm repair (independent ifs).
+        example = json.loads(
+            (Path(__file__).resolve().parents[1] / "config" / "led_sim_profile.example.json").read_text()
+        )
+        example.pop("room_mm", None)
+        self.profile_path.write_text(json.dumps(example), encoding="utf-8")
+        with _server(self.profile_path) as port:
+            status, result = _request(port, "GET", "/api/profile")
+        self.assertEqual(status, 200)
+        self.assertEqual(result["profile"]["room_mm"], list(led_sim_engine.DEFAULT_ROOM_MM))
+        self.assertIn("profile_warnings", result)
+        self.assertEqual(result["profile"].get("layout_locked"), False)
+        self.assertEqual(result["profile"].get("calibration_locked"), False)
+
+    def test_catalog_includes_profile_warnings(self) -> None:
+        with _server(self.profile_path) as port:
+            status, catalog = _request(port, "GET", "/api/catalog")
+        self.assertEqual(status, 200)
+        self.assertIn("profile_warnings", catalog)
+        self.assertIsInstance(catalog["profile_warnings"], list)
+
     def test_lab_degradation_keeps_catalog_serving(self) -> None:
         with mock.patch.object(led_sim_engine, "_import_lab", side_effect=RuntimeError("lab exploded")):
             with _server(self.profile_path) as port:

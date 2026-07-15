@@ -1,4 +1,4 @@
-// sim-app.js — H612D LED Studio page controller.
+// sim-app.js — H612D LED Studio lighting-console controller (AWR-244 R3).
 
 import {
   createLedSimView,
@@ -12,6 +12,16 @@ import {
 } from "./ledsim-view.js";
 
 const $ = (id) => document.getElementById(id);
+
+const LAYOUT_KEYS = ["room_mm", "layout", "layout_locked"];
+const CALIBRATION_KEYS = [
+  "gamma", "white_point", "brightness", "glow_radius", "glow_gain", "bleed",
+  "fps", "latency_ms", "hold_mode", "slew_ms", "bpm",
+  "calibration_status", "calibration_domains", "calibration_evidence",
+  "calibration_locked",
+];
+const UNDO_LIMIT = 20;
+const LONG_PRESS_MOVE_PX = 6;
 
 const state = {
   profile: null,
@@ -38,16 +48,36 @@ const state = {
   drawCount: 0,
   missedFrames: 0,
   frameRequestToken: 0,
-  layoutUndo: null,
+  layoutUndoStack: [],
+  lastChosenPreset: "perimeter",
   dragVertex: -1,
+  selectedVertex: -1,
   longPressTimer: null,
   longPressPoint: null,
+  longPressStart: null,
+  activeTab: "play",
+  _labelsUserSet: false,
 };
 
 let view = null;
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+/** U-10: deep-ish clone for profile POST bodies (no local-only keys today). */
+function cloneProfile(profile) {
+  return clone(profile);
+}
+
+function pickKeys(profile, keys) {
+  const out = {};
+  for (const key of keys) {
+    if (profile && Object.prototype.hasOwnProperty.call(profile, key)) {
+      out[key] = profile[key];
+    }
+  }
+  return out;
 }
 
 function showError(message) {
@@ -64,6 +94,14 @@ function showWarnings() {
   const element = $("warnings");
   element.textContent = warnings.join("  •  ");
   element.hidden = warnings.length === 0;
+}
+
+function showLayoutWarnings(list) {
+  const element = $("layout-warnings");
+  if (!element) return;
+  const items = Array.isArray(list) ? list.filter(Boolean) : [];
+  element.textContent = items.join("  •  ");
+  element.hidden = items.length === 0;
 }
 
 async function api(method, path, body, frameToken = null) {
@@ -110,13 +148,22 @@ const KNOBS = [
   ["slew_ms", "knob-slew"],
 ];
 
-function stripLocal(profile) {
-  return {...profile};
+function layoutLocked() {
+  return state.profile?.layout_locked === true;
+}
+
+function calibrationLocked() {
+  return state.profile?.calibration_locked === true;
 }
 
 function markDirty() {
-  const dirty = JSON.stringify(stripLocal(state.profile)) !== JSON.stringify(state.savedProfile);
-  $("profile-dirty").hidden = !dirty;
+  // U-3: scope each dirty badge to its subsystem keys.
+  const layoutDirty = JSON.stringify(pickKeys(state.profile, LAYOUT_KEYS))
+    !== JSON.stringify(pickKeys(state.savedProfile, LAYOUT_KEYS));
+  const calibDirty = JSON.stringify(pickKeys(state.profile, CALIBRATION_KEYS))
+    !== JSON.stringify(pickKeys(state.savedProfile, CALIBRATION_KEYS));
+  $("layout-dirty").hidden = !layoutDirty;
+  $("profile-dirty").hidden = !calibDirty;
 }
 
 function updateCalibrationBadge() {
@@ -124,7 +171,7 @@ function updateCalibrationBadge() {
   const status = ["unmeasured", "relative", "measured"].includes(candidate) ? candidate : "unmeasured";
   const badge = $("calibration-badge");
   badge.textContent = status.toUpperCase();
-  badge.classList.toggle("warning", status !== "measured");
+  badge.classList.toggle("warn", status !== "measured");
 }
 
 function calibrationSupportsSlew() {
@@ -146,33 +193,98 @@ function invalidateCalibration() {
   state.lastPresentedOrdinal = null;
 }
 
+function syncEditGestureClass() {
+  const wrap = $("canvas-wrap");
+  const editing = state.activeTab === "layout" && !layoutLocked() && view?.getViewMode() === "room";
+  wrap.classList.toggle("edit-gestures", Boolean(editing));
+}
+
+function syncLockUi() {
+  const layoutLock = layoutLocked();
+  const calibLock = calibrationLocked();
+  const layoutBtn = $("layout-lock");
+  layoutBtn.setAttribute("aria-pressed", layoutLock ? "true" : "false");
+  layoutBtn.textContent = layoutLock ? "🔒 Locked" : "🔓 Unlock";
+  const calibBtn = $("calibration-lock");
+  calibBtn.setAttribute("aria-pressed", calibLock ? "true" : "false");
+  calibBtn.textContent = calibLock ? "🔒 Locked" : "🔓 Unlock";
+  $("lock-chip").hidden = !(layoutLock && view?.getViewMode() === "room");
+
+  for (const id of ["room-width-ft", "room-height-ft", "layout-flip", "layout-reset"]) {
+    $(id).disabled = layoutLock;
+  }
+  for (const button of document.querySelectorAll(".preset-card")) {
+    button.disabled = layoutLock;
+  }
+  const calibRoot = $("calibration-controls");
+  if (calibRoot) {
+    for (const el of calibRoot.querySelectorAll("input, select, textarea, button")) {
+      el.disabled = calibLock;
+    }
+  }
+  $("knob-hold").disabled = calibLock;
+  $("profile-save").disabled = calibLock;
+  $("profile-revert").disabled = false;
+
+  const roomEditing = view?.getViewMode() === "room" && state.activeTab === "layout" && !layoutLock;
+  view?.setEditing(Boolean(roomEditing));
+  syncEditGestureClass();
+  updateResetLabel();
+}
+
 function pushProfileToView() {
   view.setProfile(state.profile);
   markDirty();
   updateCalibrationBadge();
   syncLayoutForm();
+  syncLockUi();
 }
 
 function ensureProfileLayout() {
   if (!state.profile.room_mm || state.profile.room_mm.length !== 2) {
     state.profile.room_mm = [5216, 2284];
   }
+  if (typeof state.profile.layout_locked !== "boolean") state.profile.layout_locked = false;
+  if (typeof state.profile.calibration_locked !== "boolean") state.profile.calibration_locked = false;
   state.profile.layout = resolveLayout(state.profile);
   return state.profile.layout;
 }
 
-function snapshotLayout() {
+function pushUndo() {
   ensureProfileLayout();
-  state.layoutUndo = clone({
+  state.layoutUndoStack.push(clone({
     room_mm: state.profile.room_mm,
     layout: state.profile.layout,
-  });
+  }));
+  if (state.layoutUndoStack.length > UNDO_LIMIT) state.layoutUndoStack.shift();
+  syncUndoButton();
+}
+
+function syncUndoButton() {
+  const button = $("layout-undo");
+  button.disabled = state.layoutUndoStack.length === 0 || layoutLocked();
+}
+
+function undoLayout() {
+  if (!state.layoutUndoStack.length || layoutLocked()) return;
+  const previous = state.layoutUndoStack.pop();
+  state.profile.room_mm = previous.room_mm;
+  state.profile.layout = previous.layout;
+  syncUndoButton();
+  pushProfileToView();
+  refreshPresetThumbs();
 }
 
 function markLayoutCustom() {
   ensureProfileLayout();
   state.profile.layout.preset = "custom";
   syncPresetCards();
+  updateResetLabel();
+}
+
+function updateResetLabel() {
+  const name = state.lastChosenPreset === "snake" ? "Snake" : "Perimeter";
+  $("layout-reset").textContent = `Reset to ${name}`;
 }
 
 function syncPresetCards() {
@@ -193,8 +305,24 @@ function syncLayoutForm() {
   syncPresetCards();
   updatePathLengthStatus();
   markDirty();
-  const dirty = JSON.stringify(stripLocal(state.profile)) !== JSON.stringify(state.savedProfile);
-  $("layout-dirty").hidden = !dirty;
+  const warnings = state.catalog?.profile_warnings || [];
+  showLayoutWarnings(warnings);
+  // Client-side soft bounds check mirrors engine profile_warnings.
+  const roomW = widthMm;
+  const roomH = heightMm;
+  const tol = 2;
+  let outside = 0;
+  for (const point of state.profile.layout.points_mm || []) {
+    const x = Number(point[0]);
+    const y = Number(point[1]);
+    if (x < -tol || y < -tol || x > roomW + tol || y > roomH + tol) outside += 1;
+  }
+  if (outside) {
+    showLayoutWarnings([
+      ...warnings,
+      `${outside} layout point${outside === 1 ? "" : "s"} outside room bounds (±${tol} mm tolerance)`,
+    ]);
+  }
 }
 
 function updatePathLengthStatus() {
@@ -202,13 +330,13 @@ function updatePathLengthStatus() {
   const layout = view.getLayout();
   const status = $("path-length-status");
   if (layout.unplaced_mm > 0) {
-    status.className = "path-length-status warn";
+    status.className = "dim-bar warn";
     status.textContent = `Path ${layout.path_label} / Strip ${layout.strip_label} — ${formatLengthMm(layout.unplaced_mm)} unplaced`;
   } else if (layout.excess_path_mm > 0) {
-    status.className = "path-length-status ok";
+    status.className = "dim-bar ok";
     status.textContent = `Path ${layout.path_label} / Strip ${layout.strip_label} — strip ends at 49.2 ft; extra path is a dashed guide`;
   } else {
-    status.className = "path-length-status ok";
+    status.className = "dim-bar ok";
     status.textContent = `Path ${layout.path_label} · Strip ${layout.strip_label} · pitch 41.656 mm/LED`;
   }
 }
@@ -218,7 +346,7 @@ function drawPresetThumb(canvas, points, room) {
   const width = canvas.width;
   const height = canvas.height;
   ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = "#07090f";
+  ctx.fillStyle = "#06080b";
   ctx.fillRect(0, 0, width, height);
   const [roomW, roomH] = room;
   const pad = 8;
@@ -230,7 +358,7 @@ function drawPresetThumb(canvas, points, room) {
   if (!points?.length) return;
   const toX = (x) => ox + x * scale;
   const toY = (y) => oy + (roomH - y) * scale;
-  ctx.strokeStyle = "#8a6cff";
+  ctx.strokeStyle = "#4dd8e6";
   ctx.lineWidth = 2;
   ctx.lineJoin = "round";
   ctx.beginPath();
@@ -247,21 +375,22 @@ function refreshPresetThumbs() {
   drawPresetThumb($("thumb-snake"), snakePresetPoints(room), room);
 }
 
-function applyPreset(preset, {resetPoints = true} = {}) {
-  snapshotLayout();
+function applyPreset(preset) {
+  if (layoutLocked()) return;
+  pushUndo();
   ensureProfileLayout();
   const room = state.profile.room_mm;
   if (preset === "custom") {
     state.profile.layout.preset = "custom";
   } else {
+    state.lastChosenPreset = preset;
     state.profile.layout = {
       preset,
       points_mm: preset === "snake" ? snakePresetPoints(room) : perimeterPresetPoints(room),
-      flip_chain: Boolean(state.profile.layout.flip_chain),
+      flip_chain: typeof state.profile.layout.flip_chain === "boolean"
+        ? state.profile.layout.flip_chain
+        : false,
     };
-    if (!resetPoints) {
-      // keep flip only
-    }
   }
   pushProfileToView();
   refreshPresetThumbs();
@@ -276,38 +405,97 @@ function canvasEventPoint(event) {
   };
 }
 
+function setActiveTab(tab) {
+  state.activeTab = tab;
+  for (const name of ["play", "layout", "calibrate"]) {
+    const panelEl = $(`${name}-panel`);
+    panelEl.hidden = name !== tab;
+    const tabBtn = $(`tab-${name}`);
+    tabBtn.classList.toggle("active", name === tab);
+    tabBtn.setAttribute("aria-pressed", name === tab ? "true" : "false");
+  }
+  for (const btn of document.querySelectorAll(".rail-btn[data-tab]")) {
+    const on = btn.dataset.tab === tab;
+    btn.classList.toggle("active", on);
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+  }
+  document.body.classList.remove("sheet-collapsed");
+  $("sheet-toggle")?.setAttribute("aria-expanded", "true");
+  syncLockUi();
+}
+
+function wireShell() {
+  for (const btn of document.querySelectorAll("[data-tab]")) {
+    btn.addEventListener("click", () => {
+      if (btn.dataset.tab) setActiveTab(btn.dataset.tab);
+    });
+  }
+  $("sidecar-collapse").addEventListener("click", () => {
+    document.body.classList.toggle("sidecar-collapsed");
+    const collapsed = document.body.classList.contains("sidecar-collapsed");
+    $("sidecar-collapse").textContent = collapsed ? "›" : "‹";
+    $("sidecar-collapse").setAttribute("aria-label", collapsed ? "Expand sidecar" : "Collapse sidecar");
+  });
+  $("sheet-toggle")?.addEventListener("click", () => {
+    document.body.classList.toggle("sheet-collapsed");
+    const collapsed = document.body.classList.contains("sheet-collapsed");
+    $("sheet-toggle").setAttribute("aria-expanded", collapsed ? "false" : "true");
+  });
+  // Mobile sheet starts expanded on layout-capable widths; collapse chrome on tiny screens.
+  if (window.innerWidth < 900) {
+    document.body.classList.add("sheet-collapsed");
+    $("sheet-toggle")?.setAttribute("aria-expanded", "false");
+  }
+  $("help-btn").addEventListener("click", () => {
+    const pop = $("help-popover");
+    const open = pop.hidden;
+    pop.hidden = !open;
+    $("help-btn").setAttribute("aria-expanded", open ? "true" : "false");
+  });
+  document.addEventListener("click", (event) => {
+    const pop = $("help-popover");
+    if (pop.hidden) return;
+    if (pop.contains(event.target) || $("help-btn").contains(event.target)) return;
+    pop.hidden = true;
+    $("help-btn").setAttribute("aria-expanded", "false");
+  });
+  $("top-stop").addEventListener("click", () => stopPlayback());
+}
+
 function wireLayoutEditor() {
-  view.setEditing(true);
-  view.setViewMode("room");
   const labelsDefault = window.innerWidth >= 700;
-  $("toggle-labels").checked = labelsDefault;
+  $("toggle-labels").setAttribute("aria-pressed", labelsDefault ? "true" : "false");
   view.setLabelsVisible(labelsDefault);
 
   $("view-room").addEventListener("click", () => {
     view.setViewMode("room");
     $("view-room").classList.add("active");
+    $("view-room").setAttribute("aria-pressed", "true");
     $("view-strip").classList.remove("active");
-    $("layout-panel").hidden = false;
-    view.setEditing(true);
+    $("view-strip").setAttribute("aria-pressed", "false");
+    syncLockUi();
   });
   $("view-strip").addEventListener("click", () => {
     view.setViewMode("strip");
     $("view-strip").classList.add("active");
+    $("view-strip").setAttribute("aria-pressed", "true");
     $("view-room").classList.remove("active");
-    $("layout-panel").hidden = true;
+    $("view-room").setAttribute("aria-pressed", "false");
     view.setEditing(false);
+    $("lock-chip").hidden = true;
+    syncEditGestureClass();
   });
-  $("toggle-labels").addEventListener("change", () => {
-    view.setLabelsVisible($("toggle-labels").checked);
+  $("toggle-labels").addEventListener("click", () => {
+    state._labelsUserSet = true;
+    const next = $("toggle-labels").getAttribute("aria-pressed") !== "true";
+    $("toggle-labels").setAttribute("aria-pressed", next ? "true" : "false");
+    view.setLabelsVisible(next);
   });
   window.addEventListener("resize", () => {
-    if (window.innerWidth < 700 && $("toggle-labels").checked && !state._labelsUserSet) {
-      $("toggle-labels").checked = false;
+    if (window.innerWidth < 700 && $("toggle-labels").getAttribute("aria-pressed") === "true" && !state._labelsUserSet) {
+      $("toggle-labels").setAttribute("aria-pressed", "false");
       view.setLabelsVisible(false);
     }
-  });
-  $("toggle-labels").addEventListener("input", () => {
-    state._labelsUserSet = true;
   });
 
   for (const button of document.querySelectorAll(".preset-card")) {
@@ -315,7 +503,8 @@ function wireLayoutEditor() {
   }
 
   const onRoomSize = () => {
-    snapshotLayout();
+    if (layoutLocked()) return;
+    pushUndo();
     const widthFt = Math.max(1, Number($("room-width-ft").value) || mmToFeet(5216));
     const heightFt = Math.max(1, Number($("room-height-ft").value) || mmToFeet(2284));
     state.profile.room_mm = [feetToMm(widthFt), feetToMm(heightFt)];
@@ -332,33 +521,29 @@ function wireLayoutEditor() {
   $("room-height-ft").addEventListener("change", onRoomSize);
 
   $("layout-flip").addEventListener("click", () => {
-    snapshotLayout();
+    if (layoutLocked()) return;
+    pushUndo();
     ensureProfileLayout();
     state.profile.layout.flip_chain = !state.profile.layout.flip_chain;
     pushProfileToView();
   });
   $("layout-reset").addEventListener("click", () => {
-    const preset = ensureProfileLayout().preset === "snake" ? "snake" : "perimeter";
-    applyPreset(preset);
+    if (layoutLocked()) return;
+    applyPreset(state.lastChosenPreset === "snake" ? "snake" : "perimeter");
   });
-  $("layout-undo").addEventListener("click", () => {
-    if (!state.layoutUndo) return;
-    const previous = state.layoutUndo;
-    state.layoutUndo = clone({
-      room_mm: state.profile.room_mm,
-      layout: state.profile.layout,
-    });
-    state.profile.room_mm = previous.room_mm;
-    state.profile.layout = previous.layout;
-    pushProfileToView();
-    refreshPresetThumbs();
-  });
+  $("layout-undo").addEventListener("click", undoLayout);
   $("layout-save").addEventListener("click", async () => {
     ensureProfileLayout();
-    const result = await api("POST", "/api/profile", stripLocal(state.profile));
+    const result = await api("POST", "/api/profile", cloneProfile(state.profile));
     state.savedProfile = clone(result.profile);
+    state.catalog.profile_warnings = result.warnings || [];
     markDirty();
-    $("layout-dirty").hidden = true;
+    showLayoutWarnings(result.warnings || []);
+  });
+  $("layout-lock").addEventListener("click", () => {
+    state.profile.layout_locked = !layoutLocked();
+    markDirty();
+    syncLockUi();
   });
 
   const canvas = $("fixture-canvas");
@@ -370,22 +555,29 @@ function wireLayoutEditor() {
       state.longPressTimer = null;
     }
     state.longPressPoint = null;
+    state.longPressStart = null;
+  }
+
+  function editsAllowed() {
+    return view.getViewMode() === "room" && state.activeTab === "layout" && !layoutLocked();
   }
 
   function pointerDown(event) {
-    if (view.getViewMode() !== "room") return;
+    if (!editsAllowed()) return;
     const point = canvasEventPoint(event);
     const vertex = view.hitTestVertex(point.x, point.y, HIT);
     if (vertex >= 0) {
       event.preventDefault();
-      snapshotLayout();
+      pushUndo();
       state.dragVertex = vertex;
+      state.selectedVertex = vertex;
       canvas.setPointerCapture?.(event.pointerId);
       return;
     }
     state.longPressPoint = point;
+    state.longPressStart = point;
     state.longPressTimer = setTimeout(() => {
-      mutateAtCanvasPoint(point);
+      if (state.longPressPoint) mutateAtCanvasPoint(state.longPressPoint);
       clearLongPress();
     }, 550);
   }
@@ -402,26 +594,34 @@ function wireLayoutEditor() {
   }
 
   function mutateAtCanvasPoint(point) {
+    if (!editsAllowed()) return;
     const vertexHit = view.hitTestVertex(point.x, point.y, HIT);
     ensureProfileLayout();
     if (vertexHit >= 0) {
       if (state.profile.layout.points_mm.length <= 2) return;
-      snapshotLayout();
+      pushUndo();
       state.profile.layout.points_mm.splice(storedIndex(vertexHit), 1);
+      state.selectedVertex = -1;
       markLayoutCustom();
       pushProfileToView();
       return;
     }
     const edge = view.hitTestEdge(point.x, point.y, HIT);
     if (!edge) return;
-    snapshotLayout();
+    pushUndo();
     state.profile.layout.points_mm.splice(insertIndexForEdge(edge.edgeIndex), 0, [edge.mm.x, edge.mm.y]);
     markLayoutCustom();
     pushProfileToView();
   }
 
   function pointerMove(event) {
-    if (state.dragVertex < 0) return;
+    // U-1: cancel long-press insert once movement exceeds ~6px.
+    if (state.longPressTimer && state.longPressStart) {
+      const point = canvasEventPoint(event);
+      const moved = Math.hypot(point.x - state.longPressStart.x, point.y - state.longPressStart.y);
+      if (moved > LONG_PRESS_MOVE_PX) clearLongPress();
+    }
+    if (state.dragVertex < 0 || !editsAllowed()) return;
     event.preventDefault();
     const point = canvasEventPoint(event);
     const mm = view.canvasToMm(point.x, point.y);
@@ -429,6 +629,7 @@ function wireLayoutEditor() {
     const points = state.profile.layout.points_mm.map((entry) => [entry[0], entry[1]]);
     points[storedIndex(state.dragVertex)] = [mm.x, mm.y];
     state.profile.layout.points_mm = points;
+    state.selectedVertex = state.dragVertex;
     markLayoutCustom();
     pushProfileToView();
   }
@@ -446,7 +647,7 @@ function wireLayoutEditor() {
   canvas.addEventListener("pointerup", pointerUp);
   canvas.addEventListener("pointercancel", pointerUp);
   canvas.addEventListener("dblclick", (event) => {
-    if (view.getViewMode() !== "room") return;
+    if (!editsAllowed()) return;
     event.preventDefault();
     mutateAtCanvasPoint(canvasEventPoint(event));
   });
@@ -465,11 +666,13 @@ function knobsFromProfile() {
   $("bpm").value = state.profile.bpm;
   markDirty();
   updateCalibrationBadge();
+  syncLockUi();
 }
 
 function wireKnobs() {
   for (const [key, id] of KNOBS) {
     $(id).addEventListener("input", () => {
+      if (calibrationLocked()) return;
       state.profile[key] = Number($(id).value);
       $(`${id}-val`).textContent = $(id).value;
       invalidateCalibration();
@@ -478,6 +681,7 @@ function wireKnobs() {
   }
   for (let channel = 0; channel < 3; channel += 1) {
     $(`knob-white-${channel}`).addEventListener("input", () => {
+      if (calibrationLocked()) return;
       state.profile.white_point[channel] = Number($(`knob-white-${channel}`).value);
       $(`knob-white-${channel}-val`).textContent = $(`knob-white-${channel}`).value;
       invalidateCalibration();
@@ -485,33 +689,34 @@ function wireKnobs() {
     });
   }
   $("knob-hold").addEventListener("change", () => {
+    if (calibrationLocked()) return;
     state.profile.hold_mode = $("knob-hold").value;
     invalidateCalibration();
     pushProfileToView();
   });
 
   $("profile-save").addEventListener("click", async () => {
-    const result = await api("POST", "/api/profile", stripLocal(state.profile));
+    if (calibrationLocked()) return;
+    const result = await api("POST", "/api/profile", cloneProfile(state.profile));
     state.savedProfile = clone(result.profile);
+    state.catalog.profile_warnings = result.warnings || [];
     markDirty();
   });
   $("profile-revert").addEventListener("click", async () => {
     const result = await api("GET", "/api/profile");
     state.profile = result.profile;
     state.savedProfile = clone(result.profile);
+    state.catalog.profile_warnings = result.profile_warnings || [];
     state.display = null;
     state.lastPresentedOrdinal = null;
     knobsFromProfile();
     pushProfileToView();
   });
-}
-
-function setMode(mode) {
-  const calibrate = mode === "calibrate";
-  $("author-panel").hidden = calibrate;
-  $("calibrate-panel").hidden = !calibrate;
-  $("tab-author").classList.toggle("active", !calibrate);
-  $("tab-calibrate").classList.toggle("active", calibrate);
+  $("calibration-lock").addEventListener("click", () => {
+    state.profile.calibration_locked = !calibrationLocked();
+    markDirty();
+    syncLockUi();
+  });
 }
 
 function fillSourcePicker() {
@@ -526,7 +731,7 @@ function fillSourcePicker() {
     look: "Render configured look",
     effect: "Render effect",
     lab: "Render lab draft",
-  }[kind] || "Render preview";
+  }[kind] || "Render";
 
   if (kind === "effect") {
     for (const name of state.catalog.effects) select.add(new Option(name, name));
@@ -600,7 +805,6 @@ async function doRender() {
   if (!body) return;
   const result = await latestFrameRequest("/api/render", body);
   if (!result) return;
-  $("view-title").textContent = $("source-name").selectedOptions[0]?.textContent || body.name;
   loadFrames(result.frames, result.fps, result.t_ms, [], {
     durationMs: result.duration_ms,
     durationSource: result.duration_source,
@@ -617,7 +821,6 @@ async function doReplayLoad() {
   }
   const result = await latestFrameRequest("/api/replay/load", {path});
   if (!result) return;
-  $("view-title").textContent = result.meta?.name || "Recorded frames";
   loadFrames(result.frames, result.fps, result.t_ms, result.meta?.markers || [], {
     durationMs: result.duration_ms ?? result.meta?.duration_ms,
     durationSource: result.duration_source,
@@ -629,7 +832,6 @@ async function doReplayLoad() {
 async function doTestCard(kind) {
   const result = await latestFrameRequest("/api/render_card", {kind});
   if (!result) return;
-  $("view-title").textContent = `Reference · ${kind}`;
   loadFrames(result.frames, result.fps, result.t_ms, [{frame: 0, label: kind}], {
     durationMs: result.duration_ms,
     durationSource: result.duration_source,
@@ -645,7 +847,6 @@ async function doCalibration(name) {
     fps: Number(state.profile.fps) || 60,
   });
   if (!result) return;
-  $("view-title").textContent = `Calibration · ${name.replaceAll("_", " ")}`;
   loadFrames(result.frames, result.fps, result.t_ms, result.markers, {
     durationMs: result.duration_ms,
     durationSource: result.duration_source,
@@ -713,6 +914,7 @@ function loadFrames(frames, fps, tMs, markers = [], options = {}) {
   $("scrub").value = "0";
   $("pipeline-badge").textContent = `SOURCE · ${state.provenance.toUpperCase()}`;
   $("timing-readout").textContent = `${state.framesFps} FPS · ${state.timingSource.toUpperCase()} · ${state.durationSource.toUpperCase()}`;
+  $("fps-chip").textContent = `${state.framesFps} FPS`;
   $("paint-health").textContent = "WAITING";
   startPlayback();
 }
@@ -819,7 +1021,8 @@ function updatePaintHealth(now) {
   if (span < 1000) return;
   const rafRate = state.rafCount * 1000 / span;
   const drawRate = state.drawCount * 1000 / span;
-  $("paint-health").textContent = `DRAW ${drawRate.toFixed(1)} · RAF ${rafRate.toFixed(1)} · MISSED ${state.missedFrames}`;
+  $("paint-health").textContent = `DRAW ${drawRate.toFixed(0)}`;
+  $("fps-chip").textContent = `${drawRate.toFixed(0)} FPS`;
   state.healthWindowAt = now;
   state.rafCount = 0;
   state.drawCount = 0;
@@ -860,13 +1063,51 @@ function tick(now) {
   requestAnimationFrame(tick);
 }
 
+function nudgeSelectedVertex(dxMm, dyMm) {
+  if (layoutLocked() || state.selectedVertex < 0 || view.getViewMode() !== "room") return;
+  ensureProfileLayout();
+  const count = state.profile.layout.points_mm.length;
+  const displayIndex = state.selectedVertex;
+  const stored = state.profile.layout.flip_chain ? count - 1 - displayIndex : displayIndex;
+  pushUndo();
+  const point = state.profile.layout.points_mm[stored];
+  state.profile.layout.points_mm[stored] = [Number(point[0]) + dxMm, Number(point[1]) + dyMm];
+  markLayoutCustom();
+  pushProfileToView();
+}
+
 function wireKeyboard() {
   document.addEventListener("keydown", (event) => {
     if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) return;
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
+      event.preventDefault();
+      undoLayout();
+      return;
+    }
     if (event.code === "Space") {
       event.preventDefault();
       state.playing ? stopPlayback() : startPlayback();
-    } else if ((event.key === "ArrowLeft" || event.key === "ArrowRight") && state.frames.length) {
+      return;
+    }
+    if (event.key === "l" || event.key === "L") {
+      event.preventDefault();
+      $("toggle-labels").click();
+      return;
+    }
+    if (event.key === "?" || (event.shiftKey && event.key === "/")) {
+      $("help-btn").click();
+      return;
+    }
+    const arrow = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key);
+    if (arrow && state.selectedVertex >= 0 && !layoutLocked() && state.activeTab === "layout") {
+      event.preventDefault();
+      const step = event.shiftKey ? 100 : 10;
+      const dx = event.key === "ArrowRight" ? step : event.key === "ArrowLeft" ? -step : 0;
+      const dy = event.key === "ArrowUp" ? step : event.key === "ArrowDown" ? -step : 0;
+      nudgeSelectedVertex(dx, dy);
+      return;
+    }
+    if ((event.key === "ArrowLeft" || event.key === "ArrowRight") && state.frames.length) {
       event.preventDefault();
       stopPlayback();
       state.manualIdx = Math.max(0, Math.min(
@@ -887,29 +1128,42 @@ function setLoop(next, now = performance.now()) {
   if (state.playing) state.t0 = now - elapsed;
   state.manualIdx = positionForElapsed(elapsed).index;
   state.lastPresentedOrdinal = null;
+  $("loop").setAttribute("aria-pressed", next ? "true" : "false");
 }
 
 async function boot() {
+  // U-8: modality-aware gesture copy
+  const coarse = window.matchMedia?.("(pointer: coarse)")?.matches;
+  $("layout-gesture-copy").textContent = coarse
+    ? "Drag vertices on the room. Long-press an edge to add a point, a vertex to remove one. LED spacing is fixed — the path is never stretched."
+    : "Drag vertices on the room. Double-click an edge to add a point, a vertex to remove one. On touch devices, long-press does the same. LED spacing is fixed — the path is never stretched.";
+
   state.catalog = await api("GET", "/api/catalog");
   state.profile = state.catalog.profile;
   if (!state.profile.layout) {
     state.profile.layout = defaultLayout(state.profile.room_mm || [5216, 2284]);
   }
   if (!state.profile.room_mm) state.profile.room_mm = [5216, 2284];
+  if (typeof state.profile.layout_locked !== "boolean") state.profile.layout_locked = false;
+  if (typeof state.profile.calibration_locked !== "boolean") state.profile.calibration_locked = false;
+  const preset = state.profile.layout?.preset;
+  if (preset === "snake" || preset === "perimeter") state.lastChosenPreset = preset;
   state.savedProfile = clone(state.catalog.profile);
   view = createLedSimView($("fixture-canvas"), state.profile);
   view.renderFrame(Array.from({length: 60}, () => [0, 0, 0]));
   showWarnings();
+  showLayoutWarnings(state.catalog.profile_warnings || []);
   fillSourcePicker();
   knobsFromProfile();
   wireKnobs();
+  wireShell();
   wireLayoutEditor();
   syncLayoutForm();
   refreshPresetThumbs();
   wireKeyboard();
+  setActiveTab("play");
+  syncUndoButton();
 
-  $("tab-author").addEventListener("click", () => setMode("author"));
-  $("tab-calibrate").addEventListener("click", () => setMode("calibrate"));
   $("source-kind").addEventListener("change", () => {
     state.frameRequestToken += 1;
     fillSourcePicker();
@@ -921,7 +1175,7 @@ async function boot() {
   $("render").addEventListener("click", doRender);
   $("replay-load").addEventListener("click", doReplayLoad);
   $("play-pause").addEventListener("click", () => (state.playing ? stopPlayback() : startPlayback()));
-  $("loop").addEventListener("change", () => setLoop($("loop").checked));
+  $("loop").addEventListener("click", () => setLoop($("loop").getAttribute("aria-pressed") !== "true"));
   $("scrub").addEventListener("input", () => {
     stopPlayback();
     state.manualIdx = Number($("scrub").value) || 0;

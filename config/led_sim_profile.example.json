@@ -19,6 +19,8 @@
     ],
     "flip_chain": false
   },
+  "layout_locked": false,
+  "calibration_locked": false,
   "gamma": 1.0,
   "white_point": [1.0, 1.0, 1.0],
   "brightness": 1.0,

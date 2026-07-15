@@ -51,10 +51,15 @@ class LedSimService:
         if self.profile_path.exists():
             try:
                 profile = {**example, **engine.load_profile(self.profile_path)}
+                # Independent repairs — layout missing and room_mm missing can both apply.
                 if not isinstance(profile.get("layout"), dict):
                     profile["layout"] = engine.default_layout(engine.room_size_mm(profile))
-                elif not isinstance(profile.get("room_mm"), (list, tuple)):
+                if not isinstance(profile.get("room_mm"), (list, tuple)):
                     profile["room_mm"] = list(engine.DEFAULT_ROOM_MM)
+                if "layout_locked" not in profile:
+                    profile["layout_locked"] = False
+                if "calibration_locked" not in profile:
+                    profile["calibration_locked"] = False
                 errors = engine.validate_profile(profile)
                 if not errors:
                     return profile, ""
@@ -73,6 +78,7 @@ class LedSimService:
             "lab": lab,
             "profile": profile,
             "profile_error": profile_error,
+            "profile_warnings": engine.profile_warnings(profile),
             "lab_error": lab.get("error", ""),
             "test_cards": list(engine.TEST_CARD_KINDS),
             "calibration_sequences": list(engine.CALIBRATION_SEQUENCE_NAMES),
@@ -183,6 +189,7 @@ def build_handler(service: LedSimService) -> type[BaseHTTPRequestHandler]:
                     self._send_json({
                         "profile": profile,
                         "profile_error": profile_error,
+                        "profile_warnings": engine.profile_warnings(profile),
                         "path": str(service.profile_path),
                     })
                 else:
@@ -325,7 +332,12 @@ def build_handler(service: LedSimService) -> type[BaseHTTPRequestHandler]:
                 self._send_json({"ok": False, "errors": errors}, HTTPStatus.BAD_REQUEST)
                 return
             engine.save_profile(service.profile_path, body)
-            self._send_json({"ok": True, "profile": body, "path": str(service.profile_path)})
+            self._send_json({
+                "ok": True,
+                "profile": body,
+                "path": str(service.profile_path),
+                "warnings": engine.profile_warnings(body),
+            })
 
         def _handle_replay_load(self, body: dict[str, Any]) -> None:
             raw = body.get("path")
