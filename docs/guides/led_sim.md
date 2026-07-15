@@ -1,18 +1,20 @@
 ---
 doc_status: current
 truth_level: software-tested
-last_verified_commit: 3947216
+last_verified_commit: 3a0e127
 last_verified_date: 2026-07-15
 validation_scope: >
   H612D LED Studio (AWR-196 + AWR-244 room-view + AWR-246 layout library):
   offline production-runner frame composition, room polyline layout with
   arc-length LED placement, named layouts library (schema v2) with Home/Venue
-  style isolation, perimeter/snake/custom presets, layout and calibration
-  lockers, timestamp-held playback, calibration sequence v2, profile evidence
-  guards, and the local web service are software-tested. Optics (glow/bleed/
-  gamma) remain uncalibrated assumptions. Generated timing uses an ideal grid.
-  Device color, PWM, latency, physical response, packet delivery, and hardware
-  cadence remain unmeasured; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
+  style isolation, picker Use/Delete targeting selected (refuse active/last
+  with on-screen reason), perimeter/snake/custom presets, layout and
+  calibration lockers, timestamp-held playback, calibration sequence v2,
+  profile evidence guards, and the local web service are software-tested.
+  Optics (glow/bleed/gamma) remain uncalibrated assumptions. Generated timing
+  uses an ideal grid. Device color, PWM, latency, physical response, packet
+  delivery, and hardware cadence remain unmeasured; SOFTWARE-VALIDATED ONLY /
+  HARDWARE-UNVALIDATED.
 ---
 
 # H612D LED Studio
@@ -134,11 +136,14 @@ every frame. UI lengths are **feet primary** with metric secondary
 except the junction arc (segment 30) where the tick is suppressed under the
 control-box label.
 
-The Layout tab opens with a **layout slot picker** (select + Save as… / Rename /
-Delete). Switching swaps the stage immediately and respects that layout's own
-lock. Save as duplicates the active entry (prompt prefilled `Copy of <name>`);
-delete refuses the last layout and switches away before removing the active one.
-Room W/H, presets, and the editor operate on the active layout only. The
+The Layout tab opens with a **layout slot picker** (select + Use / Save as… /
+Rename / Delete). The picker selects a library slot; **Use** puts that slot on
+the stage (and marks it active). Save as duplicates the active entry (prompt
+prefilled `Copy of <name>`). Delete targets the **selected** slot: it refuses
+the last layout and refuses the active layout, both with a clear on-screen
+reason — switch away (or select a non-active slot, then Delete) first. Room
+W/H, presets, and the editor operate on the active layout (selecting a slot
+and editing auto-Uses it). The
 dimension bar is unchanged. Preset cards, drag handles (≥32 px), double-click /
 long-press vertex edit, flip chain, reset, bounded undo (up to 20, Cmd/Ctrl-Z
 on the Layout tab), and the per-layout locker still apply.

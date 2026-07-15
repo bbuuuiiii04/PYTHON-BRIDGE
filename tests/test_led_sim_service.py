@@ -304,6 +304,42 @@ class LedSimServiceTests(unittest.TestCase):
         self.assertNotIn("layout", disk)
         self.assertNotIn("room_mm", disk)
 
+    def test_layout_delete_roundtrip_persists(self) -> None:
+        """AWR-246 follow-up: removing a non-active layout via profile POST sticks on disk."""
+        example = json.loads(
+            (Path(__file__).resolve().parents[1] / "config" / "led_sim_profile.example.json").read_text()
+        )
+        home = dict(example["layouts"]["Home"])
+        example["layouts"] = {
+            "Home": home,
+            "Venue Test": dict(home),
+        }
+        example["active_layout"] = "Home"
+        with _server(self.profile_path) as port:
+            status, saved = _request(port, "POST", "/api/profile", example)
+            self.assertEqual(status, 200, saved)
+            self.assertTrue(saved["ok"])
+            self.assertEqual(set(saved["profile"]["layouts"]), {"Home", "Venue Test"})
+
+            pruned = json.loads(json.dumps(saved["profile"]))
+            del pruned["layouts"]["Venue Test"]
+            self.assertEqual(pruned["active_layout"], "Home")
+            status, after_save = _request(port, "POST", "/api/profile", pruned)
+            self.assertEqual(status, 200, after_save)
+            self.assertTrue(after_save["ok"])
+            self.assertEqual(set(after_save["profile"]["layouts"]), {"Home"})
+            self.assertEqual(after_save["profile"]["active_layout"], "Home")
+
+            status, fetched = _request(port, "GET", "/api/profile")
+            self.assertEqual(status, 200)
+            self.assertEqual(set(fetched["profile"]["layouts"]), {"Home"})
+            self.assertEqual(fetched["profile"]["active_layout"], "Home")
+
+        disk = json.loads(self.profile_path.read_text(encoding="utf-8"))
+        self.assertEqual(set(disk["layouts"]), {"Home"})
+        self.assertEqual(disk["active_layout"], "Home")
+        self.assertNotIn("Venue Test", disk["layouts"])
+
     def test_lab_degradation_keeps_catalog_serving(self) -> None:
         with mock.patch.object(led_sim_engine, "_import_lab", side_effect=RuntimeError("lab exploded")):
             with _server(self.profile_path) as port:

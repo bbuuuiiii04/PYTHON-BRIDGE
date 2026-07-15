@@ -60,6 +60,8 @@ const state = {
   longPressStart: null,
   activeTab: "play",
   _labelsUserSet: false,
+  /** Picker selection for Use/Rename/Delete; may differ from active_layout. */
+  layoutSelection: null,
 };
 
 let view = null;
@@ -469,20 +471,34 @@ function refreshPresetThumbs() {
   drawPresetThumb($("thumb-snake"), snakePresetPoints(room), room);
 }
 
+function selectedLayoutName() {
+  ensureLayoutLibrary();
+  const active = state.profile.active_layout;
+  const pick = state.layoutSelection;
+  if (typeof pick === "string" && state.profile.layouts[pick]) return pick;
+  state.layoutSelection = active;
+  return active;
+}
+
 function syncLayoutPicker() {
   const select = $("layout-slot");
   if (!select || !state.profile) return;
   ensureLayoutLibrary();
   const names = Object.keys(state.profile.layouts).sort((a, b) => a.localeCompare(b));
   const active = state.profile.active_layout;
+  const selected = selectedLayoutName();
   select.innerHTML = "";
-  for (const name of names) select.add(new Option(name, name));
-  select.value = active;
+  for (const name of names) {
+    select.add(new Option(name === active ? `${name} (active)` : name, name));
+  }
+  select.value = selected;
   const onlyOne = names.length <= 1;
   const del = $("layout-delete");
   if (del) del.disabled = onlyOne;
   const saveAs = $("layout-save-as");
   if (saveAs) saveAs.disabled = names.length >= MAX_LAYOUTS;
+  const use = $("layout-use");
+  if (use) use.disabled = selected === active;
 }
 
 function layoutNameError(name, {allowExisting = false, allowName = null} = {}) {
@@ -543,7 +559,12 @@ function promptLayoutName({title, initial, allowName = null}) {
 
 function switchActiveLayout(name) {
   ensureLayoutLibrary();
-  if (!state.profile.layouts[name] || name === state.profile.active_layout) {
+  if (!state.profile.layouts[name]) {
+    syncLayoutPicker();
+    return;
+  }
+  state.layoutSelection = name;
+  if (name === state.profile.active_layout) {
     syncLayoutPicker();
     return;
   }
@@ -571,48 +592,59 @@ async function saveAsLayout() {
   if (!name) return;
   state.profile.layouts[name] = makeLayoutEntry(activeEntry());
   state.profile.active_layout = name;
+  state.layoutSelection = name;
   state.layoutUndoStack = [];
+  showError("");
   pushProfileToView();
   syncUndoButton();
 }
 
-async function renameActiveLayout() {
+async function renameSelectedLayout() {
   ensureLayoutLibrary();
-  const current = state.profile.active_layout;
+  const current = selectedLayoutName();
   const name = await promptLayoutName({
     title: "Rename layout",
     initial: current,
     allowName: current,
   });
   if (!name || name === current) return;
-  // promptLayoutName rejects existing names; allow rename-to-self already handled.
   if (state.profile.layouts[name]) {
     showError("That name already exists");
     return;
   }
   state.profile.layouts[name] = state.profile.layouts[current];
   delete state.profile.layouts[current];
-  state.profile.active_layout = name;
+  if (state.profile.active_layout === current) {
+    state.profile.active_layout = name;
+  }
+  state.layoutSelection = name;
+  showError("");
   pushProfileToView();
 }
 
-function deleteActiveLayout() {
+function deleteSelectedLayout() {
   ensureLayoutLibrary();
   const names = Object.keys(state.profile.layouts);
   if (names.length <= 1) {
-    showError("Cannot delete the last layout");
+    showError("Cannot delete the last layout.");
     return;
   }
-  const current = state.profile.active_layout;
-  const others = names.filter((name) => name !== current);
-  if (!window.confirm(`Delete layout “${current}”? Switch to “${others[0]}” first is required — delete switches automatically.`)) {
+  const target = selectedLayoutName();
+  if (target === state.profile.active_layout) {
+    showError(`Cannot delete “${target}” while it is active. Select another layout in the picker (keep this one on stage), then Delete.`);
     return;
   }
-  // Spec: cannot delete the active without switching first — switch then delete.
-  const next = others.sort((a, b) => a.localeCompare(b))[0];
-  state.profile.active_layout = next;
-  delete state.profile.layouts[current];
+  if (!state.profile.layouts[target]) {
+    showError(`Layout “${target}” was not found.`);
+    return;
+  }
+  if (!window.confirm(`Delete layout “${target}”?`)) {
+    return;
+  }
+  delete state.profile.layouts[target];
+  state.layoutSelection = state.profile.active_layout;
   state.layoutUndoStack = [];
+  showError("");
   view?.invalidateLayout?.();
   pushProfileToView();
   syncUndoButton();
@@ -620,6 +652,11 @@ function deleteActiveLayout() {
 }
 
 function applyPreset(preset) {
+  // Editing always applies to the selected slot — activate it first when needed.
+  const selected = selectedLayoutName();
+  if (selected !== state.profile.active_layout) {
+    switchActiveLayout(selected);
+  }
   if (layoutLocked()) return;
   pushUndo();
   ensureProfileLayout();
@@ -780,13 +817,24 @@ function wireLayoutEditor() {
   }
 
   $("layout-slot")?.addEventListener("change", (event) => {
-    switchActiveLayout(event.target.value);
+    // Picker selects a library slot for Use / Rename / Delete.
+    // Stage stays on active_layout until Use (or Save as).
+    state.layoutSelection = event.target.value;
+    showError("");
+    syncLayoutPicker();
+  });
+  $("layout-use")?.addEventListener("click", () => {
+    switchActiveLayout(selectedLayoutName());
   });
   $("layout-save-as")?.addEventListener("click", () => { saveAsLayout(); });
-  $("layout-rename")?.addEventListener("click", () => { renameActiveLayout(); });
-  $("layout-delete")?.addEventListener("click", () => { deleteActiveLayout(); });
+  $("layout-rename")?.addEventListener("click", () => { renameSelectedLayout(); });
+  $("layout-delete")?.addEventListener("click", () => { deleteSelectedLayout(); });
 
   const onRoomSize = () => {
+    const selected = selectedLayoutName();
+    if (selected !== state.profile.active_layout) {
+      switchActiveLayout(selected);
+    }
     if (layoutLocked()) return;
     pushUndo();
     const widthFt = Math.max(1, Number($("room-width-ft").value) || mmToFeet(5216));
@@ -805,6 +853,10 @@ function wireLayoutEditor() {
   $("room-height-ft").addEventListener("change", onRoomSize);
 
   $("layout-flip").addEventListener("click", () => {
+    const selected = selectedLayoutName();
+    if (selected !== state.profile.active_layout) {
+      switchActiveLayout(selected);
+    }
     if (layoutLocked()) return;
     pushUndo();
     ensureProfileLayout();
@@ -812,6 +864,10 @@ function wireLayoutEditor() {
     pushProfileToView();
   });
   $("layout-reset").addEventListener("click", () => {
+    const selected = selectedLayoutName();
+    if (selected !== state.profile.active_layout) {
+      switchActiveLayout(selected);
+    }
     if (layoutLocked()) return;
     applyPreset(state.lastChosenPreset === "snake" ? "snake" : "perimeter");
   });

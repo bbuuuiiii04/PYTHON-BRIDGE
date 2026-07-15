@@ -146,12 +146,13 @@
       <section id="layout-panel" class="panel-stack" data-panel="layout" hidden role="tabpanel" aria-labelledby="tab-layout">
         <div class="layout-slot-row" role="group" aria-label="Layout library">
           <label class="field layout-slot-field">Layout
-            <select id="layout-slot" aria-label="Active layout"></select>
+            <select id="layout-slot" aria-label="Selected layout"></select>
           </label>
           <div class="button-row wrap layout-slot-actions">
+            <button type="button" id="layout-use" title="Put the selected layout on the stage">Use</button>
             <button type="button" id="layout-save-as" title="Duplicate the active layout">Save as…</button>
-            <button type="button" id="layout-rename" title="Rename the active layout">Rename</button>
-            <button type="button" id="layout-delete" title="Delete the active layout">Delete</button>
+            <button type="button" id="layout-rename" title="Rename the selected layout">Rename</button>
+            <button type="button" id="layout-delete" title="Delete the selected layout (not while it is active)">Delete</button>
           </div>
         </div>
         <div class="panel-head-row">
