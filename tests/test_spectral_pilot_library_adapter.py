@@ -116,6 +116,15 @@ class AnchorPinningTests(unittest.TestCase):
         self.assertEqual(la.pick_highest_tier_beat([(400, 2), (64, 3)]), 64)             # highest tier wins
         self.assertIsNone(la.pick_highest_tier_beat([]))
 
+    def test_pick_nearest_beat_snaps_and_offgrid(self):
+        grid = [i * 500.0 for i in range(400)]                       # 0.5 s per beat
+        self.assertEqual(la.pick_nearest_beat(grid, 10.0), 20)       # exact on-grid: 10 s = beat 20
+        self.assertEqual(la.pick_nearest_beat(grid, 10.24), 20)      # 10240 ms nearer beat 20 (10000)
+        self.assertEqual(la.pick_nearest_beat(grid, 10.30), 21)      # 10300 ms nearer beat 21 (10500)
+        self.assertEqual(la.pick_nearest_beat(grid, 10.25), 20)      # exact tie -> earliest beat
+        self.assertEqual(la.pick_nearest_beat(grid, 0.0), 0)
+        self.assertIsNone(la.pick_nearest_beat([], 79.4))
+
     def _meta_getter(self):
         metas = {cid: la.LocatorMeta(content_id_locator=cid, artist="a", title=role, duration_s=200.0,
                                      bpm=128.0, audio_path=f"/{cid}.wav", analysis_data_path=f"{cid}.DAT")
@@ -123,7 +132,15 @@ class AnchorPinningTests(unittest.TestCase):
         return lambda cid: metas.get(cid)
 
     def test_build_seven_anchor_rows(self):
-        readers = fake_readers(drops=(64, 128, 256))
+        grid = [i * 451.0 for i in range(700)]                     # ~133 BPM; 79.4 s -> nearest beat 176
+        readers = la.LibraryReaders(
+            audio_sha256=lambda p: "sha-" + p,
+            beatgrid_times=lambda a: (list(grid) if a else None),
+            beatgrid_fingerprint=lambda t: f"bg-{len(t)}",
+            phrase_drops=lambda a: [64, 128, 256],
+            v4_status=lambda p, t: (True, True, 600),
+            label_store_hash=lambda: "labelhash",
+        )
         tier_fn = lambda meta, covered: [(b, 3 if b == 128 else 2) for b in covered]  # 128 is hardest
         rows, pins = la.build_anchor_rows(self._meta_getter(), readers, tier_fn)
         self.assertEqual(len(rows), 7)
@@ -132,7 +149,8 @@ class AnchorPinningTests(unittest.TestCase):
         self.assertEqual(by_role["mixed"].anchor_montage_beats, (192, 288))    # montage windows
         self.assertIsNone(by_role["mixed"].anchor_marker_beat)
         self.assertEqual(by_role["T2"].anchor_marker_beat, 128)               # pinned highest tier
-        self.assertEqual(pins, {"T2": 128, "T3": 128})
+        self.assertEqual(by_role["T3"].anchor_marker_beat, 176)               # seconds -> nearest grid beat
+        self.assertEqual(pins, {"T2": 128, "T3": 176})
 
     def test_invalid_v4_anchor_fails_closed(self):
         readers = fake_readers(valid=False)

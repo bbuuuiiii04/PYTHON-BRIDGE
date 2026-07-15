@@ -82,21 +82,22 @@ class AnchorError(ValueError):
 
 # The seven anchors — operator-decided 2026-07-15 (spec B3.7). Content-ids resolved
 # read-only against the live library at Phase-1 prep and verified valid. `gold`
-# anchors use their fixed B3.7 labeled-drop beats; T2/T3 pin the highest-F2-tier
-# phrase drop at implementation. Order MUST match selection.ANCHOR_ROLES.
+# anchors use their fixed B3.7 labeled-drop beats; `pin` (T2) pins the highest-F2-tier
+# phrase drop; `seconds` (T3) snaps an operator-named moment to the nearest grid beat.
+# Order MUST match selection.ANCHOR_ROLES.
 ANCHOR_SPECS = (
-    ("WALL",  "51640855",  "gold", (128,)),        # REWIND — Ray Volpe, Sullivan King
-    ("COMET", "250469778", "gold", (472,)),        # Laserbeam (TiDo Edit) — Ray Volpe
-    ("HOUSE", "67676901",  "gold", (384,)),        # Utopia — Dombresky
-    ("mixed", "216468125", "gold", (192, 288)),    # Sexy (Extended Mix) — Matt Sassari (montage)
-    ("T1",    "1783601",   "gold", (128,)),        # ESSE Work It x Take It (Bellevue Rework)
-    ("T2",    "87057007",  "pin",  ()),            # Like I Like It — Mau P (pin from RB markers)
-    ("T3",    "127938342", "pin",  ()),            # I Cannot (Extended Mix) — Anti Up (pin)
+    ("WALL",  "51640855",  "gold",    (128,)),      # REWIND — Ray Volpe, Sullivan King
+    ("COMET", "250469778", "gold",    (472,)),      # Laserbeam (TiDo Edit) — Ray Volpe
+    ("HOUSE", "67676901",  "gold",    (384,)),      # Utopia — Dombresky
+    ("mixed", "216468125", "gold",    (192, 288)),  # Sexy (Extended Mix) — Matt Sassari (montage)
+    ("T1",    "1783601",   "gold",    (128,)),      # ESSE Work It x Take It (Bellevue Rework)
+    ("T2",    "87057007",  "pin",     ()),          # Like I Like It — Mau P (pin highest RB-marker tier; beat 124 genuine)
+    ("T3",    "127938342", "seconds", (79.4,)),     # I Cannot — operator moment 1:19.4 → nearest grid beat (B3.7 2026-07-15)
 )
 
 
 def pick_highest_tier_beat(tiered_markers):
-    """Pinning rule (spec B3.7 T2/T3): the marker whose frozen F2 plan tier is
+    """Pinning rule (spec B3.7 T2): the marker whose frozen F2 plan tier is
     highest, tie-break earliest beat. ``tiered_markers`` = iterable of (beat, tier).
     """
     tiered = [(int(b), int(t)) for b, t in tiered_markers]
@@ -105,13 +106,26 @@ def pick_highest_tier_beat(tiered_markers):
     return sorted(tiered, key=lambda bt: (-bt[1], bt[0]))[0][0]
 
 
+def pick_nearest_beat(times_ms, seconds):
+    """Pinning rule (spec B3.7 T3): resolve an operator-named moment in SECONDS to the
+    nearest ANLZ beatgrid beat index. No BPM arithmetic — snaps to the grid time
+    closest to ``seconds * 1000`` ms; earliest beat wins an exact tie. Returns None on
+    an empty grid.
+    """
+    if not times_ms:
+        return None
+    target = float(seconds) * 1000.0
+    return min(range(len(times_ms)), key=lambda i: (abs(float(times_ms[i]) - target), i))
+
+
 def build_anchor_rows(get_meta, readers, tier_fn, *, specs=ANCHOR_SPECS):
     """Build the seven anchor LocatorRows in ANCHOR_ROLES order (spec B3.7/B7).
 
     ``get_meta(content_id) -> LocatorMeta`` resolves an anchor's library row;
     ``tier_fn(meta, covered_drops) -> [(beat, tier)]`` returns the F2 plan tier per
     covered drop (real: lighting_moments_v2.build_track_plan; fake under test). Gold
-    anchors use their fixed B3.7 beats; T2/T3 pin the highest-tier phrase drop.
+    anchors use their fixed B3.7 beats; T2 pins the highest-tier phrase drop; T3 snaps
+    the operator-named moment (seconds) to the nearest grid beat.
     Returns ``(rows, pins)`` where ``pins`` maps the pinned roles (T2/T3) to beats.
     Fails closed via ``AnchorError`` if any anchor lacks valid v4, its content, or a
     usable covered marker — never a silent substitution (spec B3.7, B10).
@@ -119,7 +133,7 @@ def build_anchor_rows(get_meta, readers, tier_fn, *, specs=ANCHOR_SPECS):
     if tuple(s[0] for s in specs) != ANCHOR_ROLES:
         raise AnchorError("anchor specs order must match selection.ANCHOR_ROLES")
     rows, pins = [], {}
-    for role, cid, kind, gold in specs:
+    for role, cid, kind, arg in specs:
         meta = get_meta(cid)
         if meta is None:
             raise AnchorError(f"anchor {role}: content_id {cid} not found in library")
@@ -130,8 +144,15 @@ def build_anchor_rows(get_meta, readers, tier_fn, *, specs=ANCHOR_SPECS):
         n_beats = int(v4_n) if v4_n else len(times)
         drops = tuple(sorted(int(b) for b in (readers.phrase_drops(meta.analysis_data_path) or [])))
         if kind == "gold":
-            beats = tuple(int(b) for b in gold)
-        else:
+            beats = tuple(int(b) for b in arg)
+        elif kind == "seconds":
+            # spec B3.7 T3: operator-named moment in seconds → nearest ANLZ grid beat.
+            beat = pick_nearest_beat(times, arg[0])
+            if beat is None:
+                raise AnchorError(f"anchor {role} ({cid}): no beatgrid to resolve {arg[0]}s")
+            beats = (int(beat),)
+            pins[role] = int(beat)
+        else:  # "pin": highest frozen-F2-tier phrase drop
             covered = [b for b in drops if b >= 0 and b + WINDOW <= n_beats]
             if not covered:
                 raise AnchorError(f"anchor {role} ({cid}): no usable candidate markers")
