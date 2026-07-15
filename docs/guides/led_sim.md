@@ -131,7 +131,7 @@ The Layout tab supports preset cards, room-size fields (presets rescale),
 drag handles (≥32 px hit target), double-click (desktop) / long-press (touch)
 to insert or delete vertices (minimum two; long-press cancels once the pointer
 moves ~6 px), flip chain, reset to the last chosen perimeter/snake preset, a
-bounded undo stack (≥20 layout edits, Cmd/Ctrl-Z), and the layout locker.
+bounded undo stack (up to 20 layout edits, Cmd/Ctrl-Z on the Layout tab), and the layout locker.
 **Save layout** uses the existing validated profile POST. Unsaved badges are
 scoped: layout edits do not light the calibration badge, and vice versa.
 
@@ -322,6 +322,5 @@ Focused checks:
 python3 -m unittest discover tests -p "test_led_sim*"
 ```
 
-Current focused result: **52 tests passed** on 2026-07-15 (includes fixed-pitch
-layout, truncation, and shortfall cases). This is software proof for the offline
-studio only; no H612D hardware was exercised. Optics remain uncalibrated.
+That command is the software proof for the offline studio; no H612D hardware
+was exercised. Optics remain uncalibrated.

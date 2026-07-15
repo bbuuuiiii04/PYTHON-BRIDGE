@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import math
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -12,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from rb_ss_bridge_v2.tools import led_sim_engine as engine  # noqa: E402
 
 _EXAMPLE_PATH = Path(__file__).resolve().parents[1] / "config" / "led_sim_profile.example.json"
+_VIEW_JS = Path(__file__).resolve().parents[1] / "tools" / "led_sim_assets" / "ledsim-view.js"
 
 
 def _profile(**overrides) -> dict:
@@ -492,6 +495,44 @@ class LayoutTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("export function shouldSuppressSegmentTick", view_js)
         self.assertIn("if (shouldSuppressSegmentTick(segment)) continue;", view_js)
+
+    @unittest.skipUnless(shutil.which("node"), "node not on PATH")
+    def test_js_layout_led_positions_parity_when_node_available(self) -> None:
+        # F-4: silent Python↔JS layout divergence fails a local test when node exists.
+        profile = _profile(layout=engine.default_layout())
+        py = engine.layout_led_positions(profile)
+        sample_idx = [0, 1, 30, 179, 180, 358, 359]
+        script = (
+            f"import {{ layoutLedPositions }} from {_VIEW_JS.resolve().as_uri()!r};\n"
+            f"const profile = {json.dumps(profile)};\n"
+            "const r = layoutLedPositions(profile);\n"
+            f"const sampleIdx = {json.dumps(sample_idx)};\n"
+            "process.stdout.write(JSON.stringify({\n"
+            "  path_length_mm: r.path_length_mm,\n"
+            "  junction_mm: r.junction_mm,\n"
+            "  unplaced_mm: r.unplaced_mm,\n"
+            "  excess_path_mm: r.excess_path_mm,\n"
+            "  leds: sampleIdx.map((i) => r.leds_mm[i]),\n"
+            "}));\n"
+        )
+        proc = subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        js = json.loads(proc.stdout)
+        self.assertAlmostEqual(js["path_length_mm"], py["path_length_mm"], delta=1e-6)
+        self.assertAlmostEqual(js["unplaced_mm"], py["unplaced_mm"], delta=1e-6)
+        self.assertAlmostEqual(js["excess_path_mm"], py["excess_path_mm"], delta=1e-6)
+        self.assertAlmostEqual(js["junction_mm"][0], py["junction_mm"][0], delta=1e-6)
+        self.assertAlmostEqual(js["junction_mm"][1], py["junction_mm"][1], delta=1e-6)
+        for index, (got, expected) in enumerate(zip(js["leds"], (py["leds_mm"][i] for i in sample_idx))):
+            self.assertIsNotNone(got)
+            self.assertIsNotNone(expected)
+            self.assertAlmostEqual(got[0], expected[0], delta=1e-6, msg=f"led sample {index} x")
+            self.assertAlmostEqual(got[1], expected[1], delta=1e-6, msg=f"led sample {index} y")
 
     def test_format_length_feet_primary(self) -> None:
         self.assertEqual(engine.format_length_mm(engine.H612D_LENGTH_MM), "49.2 ft · 15.0 m")

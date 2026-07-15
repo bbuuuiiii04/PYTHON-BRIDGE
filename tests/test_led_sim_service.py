@@ -234,6 +234,26 @@ class LedSimServiceTests(unittest.TestCase):
         self.assertIs(after["profile"]["layout_locked"], True)
         self.assertIs(after["profile"]["calibration_locked"], True)
 
+        # F-1: Calibrate-tab flow — start unlocked on disk, then POST with only
+        # calibration_locked flipped true (knobs unchanged). Save must persist it.
+        unlocked = json.loads(
+            (Path(__file__).resolve().parents[1] / "config" / "led_sim_profile.example.json").read_text()
+        )
+        unlocked["layout_locked"] = False
+        unlocked["calibration_locked"] = False
+        with _server(self.profile_path) as port:
+            status, _ = _request(port, "POST", "/api/profile", unlocked)
+            self.assertEqual(status, 200)
+            toggled = dict(unlocked)
+            toggled["calibration_locked"] = True
+            status, result = _request(port, "POST", "/api/profile", toggled)
+            self.assertEqual(status, 200, result)
+            self.assertTrue(result["ok"])
+            status, after = _request(port, "GET", "/api/profile")
+        self.assertEqual(status, 200)
+        self.assertIs(after["profile"]["calibration_locked"], True)
+        self.assertIs(after["profile"]["layout_locked"], False)
+
     def test_lab_degradation_keeps_catalog_serving(self) -> None:
         with mock.patch.object(led_sim_engine, "_import_lab", side_effect=RuntimeError("lab exploded")):
             with _server(self.profile_path) as port:

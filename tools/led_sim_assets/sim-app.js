@@ -50,8 +50,10 @@ const state = {
   frameRequestToken: 0,
   layoutUndoStack: [],
   lastChosenPreset: "perimeter",
-  dragVertex: -1,
+    dragVertex: -1,
   selectedVertex: -1,
+  dragUndoPushed: false,
+  dragStartPoint: null,
   longPressTimer: null,
   longPressPoint: null,
   longPressStart: null,
@@ -247,8 +249,9 @@ function syncLockUi() {
   }
   const hold = $("knob-hold");
   if (hold) hold.disabled = calibLock;
+  // F-1: Save stays enabled so calibration_locked itself can be persisted.
   const save = $("profile-save");
-  if (save) save.disabled = calibLock;
+  if (save) save.disabled = false;
 
   const roomEditing = view?.getViewMode() === "room" && state.activeTab === "layout" && !layoutLock;
   view?.setEditing(Boolean(roomEditing));
@@ -303,6 +306,7 @@ function syncUndoButton() {
 }
 
 function undoLayout() {
+  if (state.activeTab !== "layout") return;
   if (!state.layoutUndoStack.length || layoutLocked()) return;
   const previous = state.layoutUndoStack.pop();
   state.profile.room_mm = previous.room_mm;
@@ -640,9 +644,11 @@ function wireLayoutEditor() {
     const vertex = view.hitTestVertex(point.x, point.y, HIT);
     if (vertex >= 0) {
       event.preventDefault();
-      pushUndo();
+      // F-2: defer undo snapshot until actual drag movement (>6px).
       state.dragVertex = vertex;
       state.selectedVertex = vertex;
+      state.dragUndoPushed = false;
+      state.dragStartPoint = point;
       canvas.setPointerCapture?.(event.pointerId);
       return;
     }
@@ -696,6 +702,12 @@ function wireLayoutEditor() {
     if (state.dragVertex < 0 || !editsAllowed()) return;
     event.preventDefault();
     const point = canvasEventPoint(event);
+    if (!state.dragUndoPushed && state.dragStartPoint) {
+      const moved = Math.hypot(point.x - state.dragStartPoint.x, point.y - state.dragStartPoint.y);
+      if (moved <= LONG_PRESS_MOVE_PX) return;
+      pushUndo();
+      state.dragUndoPushed = true;
+    }
     const mm = view.canvasToMm(point.x, point.y);
     ensureProfileLayout();
     const points = state.profile.layout.points_mm.map((entry) => [entry[0], entry[1]]);
@@ -710,6 +722,8 @@ function wireLayoutEditor() {
     clearLongPress();
     if (state.dragVertex >= 0) {
       state.dragVertex = -1;
+      state.dragUndoPushed = false;
+      state.dragStartPoint = null;
       try { canvas.releasePointerCapture?.(event.pointerId); } catch (_error) { /* ignore */ }
     }
   }
@@ -768,7 +782,7 @@ function wireKnobs() {
   });
 
   $("profile-save").addEventListener("click", async () => {
-    if (calibrationLocked()) return;
+    // F-1: lock blocks knob edits only — never the save that persists the lock.
     const result = await api("POST", "/api/profile", cloneProfile(state.profile));
     state.savedProfile = clone(result.profile);
     ensureLockDefaults(state.savedProfile);
@@ -1152,6 +1166,7 @@ function wireKeyboard() {
   document.addEventListener("keydown", (event) => {
     if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) return;
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
+      if (state.activeTab !== "layout") return;
       event.preventDefault();
       undoLayout();
       return;

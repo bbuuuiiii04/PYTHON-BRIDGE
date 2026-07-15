@@ -16,6 +16,18 @@ export function shouldSuppressSegmentTick(segment) {
   return Math.abs(Number(segment) * H612D_SEGMENT_MM - H612D_JUNCTION_MM) < 1e-6;
 }
 
+/** Half-even (banker's) rounding — mirrors Python int(round(x)) used in
+ *  led_sim_engine.transform_color / apply_bleed (engine ~lines 590, 607). */
+function roundHalfEven(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  const floor = Math.floor(n);
+  const frac = n - floor;
+  if (frac < 0.5) return floor;
+  if (frac > 0.5) return floor + 1;
+  return floor % 2 === 0 ? floor : floor + 1;
+}
+
 function roomSizeMm(profile) {
   const room = profile?.room_mm;
   if (
@@ -336,7 +348,8 @@ export function createLedSimView(canvas, initialProfile) {
     const gains = profile.white_point || [1, 1, 1];
     return rgb.map((channel, index) => {
       const linear = (Number(gains[index]) || 0) * brightness * (Number(channel) / 255);
-      return Math.max(0, Math.min(255, Math.round(255 * Math.max(0, linear) ** gamma)));
+      // Mirror led_sim_engine.transform_color: int(round(...)) half-even.
+      return Math.max(0, Math.min(255, roundHalfEven(255 * Math.max(0, linear) ** gamma)));
     });
   }
 
@@ -347,7 +360,7 @@ export function createLedSimView(canvas, initialProfile) {
     return frame.map((current, index) => {
       const previous = index ? frame[index - 1] : current;
       const next = index + 1 < frame.length ? frame[index + 1] : current;
-      return current.map((channel, c) => Math.max(0, Math.min(255, Math.round(
+      return current.map((channel, c) => Math.max(0, Math.min(255, roundHalfEven(
         (1 - mix) * channel + (mix / 2) * (previous[c] + next[c]),
       ))));
     });

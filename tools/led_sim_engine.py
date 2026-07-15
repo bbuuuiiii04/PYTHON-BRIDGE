@@ -69,11 +69,6 @@ LAYOUT_BOUNDS_TOLERANCE_MM = 2.0
 
 DEFAULT_ROOM_MM = (5216.0, 2284.0)
 LAYOUT_PRESETS = ("perimeter", "snake", "custom")
-# Legacy room-layout keys kept for old profiles; the room view reads `layout` only.
-LEGACY_LAYOUT_KEYS = (
-    "room_mm", "corner_segments", "start_corner", "direction",
-    "wash_reach_mm", "wash_gain", "diffusion_width_seg",
-)
 
 FRAME_SOURCE_PRODUCTION_RUNNER_OFFLINE = "production_runner_offline"
 TIMING_SOURCE_IDEAL_GRID = "ideal_grid"
