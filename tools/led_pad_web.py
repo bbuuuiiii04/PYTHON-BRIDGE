@@ -962,7 +962,7 @@ class LedPadService:
             raise ValueError("no realtime-enabled LED target in config")
         fps = max(1, min(40, int(payload.get("fps") or target.realtime.fps)))
         bpm = max(40.0, min(220.0, float(payload.get("bpm") or session.get("bpm") or 128)))
-        default_beats = min(float(entry.get("cue_beats", 16) or 16), 8.0)
+        default_beats = float(entry.get("cue_beats", 16) or 16)
         beats = max(1.0, min(32.0, float(payload.get("beats") or default_beats)))
         frames = render_preview_frames(
             renderer, scene,

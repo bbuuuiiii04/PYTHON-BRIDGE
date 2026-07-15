@@ -569,6 +569,24 @@ class LedPadServiceTests(unittest.TestCase):
             # The overlay never persisted.
             self.assertEqual(service._lab.get("pulse")["params"], {"level": 0.0})
 
+    def test_lab_preview_default_beats_equals_full_cue_beats(self) -> None:
+        # AWR-247: default was min(cue_beats, 8) so 32-beat cues only previewed 2 bars.
+        with tempfile.TemporaryDirectory() as td:
+            service, _playback = self._lab_service(td)
+            service.lab_save({
+                "name": "pulse", "kind": "slot", "fn": "pulse",
+                "params": {"level": 1.0}, "cue_beats": 32,
+            })
+            result = service.lab_preview({"name": "pulse", "bpm": 120.0})
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["beats"], 32.0)
+            # fps defaults to target realtime fps (capped ≤40); at 120 BPM → 2 beats/sec.
+            expected_frames = int(round(result["fps"] * (32.0 * 60.0 / 120.0)))
+            self.assertEqual(len(result["frames"]), expected_frames)
+            # Explicit short window still honored.
+            short = service.lab_preview({"name": "pulse", "beats": 8.0, "bpm": 120.0})
+            self.assertEqual(short["beats"], 8.0)
+
     def test_lab_list_decorates_effective_specs_and_conflicts(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             service, _playback = self._lab_service(td)

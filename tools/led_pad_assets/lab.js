@@ -656,6 +656,9 @@
   }
 
   const preview = {frames: [], fps: 40, raf: 0};
+  // AWR-247: preview window length (2 bars / 4 bars / full cue). Default full.
+  const PREVIEW_LEN_KEY = "labPreviewLength";
+  let previewLengthMode = "full"; // "8" | "16" | "full"
   // AWR-245: Strip | Room toggle. Room reuses the sim view module as-is (no fork).
   const PREVIEW_MODE_KEY = "labPreviewMode";
   const roomView = {
@@ -692,6 +695,24 @@
     if (note) note.hidden = !roomView.unavailable;
     if (stripCanvas) stripCanvas.hidden = isRoom;
     if (roomCanvas) roomCanvas.hidden = !isRoom;
+  }
+  function syncPreviewLengthChrome() {
+    for (const btn of document.querySelectorAll("[data-preview-len]")) {
+      const on = btn.dataset.previewLen === previewLengthMode;
+      btn.classList.toggle("on", on);
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+  }
+  function setPreviewLengthMode(mode) {
+    previewLengthMode = (mode === "8" || mode === "16") ? mode : "full";
+    try { localStorage.setItem(PREVIEW_LEN_KEY, previewLengthMode); } catch (_) { /* private mode */ }
+    syncPreviewLengthChrome();
+  }
+  function previewBeats() {
+    if (previewLengthMode === "8") return 8;
+    if (previewLengthMode === "16") return 16;
+    // Full cue — editor cue length (capped 32, same as server).
+    return Math.max(1, Math.min(32, cue()));
   }
   function destroyRoomView() {
     if (roomView.view && typeof roomView.view.destroy === "function") {
@@ -785,7 +806,7 @@
     setPreviewHint(true);
     // No implicit save: preview posts the current editor params directly.
     const params = JSON.parse($("paramsInput").value || "{}");
-    const res = await api.labPreview({name: state.current.name, params});
+    const res = await api.labPreview({name: state.current.name, params, beats: previewBeats()});
     if (!res.ok) {
       $("traceText").textContent = res.traceback || res.error || "preview failed";
       state.health.labOk = false;
@@ -831,6 +852,14 @@
   };
   $("previewModeStrip").onclick = () => { setPreviewMode("strip"); };
   $("previewModeRoom").onclick = () => { setPreviewMode("room"); };
+  for (const btn of document.querySelectorAll("[data-preview-len]")) {
+    btn.onclick = () => { setPreviewLengthMode(btn.dataset.previewLen); };
+  }
+  try {
+    const savedLen = localStorage.getItem(PREVIEW_LEN_KEY);
+    if (savedLen === "8" || savedLen === "16" || savedLen === "full") previewLengthMode = savedLen;
+  } catch (_) { /* private mode */ }
+  syncPreviewLengthChrome();
   // Restore persisted choice (default Strip). Fail-soft if Room assets are gone.
   (async () => {
     let saved = "strip";
