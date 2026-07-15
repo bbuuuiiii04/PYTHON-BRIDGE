@@ -222,8 +222,9 @@ class CardManifestRowTests(unittest.TestCase):
 
     def test_anchor_cards_carry_marker_beat_and_clip(self):
         rows, ls = eligible_corpus()
-        # seven anchors, each with its own pinned marker beat
+        # seven anchors in ANCHOR_ROLES order; the 4th ("mixed") is montage-style.
         anchors = [make_row(100 + i, anchor_marker_beat=128) for i in range(7)]
+        anchors[3] = make_row(103, anchor_marker_beat=None, anchor_montage_beats=(192, 288))
         for a in anchors:
             ls[a.content_id_locator] = "confirmed"
         r = run(rows, ls, anchor_rows=anchors)
@@ -231,8 +232,22 @@ class CardManifestRowTests(unittest.TestCase):
         anchor_cards = [m for m in mrows if m.card_type == "anchor_confirm"]
         self.assertEqual(len(anchor_cards), 7)
         for m in anchor_cards:
-            self.assertEqual(m.marker_beat, 128)
-            self.assertEqual(m.clip_spec["end_beat"] - m.clip_spec["start_beat"], 16)
+            if m.anchor_role == "mixed":
+                self.assertIsNone(m.marker_beat)
+                self.assertEqual([w["start_beat"] for w in m.clip_spec["windows"]], [192, 288])
+                self.assertTrue(all(w["end_beat"] - w["start_beat"] == 16 for w in m.clip_spec["windows"]))
+            else:
+                self.assertEqual(m.marker_beat, 128)
+                self.assertEqual(m.clip_spec["end_beat"] - m.clip_spec["start_beat"], 16)
+
+    def test_mixed_anchor_requires_two_montage_beats(self):
+        rows, ls = eligible_corpus()
+        # a 'mixed' anchor without montage beats is a fail-closed ManifestError (B7)
+        anchors = [make_row(100 + i, anchor_marker_beat=128) for i in range(7)]  # anchors[3] == mixed, single beat
+        for a in anchors:
+            ls[a.content_id_locator] = "confirmed"
+        with self.assertRaises(sel.ManifestError):
+            run(rows, ls, anchor_rows=anchors)
 
 
 if __name__ == "__main__":

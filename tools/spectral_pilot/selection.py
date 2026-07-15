@@ -108,6 +108,7 @@ class LocatorRow:
     v4_valid: bool = True
     is_scripted: bool = False
     anchor_marker_beat: Optional[int] = None   # anchor rows only (spec B3.7/B7 clip rule)
+    anchor_montage_beats: Optional[tuple] = None   # mixed anchor ONLY: both B3.7 windows (spec B7)
 
     def eligible_markers(self) -> tuple:
         """Candidate markers with full 16-beat coverage (marker+16 <= n_beats)."""
@@ -320,13 +321,25 @@ def _build_cards(pilot_seed, sessions, marker_rows, hardness_by_card, montage_by
     cards = []
 
     # Session A: seven anchor-confirm cards (only if anchors provided). Each anchor
-    # carries its own marker beat + exact 16-beat clip (spec B7 clip rule).
+    # carries its own exact 16-beat clip (spec B7 clip rule). The `mixed` anchor is
+    # montage-style — its clip_spec carries BOTH B3.7 windows (Sexy 192+288), since
+    # confirming "mixed" requires hearing both moments (spec B7 amended clip rule).
     for role, arow in zip(ANCHOR_ROLES, anchor_rows):
         cid = anchor_card_id(pilot_seed, role)
+        tid = track_instance_id(pilot_seed, arow.content_id_locator)
+        if role == "mixed":
+            beats = arow.anchor_montage_beats
+            if not beats or len(beats) != 2:
+                raise ManifestError("mixed anchor must carry exactly two montage beats (spec B7)")
+            mbeats = [int(b) for b in beats]
+            cards.append(CardPlan(cid, "anchor_confirm", "A", 0, tid, None, arow.audio_sha256,
+                                  arow.recording_lineage_id, role, None, None, None, None, None,
+                                  montage_windows=mbeats))
+            continue
         ab = arow.anchor_marker_beat
         if ab is None:
             raise ManifestError(f"anchor role {role} has no usable marker beat")
-        cards.append(CardPlan(cid, "anchor_confirm", "A", 0, track_instance_id(pilot_seed, arow.content_id_locator),
+        cards.append(CardPlan(cid, "anchor_confirm", "A", 0, tid,
                               ab, arow.audio_sha256, arow.recording_lineage_id, role, None, None, None, ab, ab + WINDOW))
 
     # Sessions P1-P3
@@ -409,11 +422,15 @@ def _place_repeats(pilot_seed, base, repeats):
 
 # --- card manifest producer (spec B7) ----------------------------------------
 def _clip_spec(c: CardPlan) -> dict:
-    """The exact 16-beat clip(s) a card plays (spec B7 clip rule)."""
-    if c.card_type in ("family_montage", "family_repeat"):
-        beats = c.montage_windows or []
+    """The exact 16-beat clip(s) a card plays (spec B7 clip rule).
+
+    Montage-style (two windows) whenever the card carries ``montage_windows`` — the
+    family montage/repeat cards AND the `mixed` anchor card (spec B7 amended); a
+    single 16-beat window otherwise.
+    """
+    if c.montage_windows:
         return {"windows": [{"audio_sha256": c.audio_sha256, "start_beat": b, "end_beat": b + WINDOW}
-                            for b in beats]}
+                            for b in c.montage_windows]}
     return {"audio_sha256": c.audio_sha256, "start_beat": c.marker_beat, "end_beat": c.marker_beat + WINDOW}
 
 
