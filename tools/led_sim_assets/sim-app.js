@@ -148,11 +148,20 @@ const KNOBS = [
   ["slew_ms", "knob-slew"],
 ];
 
+function ensureLockDefaults(profile = state.profile) {
+  if (!profile || typeof profile !== "object") return profile;
+  if (typeof profile.layout_locked !== "boolean") profile.layout_locked = false;
+  if (typeof profile.calibration_locked !== "boolean") profile.calibration_locked = false;
+  return profile;
+}
+
 function layoutLocked() {
+  ensureLockDefaults();
   return state.profile?.layout_locked === true;
 }
 
 function calibrationLocked() {
+  ensureLockDefaults();
   return state.profile?.calibration_locked === true;
 }
 
@@ -200,36 +209,65 @@ function syncEditGestureClass() {
 }
 
 function syncLockUi() {
+  ensureLockDefaults();
   const layoutLock = layoutLocked();
   const calibLock = calibrationLocked();
   const layoutBtn = $("layout-lock");
-  layoutBtn.setAttribute("aria-pressed", layoutLock ? "true" : "false");
-  layoutBtn.textContent = layoutLock ? "🔒 Locked" : "🔓 Unlock";
+  if (layoutBtn) {
+    layoutBtn.setAttribute("aria-pressed", layoutLock ? "true" : "false");
+    layoutBtn.textContent = layoutLock ? "🔒 Locked" : "🔓 Unlocked";
+    layoutBtn.title = layoutLock ? "Unlock layout editing" : "Lock layout editing";
+  }
   const calibBtn = $("calibration-lock");
-  calibBtn.setAttribute("aria-pressed", calibLock ? "true" : "false");
-  calibBtn.textContent = calibLock ? "🔒 Locked" : "🔓 Unlock";
-  $("lock-chip").hidden = !(layoutLock && view?.getViewMode() === "room");
+  if (calibBtn) {
+    calibBtn.setAttribute("aria-pressed", calibLock ? "true" : "false");
+    calibBtn.textContent = calibLock ? "🔒 Locked" : "🔓 Unlocked";
+    calibBtn.title = calibLock ? "Unlock calibration edits" : "Lock calibration edits";
+  }
+  const lockChip = $("lock-chip");
+  if (lockChip) {
+    lockChip.hidden = !(layoutLock && view?.getViewMode() === "room");
+  }
 
   for (const id of ["room-width-ft", "room-height-ft", "layout-flip", "layout-reset"]) {
-    $(id).disabled = layoutLock;
+    const el = $(id);
+    if (el) el.disabled = layoutLock;
   }
   for (const button of document.querySelectorAll(".preset-card")) {
     button.disabled = layoutLock;
   }
+  const undoBtn = $("layout-undo");
+  if (undoBtn) undoBtn.disabled = layoutLock || state.layoutUndoStack.length === 0;
+
   const calibRoot = $("calibration-controls");
   if (calibRoot) {
     for (const el of calibRoot.querySelectorAll("input, select, textarea, button")) {
       el.disabled = calibLock;
     }
   }
-  $("knob-hold").disabled = calibLock;
-  $("profile-save").disabled = calibLock;
-  $("profile-revert").disabled = false;
+  const hold = $("knob-hold");
+  if (hold) hold.disabled = calibLock;
+  const save = $("profile-save");
+  if (save) save.disabled = calibLock;
 
   const roomEditing = view?.getViewMode() === "room" && state.activeTab === "layout" && !layoutLock;
   view?.setEditing(Boolean(roomEditing));
   syncEditGestureClass();
   updateResetLabel();
+}
+
+function toggleLayoutLock() {
+  ensureLockDefaults();
+  state.profile.layout_locked = !state.profile.layout_locked;
+  syncLockUi();
+  markDirty();
+}
+
+function toggleCalibrationLock() {
+  ensureLockDefaults();
+  state.profile.calibration_locked = !state.profile.calibration_locked;
+  syncLockUi();
+  markDirty();
 }
 
 function pushProfileToView() {
@@ -244,8 +282,7 @@ function ensureProfileLayout() {
   if (!state.profile.room_mm || state.profile.room_mm.length !== 2) {
     state.profile.room_mm = [5216, 2284];
   }
-  if (typeof state.profile.layout_locked !== "boolean") state.profile.layout_locked = false;
-  if (typeof state.profile.calibration_locked !== "boolean") state.profile.calibration_locked = false;
+  ensureLockDefaults();
   state.profile.layout = resolveLayout(state.profile);
   return state.profile.layout;
 }
@@ -405,31 +442,56 @@ function canvasEventPoint(event) {
   };
 }
 
-function setActiveTab(tab) {
+function setActiveTab(tab, {expandSheet = true} = {}) {
   state.activeTab = tab;
-  for (const name of ["play", "layout", "calibrate"]) {
+  const order = ["play", "layout", "calibrate"];
+  for (const name of order) {
     const panelEl = $(`${name}-panel`);
-    panelEl.hidden = name !== tab;
+    const selected = name === tab;
+    panelEl.hidden = !selected;
+    panelEl.setAttribute("aria-hidden", selected ? "false" : "true");
     const tabBtn = $(`tab-${name}`);
-    tabBtn.classList.toggle("active", name === tab);
-    tabBtn.setAttribute("aria-pressed", name === tab ? "true" : "false");
+    tabBtn.classList.toggle("active", selected);
+    tabBtn.setAttribute("aria-selected", selected ? "true" : "false");
+    tabBtn.tabIndex = selected ? 0 : -1;
   }
   for (const btn of document.querySelectorAll(".rail-btn[data-tab]")) {
     const on = btn.dataset.tab === tab;
     btn.classList.toggle("active", on);
     btn.setAttribute("aria-pressed", on ? "true" : "false");
   }
-  document.body.classList.remove("sheet-collapsed");
-  $("sheet-toggle")?.setAttribute("aria-expanded", "true");
+  if (expandSheet && window.innerWidth < 900) {
+    document.body.classList.remove("sheet-collapsed");
+    $("sheet-toggle")?.setAttribute("aria-expanded", "true");
+  }
   syncLockUi();
 }
 
 function wireShell() {
-  for (const btn of document.querySelectorAll("[data-tab]")) {
+  const tabButtons = [...document.querySelectorAll('.sidecar-tabs [role="tab"]')];
+  for (const btn of tabButtons) {
     btn.addEventListener("click", () => {
       if (btn.dataset.tab) setActiveTab(btn.dataset.tab);
     });
   }
+  for (const btn of document.querySelectorAll(".rail-btn[data-tab]")) {
+    btn.addEventListener("click", () => {
+      if (btn.dataset.tab) setActiveTab(btn.dataset.tab);
+    });
+  }
+  // P-3: Left/Right arrow navigation within the tablist.
+  document.querySelector(".sidecar-tabs")?.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    const current = tabButtons.findIndex((btn) => btn.getAttribute("aria-selected") === "true");
+    if (current < 0) return;
+    event.preventDefault();
+    const delta = event.key === "ArrowRight" ? 1 : -1;
+    const next = (current + delta + tabButtons.length) % tabButtons.length;
+    const name = tabButtons[next].dataset.tab;
+    setActiveTab(name);
+    tabButtons[next].focus();
+  });
+
   $("sidecar-collapse").addEventListener("click", () => {
     document.body.classList.toggle("sidecar-collapsed");
     const collapsed = document.body.classList.contains("sidecar-collapsed");
@@ -441,7 +503,7 @@ function wireShell() {
     const collapsed = document.body.classList.contains("sheet-collapsed");
     $("sheet-toggle").setAttribute("aria-expanded", collapsed ? "false" : "true");
   });
-  // Mobile sheet starts expanded on layout-capable widths; collapse chrome on tiny screens.
+  // Phone: start collapsed to tab bar; tapping a tab expands the sheet.
   if (window.innerWidth < 900) {
     document.body.classList.add("sheet-collapsed");
     $("sheet-toggle")?.setAttribute("aria-expanded", "false");
@@ -460,6 +522,18 @@ function wireShell() {
     $("help-btn").setAttribute("aria-expanded", "false");
   });
   $("top-stop").addEventListener("click", () => stopPlayback());
+
+  // P-1: wire lockers early and independently of layout-editor setup.
+  $("layout-lock")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleLayoutLock();
+  });
+  $("calibration-lock")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleCalibrationLock();
+  });
 }
 
 function wireLayoutEditor() {
@@ -536,15 +610,13 @@ function wireLayoutEditor() {
     ensureProfileLayout();
     const result = await api("POST", "/api/profile", cloneProfile(state.profile));
     state.savedProfile = clone(result.profile);
+    ensureLockDefaults(state.savedProfile);
     state.catalog.profile_warnings = result.warnings || [];
     markDirty();
     showLayoutWarnings(result.warnings || []);
-  });
-  $("layout-lock").addEventListener("click", () => {
-    state.profile.layout_locked = !layoutLocked();
-    markDirty();
     syncLockUi();
   });
+  // layout-lock wired in wireShell (P-1)
 
   const canvas = $("fixture-canvas");
   const HIT = 32;
@@ -699,24 +771,24 @@ function wireKnobs() {
     if (calibrationLocked()) return;
     const result = await api("POST", "/api/profile", cloneProfile(state.profile));
     state.savedProfile = clone(result.profile);
+    ensureLockDefaults(state.savedProfile);
     state.catalog.profile_warnings = result.warnings || [];
     markDirty();
+    syncLockUi();
   });
   $("profile-revert").addEventListener("click", async () => {
     const result = await api("GET", "/api/profile");
     state.profile = result.profile;
+    ensureLockDefaults(state.profile);
     state.savedProfile = clone(result.profile);
+    ensureLockDefaults(state.savedProfile);
     state.catalog.profile_warnings = result.profile_warnings || [];
     state.display = null;
     state.lastPresentedOrdinal = null;
     knobsFromProfile();
     pushProfileToView();
   });
-  $("calibration-lock").addEventListener("click", () => {
-    state.profile.calibration_locked = !calibrationLocked();
-    markDirty();
-    syncLockUi();
-  });
+  // calibration-lock wired in wireShell (P-1)
 }
 
 function fillSourcePicker() {
@@ -1140,15 +1212,15 @@ async function boot() {
 
   state.catalog = await api("GET", "/api/catalog");
   state.profile = state.catalog.profile;
+  ensureLockDefaults(state.profile);
   if (!state.profile.layout) {
     state.profile.layout = defaultLayout(state.profile.room_mm || [5216, 2284]);
   }
   if (!state.profile.room_mm) state.profile.room_mm = [5216, 2284];
-  if (typeof state.profile.layout_locked !== "boolean") state.profile.layout_locked = false;
-  if (typeof state.profile.calibration_locked !== "boolean") state.profile.calibration_locked = false;
   const preset = state.profile.layout?.preset;
   if (preset === "snake" || preset === "perimeter") state.lastChosenPreset = preset;
-  state.savedProfile = clone(state.catalog.profile);
+  state.savedProfile = clone(state.profile);
+  ensureLockDefaults(state.savedProfile);
   view = createLedSimView($("fixture-canvas"), state.profile);
   view.renderFrame(Array.from({length: 60}, () => [0, 0, 0]));
   showWarnings();

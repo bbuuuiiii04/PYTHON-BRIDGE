@@ -216,6 +216,23 @@ class LedSimServiceTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("profile_warnings", catalog)
         self.assertIsInstance(catalog["profile_warnings"], list)
+        self.assertIs(catalog["profile"]["layout_locked"], False)
+        self.assertIs(catalog["profile"]["calibration_locked"], False)
+
+    def test_lock_flags_roundtrip_on_profile_save(self) -> None:
+        example = json.loads(
+            (Path(__file__).resolve().parents[1] / "config" / "led_sim_profile.example.json").read_text()
+        )
+        example["layout_locked"] = True
+        example["calibration_locked"] = True
+        with _server(self.profile_path) as port:
+            status, result = _request(port, "POST", "/api/profile", example)
+            self.assertEqual(status, 200, result)
+            self.assertTrue(result["ok"])
+            status, after = _request(port, "GET", "/api/profile")
+        self.assertEqual(status, 200)
+        self.assertIs(after["profile"]["layout_locked"], True)
+        self.assertIs(after["profile"]["calibration_locked"], True)
 
     def test_lab_degradation_keeps_catalog_serving(self) -> None:
         with mock.patch.object(led_sim_engine, "_import_lab", side_effect=RuntimeError("lab exploded")):

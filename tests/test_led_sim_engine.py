@@ -484,6 +484,15 @@ class LayoutTests(unittest.TestCase):
         errors = engine.validate_profile(_profile(calibration_locked="yes"))
         self.assertTrue(any("calibration_locked" in error for error in errors), errors)
 
+    def test_junction_segment_tick_suppression_contract(self) -> None:
+        # AF-4: segment 30 arc length is the junction; JS must skip that tick.
+        self.assertAlmostEqual(30 * engine.H612D_SEGMENT_MM, engine.H612D_JUNCTION_MM, places=9)
+        view_js = (
+            Path(__file__).resolve().parents[1] / "tools" / "led_sim_assets" / "ledsim-view.js"
+        ).read_text(encoding="utf-8")
+        self.assertIn("export function shouldSuppressSegmentTick", view_js)
+        self.assertIn("if (shouldSuppressSegmentTick(segment)) continue;", view_js)
+
     def test_format_length_feet_primary(self) -> None:
         self.assertEqual(engine.format_length_mm(engine.H612D_LENGTH_MM), "49.2 ft · 15.0 m")
         self.assertEqual(engine.format_length_mm(10 * engine.H612D_SEGMENT_MM), "8.2 ft · 2.5 m")

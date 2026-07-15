@@ -34,8 +34,9 @@ the old 6×10 bench grid for command inspection.
 Round 3 rebuilds the page as a **lighting-console shell**: stage-first room
 canvas, collapsible right sidecar (Play / Layout / Calibrate tabs), bottom
 transport, layout and calibration lockers, and Archivo + mono numeric chrome.
-Pad/lab get the same language in a later round — this change does not touch
-pad or lab files.
+Round 4 polishes the lockers (persist + stage padlock chip), the phone bottom
+sheet (zero page scroll), tablist semantics, and contrast. Pad/lab get the same
+language in a later round — this change does not touch pad or lab files.
 
 Each group of six dots receives one RGB command because the H612D exposes 60
 groups, not 360 separately controllable pixels. Screen optics (gamma, gains,

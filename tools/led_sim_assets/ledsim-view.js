@@ -11,6 +11,11 @@ const H612D_SEGMENT_MM = H612D_LENGTH_MM / H612D_SEGMENTS;
 const MM_PER_FOOT = 304.8;
 const DEFAULT_ROOM_MM = [5216, 2284];
 
+/** AF-4: true when the segment tick coincides with the junction control-box glyph. */
+export function shouldSuppressSegmentTick(segment) {
+  return Math.abs(Number(segment) * H612D_SEGMENT_MM - H612D_JUNCTION_MM) < 1e-6;
+}
+
 function roomSizeMm(profile) {
   const room = profile?.room_mm;
   if (
@@ -819,8 +824,7 @@ export function createLedSimView(canvas, initialProfile) {
     }
 
     for (let segment = 0; segment < H612D_SEGMENTS; segment += 10) {
-      // AF-4: suppress the tick that coincides with the junction glyph (seg 30).
-      if (Math.abs(segment * H612D_SEGMENT_MM - H612D_JUNCTION_MM) < 1e-6) continue;
+      if (shouldSuppressSegmentTick(segment)) continue;
       const point = boundaries[segment];
       if (!point) continue;
       ctx.beginPath();

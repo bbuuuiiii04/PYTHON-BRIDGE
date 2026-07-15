@@ -59,13 +59,15 @@
 
     <div class="canvas-wrap" id="canvas-wrap">
       <canvas id="fixture-canvas" width="1600" height="900" role="img" aria-label="H612D room view with strip path and 360 emitters"></canvas>
-      <div class="canvas-overlay">
-        <span id="marker-label">Choose a look and render</span>
-        <span id="time-label" class="mono">0.000 s</span>
-      </div>
-      <div class="stage-provenance">
-        <span id="pipeline-badge" class="chip mono">SOURCE · —</span>
-        <span id="timing-readout" class="chip mono">TIMING · —</span>
+      <div class="canvas-hud">
+        <div class="canvas-overlay">
+          <span id="marker-label">Choose a look and render</span>
+          <span id="time-label" class="mono">0.000 s</span>
+        </div>
+        <div class="stage-provenance">
+          <span id="pipeline-badge" class="chip mono">SOURCE · —</span>
+          <span id="timing-readout" class="chip mono">TIMING · —</span>
+        </div>
       </div>
     </div>
 
@@ -78,8 +80,8 @@
   </main>
 
   <aside class="sidecar" id="sidecar" aria-label="Console sidecar">
-    <div class="sheet-handle" id="sheet-handle" hidden>
-      <button type="button" id="sheet-toggle" aria-expanded="false" aria-controls="sidecar-body">Controls</button>
+    <div class="sheet-handle" id="sheet-handle">
+      <button type="button" id="sheet-toggle" aria-expanded="false" aria-controls="sidecar-panels">Controls</button>
     </div>
     <div class="sidecar-rail">
       <button type="button" class="rail-btn active" data-tab="play" aria-label="Play tab" title="Play">▶</button>
@@ -87,14 +89,17 @@
       <button type="button" class="rail-btn" data-tab="calibrate" aria-label="Calibrate tab" title="Calibrate">◎</button>
       <button type="button" class="rail-btn rail-collapse" id="sidecar-collapse" aria-label="Collapse sidecar" title="Collapse">‹</button>
     </div>
-    <div class="sidecar-body" id="sidecar-body">
-      <nav class="sidecar-tabs" aria-label="Sidecar tabs">
-        <button id="tab-play" class="active" type="button" data-tab="play" aria-pressed="true">Play</button>
-        <button id="tab-layout" type="button" data-tab="layout" aria-pressed="false">Layout</button>
-        <button id="tab-calibrate" type="button" data-tab="calibrate" aria-pressed="false">Calibrate</button>
+    <div class="sidecar-main">
+      <nav class="sidecar-tabs" role="tablist" aria-label="Sidecar tabs">
+        <button id="tab-play" class="active" type="button" role="tab" data-tab="play"
+          aria-selected="true" aria-controls="play-panel" tabindex="0">Play</button>
+        <button id="tab-layout" type="button" role="tab" data-tab="layout"
+          aria-selected="false" aria-controls="layout-panel" tabindex="-1">Layout</button>
+        <button id="tab-calibrate" type="button" role="tab" data-tab="calibrate"
+          aria-selected="false" aria-controls="calibrate-panel" tabindex="-1">Calibrate</button>
       </nav>
-
-      <section id="play-panel" class="panel-stack" data-panel="play">
+      <div class="sidecar-panels" id="sidecar-panels">
+      <section id="play-panel" class="panel-stack" data-panel="play" role="tabpanel" aria-labelledby="tab-play">
         <span class="panel-label">Source</span>
         <label class="field">Type
           <select id="source-kind">
@@ -126,10 +131,10 @@
         <p class="fine-print">Frame source and timing appear on the stage. This page never contacts the strip.</p>
       </section>
 
-      <section id="layout-panel" class="panel-stack" data-panel="layout" hidden>
+      <section id="layout-panel" class="panel-stack" data-panel="layout" hidden role="tabpanel" aria-labelledby="tab-layout">
         <div class="panel-head-row">
           <span class="panel-label">Strip layout</span>
-          <button id="layout-lock" type="button" class="lock-toggle" aria-pressed="false" title="Lock layout editing">🔓 Unlock</button>
+          <button id="layout-lock" type="button" class="lock-toggle" aria-pressed="false" title="Lock layout editing">🔓 Unlocked</button>
         </div>
         <p class="fine-print" id="layout-gesture-copy">Drag vertices on the room. Double-click (desktop) or long-press (touch) an edge to add a point, a vertex to remove one. LED spacing is fixed — the path is never stretched.</p>
         <div class="preset-cards" role="listbox" aria-label="Layout presets">
@@ -170,10 +175,10 @@
         <span id="layout-dirty" class="dirty" hidden>Unsaved layout changes</span>
       </section>
 
-      <section id="calibrate-panel" class="panel-stack" data-panel="calibrate" hidden>
+      <section id="calibrate-panel" class="panel-stack" data-panel="calibrate" hidden role="tabpanel" aria-labelledby="tab-calibrate">
         <div class="panel-head-row">
           <span class="panel-label">Calibrate</span>
-          <button id="calibration-lock" type="button" class="lock-toggle" aria-pressed="false" title="Lock calibration edits">🔓 Unlock</button>
+          <button id="calibration-lock" type="button" class="lock-toggle" aria-pressed="false" title="Lock calibration edits">🔓 Unlocked</button>
         </div>
         <p class="muted">Deterministic measurement frames for a later synchronized hardware capture. Nothing is sent now. Optics stay assumptions until fitted.</p>
         <button class="sequence-card" data-sequence="segment_map" type="button">
@@ -222,7 +227,8 @@
           <span id="profile-dirty" class="dirty" hidden>Unsaved calibration changes</span>
         </details>
       </section>
-    </div>
+      </div><!-- .sidecar-panels -->
+    </div><!-- .sidecar-main -->
   </aside>
 </div>
 

@@ -48,6 +48,15 @@ class LedSimService:
             example = engine.load_profile(engine.EXAMPLE_PROFILE_PATH)
         except Exception as exc:
             return {}, f"{engine.EXAMPLE_PROFILE_PATH.name}: {exc}"
+
+        def with_lock_defaults(profile: dict[str, Any]) -> dict[str, Any]:
+            # Always present so the UI lockers have a real key to flip/persist.
+            if not isinstance(profile.get("layout_locked"), bool):
+                profile["layout_locked"] = False
+            if not isinstance(profile.get("calibration_locked"), bool):
+                profile["calibration_locked"] = False
+            return profile
+
         if self.profile_path.exists():
             try:
                 profile = {**example, **engine.load_profile(self.profile_path)}
@@ -56,17 +65,14 @@ class LedSimService:
                     profile["layout"] = engine.default_layout(engine.room_size_mm(profile))
                 if not isinstance(profile.get("room_mm"), (list, tuple)):
                     profile["room_mm"] = list(engine.DEFAULT_ROOM_MM)
-                if "layout_locked" not in profile:
-                    profile["layout_locked"] = False
-                if "calibration_locked" not in profile:
-                    profile["calibration_locked"] = False
+                profile = with_lock_defaults(profile)
                 errors = engine.validate_profile(profile)
                 if not errors:
                     return profile, ""
                 error = f"{self.profile_path.name}: " + "; ".join(errors)
             except Exception as exc:
                 error = f"{self.profile_path.name}: {exc}"
-        return example, error
+        return with_lock_defaults(dict(example)), error
 
     def catalog(self) -> dict[str, Any]:
         profile, profile_error = self.profile_state()
