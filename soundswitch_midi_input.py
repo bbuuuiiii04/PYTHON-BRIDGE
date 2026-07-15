@@ -539,12 +539,12 @@ class SoundSwitchMidiInputAdapter:
         ever_ready: bool,
     ) -> None:
         """Mark input unavailable and log; caller waits then rebinds."""
-        try:
-            close = getattr(source, "close", None)
-            if callable(close):
+        close = getattr(source, "close", None)
+        if callable(close):
+            try:
                 close()
-        finally:
-            pass
+            except Exception:
+                pass
         # Same clear-held seam as mark_unavailable / input_port_gone: drop held
         # layers so pack overlay does not stick while the physical port is gone.
         if ready or not ever_ready:

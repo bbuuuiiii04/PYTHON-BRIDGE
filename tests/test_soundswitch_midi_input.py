@@ -718,15 +718,25 @@ class TestClearOnEvent(unittest.TestCase):
             """Name must match python-rtmidi's exception class name."""
 
         attempts = {"n": 0}
+        vanish = threading.Event()
+        allow_rebind = threading.Event()
 
         def factory():
             attempts["n"] += 1
+            attempt = attempts["n"]
+            if attempt >= 2:
+                # Hold the second open until the test has observed port-gone.
+                allow_rebind.wait(timeout=2.0)
 
             def gen():
-                # Become ready, then simulate the live unplug exception.
-                yield None
-                if attempts["n"] == 1:
-                    raise InvalidPortError("MidiIn::getMessage(): error looking up port")
+                yield None  # become ready
+                if attempt == 1:
+                    while not vanish.is_set():
+                        time.sleep(0.01)
+                        yield None
+                    raise InvalidPortError(
+                        "MidiIn::getMessage(): error looking up port"
+                    )
                 while True:
                     time.sleep(0.01)
                     yield None
@@ -750,15 +760,17 @@ class TestClearOnEvent(unittest.TestCase):
                 self.assertIsNotNone(first_thread)
                 self.assertTrue(first_thread.is_alive())
 
+                vanish.set()
                 wait_for(lambda: a.snapshot().error == "input_port_gone")
                 # Thread must still be the same retrying worker, not dead.
                 self.assertIs(a._thread, first_thread)
                 self.assertTrue(first_thread.is_alive())
-                self.assertNotIn(
-                    "worker_error:InvalidPortError",
-                    a.snapshot().error or "",
+                self.assertEqual(a.snapshot().error, "input_port_gone")
+                self.assertFalse(
+                    (a.snapshot().error or "").startswith("worker_error:"),
                 )
 
+                allow_rebind.set()
                 wait_for(lambda: a.snapshot().worker_alive and a.snapshot().error is None)
                 self.assertIs(a._thread, first_thread)
                 self.assertTrue(first_thread.is_alive())
@@ -766,6 +778,8 @@ class TestClearOnEvent(unittest.TestCase):
                 _note_on(a, _SLOT8)
                 self.assertEqual(_slots(a), (8,))
             finally:
+                vanish.set()
+                allow_rebind.set()
                 a.stop()
             self.assertFalse(first_thread.is_alive())
 

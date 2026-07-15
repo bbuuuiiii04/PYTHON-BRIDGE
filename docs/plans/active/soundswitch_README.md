@@ -87,7 +87,8 @@ artifacts, not planning documents. They are not moved into the authority tree.
   after a fresh disconnected `pack_start_failed`; no manual pack button and no
   implicit hot-enable. AWR-238: boot-time `pack_start_failed` is also retried by a
   bridge supervisor (~10 s) until Enttec/IAC appear (software-tested; live
-  hot-plug unvalidated).
+  hot-plug unvalidated). SS-MIDI `InvalidPortError` on unplug rebinds in-process
+  instead of worker death.
 - Audit P2 makes file-driven OS2L injection opt-in and adds copied
   `soundswitch_pack.overlay_suppressed` diagnostics under SoundSwitch-connected
   ZERO suppression.

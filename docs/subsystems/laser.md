@@ -38,8 +38,10 @@ Govee, DMX, or Enttec validation was performed.
 AWR-238 (2026-07-15): `MidiOutput` `port_unavailable` at boot is no longer a permanent latch —
 the same throttled reopen used for `send_error` clears it when the IAC port appears later.
 Pack `pack_start_failed` at boot also retries on a supervisor thread (~10 s) and late-attaches
-via `StateManager.set_pack_runtime` + `LaserSceneExecutor.set_backend`. Policy, blackout, and
-emergency behavior are unchanged. SOFTWARE-TESTED only; foreign-Mac hot-plug live-unvalidated.
+via `StateManager.set_pack_runtime` + `LaserSceneExecutor.set_backend`. SS-MIDI input
+`InvalidPortError` on bound-port unplug re-enters the wait/rebind loop instead of killing the
+worker. Policy, blackout, and emergency behavior are unchanged. SOFTWARE-TESTED only;
+foreign-Mac hot-plug live-unvalidated.
 
 Offline SoundSwitch pack boundary:
 - Task 2 deterministically exports and independently verifies the repo-local canonical pack for the pinned SoundSwitch 2.10.3 canonical RAVE project, including the seven-class F-3 control crosswalk. Live export reconciles saved-project inventory dynamically; the old exact-count snapshot is proof-only. It does not replace or alter Laser Director policy, MIDI execution, mappings, blackout behavior, or status.
