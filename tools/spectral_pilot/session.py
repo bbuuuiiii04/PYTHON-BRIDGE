@@ -115,36 +115,40 @@ class SessionRunner:
 
     # --- durable-log loading + integrity (spec B6 recovery) ------------------
     def _read_jsonl(self, path: Path):
-        """Return (rows, torn_tail). A torn trailing line is dropped + flagged."""
+        """Return (rows, torn_tail). A durably committed row always ends with ``\\n``
+        (``_append`` writes ``jsonl_line``); an unterminated final line means a torn
+        write, so it is dropped and flagged even when it happens to be valid JSON
+        (spec B6 amended). An interior undecodable line is gate-1 tampering.
+        """
         if not path.exists():
             return [], False
         raw = path.read_text(encoding="utf-8")
+        if raw == "":
+            return [], False
+        torn = not raw.endswith("\n")
         lines = raw.split("\n")
         if lines and lines[-1] == "":
             lines.pop()          # normal terminator
-            torn = False
-        else:
-            torn = bool(lines)   # last line had no trailing newline => torn
-        rows, kept = [], []
-        for i, ln in enumerate(lines):
+        if torn and lines:
+            lines.pop()          # drop the unterminated final line (valid JSON or not)
+        rows = []
+        for ln in lines:
             try:
                 rows.append(json.loads(ln))
-                kept.append(ln)
             except json.JSONDecodeError:
-                if i == len(lines) - 1:
-                    torn = True         # torn trailing record: drop it
-                    break
                 raise Gate1Error(f"corrupt interior line in {path.name}")
         return rows, torn
 
     def _load(self):
         resp, self._resp_torn = self._read_jsonl(self.responses_path)
+        for r in resp:
+            ResponseRow.from_dict(r)          # strict: reject any off-schema row
         self._verify_chain(resp)
         self.responses = resp
         self.playbacks, self._pb_torn = self._read_jsonl(self.playbacks_path)
         self._answers = {}
         for r in resp:
-            self._answers.setdefault(r["card_id"], {})[r["__question__"]] = r["canonical_response"]
+            self._answers.setdefault(r["card_id"], {})[r["question"]] = r["canonical_response"]
         for pb in self.playbacks:
             if pb.get("kind") == "skip":
                 self._answers.setdefault(pb["card_id"], {})["__skipped__"] = True
@@ -227,15 +231,13 @@ class SessionRunner:
 
         row = ResponseRow(
             schema_version=SCHEMA_VERSION, pilot_seed=self.pilot_seed, card_id=card_id,
-            commit_index=len(self.responses), displayed_response=displayed_response,
-            canonical_response=canonical_response, recognized=recognized,
-            response_seconds=float(response_seconds), commit_utc=self.clock(),
+            commit_index=len(self.responses), question=question,
+            displayed_response=displayed_response, canonical_response=canonical_response,
+            recognized=recognized, response_seconds=float(response_seconds),
+            commit_utc=self.clock(), local_date=self.local_date(),
             session_index=self.current_session, segment_index=self.segment_index,
             prev_row_hash=self._last_hash, card_manifest_hash=self.card_manifest_hash,
         ).to_dict()
-        # operational fields carried on-disk beside the strict B7 core
-        row["__question__"] = question
-        row["local_date"] = self.local_date()
         self._append(self.responses_path, row)
         self.responses.append(row)
         self._answers.setdefault(card_id, {})[question] = canonical_response

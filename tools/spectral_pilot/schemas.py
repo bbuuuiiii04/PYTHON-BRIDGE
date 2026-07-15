@@ -36,6 +36,8 @@ MARKER_STATE_ANSWER = frozenset({"genuine", "not_genuine", "marker_wrong_or_ambi
 HARDNESS_ANSWER = frozenset({"harder", "tied", "softer", "unsure"})
 FAMILY_ANSWER = frozenset({"WALL", "COMET", "HOUSE", "mixed", "none", "unsure"})
 ANCHOR_CONFIRM_ANSWER = frozenset({"confirm", "reject"})
+# Which of a card's questions a response answers (spec B7 amended).
+QUESTION = frozenset({"anchor", "state", "hardness", "family"})
 ANCHOR_ROLE = frozenset(
     {"WALL", "COMET", "HOUSE", "mixed", "T1", "T2", "T3"}
 )
@@ -151,16 +153,18 @@ class CardManifestRow:
 
 @dataclass(frozen=True)
 class ResponseRow:
-    """responses.jsonl append-only row (spec B7)."""
+    """responses.jsonl append-only row (spec B7, amended: question + local_date)."""
     schema_version: str
     pilot_seed: str
     card_id: str
     commit_index: int
+    question: str
     displayed_response: str
     canonical_response: str
     recognized: bool
     response_seconds: float
     commit_utc: str
+    local_date: str
     session_index: str
     segment_index: int
     prev_row_hash: str
@@ -168,6 +172,7 @@ class ResponseRow:
 
     def __post_init__(self):
         _check_enum(self.session_index, SESSION_INDEX, "session_index")
+        _check_enum(self.question, QUESTION, "question")
         if not isinstance(self.recognized, bool):
             raise TypeError("recognized must be bool")
         _check_finite(self.response_seconds, "response_seconds")

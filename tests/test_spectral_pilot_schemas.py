@@ -28,8 +28,9 @@ def _card_row():
 def _response_row():
     return dict(
         schema_version=S.SCHEMA_VERSION, pilot_seed="seed", card_id="c" * 16, commit_index=0,
-        displayed_response="genuine", canonical_response="genuine", recognized=False,
-        response_seconds=1.5, commit_utc="2026-07-15T00:00:00Z", session_index="P1",
+        question="state", displayed_response="genuine", canonical_response="genuine",
+        recognized=False, response_seconds=1.5, commit_utc="2026-07-15T00:00:00Z",
+        local_date="2026-07-15", session_index="P1",
         segment_index=0, prev_row_hash="0" * 64, card_manifest_hash="m" * 64,
     )
 
