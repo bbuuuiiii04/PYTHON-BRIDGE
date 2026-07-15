@@ -246,7 +246,10 @@ Interface (all candidates):
 `predict(method_version, frozen_feature_row, eligible_development_rows) -> PredictionRow`.
 `PredictionRow` records method/version, manifest/input/scaler hashes, eligible and
 excluded neighbour IDs, distances, per-axis value or abstention, raw score, reason
-codes, error state. Only canonical decision fields enter its hash; wall time/RSS
+codes, error state. `manifest_hash` is the **lineage-manifest** canonical hash —
+selection identity, never the card deck: presentation/card binding lives only in
+`prediction_hashes.json`, so a presentation-only change can never move prediction
+bytes (ruled 2026-07-15 after the run-in re-cut exposed the coupling). Only canonical decision fields enter its hash; wall time/RSS
 telemetry goes to `resource_report.json` only. All prediction files and
 `prediction_hashes.json` are written and frozen **before any card is shown**.
 
