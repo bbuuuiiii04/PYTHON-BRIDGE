@@ -77,7 +77,11 @@ Corpus sweep receipts (`ws3_neutral_crack_receipts.json`, 1,665 true drops):
 ## D. Laser evidence (WS4 + WS6)
 - Span mining (offline, laser files untouched): sustained-synth + growl spans
   ≥16 beats across the full library, gap-tolerant, ranked by beats×duty —
-  `laser_spans.json` + human `laser_spans_top.md` (top 120). {SPANS_STATUS}
+  `laser_spans.json` + human `laser_spans_top.md` (top 120). DONE: 3,426
+  spans (2,212 synth-sustain / 1,214 growl). Honest caveat: length×duty
+  ranks whole-track pad tracks (Innerbloom, the Radiohead SCRIPT edit) at
+  the top — those are "laser could live here for minutes" candidates;
+  shorter drop-adjacent growl spans sit further down the list.
 - Deep-research (festival/club laser practice across subgenres + honest
   translation to his two mirrored DMX lasers, CH8 color / CH9 speed / CH11
   strobe, no pan-tilt/ILDA): {RESEARCH_STATUS}
@@ -97,15 +101,24 @@ Corpus sweep receipts (`ws3_neutral_crack_receipts.json`, 1,665 true drops):
   suite runs let non-hermetic drop-presentation test fixtures write synthetic
   "content-1" entries into local/state/laser_solo_learned.json (real runtime
   state!). Purged (file contained ONLY junk; backup kept in session
-  scratchpad). Hermeticity fix is specced (scratchpad/hermetic_dispatch.md)
-  {HERMETIC_STATUS}.
+  scratchpad). Hermeticity fix dispatched to lane `nightlane` (opus/high,
+  tag HERMETIC, test-file-only fence) — check
+  /tmp/rbss_lane_signals/nightlane.HERMETIC.* and gate the diff before
+  treating it as landed.
 - Bookkeeping: charter + registry rows committed 9822a80f (AWR-267/AWR-268).
 - Coexistence note: a SECOND exec (fable2, LED consumer-audit program) ran all
   night on its own lanes; its Grok fix 15de3071 cured the speed-law/f4/patch_c
   reds. No fence collisions with this program.
 
 ## F. Late-landing statuses
-{LATE_STATUS}
+- Adversarial review of the five lab drafts: **NO CONFIRMED FINDINGS**
+  (independent Opus reviewer, refute-by-default, six defect classes: math/
+  clamping, determinism, segments=0/1, slider extremes, strobe risk at
+  slider minima, beat aliasing). One pre-existing repo-wide note, NOT
+  introduced by the drafts: `_ember_slots` uses string-tuple `__hash__`
+  (PYTHONHASHSEED-sensitive spark placement across processes) — an
+  established pattern in comet_* too; flagged for a future cleanup, no
+  action tonight.
 
 ## Boot protocol for this (morning) session
 Read memory + this file, verify git fresh (`git log --oneline -5`), then
