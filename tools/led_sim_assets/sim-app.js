@@ -107,7 +107,9 @@ function ensurePlayer() {
   return player;
 }
 
+/** Deep snapshot — savedProfile must never share nested arrays with the live profile. */
 function clone(value) {
+  if (typeof structuredClone === "function") return structuredClone(value);
   return JSON.parse(JSON.stringify(value));
 }
 
@@ -243,6 +245,18 @@ function makeLayoutEntry(source = {}) {
   };
 }
 
+/** True when the slot is already a usable layout entry (same object can be edited in place). */
+function isStableLayoutEntry(entry) {
+  return Boolean(
+    entry
+    && typeof entry === "object"
+    && Array.isArray(entry.points_mm)
+    && entry.points_mm.length >= 2
+    && Array.isArray(entry.room_mm)
+    && entry.room_mm.length === 2,
+  );
+}
+
 function ensureLayoutLibrary(profile = state.profile) {
   if (!profile || typeof profile !== "object") return profile;
   if (!profile.layouts || typeof profile.layouts !== "object" || !Object.keys(profile.layouts).length) {
@@ -262,10 +276,19 @@ function ensureLayoutLibrary(profile = state.profile) {
     profile.active_layout = Object.keys(profile.layouts)[0];
   }
   const entry = profile.layouts[profile.active_layout];
-  if (!entry || typeof entry !== "object") {
-    profile.layouts[profile.active_layout] = makeLayoutEntry();
+  // AWR-267 gate: do NOT replace a stable entry on every call. Helpers such as
+  // insertIndexForEdge/storedIndex re-enter ensure* while evaluating args; an
+  // always-rebuild makeLayoutEntry() used to swap the active entry mid-statement,
+  // so an in-place points_mm splice mutated an orphaned array and the unsaved
+  // chip never fired.
+  if (!isStableLayoutEntry(entry)) {
+    profile.layouts[profile.active_layout] = makeLayoutEntry(
+      entry && typeof entry === "object" ? entry : {},
+    );
   } else {
-    profile.layouts[profile.active_layout] = makeLayoutEntry(entry);
+    if (!["perimeter", "snake", "custom"].includes(entry.preset)) entry.preset = "custom";
+    if (typeof entry.flip_chain !== "boolean") entry.flip_chain = false;
+    if (typeof entry.layout_locked !== "boolean") entry.layout_locked = false;
   }
   return profile;
 }
@@ -1277,7 +1300,16 @@ function wireLayoutEditor() {
       (Number(displayPoints[edgeIndex][1]) + Number(displayPoints[edgeIndex + 1][1])) / 2,
     ];
     pushUndo();
-    activeEntry().points_mm.splice(insertIndexForEdge(edgeIndex), 0, mid);
+    // Assign a new points_mm array (same pattern as removeCornerFromButton).
+    // Avoid splicing points_mm in the same expression as insertIndexForEdge —
+    // that helper re-enters ensure* and historically orphaned the splice target.
+    const entry = activeEntry();
+    const insertAt = insertIndexForEdge(edgeIndex);
+    entry.points_mm = [
+      ...entry.points_mm.slice(0, insertAt),
+      mid,
+      ...entry.points_mm.slice(insertAt),
+    ];
     state.selectedEdge = -1;
     state.selectedVertex = edgeIndex + 1;
     markLayoutCustom();
@@ -1349,7 +1381,12 @@ function wireLayoutEditor() {
     if (vertexHit >= 0) {
       if (!canRemoveCorner(activeEntry().points_mm)) return;
       pushUndo();
-      activeEntry().points_mm.splice(storedIndex(vertexHit), 1);
+      const removed = removeCornerAt(
+        activeEntry().points_mm,
+        storedIndex(vertexHit),
+      );
+      if (!removed) return;
+      activeEntry().points_mm = removed;
       state.selectedVertex = -1;
       state.selectedEdge = -1;
       markLayoutCustom();
@@ -1361,7 +1398,13 @@ function wireLayoutEditor() {
     const edge = view.hitTestEdge(point.x, point.y, HIT);
     if (!edge) return;
     pushUndo();
-    activeEntry().points_mm.splice(insertIndexForEdge(edge.edgeIndex), 0, [edge.mm.x, edge.mm.y]);
+    const entry = activeEntry();
+    const insertAt = insertIndexForEdge(edge.edgeIndex);
+    entry.points_mm = [
+      ...entry.points_mm.slice(0, insertAt),
+      [edge.mm.x, edge.mm.y],
+      ...entry.points_mm.slice(insertAt),
+    ];
     state.selectedVertex = edge.edgeIndex + 1;
     state.selectedEdge = -1;
     markLayoutCustom();

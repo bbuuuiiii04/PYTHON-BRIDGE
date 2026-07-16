@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: software-tested
-last_verified_commit: f2e66dcd
+last_verified_commit: 42b2be73
 last_verified_date: 2026-07-16
 validation_scope: >
   H612D LED Studio (AWR-196 + AWR-244 room-view + AWR-246 layout library):
@@ -18,7 +18,9 @@ validation_scope: >
   (stale-write 409 via base_mtime, rotating .bak-* keep-5, refuse save while
   profile_error, beforeunload when dirty), and AWR-267 R6 Layout corner tools
   (Add/Remove corner buttons alongside dblclick/long-press, header unsaved
-  warning, Reset confirm, label crowding offsets, ? help what-is sentence)
+  warning, Reset confirm, label crowding offsets, ? help what-is sentence;
+  gate FIX: Add corner raises the unsaved chip — stable layout-entry identity
+  so splice/assign cannot orphan points_mm vs savedProfile)
   are software-tested.
   Optics (glow/bleed/gamma) remain uncalibrated assumptions. Generated timing
   uses an ideal grid. Device color, PWM, latency, physical response, packet
@@ -181,7 +183,10 @@ edge; Remove needs a selected corner and keeps ≥2 corners), Reverse direction,
 Reset with an honest confirm (“puts the corners back… unsaved changes go away”),
 bounded undo (up to 20, Cmd/Ctrl-Z on the Layout tab), and the per-layout locker
 still apply. The **Unsaved layout changes** chip sits in the sim header so it is
-visible without scrolling the Layout panel. Stage labels drop or offset when they
+visible without scrolling the Layout panel. Gate FIX (2026-07-16): Add corner
+now raises that chip — `ensureLayoutLibrary` keeps a stable entry object (no
+rebuild-on-every-call), and Add assigns a new `points_mm` array so the edit
+cannot land on an orphaned splice target. Stage labels drop or offset when they
 crowd at the current zoom (center / start / end keep priority over ticks and
 room-size). The **?** help opens with one plain sentence on what the page is
 before listing shortcuts.

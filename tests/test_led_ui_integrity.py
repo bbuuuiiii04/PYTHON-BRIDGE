@@ -127,6 +127,178 @@ class PadUiIntegrityTests(unittest.TestCase):
         self.assertIn("Puts the corners back to the saved", js)
         self.assertIn("Your unsaved layout changes go away", js)
 
+    def test_awr267_add_corner_marks_layout_dirty(self) -> None:
+        """Gate FIX: Add-corner must diverge live vs saved snapshot (dirty chip).
+
+        Historical bug was NOT a shallow savedProfile snapshot. ensureLayoutLibrary
+        rebuilt the active entry on every call; insertIndexForEdge/storedIndex re-enter
+        ensure*, so `activeEntry().points_mm.splice(insertIndexForEdge(...), ...)`
+        spliced an orphaned array and markDirty saw no change. Drag/remove assigned a
+        new array onto a fresh activeEntry() and looked fine.
+        """
+        import json
+        import subprocess
+
+        script = r"""
+const LAYOUT_KEYS = ["layouts", "active_layout"];
+const DEFAULT_ROOM_MM = [5216, 2284];
+
+function clone(value) {
+  return typeof structuredClone === "function"
+    ? structuredClone(value)
+    : JSON.parse(JSON.stringify(value));
+}
+function pickKeys(profile, keys) {
+  const out = {};
+  for (const key of keys) {
+    if (profile && Object.prototype.hasOwnProperty.call(profile, key)) out[key] = profile[key];
+  }
+  return out;
+}
+function makeLayoutEntry(source = {}) {
+  const room = Array.isArray(source.room_mm) && source.room_mm.length === 2
+    ? [Number(source.room_mm[0]), Number(source.room_mm[1])]
+    : DEFAULT_ROOM_MM.slice();
+  let points = source.points_mm;
+  if (!Array.isArray(points) || points.length < 2) {
+    points = [[0, 0], [10, 0], [10, 10], [0, 10]];
+  }
+  return {
+    preset: source.preset || "perimeter",
+    points_mm: points.map((point) => [Number(point[0]), Number(point[1])]),
+    flip_chain: typeof source.flip_chain === "boolean" ? source.flip_chain : false,
+    room_mm: room,
+    layout_locked: typeof source.layout_locked === "boolean" ? source.layout_locked : false,
+  };
+}
+function isStableLayoutEntry(entry) {
+  return Boolean(
+    entry
+    && typeof entry === "object"
+    && Array.isArray(entry.points_mm)
+    && entry.points_mm.length >= 2
+    && Array.isArray(entry.room_mm)
+    && entry.room_mm.length === 2,
+  );
+}
+function ensureLayoutLibrary(profile, {alwaysRebuild} = {}) {
+  const entry = profile.layouts[profile.active_layout];
+  if (alwaysRebuild || !isStableLayoutEntry(entry)) {
+    profile.layouts[profile.active_layout] = makeLayoutEntry(entry && typeof entry === "object" ? entry : {});
+  }
+  return profile;
+}
+
+function layoutDirty(profile, saved) {
+  return JSON.stringify(pickKeys(profile, LAYOUT_KEYS))
+    !== JSON.stringify(pickKeys(saved, LAYOUT_KEYS));
+}
+
+function simulateAddCorner(alwaysRebuild) {
+  const profile = {
+    active_layout: "Home",
+    layouts: {
+      Home: makeLayoutEntry({
+        points_mm: [[0, 0], [10, 0], [10, 10], [0, 10]],
+        room_mm: [100, 100],
+        preset: "perimeter",
+      }),
+    },
+  };
+  ensureLayoutLibrary(profile, {alwaysRebuild});
+  const saved = clone(profile);
+  ensureLayoutLibrary(saved, {alwaysRebuild});
+
+  // Mirror the old call shape: base activeEntry() then arg insertIndexForEdge → ensure*.
+  function activeEntry() {
+    ensureLayoutLibrary(profile, {alwaysRebuild});
+    return profile.layouts[profile.active_layout];
+  }
+  function insertIndexForEdge(edgeIndex) {
+    ensureLayoutLibrary(profile, {alwaysRebuild}); // re-enter like production helper
+    return edgeIndex + 1;
+  }
+
+  const mid = [5, 0];
+  // Old buggy expression (orphan when alwaysRebuild):
+  activeEntry().points_mm.splice(insertIndexForEdge(0), 0, mid);
+  const orphanBugDirty = layoutDirty(profile, saved);
+  const orphanLen = profile.layouts.Home.points_mm.length;
+
+  // Fixed path used by addCornerFromButton: capture entry, then assign.
+  const profile2 = {
+    active_layout: "Home",
+    layouts: {
+      Home: makeLayoutEntry({
+        points_mm: [[0, 0], [10, 0], [10, 10], [0, 10]],
+        room_mm: [100, 100],
+        preset: "perimeter",
+      }),
+    },
+  };
+  ensureLayoutLibrary(profile2, {alwaysRebuild: false});
+  const saved2 = clone(profile2);
+  function activeEntry2() {
+    ensureLayoutLibrary(profile2, {alwaysRebuild: false});
+    return profile2.layouts[profile2.active_layout];
+  }
+  function insertIndexForEdge2(edgeIndex) {
+    ensureLayoutLibrary(profile2, {alwaysRebuild: false});
+    return edgeIndex + 1;
+  }
+  const entry = activeEntry2();
+  const insertAt = insertIndexForEdge2(0);
+  entry.points_mm = [
+    ...entry.points_mm.slice(0, insertAt),
+    mid,
+    ...entry.points_mm.slice(insertAt),
+  ];
+  entry.preset = "custom";
+
+  return {
+    orphanBugDirty,
+    orphanLen,
+    fixedDirty: layoutDirty(profile2, saved2),
+    fixedLen: profile2.layouts.Home.points_mm.length,
+    savedLen: saved2.layouts.Home.points_mm.length,
+    samePointsRef: profile2.layouts.Home.points_mm === saved2.layouts.Home.points_mm,
+  };
+}
+
+const broken = simulateAddCorner(true);
+const fixed = simulateAddCorner(false);
+console.log(JSON.stringify({broken, fixed}));
+"""
+        root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = json.loads(result.stdout.strip().splitlines()[-1])
+        # Prove the old always-rebuild ensure* path hides Add-corner from dirty.
+        self.assertFalse(data["broken"]["orphanBugDirty"])
+        self.assertEqual(data["broken"]["orphanLen"], 4)
+        # Stable ensure* + assign path diverges the snapshot.
+        self.assertTrue(data["fixed"]["fixedDirty"])
+        self.assertEqual(data["fixed"]["fixedLen"], 5)
+        self.assertEqual(data["fixed"]["savedLen"], 4)
+        self.assertFalse(data["fixed"]["samePointsRef"])
+
+        js = (_SIM / "sim-app.js").read_text(encoding="utf-8")
+        self.assertIn("isStableLayoutEntry", js)
+        self.assertIn("structuredClone", js)
+        # Add-corner must assign a new points_mm array, not splice in the ensure*-arg expression.
+        self.assertIn("entry.points_mm = [", js)
+        self.assertNotIn(
+            "activeEntry().points_mm.splice(insertIndexForEdge",
+            js,
+        )
+
+
 
 class Awr267LayoutCornerMathTests(unittest.TestCase):
     """Unit-level midpoint insert + minimum-corner guard (JS helpers via node)."""
