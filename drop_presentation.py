@@ -30,6 +30,10 @@ from typing import Any, Mapping, Optional, Sequence
 
 from .launch_profile import resolve_state_path
 from .smart_phrasing import PhraseSegment
+# AWR-257: runway_beats moved into smart_phrasing.py (drop_presentation already
+# imports PhraseSegment FROM smart_phrasing, so it can't import back). Re-exported
+# here so the existing consumer at :326 and its tests keep working unchanged.
+from .smart_phrasing import runway_beats
 
 log = logging.getLogger("drop_presentation")
 
@@ -39,7 +43,6 @@ LEDS_ONLY = "leds_only"
 LEDS_PLUS_LASERS = "leds_plus_lasers"
 LASERS_ONLY = "lasers_only"
 
-_RUNWAY_LABELS = frozenset({"up", "low"})  # "up"=buildup, "low"=breakdown (smart_phrasing.py)
 _WINDOW_ACTIVE_ROLES = frozenset({"drop", "post_drop"})
 
 HOTCUE_TOLERANCE_BEATS = 2.0
@@ -165,37 +168,6 @@ def drop_laser_qualifies(tier_name: Optional[str], tier_min: int) -> bool:
     if tier_name == "intense":
         return int(tier_min) <= 2
     return False
-
-
-# ---- Runway ------------------------------------------------------------
-
-
-def runway_beats(beat: float, phrase_roles: Sequence[PhraseSegment]) -> float:
-    """Contiguous breakdown/buildup beats immediately before `beat`.
-
-    Walks backward through phrase segments whose label is "low" (breakdown) or
-    "up" (buildup) and are contiguous with `beat` (each segment's end must equal
-    the running boundary), stopping at the first segment that is anything else
-    (e.g. "chorus"/"other" — a groove between breakdown and buildup resets the
-    count) or the first gap. Missing/absent phrase data yields 0.0 and is
-    invisible to the record-breaker tier. Pure; no I/O.
-    """
-    if not phrase_roles:
-        return 0.0
-    # Index by end_beat so the backward walk finds the segment landing exactly
-    # at the current boundary regardless of where it sits among the track's
-    # OTHER segments (a naive reverse-chronological scan breaks as soon as the
-    # track's LAST segment doesn't happen to be the one ending at `beat`).
-    by_end: dict[float, PhraseSegment] = {seg.end_beat: seg for seg in phrase_roles}
-    total = 0.0
-    boundary = beat
-    while True:
-        seg = by_end.get(boundary)
-        if seg is None or seg.label not in _RUNWAY_LABELS:
-            break
-        total += seg.end_beat - seg.start_beat
-        boundary = seg.start_beat
-    return total
 
 
 # ---- Nearest-within-tolerance (shared by hot-cue and learned-store lookup) --

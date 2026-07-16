@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Literal, Optional, Sequence
 from .config import (
     SMART_DROP_IGNORE_INTRO_BEATS,
     SMART_DROP_IGNORE_OUTRO_BEATS,
@@ -12,6 +12,11 @@ from .config import (
 _EXACT_DROP_EPSILON = 1e-6
 # ANLZ marks each 32-beat phrase in a drop section; keep the section entry only.
 SMART_DROP_MIN_GAP_BEATS = 64
+# AWR-257: min spacing between LED section-advance points inside one drop section.
+SECTION_ADVANCE_MIN_GAP_BEATS = 16
+
+# "up"=buildup, "low"=breakdown — the contiguous run runway_beats() counts.
+_RUNWAY_LABELS = frozenset({"up", "low"})
 
 
 PhraseLabel = Literal["up", "chorus", "low", "other"]
@@ -652,6 +657,34 @@ def build_phrase_segments_from_markers(
             ))
 
     return tuple(segments)
+
+
+def runway_beats(beat: float, phrase_roles: Sequence[PhraseSegment]) -> float:
+    """Contiguous breakdown/buildup beats immediately before `beat`.
+
+    Walks backward through phrase segments whose label is "low" (breakdown) or
+    "up" (buildup) and are contiguous with `beat` (each segment's end must equal
+    the running boundary), stopping at the first segment that is anything else
+    (e.g. "chorus"/"other" — a groove between breakdown and buildup resets the
+    count) or the first gap. Missing/absent phrase data yields 0.0 and is
+    invisible to the record-breaker tier. Pure; no I/O.
+    """
+    if not phrase_roles:
+        return 0.0
+    # Index by end_beat so the backward walk finds the segment landing exactly
+    # at the current boundary regardless of where it sits among the track's
+    # OTHER segments (a naive reverse-chronological scan breaks as soon as the
+    # track's LAST segment doesn't happen to be the one ending at `beat`).
+    by_end: dict[float, PhraseSegment] = {seg.end_beat: seg for seg in phrase_roles}
+    total = 0.0
+    boundary = beat
+    while True:
+        seg = by_end.get(boundary)
+        if seg is None or seg.label not in _RUNWAY_LABELS:
+            break
+        total += seg.end_beat - seg.start_beat
+        boundary = seg.start_beat
+    return total
 
 
 def select_smart_drops(
