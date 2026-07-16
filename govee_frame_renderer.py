@@ -2352,7 +2352,15 @@ _DEFAULT_SLOT_COLORS: list[RGB] = [(255, 255, 255)]
 
 
 class GoveeFrameRenderer:
-    """Stateless renderer. Unknown effect names fail dark."""
+    """Stateless renderer. Unknown effect names fail dark.
+
+    Optional ``lab_adapter`` (AWR-260) handles production ``lab:<draft>`` /
+    ``lab_adapter`` scene refs inside the frame-engine child. Pad lab playback
+    still uses ``LabRenderer`` + ``lab_*`` names and does not go through here.
+    """
+
+    def __init__(self, lab_adapter: Any | None = None) -> None:
+        self.lab_adapter = lab_adapter
 
     def blank(self, segments: int) -> Frame:
         return _empty(max(0, int(segments)))
@@ -2394,6 +2402,25 @@ class GoveeFrameRenderer:
     ) -> Frame:
         safe_params: Mapping[str, Any] = params if isinstance(params, Mapping) else {}
         seg_count = max(0, int(segments))
+
+        # AWR-260: production lab drafts (lab:<name> / lab_adapter) — fail-dark
+        # adapter owns try/except + budget disable; never reach baked registries.
+        adapter = self.lab_adapter
+        if adapter is not None:
+            try:
+                from .govee_lab_adapter import is_lab_production_scene
+            except Exception:
+                is_lab_production_scene = None  # type: ignore[assignment]
+            if is_lab_production_scene is not None and is_lab_production_scene(str(name)):
+                return adapter.render(
+                    str(name),
+                    beat_pos=beat_pos,
+                    local_t=local_t,
+                    frame_index=frame_index,
+                    params=safe_params,
+                    segments=seg_count,
+                    seed=seed,
+                )
 
         # M2 slot-effect dispatch.
         slot_effect = SLOT_EFFECTS.get(str(name))

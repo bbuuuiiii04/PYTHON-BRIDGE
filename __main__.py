@@ -755,6 +755,8 @@ def _build_led_startup_wiring(
             # drop-in for GoveeRealtimeRunner from the coordinator's point of view;
             # the transport.deactivate() that used to run here happens child-side
             # on init.
+            from .govee_lab_adapter import default_lab_module_path
+
             engine_init = {
                 "t": "init",
                 "dry_run": cfg.dry_run,
@@ -767,6 +769,7 @@ def _build_led_startup_wiring(
                 "stretch": rt.stretch,
                 "activate_pt": rt.activate_pt,
                 "deactivate_pt": rt.deactivate_pt,
+                "lab_module_path": str(default_lab_module_path()),
             }
             realtime_runner = GoveeFrameEngineClient(
                 engine_init, resolve_ip_fn=resolve_ip_fn

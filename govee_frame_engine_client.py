@@ -164,6 +164,15 @@ class GoveeFrameEngineClient:
             self._enqueue({"t": "force_deactivate"})
         self._wake.set()
 
+    def reload_lab(self, module_path: str | None = None) -> None:
+        """Ask the child to re-import lab effects (AWR-260). Lock-and-flag only."""
+        msg: dict = {"t": "reload_lab"}
+        if module_path:
+            msg["module_path"] = str(module_path)
+        with self._lock:
+            self._enqueue(msg)
+        self._wake.set()
+
     def status(self) -> dict[str, Any]:
         now = self._time_fn()
         with self._lock:

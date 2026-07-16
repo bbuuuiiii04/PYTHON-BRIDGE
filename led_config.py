@@ -74,6 +74,12 @@ _PLACEHOLDER_TOKENS = (
 _LOOK_ACTIONS = frozenset({"scene", "music_mode", "diy_scene", "off", "unmapped", "realtime"})
 _LOOK_BACKENDS = frozenset({"cloud_diy", "realtime_razer"})
 _MUSIC_MODE_NAMES = frozenset({"rhythm", "sprouting", "shiny"})
+
+
+def _is_lab_production_scene_ref(scene_ref: str) -> bool:
+    """AWR-260: accepted lab drafts use lab:<draft> or lab_adapter scene_refs."""
+    text = str(scene_ref or "").strip()
+    return text.startswith("lab:") or text == "lab_adapter"
 _BANK_ROLES = (
     "ambient",
     "groove",
@@ -461,7 +467,7 @@ def _validate_look(
             errors.append(f"{prefix} action='realtime' requires backend='realtime_razer'")
         if not isinstance(scene_ref, str) or not scene_ref.strip():
             errors.append(f"{prefix} requires non-empty 'scene_ref' for action='realtime'")
-        elif scene_ref not in REALTIME_EFFECT_NAMES:
+        elif not _is_lab_production_scene_ref(scene_ref) and scene_ref not in REALTIME_EFFECT_NAMES:
             errors.append(f"{prefix} scene_ref references unknown realtime effect '{scene_ref}'")
         profile_name = look.get("param_profile", "")
         profile_params: dict[str, Any] = {}
@@ -479,13 +485,23 @@ def _validate_look(
             params = {}
         if not isinstance(params, dict):
             errors.append(f"{prefix} field 'params' must be an object")
-        elif isinstance(scene_ref, str):
+        elif isinstance(scene_ref, str) and not _is_lab_production_scene_ref(scene_ref):
             params = {**profile_params, **params}
             allowed = REALTIME_EFFECT_PARAM_KEYS.get(scene_ref, frozenset())
             for key in params:
                 if key not in allowed:
                     errors.append(f"{prefix} params.{key} is not valid for effect '{scene_ref}'")
             _validate_realtime_params(prefix, scene_ref, params, errors)
+        elif isinstance(scene_ref, str) and _is_lab_production_scene_ref(scene_ref):
+            # AWR-260: lab drafts carry free-form author params; only shape-check.
+            if scene_ref.strip() == "lab_adapter":
+                draft = str(params.get("lab_draft") or params.get("draft") or "").strip()
+                if not draft:
+                    errors.append(
+                        f"{prefix} lab_adapter scene_ref requires params.lab_draft"
+                    )
+            elif scene_ref.strip().startswith("lab:") and not scene_ref.strip()[4:]:
+                errors.append(f"{prefix} lab: scene_ref requires a draft name after 'lab:'")
     elif backend == "realtime_razer":
         errors.append(f"{prefix} backend='realtime_razer' requires action='realtime'")
     else:

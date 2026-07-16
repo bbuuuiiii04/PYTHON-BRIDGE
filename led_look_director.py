@@ -98,6 +98,9 @@ class LEDLookDirector:
         # decides transport.
         self._role_shuffle_bags: dict[tuple[str, str], tuple[str, ...]] = {}
         self._role_backend_cursors: dict[tuple[str, str], int] = {}
+        # Optional predicate: return False to skip a look during bank picks
+        # (AWR-260 lab module-load / disabled-for-session). None = all available.
+        self._look_available: Callable[[str], bool] | None = None
         self._manual_override: str = ""
         self._emergency_blackout: bool = False
         self._last_decision: LEDLookDecision | None = None
@@ -114,6 +117,29 @@ class LEDLookDirector:
         # no RNG in the cursor. Look variety still comes from the shuffle bags.
         for role in _AUTOMATION_ROLE_ORDER:
             self._role_cursors[role] = 0
+
+    def set_look_availability(self, predicate: Callable[[str], bool] | None) -> None:
+        self._look_available = predicate
+
+    def replace_config(self, config: LEDConfig) -> None:
+        """Atomically swap the look table (AWR-260 led_reload_looks).
+
+        Single attribute assignment is atomic under the GIL; call off the push
+        loop (command thread). Bags/cursors keep working — picks already filter
+        ``n in self._config.looks``.
+        """
+        self._config = config
+
+    def _look_ok(self, look_name: str) -> bool:
+        if look_name not in self._config.looks:
+            return False
+        pred = self._look_available
+        if pred is None:
+            return True
+        try:
+            return bool(pred(look_name))
+        except Exception:
+            return False
 
     def reset_for_track(self) -> None:
         """No-op: the deterministic plan/backend cursors deliberately persist
@@ -283,7 +309,7 @@ class LEDLookDirector:
         # (no eligibility/preference) -- this preserves the pre-existing preview
         # gap exactly. Peek the (role, backend) bag with RNG restore so nothing
         # (cursor, bag, or RNG) is mutated.
-        known = tuple(n for n in look_names if n in self._config.looks)
+        known = tuple(n for n in look_names if self._look_ok(n))
         if not known:
             return None
         plan = plan_backend_sequence(
@@ -374,7 +400,7 @@ class LEDLookDirector:
                 preferred = tuple(n for n in look_names if pred(n))
                 if preferred:
                     look_names = preferred
-        known = tuple(n for n in look_names if n in self._config.looks)
+        known = tuple(n for n in look_names if self._look_ok(n))
         subset = tuple(
             n for n in known if self._config.looks[n].backend == "realtime_razer"
         )
@@ -487,7 +513,7 @@ class LEDLookDirector:
         # Both transports stay reachable in every role that has both -- this
         # replaces the WI-7 sticky latch, which coin-flipped a role onto one
         # transport for a whole session.
-        known = tuple(n for n in look_names if n in self._config.looks)
+        known = tuple(n for n in look_names if self._look_ok(n))
         if not known:
             return None
         plan = plan_backend_sequence(

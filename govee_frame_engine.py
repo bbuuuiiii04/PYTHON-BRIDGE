@@ -27,9 +27,11 @@ import socket
 import sys
 import threading
 import time
+from pathlib import Path
 from typing import Any, Callable
 
 from .govee_frame_renderer import GoveeFrameRenderer
+from .govee_lab_adapter import LabProductionAdapter, default_lab_module_path
 from .govee_realtime_runner import EffectSpec, GoveeRealtimeRunner
 from .govee_realtime_transport import (
     GoveeRealtimeDryRunTransport,
@@ -211,6 +213,7 @@ class FrameEngineHost:
         self._band_setpriority = False
         self._band_nsactivity = False
         self._band_darwin_prio: int | None = None
+        self._lab_adapter: LabProductionAdapter | None = None
 
     def set_band_report(self, report: dict) -> None:
         """Seed the host with the startup scheduling-band report so the first
@@ -284,6 +287,24 @@ class FrameEngineHost:
         if t == "force_deactivate":
             self._runner.force_deactivate()
             return True
+        if t == "reload_lab":
+            adapter = self._lab_adapter
+            if adapter is not None:
+                path = msg.get("module_path")
+                if path:
+                    adapter.module_path = Path(str(path))
+                result = adapter.reload()
+                if not result.get("ok"):
+                    self._log.warning(
+                        "[ENGINE] lab-reload-failed err=%s",
+                        result.get("error") or "unknown",
+                    )
+                else:
+                    self._log.info(
+                        "[ENGINE] lab-reloaded effects=%d",
+                        len(result.get("effects") or {}),
+                    )
+            return True
         if t == "shutdown":
             return False
         self._log.warning("[ENGINE] unknown IPC message type %r", t)
@@ -301,8 +322,11 @@ class FrameEngineHost:
             # Mirror __main__.py:565 — clear any lingering razer mode before frames.
             transport.deactivate()
         self._transport = transport
+        lab_path = init.get("lab_module_path") or str(default_lab_module_path())
+        self._lab_adapter = LabProductionAdapter(lab_path)
+        self._lab_adapter.reload()
         self._runner = self._runner_factory(
-            transport, GoveeFrameRenderer(),
+            transport, GoveeFrameRenderer(lab_adapter=self._lab_adapter),
             segments=int(init["segments"]), fps=self._fps,
             grace_s=float(init["grace_s"]), on_thread_start=_qos_user_interactive,
         )
