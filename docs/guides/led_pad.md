@@ -180,10 +180,16 @@ fallbacks into `led_pad_controls.py::CONTROL_META` (keys whose fallback differs 
 surge/hold/ember keys — carry per-scene rows in `PARAM_DEFAULT_OVERRIDES`);
 `tests/test_led_pad_controls.py::LedPadControlDefaultsTests` pins every
 hand-extracted value against the exact renderer source text, so an unrelated future change to a
-renderer fallback fails that test instead of silently drifting from the pad UI. Several
-sync-timing keys (`sync_mode`, `heads`, `max_pulses`, `spawn_on_wrap`, `reverse`) are allowlisted
-on every scene via `_SYNC_PARAM_KEYS` but are not actually consumed by most renderers; those show
-as auto rather than an invented number. Software-tested only; no runtime/API/save-format change.
+renderer fallback fails that test instead of silently drifting from the pad UI.
+
+**AWR-262 (control truth).** The pad editor no longer lists every allowlisted key.
+`controls_for(scene_ref)` returns the curated `EFFECT_VISIBLE_KEYS` surface only — comet-motion
+looks get BeatSyncEngine motion knobs; continuous/strobe looks get that effect's real params;
+`heads` (Comet Count) is removed from the UI (still tolerated in saved configs / validation).
+Choice enums render as word-labeled dropdowns. Switching the renderer warns before dropping
+params that don't apply. Advanced motion hides when empty. Permanent drift test:
+`tests/test_awr262_control_truth.py`. Allowlist/`REALTIME_EFFECT_PARAM_KEYS` unchanged (A1).
+Software-tested only; no bridge restart by implementer.
 
 ## Template Lab
 

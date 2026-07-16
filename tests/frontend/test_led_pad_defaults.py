@@ -150,10 +150,16 @@ def test_awr262_solid_and_drop_strobe_hide_motion_params(page: Page, led_pad_ser
 
 def test_awr262_comet_motion_look_shows_motion_params(page: Page, led_pad_server) -> None:
     """AWR-262: comet-motion look shows motion knobs; never Comet Count/heads."""
-    _open_named_look(page, led_pad_server, "rt_groove_chase_blue")
+    # Example bank lists rt_groove_chase (Class C); switch to a Class A comet.
+    _open_named_look(page, led_pad_server, "rt_groove_chase")
+    page.locator("#rendererSelect").select_option("groove_chase_blue")
+    modal = page.locator("#modal")
+    if modal.is_visible():
+        page.locator('#modalActions button:has-text("Switch")').click()
+    expect(page.locator("#advancedDetails")).to_be_visible()
+    page.locator("#advancedDetails summary").click()
     expect(page.locator('[data-param="travel_beats"]')).to_be_visible()
     expect(page.locator('[data-param="width"]')).to_be_visible()
-    expect(page.locator("#advancedDetails")).to_be_visible()
     expect(page.locator('[data-param="heads"]')).to_have_count(0)
     expect(page.get_by_text("Comet Count")).to_have_count(0)
 
@@ -161,6 +167,8 @@ def test_awr262_comet_motion_look_shows_motion_params(page: Page, led_pad_server
 def test_awr262_color_mode_is_word_dropdown(page: Page, led_pad_server) -> None:
     """AWR-262 C4: Color Mode is a select with word labels, not bare integers."""
     _open_named_look(page, led_pad_server, "rt_groove_heartbeat")
+    expect(page.locator("#advancedDetails")).to_be_visible()
+    page.locator("#advancedDetails summary").click()
     select = page.locator('select[data-param="color_mode"]')
     expect(select).to_be_visible()
     labels = select.locator("option").all_text_contents()
