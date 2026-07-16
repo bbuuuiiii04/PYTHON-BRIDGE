@@ -176,6 +176,12 @@ path was previously available.
   a collapsed `meta.smart_drops` list for runtime crossings: after intro/outro
   trimming, markers less than 64 beats after the previous filtered raw marker
   are treated as the same drop section, and the first marker is kept.
+- AWR-257: beside `meta.smart_drops` (same `markers_changed` guard), `StateManager`
+  stores `meta.drop_sections` — one runway-gated `DropSection` per true drop
+  (`smart_phrasing.select_true_drops`/`drop_sections`). It governs LED drop-look
+  family/tier per section and drives in-section LED look cycling only; the tick
+  reads the precomputed tuple, and laser/SoundSwitch/firing/blackout inputs are
+  byte-identical whether or not sections exist.
 - `StateManager` consumes those intents in `_smart_drop_tick`,
   `_smart_breakdown_tick`, and `_phrase_anchor_tick`; suppression gates remain
   in `StateManager`, which also owns `OutputState` writes and transition logs.

@@ -86,6 +86,15 @@ push loop.
   intro/outro trimming; `meta.anlz_drops` stays raw for phrase labels, while
   `meta.smart_drops` keeps the first marker of each drop section.
 - On the first live tick after a reset, an exact Smart Drop beat landing fires once with a small exactness epsilon; near-misses must not round forward into a false drop.
+- AWR-257: `meta.drop_sections` (`smart_phrasing.drop_sections` over the
+  runway-gated `select_true_drops`) is pure — no I/O, no runtime state — and is
+  computed only inside the `markers_changed` marker-select guard, never on the
+  tick path. The tick reads the precomputed tuple only. Sections govern LED look
+  selection ONLY; `meta.smart_drops`, drop firing, the blackout ladder, drop
+  presentation, laser, and SoundSwitch inputs are byte-identical whether or not
+  sections exist. Section-advance detection mirrors the smart-drop crossing
+  (historical crossing + exact resume landing) behind its own fired-set that
+  resets wherever `_fired_drop_beats` resets.
 - `LaserDirector` is scene policy only; it does not send OS2L and does not emit
   MIDI side effects directly.
 - `LaserSceneExecutor` owns laser MIDI trigger execution, blackout/cooldown,
@@ -128,6 +137,15 @@ push loop.
   "scripted"` gate. Role remapping is a latched policy lookup, not config
   parsing or transport I/O in `_push_tick`.
 - Emergency blackout beats manual override; manual override beats automation.
+- AWR-257: an in-section LED advance is a look-cursor move ONLY and must enter
+  exclusively through `_dispatch_led_automation`'s gate stack (blackout,
+  not-ready, manual override, scripted, not-autoloop) — never the look-director +
+  `coordinator.trigger()` side channel, which has no active-blackout recheck.
+  Every owner that wins over a drop-time look selection therefore wins over an
+  advance identically. An advance must not fire lasers, touch darkness/blackout,
+  emit autoloop/OS2L/MIDI, mutate static-override/emergency state, or add I/O to
+  the push loop. Each advance carries a unique `:a{index}` role-key so the
+  dedupe gate dispatches it exactly once.
 - Phase 8 automatic LED role-entry is dry-run/config-gated. Live automation,
   event-facing use, and Smart Drop blackout coupling require later explicit
   gates.

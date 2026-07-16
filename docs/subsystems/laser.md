@@ -59,6 +59,12 @@ Offline SoundSwitch pack boundary:
   use the selected list that collapses 32-beat-spaced marker clusters to the
   first marker of each drop section. The first live tick after a reset fires an
   exact drop beat once, without rounding near-misses forward.
+- AWR-257 (2026-07-15) is LED-ONLY: the new runway-gated `meta.drop_sections`
+  layer governs LED drop-look family/tier and in-section cycling and never
+  touches lasers. `_f2_laser_tiers` still keys `f2_plan.for_drop` on the RAW
+  drop beats and ignores sections, so laser tier selection, `drop_laser_qualifies`
+  gating, the ratio cap, and the section verdict latch are byte-identical whether
+  or not sections exist (pinned by `tests/test_true_drop_sections.py`).
 
 Authoritative code:
 - `laser_config.py`

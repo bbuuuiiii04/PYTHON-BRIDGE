@@ -39,6 +39,13 @@ Implementation notes:
   from outside `StateManager`, route through `BridgeEvent`s or runtime commands.
 - Committed drop-look selection must thread the same `diy_eligible` predicate used by normal
   `LEDLookDirector.tick()` automation.
+- AWR-257: LED drop-look pool selection is section-aware. `_led_f2_drop_look_names(anchor)`
+  resolves the containing `meta.drop_sections` entry and looks the F2 plan up at the section's
+  TRUE drop, drawing the same-family union of every tier ≤ the section's tier. In-section advance
+  markers are LED-look-cursor moves ONLY and must enter through `_dispatch_led_automation`'s gate
+  stack (`_dispatch_led_section_advance`), never the look-director + `coordinator.trigger()` side
+  channel. Sections are LED-only: never re-key `build_track_plan`, `_f2_laser_tiers`, drop firing,
+  or `meta.smart_drops` on them. Sparse phrase data ⇒ no sections ⇒ today's per-fired-drop path.
 - Prefer the smallest code or docs change that satisfies the task.
 - Verify current behavior against code before updating docs.
 - For scripted-track LED automation, preserve the split between `safety.scripted_mode_automation` as the master switch (the shipped example config enables it; the `LEDSafety` dataclass default stays `false`) and the top-level `scripted_mode` role-remap policy. `utility` is a blackout destination only; verify active and off role transitions separately.

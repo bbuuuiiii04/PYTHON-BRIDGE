@@ -1,6 +1,6 @@
 ---
 doc_status: current
-truth_level: implementation spec — verified against HEAD 2026-07-15; NOT authorized to build until the operator says "build it"
+truth_level: implementation spec — IMPLEMENTED 2026-07-15 (Claude Opus 4.8 tmux seat; operator-authorized AWR-257 build lane). Part B tasks 1-5 + Parts C/D/E landed software-tested / hardware-unvalidated; live LED behavior operator-unvalidated until his next mix. See docs/status/active_work_registry.md AWR-257 for the landed trail. This document is preserved as the authored spec.
 last_verified_commit: HEAD 2026-07-15 (post-a8611e3 working tree)
 last_verified_date: 2026-07-15
 validation_scope: >

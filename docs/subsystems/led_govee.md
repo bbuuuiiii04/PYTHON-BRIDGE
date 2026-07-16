@@ -338,6 +338,30 @@ Intra-section look rotation (2026-07-07):
   `drop`, `groove`, `post_drop`, blackout, hold, scripted, and manual-override
   semantics are unchanged. This is software-tested and hardware-unvalidated.
 
+True-drop section identity + cycling (AWR-257, 2026-07-15, ships default-on):
+- `StateManager` computes `meta.drop_sections` beside `meta.smart_drops` (see the
+  core_bridge card). A section = one true drop (a smart drop with a buildup/
+  breakdown runway in front, `smart_phrasing.select_true_drops`), its contiguous
+  chorus-run end, and the ≥16-beat continuation markers inside it.
+- LED pool narrowing is now section-aware. `_led_f2_drop_look_names` resolves the
+  section containing the drop anchor and looks the F2 plan up at the section's
+  TRUE drop, then draws the same-family union of every tier ≤ the section's tier
+  (never above it). So a mid-section continuation can't pull a different family
+  or a higher tier than the section's opening hit (the "tier-3 WALL ambush").
+- In-section advance markers surface through the SmartPhrasing tick
+  (`section_advance` + owning true drop + a per-section `:a{index}`), gated by
+  their own fired-set that resets wherever `_fired_drop_beats` does. They
+  dispatch ONLY through `_dispatch_led_automation`'s full gate stack (blackout,
+  not-ready, manual override, scripted, not-autoloop), then re-enter
+  `commit_role("drop", …)` with the section's true drop as the explicit
+  preference anchor (never `active_drop_beat`, which is `None` at an advance
+  beat) and a unique `:a{index}` role-key so the dedupe gate passes each advance
+  exactly once. An advance is a look-cursor move ONLY — no laser, darkness,
+  autoloop/OS2L/MIDI, or push-loop I/O. Sparse phrase data ⇒ no sections ⇒
+  today's per-fired-drop behavior (fail-open). No kill switch (operator ruling);
+  rollback is `git revert` + menubar restart. Software-tested
+  (`tests/test_true_drop_sections.py`, 31); hardware-unvalidated.
+
 Deterministic mixed-transport look rotation (AWR-149, 2026-07-08):
 - Which transport (cloud DIY vs realtime razer) carries a role's next look is no
   longer a per-session coin flip. The old WI-7 transport-sticky latch — prefer

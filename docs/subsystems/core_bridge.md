@@ -89,6 +89,14 @@ Runtime flow:
 - `ANLZ_DATA` stores raw drop markers on `meta.anlz_drops` and selected,
   section-collapsed markers on `meta.smart_drops`; phrase-segment labeling
   still uses the raw list.
+- AWR-257: alongside `meta.smart_drops`, inside the same `markers_changed`
+  guard, StateManager computes `meta.drop_sections` (`smart_phrasing.drop_sections`
+  over the runway-gated `select_true_drops`) — one `DropSection` per true drop
+  (Brandon's rule: only the FIRST marker in a drop section, with a buildup
+  runway, is a true drop). It carries the section's true drop, its contiguous
+  chorus-run end, and the ≥16-beat in-section LED advance points. Reset with
+  `smart_drops` in `TrackMetadata.clear()`. It governs LED look selection ONLY;
+  laser/SoundSwitch/firing/blackout paths never read it.
 - scripted-track LED automation is still StateManager-gated: `safety.scripted_mode_automation` must be true, `lighting_mode` must be `scripted`, and the smart-phrasing role is remapped through the latched LED `scripted_mode` policy before dispatch
 - laser drop-lifecycle state is reset alongside existing lifecycle teardown on master change, active track load, full stop, and resume; director-only resets also run on scripted and idle lighting transitions
 - while mixer authority is enabled, legacy OSC active-deck events, playing-only

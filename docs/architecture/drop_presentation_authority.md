@@ -308,3 +308,13 @@ cache, verified stale/empty library-wide 2026-07-04); base suppression in
 `/drop_presentation` in `config/led_look_director.json`. The optional
 `white_sand` handoff tier ships disabled (`ws_handoff_enabled: false`) with
 its flesh-out recorded in the design spec Part D.
+
+AWR-257 (2026-07-15): `runway_beats` — the pure primitive this document's
+`true drop` / `runway` vocabulary depends on — now lives in `smart_phrasing.py`
+and is re-exported from `drop_presentation` (`from .smart_phrasing import
+runway_beats`), so this module's consumer and its tests are byte-identical. The
+move exists because `smart_phrasing.select_true_drops` / `drop_sections` (the
+LED-only true-drop section layer) need the same primitive and `drop_presentation`
+already imports `PhraseSegment` from `smart_phrasing` (a one-way dependency).
+The presentation ladder, window machine, and every laser/SoundSwitch decision
+are untouched by AWR-257 — sections govern LED look selection only.
