@@ -224,6 +224,15 @@ class LedPadTempoFollowTests(unittest.TestCase):
         pb._follow_bpm = None
         return pb
 
+    @staticmethod
+    def _status(bpm, *, source: str = "live", written_at: float = 0.0) -> dict:
+        """A bridge status dict in the REAL runtime_status shape.
+
+        The live bpm lives at ``heartbeat.bpm`` (not top-level) and is a
+        _fmt_float STRING — e.g. "128.0", or the literal "unknown" with no deck.
+        """
+        return {"written_at": written_at, "heartbeat": {"bpm": bpm, "bpm_source": source}}
+
     def test_fresh_status_bpm_is_followed_with_beat_continuity(self) -> None:
         now = [0.0]
         pb = self._follow_pad(bpm=120.0, time_fn=lambda: now[0])
@@ -231,7 +240,8 @@ class LedPadTempoFollowTests(unittest.TestCase):
         now[0] = 4.0  # 8 beats elapsed at 120 BPM
         before = pb._clock.beat()
 
-        pb.apply_tempo_follow({"bpm": "140", "written_at": 0.0})
+        # Real writer emits bpm as a formatted STRING nested under heartbeat.
+        pb.apply_tempo_follow(self._status("140.0"))
         after = pb._clock.beat()
 
         self.assertTrue(pb._following)
@@ -246,7 +256,7 @@ class LedPadTempoFollowTests(unittest.TestCase):
     def test_stale_or_absent_status_reverts_to_manual_preview(self) -> None:
         pb = self._follow_pad(bpm=125.0)
         pb.set_bpm(125.0)  # operator's manual Preview tempo
-        pb.apply_tempo_follow({"bpm": "150"})
+        pb.apply_tempo_follow(self._status("150.0"))
         self.assertTrue(pb._following)
         self.assertAlmostEqual(pb._clock.bpm, 150.0)
 
@@ -265,28 +275,50 @@ class LedPadTempoFollowTests(unittest.TestCase):
         now = [0.0]
         pb = self._follow_pad(bpm=128.0, time_fn=lambda: now[0])
         pb._clock.play()
-        pb.apply_tempo_follow({"bpm": "128.0"})
+        pb.apply_tempo_follow(self._status("128.0"))
         self.assertTrue(pb._following)
         anchor_before = pb._clock._anchor_time  # noqa: SLF001
 
         now[0] = 1.0
-        pb.apply_tempo_follow({"bpm": "128.2"})  # |Δ| = 0.2 ≤ 0.3 → ignored
+        pb.apply_tempo_follow(self._status("128.2"))  # |Δ| = 0.2 ≤ 0.3 → ignored
         self.assertAlmostEqual(pb._clock.bpm, 128.0)
         self.assertEqual(pb._clock._anchor_time, anchor_before)  # noqa: SLF001  (no re-anchor)
 
-        pb.apply_tempo_follow({"bpm": "131.0"})  # |Δ| = 3 > 0.3 → applied
+        pb.apply_tempo_follow(self._status("131.0"))  # |Δ| = 3 > 0.3 → applied
         self.assertAlmostEqual(pb._clock.bpm, 131.0)
 
     def test_garbage_bpm_is_ignored_and_stays_manual(self) -> None:
         pb = self._follow_pad(bpm=128.0)
-        for bad in ({}, {"bpm": None}, {"bpm": ""}, {"bpm": "nope"}, {"bpm": "0"}, {"bpm": "999"}):
+        bad_status = (
+            {},                                     # no heartbeat at all
+            {"heartbeat": {}},                      # heartbeat present, no bpm
+            {"bpm": "150.0"},                       # top-level bpm is IGNORED (wrong shape)
+            self._status(None),
+            self._status(""),
+            self._status("unknown"),                # the literal no-deck string (real file)
+            self._status("nope"),
+            self._status("0"),
+            self._status("999"),
+        )
+        for bad in bad_status:
             pb.apply_tempo_follow(bad)
             self.assertFalse(pb._following, bad)
             self.assertAlmostEqual(pb._clock.bpm, 128.0)
 
+    def test_unknown_heartbeat_bpm_releases_follow(self) -> None:
+        # No-deck heartbeat carries bpm "unknown" — must fall back, not crash.
+        pb = self._follow_pad(bpm=128.0)
+        pb.set_bpm(128.0)
+        pb.apply_tempo_follow(self._status("144.0"))
+        self.assertTrue(pb._following)
+        self.assertAlmostEqual(pb._clock.bpm, 144.0)
+        pb.apply_tempo_follow(self._status("unknown", source="deck"))
+        self.assertFalse(pb._following)
+        self.assertAlmostEqual(pb._clock.bpm, 128.0)
+
     def test_follow_from_status_respects_awr261_freshness_window(self) -> None:
         now = [100.0]
-        status = {"bpm": "142", "written_at": 100.0}
+        status = self._status("142.0", written_at=100.0)
         gate = OwnershipGate(
             time_fn=lambda: now[0], status_reader=lambda: status,
             appender=lambda _c: None, sleep_fn=lambda _s: None,
@@ -315,7 +347,7 @@ class LedPadTempoFollowTests(unittest.TestCase):
         self.assertEqual(st["tempo_source"], "manual")
         self.assertFalse(st["following"])
 
-        pb.apply_tempo_follow({"bpm": "138"})
+        pb.apply_tempo_follow(self._status("138.0"))
         st = pb.status()
         self.assertEqual(st["tempo_source"], "following")
         self.assertTrue(st["following"])

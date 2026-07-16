@@ -375,17 +375,22 @@ class PadPlayback:
     def _extract_status_bpm(status: dict[str, Any] | None) -> float | None:
         """Parse a usable bpm from a bridge status dict, or None.
 
-        The heartbeat writes bpm as a formatted string (runtime_status). Reject
-        missing/blank/garbage values and anything outside a sane musical range so
-        a bad read never yanks the animation to a nonsense tempo.
+        The live bpm lives at ``heartbeat.bpm`` (NOT top-level) as a formatted
+        string from ``runtime_status._fmt_float`` — and it is the literal string
+        ``"unknown"`` when no deck is active. Reject missing/blank/``"unknown"``/
+        non-numeric values and anything outside a sane musical range so a bad
+        read never yanks the animation to a nonsense tempo.
         """
         if not isinstance(status, dict):
             return None
-        raw = status.get("bpm")
+        heartbeat = status.get("heartbeat")
+        if not isinstance(heartbeat, dict):
+            return None
+        raw = heartbeat.get("bpm")
         if raw is None or raw == "":
             return None
         try:
-            bpm = float(raw)
+            bpm = float(raw)  # "unknown" / any non-numeric string raises → rejected
         except (TypeError, ValueError):
             return None
         if bpm <= 0.0 or bpm > 400.0:
