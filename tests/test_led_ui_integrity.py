@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import ast
 import re
+import sys
 import unittest
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 _ASSETS = Path(__file__).resolve().parents[1] / "tools" / "led_pad_assets"
 _SIM = Path(__file__).resolve().parents[1] / "tools" / "led_sim_assets"
@@ -73,6 +76,25 @@ class PadUiIntegrityTests(unittest.TestCase):
         # AWR-260: Accept wires into production; Reject stays out of the show.
         self.assertIn("Live —", lab)
         self.assertIn("Rejected — stays out of the show", lab)
+
+    def test_look_groups_shelf_references_real_looks(self) -> None:
+        # GROUPSHELF: every data-look in the sim shelf must be a real saved look,
+        # and each must be wired to the render path. Breaks if a look is renamed.
+        from rb_ss_bridge_v2.tools.led_sim_engine import look_params_catalog
+
+        html = (_SIM / "index.html").read_text(encoding="utf-8")
+        js = (_SIM / "sim-app.js").read_text(encoding="utf-8")
+        shelf_looks = re.findall(r'data-look="([^"]+)"', html)
+        self.assertTrue(shelf_looks, "no data-look buttons found in sim index.html")
+
+        catalog = look_params_catalog()
+        self.assertTrue(catalog["ok"], catalog.get("error"))
+        known = set(catalog["looks"])
+        for name in shelf_looks:
+            self.assertIn(name, known, f"shelf look {name!r} not in look catalog")
+
+        self.assertIn('querySelectorAll("[data-look]")', js)
+        self.assertIn("playLookByName", js)
 
 
 if __name__ == "__main__":

@@ -157,6 +157,80 @@
         </details>
         <button id="render" class="primary action" type="button">Render</button>
         <p class="fine-print">Frame source and timing appear on the stage. Preview only — never touches the lights.</p>
+
+        <details class="advanced look-groups" open>
+          <summary>Look groups</summary>
+          <p class="fine-print">See what each drop-look group looks like on your room. Each button plays a real saved look on the stage above.</p>
+
+          <div class="look-group">
+            <span class="panel-label">Blackout Hit</span>
+            <p class="fine-print">Cut to black for a beat, then a bright center burst.</p>
+            <div class="button-row wrap">
+              <button type="button" data-look="rt_blackout">Black hold</button>
+              <button type="button" data-look="rt_drop_center_burst">Center burst</button>
+            </div>
+          </div>
+
+          <div class="look-group">
+            <span class="panel-label">Strobe Barrage</span>
+            <p class="fine-print">Two-color hard flashing across the whole room.</p>
+            <div class="button-row wrap">
+              <button type="button" data-look="rt_drop_strobe_red_white">Red / white</button>
+              <button type="button" data-look="rt_drop_strobe_blue_cyan">Blue / cyan</button>
+            </div>
+          </div>
+
+          <div class="look-group">
+            <span class="panel-label">Low Simmer</span>
+            <p class="fine-print">A calm blue chase for lower-energy drops. Shown at full brightness — the preview has no dimmer knob.</p>
+            <div class="button-row wrap">
+              <button type="button" data-look="rt_drop_chase_blue">Blue chase</button>
+            </div>
+          </div>
+
+          <div class="look-group">
+            <span class="panel-label">Color Chase</span>
+            <p class="fine-print">One color running along the strip.</p>
+            <div class="button-row wrap">
+              <button type="button" data-look="rt_drop_chase_cyan">Cyan</button>
+              <button type="button" data-look="rt_drop_chase_red">Red</button>
+            </div>
+          </div>
+
+          <div class="look-group">
+            <span class="panel-label">Blinder Bloom</span>
+            <p class="fine-print">Full-white blast, then a firework bloom.</p>
+            <div class="button-row wrap">
+              <button type="button" data-look="rt_drop_white_aggressive">White blast</button>
+              <button type="button" data-look="rt_drop_firework_explosion">Firework</button>
+            </div>
+          </div>
+
+          <div class="look-group">
+            <span class="panel-label">Dark Floor</span>
+            <p class="fine-print">A moody low-color floor. Stand-in: the nearest existing dark look.</p>
+            <div class="button-row wrap">
+              <button type="button" data-look="rt_drop_nebula">Nebula</button>
+            </div>
+          </div>
+
+          <div class="look-group">
+            <span class="panel-label">Sweep &amp; Bump</span>
+            <p class="fine-print">A white buildup sweep, then a center-burst hit.</p>
+            <div class="button-row wrap">
+              <button type="button" data-look="rt_buildup_white_half_strobe">Buildup sweep</button>
+              <button type="button" data-look="rt_drop_center_burst">Center burst</button>
+            </div>
+          </div>
+
+          <div class="look-group">
+            <span class="panel-label">Dimmer Pulse</span>
+            <p class="fine-print">A green pulse standing in for a kick-synced brightness pulse. Stand-in.</p>
+            <div class="button-row wrap">
+              <button type="button" data-look="rt_drop_chase_green">Green pulse</button>
+            </div>
+          </div>
+        </details>
       </section>
 
       <section id="layout-panel" class="panel-stack" data-panel="layout" hidden role="tabpanel" aria-labelledby="tab-layout">
