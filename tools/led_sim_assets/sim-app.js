@@ -29,6 +29,7 @@ const DEFAULT_ROOM_MM = [5216, 2284];
 const state = {
   profile: null,
   savedProfile: null,
+  profileMtime: null,
   catalog: null,
   frames: [],
   frameTimes: [],
@@ -75,6 +76,28 @@ function clone(value) {
 /** U-10: deep-ish clone for profile POST bodies (no local-only keys today). */
 function cloneProfile(profile) {
   return clone(profile);
+}
+
+function profileSaveBody(profile) {
+  const body = cloneProfile(profile);
+  if (state.profileMtime != null) body.base_mtime = state.profileMtime;
+  return body;
+}
+
+function rememberProfileMtime(payload) {
+  if (payload && typeof payload.profile_mtime === "number") {
+    state.profileMtime = payload.profile_mtime;
+  } else if (payload && payload.profile_mtime == null) {
+    state.profileMtime = null;
+  }
+}
+
+function isSimDirty() {
+  if (!state.profile || !state.savedProfile) return false;
+  return JSON.stringify(pickKeys(state.profile, LAYOUT_KEYS))
+      !== JSON.stringify(pickKeys(state.savedProfile, LAYOUT_KEYS))
+    || JSON.stringify(pickKeys(state.profile, CALIBRATION_KEYS))
+      !== JSON.stringify(pickKeys(state.savedProfile, CALIBRATION_KEYS));
 }
 
 function pickKeys(profile, keys) {
@@ -721,11 +744,13 @@ function switchActiveLayout(name) {
  */
 async function persistLibraryMutation(mutateDisk) {
   const fresh = await api("GET", "/api/profile");
+  rememberProfileMtime(fresh);
   const diskProfile = clone(fresh.profile);
   ensureLayoutLibrary(diskProfile);
   const plan = mutateDisk(diskProfile);
   if (plan && plan.ok === false) return plan;
-  const result = await api("POST", "/api/profile", diskProfile);
+  const result = await api("POST", "/api/profile", profileSaveBody(diskProfile));
+  rememberProfileMtime(result);
   state.savedProfile = clone(result.profile);
   ensureLockDefaults(state.savedProfile);
   state.catalog.profile_warnings = result.warnings || [];
@@ -1102,7 +1127,8 @@ function wireLayoutEditor() {
   $("layout-undo").addEventListener("click", undoLayout);
   $("layout-save").addEventListener("click", async () => {
     ensureProfileLayout();
-    const result = await api("POST", "/api/profile", cloneProfile(state.profile));
+    const result = await api("POST", "/api/profile", profileSaveBody(state.profile));
+    rememberProfileMtime(result);
     state.savedProfile = clone(result.profile);
     ensureLockDefaults(state.savedProfile);
     state.catalog.profile_warnings = result.warnings || [];
@@ -1279,7 +1305,8 @@ function wireKnobs() {
 
   $("profile-save").addEventListener("click", async () => {
     // F-1: lock blocks knob edits only — never the save that persists the lock.
-    const result = await api("POST", "/api/profile", cloneProfile(state.profile));
+    const result = await api("POST", "/api/profile", profileSaveBody(state.profile));
+    rememberProfileMtime(result);
     state.savedProfile = clone(result.profile);
     ensureLockDefaults(state.savedProfile);
     state.catalog.profile_warnings = result.warnings || [];
@@ -1288,6 +1315,7 @@ function wireKnobs() {
   });
   $("profile-revert").addEventListener("click", async () => {
     const result = await api("GET", "/api/profile");
+    rememberProfileMtime(result);
     state.profile = result.profile;
     ensureLockDefaults(state.profile);
     state.savedProfile = clone(result.profile);
@@ -1726,6 +1754,7 @@ async function boot() {
     : "Drag vertices on the room. Double-click an edge to add a point, a vertex to remove one. On touch devices, long-press does the same. LED spacing is fixed — the path is never stretched.";
 
   state.catalog = await api("GET", "/api/catalog");
+  rememberProfileMtime(state.catalog);
   state.profile = state.catalog.profile;
   ensureLockDefaults(state.profile);
   const preset = activeEntry().preset;
@@ -1745,6 +1774,11 @@ async function boot() {
   syncLayoutPicker();
   refreshPresetThumbs();
   wireKeyboard();
+  window.addEventListener("beforeunload", (ev) => {
+    if (!isSimDirty()) return;
+    ev.preventDefault();
+    ev.returnValue = "";
+  });
   setActiveTab("play");
   syncUndoButton();
 

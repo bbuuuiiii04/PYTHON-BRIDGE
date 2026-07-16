@@ -5,8 +5,9 @@
     const res = await fetch(path, init);
     const json = await res.json();
     if (!json.ok && json.error) {
-      const err = new Error(json.error);
+      const err = new Error(json.message || json.error);
       err.payload = json;
+      err.status = res.status;
       throw err;
     }
     return json;

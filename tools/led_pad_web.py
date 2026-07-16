@@ -908,7 +908,8 @@ class LedPadService:
         }
 
     def lab_save(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._lab.save(payload)
+        with self._lock:
+            return self._lab.save(payload)
 
     def _lab_merge_editor(self, entry: dict[str, Any], payload: dict[str, Any]) -> bool:
         """Merge editor fields into entry. Accept/Reject = Save then flip status.
@@ -932,32 +933,40 @@ class LedPadService:
             entry["cue_beats"] = float(payload.get("cue_beats") or 16)
         return snapshotted
 
+    def _lab_persist_editor(self, payload: dict[str, Any], *, status: str) -> dict[str, Any]:
+        """Save editor fields + status under the service lock (AWR-258)."""
+        name = str(payload.get("name", "")).strip()
+        with self._lock:
+            entry = self._lab.get(name)
+            snapshotted = self._lab_merge_editor(entry, payload)
+            entry["status"] = status
+            # CAS uses the stamp the client loaded, not a fresh disk read.
+            if "updated" in payload:
+                entry["updated"] = payload["updated"]
+            if payload.get("overwrite"):
+                entry["overwrite"] = True
+            result = self._lab.save(entry)
+            result["snapshotted"] = snapshotted
+            return result
+
     def lab_accept(self, payload: dict[str, Any]) -> dict[str, Any]:
         # AWR-251: Accept implies Save — persist what the editor shows, then accept.
-        name = str(payload.get("name", "")).strip()
-        entry = self._lab.get(name)
-        snapshotted = self._lab_merge_editor(entry, payload)
-        entry["status"] = "accepted"
-        result = self._lab.save(entry)
-        result["snapshotted"] = snapshotted
-        return result
+        return self._lab_persist_editor(payload, status="accepted")
 
     def lab_reject(self, payload: dict[str, Any]) -> dict[str, Any]:
         # AWR-251: Reject also persists the current editor state (named = saved).
-        name = str(payload.get("name", "")).strip()
-        entry = self._lab.get(name)
-        self._lab_merge_editor(entry, payload)
-        entry["status"] = "rejected"
-        return self._lab.save(entry)
+        return self._lab_persist_editor(payload, status="rejected")
 
     def lab_archive(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._lab.archive(str(payload.get("name", "")).strip())
+        with self._lock:
+            return self._lab.archive(str(payload.get("name", "")).strip())
 
     def lab_delete(self, payload: dict[str, Any]) -> dict[str, Any]:
         name = str(payload.get("name", "")).strip()
-        if self._playing_name == LabRegistry.scene_ref(name):
-            return {"ok": False, "error": "stop_playback_first"}
-        return self._lab.delete(name)
+        with self._lock:
+            if self._playing_name == LabRegistry.scene_ref(name):
+                return {"ok": False, "error": "stop_playback_first"}
+            return self._lab.delete(name)
 
     def _lab_play_spec(self, config: dict[str, Any], entry: dict[str, Any], payload: dict[str, Any]) -> tuple[dict[str, Any], float]:
         reload_result = self._lab_renderer.reload()
@@ -1436,6 +1445,18 @@ def build_handler(service: LedPadService) -> type[BaseHTTPRequestHandler]:
                     self.send_error(HTTPStatus.NOT_FOUND)
                     return
                 self._send_json(route(self._read_json()))
+            except StaleLabEntry as exc:
+                self._send_json(
+                    {
+                        "ok": False,
+                        "error": exc.code,
+                        "message": str(exc),
+                        "name": exc.name,
+                        "disk_updated": exc.disk_updated,
+                        "client_updated": exc.client_updated,
+                    },
+                    status=HTTPStatus.CONFLICT,
+                )
             except Exception as exc:
                 self._send_json({"ok": False, "error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
 

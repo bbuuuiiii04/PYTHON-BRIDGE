@@ -42,7 +42,7 @@ _TARGET_ROLES = {"", "ambient", "groove", "buildup", "pre_drop", "drop", "post_d
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds")
 
 
 def _write_json_atomic(path: Path, data: dict[str, Any]) -> None:

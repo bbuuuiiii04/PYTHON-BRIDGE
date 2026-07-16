@@ -80,6 +80,7 @@ class LedSimService:
             "lab": lab,
             "profile": profile,
             "profile_error": profile_error,
+            "profile_mtime": engine.profile_mtime(self.profile_path),
             "profile_warnings": engine.profile_warnings(profile),
             "lab_error": lab.get("error", ""),
             "test_cards": list(engine.TEST_CARD_KINDS),
@@ -191,6 +192,7 @@ def build_handler(service: LedSimService) -> type[BaseHTTPRequestHandler]:
                     self._send_json({
                         "profile": profile,
                         "profile_error": profile_error,
+                        "profile_mtime": engine.profile_mtime(service.profile_path),
                         "profile_warnings": engine.profile_warnings(profile),
                         "path": str(service.profile_path),
                     })
@@ -330,6 +332,46 @@ def build_handler(service: LedSimService) -> type[BaseHTTPRequestHandler]:
 
         def _handle_profile_save(self, body: dict[str, Any]) -> None:
             # Accept v1 or v2 on the wire; persist and echo schema-v2.
+            # AWR-258: never let the fallback example overwrite a broken real file;
+            # reject stale writers that loaded an older mtime.
+            _, profile_error = service.profile_state()
+            if profile_error:
+                self._send_json(
+                    {
+                        "ok": False,
+                        "error": "profile_error_blocks_save",
+                        "profile_error": profile_error,
+                        "message": (
+                            "Simulator is serving a fallback profile because the saved "
+                            "file failed validation. Fix or restore the real file before saving."
+                        ),
+                    },
+                    HTTPStatus.CONFLICT,
+                )
+                return
+            disk_mtime = engine.profile_mtime(service.profile_path)
+            client_mtime = body.pop("base_mtime", body.pop("_base_mtime", None))
+            if disk_mtime is not None and client_mtime is not None:
+                try:
+                    client_val = float(client_mtime)
+                except (TypeError, ValueError):
+                    self._bad_request("base_mtime must be a number")
+                    return
+                if abs(client_val - disk_mtime) > 1e-6:
+                    self._send_json(
+                        {
+                            "ok": False,
+                            "error": "stale_profile",
+                            "profile_mtime": disk_mtime,
+                            "client_mtime": client_val,
+                            "message": (
+                                "Profile changed on disk since this tab loaded it. "
+                                "Reload, then re-apply your edit."
+                            ),
+                        },
+                        HTTPStatus.CONFLICT,
+                    )
+                    return
             try:
                 migrated = engine.migrate_profile_to_v2(body)
             except Exception as exc:
@@ -344,6 +386,7 @@ def build_handler(service: LedSimService) -> type[BaseHTTPRequestHandler]:
                 "ok": True,
                 "profile": migrated,
                 "path": str(service.profile_path),
+                "profile_mtime": engine.profile_mtime(service.profile_path),
                 "warnings": engine.profile_warnings(migrated),
             })
 

@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from rb_ss_bridge_v2.govee_frame_renderer import GoveeFrameRenderer  # noqa: E402
-from rb_ss_bridge_v2.tools.led_pad_lab import LabRegistry, LabRenderer, load_lab_effects, render_preview_frames  # noqa: E402
+from rb_ss_bridge_v2.tools.led_pad_lab import LabRegistry, LabRenderer, StaleLabEntry, load_lab_effects, render_preview_frames  # noqa: E402
 from rb_ss_bridge_v2.tools.led_pad_web import LedPadService  # noqa: E402
 
 _EXAMPLE_PATH = Path(__file__).resolve().parents[1] / "config" / "led_look_director.example.json"
@@ -610,6 +610,76 @@ class LedPadLabTests(unittest.TestCase):
 
             self.assertEqual(result, {"ok": True, "deleted": "pulse"})
             self.assertEqual(service.lab_list()["entries"], [])
+
+    def test_concurrent_saves_to_different_drafts_never_lose_writes(self) -> None:
+        """AWR-258 F1: adversary's 60/60 concurrent-save loss must become 0/60."""
+        import concurrent.futures
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            config = root / "led_look_director.json"
+            shutil.copy2(_EXAMPLE_PATH, config)
+            lab_dir = root / "led_lab"
+            _write_lab_module(lab_dir / "effects_lab.py")
+            service = LedPadService(config, dry_run=True, playback=_FakePlayback(), lab_dir=lab_dir)
+            service.lab_save({"name": "draft_a", "kind": "slot", "fn": "pulse", "params": {"n": 0}, "brief": "a0"})
+            service.lab_save({"name": "draft_b", "kind": "slot", "fn": "pulse", "params": {"n": 0}, "brief": "b0"})
+
+            losses = 0
+            for round_i in range(60):
+                a_brief = f"a{round_i}"
+                b_brief = f"b{round_i}"
+                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                    fa = pool.submit(
+                        service.lab_save,
+                        {"name": "draft_a", "kind": "slot", "fn": "pulse", "params": {"n": round_i}, "brief": a_brief},
+                    )
+                    fb = pool.submit(
+                        service.lab_save,
+                        {"name": "draft_b", "kind": "slot", "fn": "pulse", "params": {"n": round_i}, "brief": b_brief},
+                    )
+                    ra = fa.result()
+                    rb = fb.result()
+                self.assertTrue(ra["ok"])
+                self.assertTrue(rb["ok"])
+                by_name = {e["name"]: e for e in service.lab_list()["entries"]}
+                if by_name["draft_a"]["brief"] != a_brief or by_name["draft_b"]["brief"] != b_brief:
+                    losses += 1
+            self.assertEqual(losses, 0, f"concurrent-save silent losses: {losses}/60")
+
+    def test_lab_save_rejects_stale_updated_stamp(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service, _playback = self._service_with_pulse_draft(Path(td))
+            first = service.lab_save({"name": "pulse", "kind": "slot", "fn": "pulse", "params": {}, "brief": "one"})
+            stamp = first["entry"]["updated"]
+            service.lab_save({
+                "name": "pulse", "kind": "slot", "fn": "pulse", "params": {}, "brief": "two",
+                "updated": stamp,
+            })
+            with self.assertRaises(StaleLabEntry):
+                service.lab_save({
+                    "name": "pulse", "kind": "slot", "fn": "pulse", "params": {}, "brief": "three",
+                    "updated": stamp,
+                })
+            # Explicit overwrite wins.
+            result = service.lab_save({
+                "name": "pulse", "kind": "slot", "fn": "pulse", "params": {}, "brief": "forced",
+                "updated": stamp, "overwrite": True,
+            })
+            self.assertEqual(result["entry"]["brief"], "forced")
+
+    def test_lab_save_writes_rotating_backups(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service, _playback = self._service_with_pulse_draft(Path(td))
+            lab_dir = Path(td) / "led_lab"
+            for i in range(7):
+                service.lab_save({"name": "pulse", "kind": "slot", "fn": "pulse", "params": {"i": i}, "brief": f"v{i}"})
+            drafts_baks = list(lab_dir.glob("drafts.json.bak-*"))
+            effects_baks = list(lab_dir.glob("effects_lab.py.bak-*"))
+            self.assertLessEqual(len(drafts_baks), 5)
+            self.assertGreaterEqual(len(drafts_baks), 1)
+            self.assertLessEqual(len(effects_baks), 5)
+            self.assertGreaterEqual(len(effects_baks), 1)
 
 
 if __name__ == "__main__":

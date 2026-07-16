@@ -521,6 +521,63 @@ class LedSimServiceTests(unittest.TestCase):
             status, result = _request(port, "POST", "/api/calibration", {"name": "nope"})
         self.assertEqual(status, 400)
 
+    def test_profile_save_rejects_stale_mtime(self) -> None:
+        example = json.loads(
+            (Path(__file__).resolve().parents[1] / "config" / "led_sim_profile.example.json").read_text()
+        )
+        with _server(self.profile_path) as port:
+            status, first = _request(port, "POST", "/api/profile", example)
+            self.assertEqual(status, 200)
+            mtime = first["profile_mtime"]
+            self.assertIsInstance(mtime, float)
+            # Second tab still holding the first mtime after another save.
+            status, second = _request(port, "POST", "/api/profile", {**example, "base_mtime": mtime})
+            self.assertEqual(status, 200)
+            stale = {**example, "gamma": 2.2, "base_mtime": mtime}
+            status, denied = _request(port, "POST", "/api/profile", stale)
+            self.assertEqual(status, 409)
+            self.assertEqual(denied["error"], "stale_profile")
+            # Fresh mtime still works.
+            status, ok = _request(port, "POST", "/api/profile", {
+                **example, "gamma": 2.2, "base_mtime": second["profile_mtime"],
+            })
+            self.assertEqual(status, 200)
+            self.assertEqual(ok["profile"]["gamma"], 2.2)
+
+    def test_profile_save_writes_rotating_backups(self) -> None:
+        example = json.loads(
+            (Path(__file__).resolve().parents[1] / "config" / "led_sim_profile.example.json").read_text()
+        )
+        with _server(self.profile_path) as port:
+            status, seeded = _request(port, "POST", "/api/profile", example)
+            self.assertEqual(status, 200)
+            mtime = seeded["profile_mtime"]
+            for i in range(6):
+                status, saved = _request(port, "POST", "/api/profile", {
+                    **example, "gamma": 1.0 + i * 0.01, "base_mtime": mtime,
+                })
+                self.assertEqual(status, 200)
+                mtime = saved["profile_mtime"]
+        backups = list(self.profile_path.parent.glob(f"{self.profile_path.name}.bak-*"))
+        self.assertLessEqual(len(backups), 5)
+        self.assertGreaterEqual(len(backups), 1)
+
+    def test_profile_save_blocked_while_profile_error(self) -> None:
+        self.profile_path.write_text('{"schema": 2, "segments": "nope"}\n', encoding="utf-8")
+        with _server(self.profile_path) as port:
+            status, catalog = _request(port, "GET", "/api/catalog")
+            self.assertEqual(status, 200)
+            self.assertTrue(catalog["profile_error"])
+            example = catalog["profile"]
+            status, denied = _request(port, "POST", "/api/profile", {
+                **example, "base_mtime": catalog.get("profile_mtime"),
+            })
+            self.assertEqual(status, 409)
+            self.assertEqual(denied["error"], "profile_error_blocks_save")
+            # Real broken file must still be on disk (fallback must not overwrite it).
+            raw = json.loads(self.profile_path.read_text(encoding="utf-8"))
+            self.assertEqual(raw.get("segments"), "nope")
+
 
 if __name__ == "__main__":
     unittest.main()

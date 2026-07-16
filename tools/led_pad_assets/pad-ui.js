@@ -117,7 +117,15 @@
   }
   async function saveCurrentEditor() {
     const e = state.editor;
-    const res = await api.saveLook({name:e.name, look:e.look, params:e.params, cue_beats:e.cue_beats, slot_fill:e.slot_fill, mono_chance:e.mono_chance});
+    const res = await api.saveLook({
+      name: e.name,
+      look: e.look,
+      params: e.params,
+      cue_beats: e.cue_beats,
+      slot_fill: e.slot_fill,
+      mono_chance: e.mono_chance,
+      locked_palette: e.locked_palette || "",
+    });
     if (!res.ok) throw new Error((res.errors || []).join("\n"));
     state.cleanSnapshot = snapshotEditor();
   }
@@ -416,6 +424,11 @@
   $("strobeInput").addEventListener("change", ev => { state.editor.look.allow_strobe = ev.target.checked; $("strobeLabel").textContent = ev.target.checked ? "On" : "Off"; setDirty(); });
   $("slotFillSelect").addEventListener("change", ev => { state.editor.slot_fill = ev.target.value; $("monoChanceWrap").hidden = state.editor.slot_fill !== "random_with_mono_chance"; setDirty(); liveUpdate(); });
   $("monoChanceInput").addEventListener("input", ev => { state.editor.mono_chance = Number(ev.target.value); $("monoChanceOutput").textContent = ev.target.value; setDirty(); liveUpdate(); });
+  window.addEventListener("beforeunload", (ev) => {
+    if (!(state.editor && snapshotEditor() !== state.cleanSnapshot)) return;
+    ev.preventDefault();
+    ev.returnValue = "";
+  });
   refresh().catch(showError);
   PadHealth.start({
     poll: updateRuntime,

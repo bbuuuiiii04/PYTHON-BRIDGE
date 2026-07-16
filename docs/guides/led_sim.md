@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: software-tested
-last_verified_commit: b3a255a
+last_verified_commit: PENDING_AWR258
 last_verified_date: 2026-07-15
 validation_scope: >
   H612D LED Studio (AWR-196 + AWR-244 room-view + AWR-246 layout library):
@@ -14,7 +14,9 @@ validation_scope: >
   Use persists active_layout immediately without leaking unsaved knobs
   (AWR-250), perimeter/snake/custom presets, layout and
   calibration lockers, timestamp-held playback, calibration sequence v2,
-  profile evidence guards, and the local web service are software-tested.
+  profile evidence guards, the local web service, and AWR-258 data-integrity
+  (stale-write 409 via base_mtime, rotating .bak-* keep-5, refuse save while
+  profile_error, beforeunload when dirty) are software-tested.
   Optics (glow/bleed/gamma) remain uncalibrated assumptions. Generated timing
   uses an ideal grid. Device color, PWM, latency, physical response, packet
   delivery, and hardware cadence remain unmeasured; SOFTWARE-VALIDATED ONLY /
@@ -177,6 +179,13 @@ existing validated profile POST. Unsaved badges are scoped: layout edits do not
 light the calibration badge, and vice versa. After Use, Lab’s Room preview picks
 up the new active layout on the next Preview click or Room toggle (AWR-250) — no
 manual reload. AWR-251 journey: `tools/awr251_save_story_journey.mjs`.
+
+**Data integrity (AWR-258).** Full-profile Save carries the `base_mtime` from the
+load this tab edited; a mismatch returns HTTP 409 `stale_profile` so a stale tab
+cannot delete another layout. Every successful overwrite writes a rotating
+`.bak-*` snapshot (keep 5). While `profile_error` is set (broken on-disk file →
+fallback example), Save is refused so the example can never overwrite the real
+file. Closing/reloading a dirty Sim tab prompts via `beforeunload`.
 
 ## What is not exact yet
 

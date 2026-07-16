@@ -26,6 +26,13 @@ from typing import Any, Mapping
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
+try:
+    from .file_backup import rotate_backup
+except ImportError:  # run as `python3 -m tools.led_sim_engine` from repo root
+    if str(_REPO_ROOT.parent) not in sys.path:
+        sys.path.insert(0, str(_REPO_ROOT.parent))
+    from rb_ss_bridge_v2.tools.file_backup import rotate_backup  # type: ignore
+
 
 def _ensure_parent_on_path() -> None:
     parent = str(_REPO_ROOT.parent)
@@ -771,11 +778,22 @@ def layout_led_positions(profile: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def profile_mtime(path: Path | str) -> float | None:
+    """Filesystem mtime of the profile file, or None when it does not exist."""
+    target = Path(path)
+    try:
+        return float(target.stat().st_mtime)
+    except OSError:
+        return None
+
+
 def save_profile(path: Path | str, profile: Mapping[str, Any]) -> None:
     """Validate then atomically write schema-v2 (tmp + rename). Raises ValueError when invalid.
 
     Legacy v1 profiles are migrated to a layouts library before write; old top-level
     ``layout`` / ``room_mm`` / ``layout_locked`` keys are dropped.
+
+    AWR-258: rotating ``.bak-*`` snapshot (keep 5) before every overwrite.
     """
     migrated = migrate_profile_to_v2(profile)
     errors = validate_profile(migrated)
@@ -783,6 +801,7 @@ def save_profile(path: Path | str, profile: Mapping[str, Any]) -> None:
         raise ValueError("; ".join(errors))
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
+    rotate_backup(target, keep=5)
     temp_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(

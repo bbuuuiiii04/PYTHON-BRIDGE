@@ -203,6 +203,8 @@
 
   async function refresh() {
     clearError();
+    // AWR-258: stash dirty fields before list rebuild (PadHealth reconnect).
+    if (state.current && isEditorDirty()) stashEditor();
     const [cfg, palettes, lab] = await Promise.all([api.config(), api.palettes(), api.labList()]);
     state.entries = lab.entries || [];
     renderSession(cfg.config._pad_meta.ui, palettes.palettes || []);
@@ -341,7 +343,10 @@
   }
 
   function selectDraft(name) {
+    // AWR-258: stash when switching drafts, or when reconnecting onto the same
+    // dirty draft (old code skipped same-name and wiped tweaks).
     if (state.current && state.current.name !== name) stashEditor();
+    else if (state.current && isEditorDirty()) stashEditor();
     stopPreview();
     renderSwatches(null);
     state.current = state.entries.find(e => e.name === name) || null;
@@ -412,19 +417,23 @@
         : "Set timing (header) to enable BPM");
   }
 
-  // Dirty chip (pad-ui.js setDirty pattern): editor params vs saved entry params.
-  function setDirty() {
-    if (!state.current) { $("labDirtyChip").textContent = ""; return; }
+  function isEditorDirty() {
+    if (!state.current) return false;
     let params;
-    try { params = JSON.parse($("paramsInput").value || "{}"); } catch { params = null; }
+    try { params = JSON.parse($("paramsInput").value || "{}"); } catch { return true; }
     const roleDirty = $("targetRoleSelect").value !== roleOf(state.current);
     const timingDirty = $("timingModeSelect").value !== (state.current.timing_mode || "unknown");
     const cueDirty = cue() !== Number(state.current.cue_beats || 16);
     const briefDirty = $("briefInput").value !== (state.current.brief || "");
     const notesDirty = $("notesInput").value !== (state.current.notes || "");
-    const dirty = params === null
-      || JSON.stringify(params) !== JSON.stringify(state.current.params || {})
+    return JSON.stringify(params) !== JSON.stringify(state.current.params || {})
       || roleDirty || timingDirty || cueDirty || briefDirty || notesDirty;
+  }
+
+  // Dirty chip (pad-ui.js setDirty pattern): editor params vs saved entry params.
+  function setDirty() {
+    if (!state.current) { $("labDirtyChip").textContent = ""; return; }
+    const dirty = isEditorDirty();
     $("labDirtyChip").textContent = dirty ? "Unsaved tweaks" : "Saved";
     $("labDirtyChip").className = dirty ? "warn-text" : "dim";
   }
@@ -467,26 +476,90 @@
     };
   }
 
-  async function save() {
+  async function save(overwrite = false) {
     if (!state.current) return;
-    const res = await api.labSave(currentPayload());
-    clearEditorMemory(state.current.name);
-    state.current = res.entry;
-    await refresh();
+    const payload = currentPayload();
+    if (overwrite) payload.overwrite = true;
+    try {
+      const res = await api.labSave(payload);
+      clearEditorMemory(state.current.name);
+      state.current = res.entry;
+      await refresh();
+    } catch (err) {
+      if (err && err.payload && err.payload.error === "stale_entry") {
+        PadModal.show(
+          "Draft changed elsewhere",
+          "Someone else (or another tab) saved this draft since you opened it. Reload their version, or overwrite with what you see now.",
+          [
+            {label: "Reload", className: "ghost", run: async () => {
+              clearEditorMemory(state.current && state.current.name);
+              await refresh();
+            }},
+            {label: "Overwrite", className: "danger-outline", run: async () => { await save(true); }},
+          ],
+        );
+        return;
+      }
+      throw err;
+    }
   }
 
   async function acceptDraft() {
     if (!state.current) return;
-    await api.labAccept({...currentPayload(), status: "accepted"});
-    clearEditorMemory(state.current.name);
-    await refresh();
+    try {
+      await api.labAccept({...currentPayload(), status: "accepted"});
+      clearEditorMemory(state.current.name);
+      await refresh();
+    } catch (err) {
+      if (err && err.payload && err.payload.error === "stale_entry") {
+        PadModal.show(
+          "Draft changed elsewhere",
+          "Reload before Accept, or overwrite with what you see now.",
+          [
+            {label: "Reload", className: "ghost", run: async () => {
+              clearEditorMemory(state.current && state.current.name);
+              await refresh();
+            }},
+            {label: "Overwrite & Accept", className: "danger-outline", run: async () => {
+              await api.labAccept({...currentPayload(), status: "accepted", overwrite: true});
+              clearEditorMemory(state.current.name);
+              await refresh();
+            }},
+          ],
+        );
+        return;
+      }
+      throw err;
+    }
   }
 
   async function rejectDraft() {
     if (!state.current) return;
-    await api.labReject({...currentPayload(), status: "rejected"});
-    clearEditorMemory(state.current.name);
-    await refresh();
+    try {
+      await api.labReject({...currentPayload(), status: "rejected"});
+      clearEditorMemory(state.current.name);
+      await refresh();
+    } catch (err) {
+      if (err && err.payload && err.payload.error === "stale_entry") {
+        PadModal.show(
+          "Draft changed elsewhere",
+          "Reload before Reject, or overwrite with what you see now.",
+          [
+            {label: "Reload", className: "ghost", run: async () => {
+              clearEditorMemory(state.current && state.current.name);
+              await refresh();
+            }},
+            {label: "Overwrite & Reject", className: "danger-outline", run: async () => {
+              await api.labReject({...currentPayload(), status: "rejected", overwrite: true});
+              clearEditorMemory(state.current.name);
+              await refresh();
+            }},
+          ],
+        );
+        return;
+      }
+      throw err;
+    }
   }
 
   async function play(takeover) {
@@ -1157,6 +1230,11 @@
       else if (state.drawerOpen) closeDrawer();
       else if (!$("selfTestPanel").hidden) $("selfTestPanel").hidden = true;
     }
+  });
+  window.addEventListener("beforeunload", (ev) => {
+    if (!isEditorDirty()) return;
+    ev.preventDefault();
+    ev.returnValue = "";
   });
   window.addEventListener("resize", sizePreviewCanvas);
   $("tracePanel").hidden = !DEV;

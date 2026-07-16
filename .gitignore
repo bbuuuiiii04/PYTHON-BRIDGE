@@ -8,6 +8,9 @@ graphify-out/
 govee.env
 *.backup_*
 *.bak
+*.pre_*
+*.stale_*
+config/*.tmp-*
 .venv/
 # USB launcher (M1) build artifacts and disposable build interpreters — never commit
 .build-venv-*/
