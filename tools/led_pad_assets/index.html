@@ -25,8 +25,8 @@
         <label class="switch">Loop <input id="loopToggle" type="checkbox"><span id="loopLabel">On</span></label>
       </form>
       <div class="transport">
-        <span id="ownershipPill" class="pill">Free</span>
-        <button id="ownershipBtn" type="button" class="ghost">Take over</button>
+        <span id="ownershipPill" class="pill">Lights are free</span>
+        <button id="ownershipBtn" type="button" class="ghost">Take control</button>
         <button id="qrBtn" type="button" class="ghost" title="Open on another device">📱</button>
         <button id="stopBtn" type="button" class="danger" aria-label="Emergency stop">■ STOP</button>
       </div>
@@ -34,15 +34,15 @@
     <div class="topbar-row bank-row">
       <nav id="bankTabs" class="bank-tabs" aria-label="Banks"></nav>
       <div class="commit-actions">
-        <button id="commitBtn" type="button" class="primary">Apply <span id="commitCount" class="badge">0</span></button>
-        <button id="discardBtn" type="button" class="ghost">Discard all changes</button>
+        <button id="commitBtn" type="button" class="primary">Save to show <span id="commitCount" class="badge">0</span></button>
+        <button id="discardBtn" type="button" class="ghost">Undo all changes</button>
       </div>
     </div>
   </header>
   <main>
     <div id="configStaleBanner" class="config-stale-banner" hidden role="status" aria-live="polite"></div>
     <div id="errorBanner" class="error-banner" hidden></div>
-    <div id="liveChangedBanner" class="error-banner warn-banner" hidden>Live config changed underneath this draft (bridge or agent edit). Review before Apply — Discard all changes reloads live.</div>
+    <div id="liveChangedBanner" class="error-banner warn-banner" hidden>The live show file changed while you were editing. Review before Save to show — Undo all changes reloads the live file.</div>
     <section id="lookGrid" class="look-grid" aria-live="polite"></section>
   </main>
   <div id="toast" class="toast" hidden></div>
@@ -60,15 +60,15 @@
     </div>
     <form id="editorForm" class="editor-form">
       <section>
-        <h3 class="panel-label">Renderer</h3>
+        <h3 class="panel-label">Effect</h3>
         <select id="rendererSelect"></select>
         <p id="rendererDescription" class="dim"></p>
       </section>
       <section>
         <h3 class="panel-label">Color</h3>
         <div class="segmented" role="group" aria-label="Automation Color">
-          <button type="button" id="followColorBtn" class="active">Follow Show Color</button>
-          <button type="button" id="lockedPaletteBtn">Locked Palette</button>
+          <button type="button" id="followColorBtn" class="active">Match the track</button>
+          <button type="button" id="lockedPaletteBtn">Use set colors</button>
         </div>
         <label id="lockedPaletteWrap" hidden>Palette <select id="lockedPaletteSelect"></select></label>
         <label>Brightness <input id="brightnessInput" type="range" min="0" max="100" step="1"><output id="brightnessOutput"></output></label>
@@ -76,10 +76,10 @@
         <p id="strobeWarning" class="warn-text"></p>
       </section>
       <section id="slotSection" hidden>
-        <h3 class="panel-label">Slot colors</h3>
-        <label>Slot Fill <select id="slotFillSelect">
-          <option value="gradient_even">Even gradient</option>
-          <option value="random_with_replacement">Random per slot</option>
+        <h3 class="panel-label">Color spread</h3>
+        <label>Color spread <select id="slotFillSelect">
+          <option value="gradient_even">Even</option>
+          <option value="random_with_replacement">Random</option>
           <option value="random_with_mono_chance">Random with solid chance</option>
         </select></label>
         <label id="monoChanceWrap">Solid chance <input id="monoChanceInput" type="range" min="0" max="1" step="0.05"><output id="monoChanceOutput"></output></label>

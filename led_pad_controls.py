@@ -57,62 +57,62 @@ def _meta(
 # below). The UI shows "auto" for `None` defaults rather than inventing a
 # number.
 CONTROL_META: dict[str, dict[str, Any]] = {
-    "travel_beats": _meta("Motion Beats", "number", min=0.01, max=32, step=0.25, help="How many beats the motion takes.", advanced=True, default=None),
-    "loop_beats": _meta("Motion Beats (loop)", "number", min=0.01, max=32, step=0.25, help="How many beats the motion loop takes.", advanced=True, default=4.0),
+    "travel_beats": _meta("Motion length (beats)", "number", min=0.01, max=32, step=0.25, help="How many beats the motion takes.", advanced=True, default=None),
+    "loop_beats": _meta("Motion length (loop, beats)", "number", min=0.01, max=32, step=0.25, help="How many beats the motion loop takes.", advanced=True, default=4.0),
     "breath_beats": _meta("Breath Beats", "number", min=0.01, max=32, step=0.25, help="How many beats a breathing cycle takes.", default=8.0),
     "burst_beats": _meta("Burst Beats", "number", min=0.01, max=16, step=0.25, help="How many beats the burst takes.", default=1.0),
     "drift_beats": _meta("Color Drift Beats", "number", min=0.01, max=64, step=0.25, help="How many beats color drift takes.", default=32.0),
-    "duration_beats": _meta("Cycle Beats", "number", min=0, max=64, step=1, help="How many beats the cue cycle covers.", default=32.0),
-    "width": _meta("Head Width", "number", min=0.01, max=4, step=0.05, help="How wide the moving head appears.", advanced=True, default=None),
-    "trail_beats": _meta("Trail Beats", "number", min=0, max=8, step=0.25, help="How long the motion trail lasts.", advanced=True, default=None),
-    "trail": _meta("Trail Length", "int", min=0, max=60, step=1, help="How many LEDs remain behind the moving head.", default=3),
+    "duration_beats": _meta("Loop length (beats)", "number", min=0, max=64, step=1, help="How many beats the cue cycle covers.", default=32.0),
+    "width": _meta("Comet head size", "number", min=0.01, max=4, step=0.05, help="How wide the moving head appears.", advanced=True, default=None),
+    "trail_beats": _meta("Tail length (beats)", "number", min=0, max=8, step=0.25, help="How long the motion trail lasts.", advanced=True, default=None),
+    "trail": _meta("Tail length (LEDs)", "int", min=0, max=60, step=1, help="How many LEDs remain behind the moving head.", default=3),
     # Deprecated (AWR-262): tolerated for legacy configs / allowlist only — no
     # runtime consumer. Never shown in the pad UI (not in EFFECT_VISIBLE_KEYS).
-    "heads": _meta("Comet Count", "int", min=1, max=16, step=1, help="Deprecated — no consumer. Tolerated in saved configs only.", advanced=True, default=None),
+    "heads": _meta("How many comets", "int", min=1, max=16, step=1, help="Deprecated — no consumer. Tolerated in saved configs only.", advanced=True, default=None),
     "span_beats": _meta("Span Beats", "number", min=0, max=32, step=0.25, help="How many beats the span covers.", default=1.0),
     "period_beats": _meta("Breath Beats", "number", min=0, max=32, step=0.25, help="How many beats a pulse takes.", default=4.0),
     "floor": _meta("Minimum Glow", "number", min=0, max=1, step=0.05, help="The dimmest point in the pulse.", default=0.1),
     "density": _meta("Sparkle Density", "number", min=0, max=1, step=0.05, help="How many sparkles appear.", default=0.2),
-    "duty": _meta("Strobe Duty", "number", min=0, max=1, step=0.05, help="How much of the strobe cycle stays lit.", default=0.5),
+    "duty": _meta("Flash length (%)", "number", min=0, max=1, step=0.05, help="How long each flash stays on (fraction of the cycle).", default=0.5),
     "subdivision": _meta(
-        "Strobe Rate",
+        "Flashes per beat",
         "choice",
         choices=(1, 2, 4, 8),
         choice_labels={1: "Whole beat", 2: "Half beat", 4: "Quarter beat", 8: "Eighth beat"},
-        help="Beat subdivision used for strobe timing.",
+        help="How often flashes fire within a beat.",
         default=4,
     ),
     "speed": _meta("Sweep Speed", "number", min=0, max=16, step=0.25, help="How quickly the sweep moves.", default=1.0),
-    "decay": _meta("Fade Decay", "number", min=0, max=16, step=0.25, help="How quickly the burst fades.", default=0.6),
+    "decay": _meta("Fade-out (beats)", "number", min=0, max=16, step=0.25, help="How quickly the burst fades out.", default=0.6),
     "sync_mode": _meta(
-        "Sync Mode",
+        "Motion restart",
         "choice",
         choices=("retrigger", "overlap", "continuous"),
         choice_labels={
-            "retrigger": "Retrigger (restart on beat)",
-            "overlap": "Overlap (stack comets)",
-            "continuous": "Continuous (free-run)",
+            "retrigger": "Restart",
+            "overlap": "Stack",
+            "continuous": "Flow",
         },
         help="How motion responds to beat triggers.",
         advanced=True,
         default=None,
     ),
-    "beat_division": _meta("Beat Division", "number", min=0.01, max=16, step=0.25, help="How often beat triggers fire.", advanced=True, default=1.0),
-    "max_pulses": _meta("Max Comets", "int", min=1, max=16, step=1, help="Maximum overlapping comets.", advanced=True, default=None),
+    "beat_division": _meta("Trigger every … beats", "number", min=0.01, max=16, step=0.25, help="How often beat triggers fire.", advanced=True, default=1.0),
+    "max_pulses": _meta("How many comets", "int", min=1, max=16, step=1, help="Maximum overlapping comets.", advanced=True, default=None),
     "spawn_on_wrap": _meta("Spawn on Loop Wrap", "bool", help="Start a comet when the beat wraps backward.", advanced=True, default=None),
-    "reverse": _meta("Reverse Direction", "bool", help="Run motion in the opposite direction.", advanced=True, default=None),
+    "reverse": _meta("Reverse direction", "bool", help="Run motion in the opposite direction.", advanced=True, default=None),
     "color": _meta("Color", "rgb", help="Fixed RGB color."),
     "bg": _meta("Background Color", "rgb", help="Fixed RGB background color."),
     "color_a": _meta("Color A", "rgb", help="First fixed RGB color."),
     "color_b": _meta("Color B", "rgb", help="Second fixed RGB color."),
     # AWR-156 additions.
-    "hz": _meta("Strobe Hz", "number", min=0.5, max=10, step=0.1, help="Real-time strobe rate (BPM-free).", default=6.0),
-    "start_width": _meta("Start Width", "number", min=0.3, max=8, step=0.1, help="Head width at the start of the build.", advanced=True, default=4.0),
-    "end_width": _meta("End Width", "number", min=0.3, max=8, step=0.1, help="Head width at the end of the build.", advanced=True, default=1.0),
+    "hz": _meta("Flashes per second", "number", min=0.5, max=10, step=0.1, help="How many flashes fire each second (clock-timed, not BPM).", default=6.0),
+    "start_width": _meta("Start Width (LEDs)", "number", min=0.3, max=8, step=0.1, help="Head width at the start of the build.", advanced=True, default=4.0),
+    "end_width": _meta("End Width (LEDs)", "number", min=0.3, max=8, step=0.1, help="Head width at the end of the build.", advanced=True, default=1.0),
     "build_beats": _meta("Build Beats", "number", min=1, max=64, step=1, help="How many beats the build takes.", default=16.0),
-    "dim_floor": _meta("Dim Floor", "number", min=0.05, max=1, step=0.05, help="The dimmest brightness the build reaches.", default=0.35),
-    "base_width": _meta("Base Width", "number", min=0.3, max=6, step=0.1, help="Resting head width between beats.", advanced=True, default=1.5),
-    "pulse_width": _meta("Pulse Width", "number", min=0, max=8, step=0.1, help="How much the head widens on each beat.", advanced=True, default=3.0),
+    "dim_floor": _meta("Minimum brightness", "number", min=0.05, max=1, step=0.05, help="The dimmest brightness the build reaches.", default=0.35),
+    "base_width": _meta("Base Width (LEDs)", "number", min=0.3, max=6, step=0.1, help="Resting head width between beats.", advanced=True, default=1.5),
+    "pulse_width": _meta("Pulse Width (LEDs)", "number", min=0, max=8, step=0.1, help="How much the head widens on each beat.", advanced=True, default=3.0),
     "color_mode": _meta(
         "Color Mode",
         "choice",
@@ -128,10 +128,10 @@ CONTROL_META: dict[str, dict[str, Any]] = {
         default=2,
     ),
     "ember_hold_beats": _meta("Ember Hold Beats", "number", min=1, max=32, step=0.5, help="How many beats the sparkle embers stay lit before cutoff or fade.", default=8.0),
-    "ember_decay_beats": _meta("Ember Decay Beats", "number", min=0, max=8, step=0.25, help="Beats to fade out after hold (0 = hard cut).", default=0.0),
+    "ember_decay_beats": _meta("Ember fade-out (beats)", "number", min=0, max=8, step=0.25, help="Beats to fade out after hold (0 = hard cut).", default=0.0),
     "sparkle_density": _meta("Sparkle Density", "number", min=0, max=0.8, step=0.05, help="How many embers are active at once.", default=0.35),
-    "sparkle_size": _meta("Sparkle Size", "number", min=0.5, max=3, step=0.1, help="How wide each ember appears.", default=1.0),
-    "sparkle_life_s": _meta("Sparkle Life (s)", "number", min=0.1, max=2, step=0.05, help="How many real seconds each ember lives.", default=0.8),
+    "sparkle_size": _meta("Sparkle Size (LEDs)", "number", min=0.5, max=3, step=0.1, help="How wide each ember appears.", default=1.0),
+    "sparkle_life_s": _meta("Sparkle Life (seconds)", "number", min=0.1, max=2, step=0.05, help="How many real seconds each ember lives.", default=0.8),
     # AWR-161 additions (defaults hand-extracted from govee_frame_renderer.py's
     # `_rainbow_ordered` / `_drop_firework_explosion` params.get fallbacks).
     "cycle_beats": _meta("Color cycle (beats)", "number", min=1, max=64, step=0.5, help="How many beats one full color cycle takes.", default=8.0),
@@ -366,10 +366,9 @@ def _humanize(name: str) -> str:
     return name.replace("rt_", "").replace("_", " ").replace("post drop", "post-drop").title()
 
 
-RENDER_LABELS: dict[str, str] = {
-    name: f"{_humanize(name)} (show-colored)" if name in SLOT_EFFECTS else _humanize(name)
-    for name in REALTIME_EFFECT_NAMES
-}
+# AWR-264: human titles only — show-color vs fixed is a separate badge, not
+# part of the effect name string.
+RENDER_LABELS: dict[str, str] = {name: _humanize(name) for name in REALTIME_EFFECT_NAMES}
 
 # What the synthetic BPM control can actually change. "mixed" effects also
 # contain a wall-clock/frame-driven layer; they still respond to BPM.
@@ -489,7 +488,7 @@ FIREWORK_EXPLOSION_LAB_SPECS: dict[str, dict[str, Any]] = {
     "spark_b_g": {"kind": "slider", "label": "Spark B G", "min": 0.0, "max": 255.0, "step": 5.0},
     "spark_b_b": {"kind": "slider", "label": "Spark B B", "min": 0.0, "max": 255.0, "step": 5.0},
     "sparkle_density": {"kind": "slider", "label": "Sparkle density", "min": 0.0, "max": 0.8, "step": 0.05},
-    "sparkle_size": {"kind": "slider", "label": "Sparkle size (px)", "min": 0.5, "max": 3.0, "step": 0.25},
+    "sparkle_size": {"kind": "slider", "label": "Sparkle size (LEDs)", "min": 0.5, "max": 3.0, "step": 0.25},
     "sparkle_life_s": {"kind": "slider", "label": "Sparkle life (seconds)", "min": 0.1, "max": 2.0, "step": 0.05},
 }
 
