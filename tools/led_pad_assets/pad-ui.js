@@ -24,10 +24,74 @@
     state.toastTimer = setTimeout(() => { $("toast").hidden = true; }, 4000);
   }
   function human(name) { return String(name).replace(/^rt_/, "").replaceAll("_", " ").replace("post drop", "post-drop").replace(/\b\w/g, c => c.toUpperCase()); }
+  function titleCaseWords(value) {
+    return String(value || "").replaceAll("_", " ").replace(/\b\w/g, c => c.toUpperCase()).trim();
+  }
   function timingBadge(render) {
-    const label = ({beat:"♫ beat sync", mixed:"♫ beat + time", time:"◷ time driven", static:"static"})[(render || {}).timing_mode];
+    const label = ({
+      beat: "Locks to the beat",
+      mixed: "Beat + clock",
+      time: "Runs on a clock",
+      static: "Still",
+    })[(render || {}).timing_mode];
     return label ? `<span class="badge">${label}</span>` : "";
   }
+  function rgbTuple(value) {
+    if (Array.isArray(value) && value.length >= 3) {
+      return [Number(value[0]) || 0, Number(value[1]) || 0, Number(value[2]) || 0];
+    }
+    return null;
+  }
+  function nearestColorName(rgb) {
+    const [r, g, b] = rgb;
+    const named = [
+      ["White", [255, 255, 255]],
+      ["Black", [0, 0, 0]],
+      ["Red", [220, 40, 40]],
+      ["Orange", [240, 140, 40]],
+      ["Yellow", [240, 220, 60]],
+      ["Green", [40, 200, 80]],
+      ["Cyan", [40, 200, 220]],
+      ["Blue", [40, 80, 240]],
+      ["Purple", [160, 60, 220]],
+      ["Pink", [240, 80, 180]],
+    ];
+    let best = named[0][0];
+    let bestDist = Infinity;
+    for (const [label, [nr, ng, nb]] of named) {
+      const dist = (r - nr) ** 2 + (g - ng) ** 2 + (b - nb) ** 2;
+      if (dist < bestDist) { bestDist = dist; best = label; }
+    }
+    return best;
+  }
+  function colorwayChip(look) {
+    const params = (look && look.params) || {};
+    const a = rgbTuple(params.color_a) || rgbTuple(params.color);
+    const b = rgbTuple(params.color_b);
+    if (!a) return "";
+    const hex = (rgb) => `#${rgb.map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0")).join("")}`;
+    const names = [nearestColorName(a)];
+    const swatches = [`<span class="colorway-swatch" style="background:${hex(a)}"></span>`];
+    if (b && (b[0] !== a[0] || b[1] !== a[1] || b[2] !== a[2])) {
+      names.push(nearestColorName(b));
+      swatches.push(`<span class="colorway-swatch" style="background:${hex(b)}"></span>`);
+    }
+    return `<span class="colorway-chip" title="Colorway">${swatches.join("")}${esc(names.join(" + "))}</span>`;
+  }
+  function slugifyLookName(display, existingNames) {
+    const raw = String(display || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+    let base = (/^[a-z0-9_]+$/.test(raw) && raw) ? raw : "untitled";
+    const taken = new Set(existingNames || []);
+    let candidate = base;
+    let n = 2;
+    while (taken.has(candidate)) {
+      candidate = `${base}_${n}`;
+      n += 1;
+    }
+    return candidate;
+  }
+  const NAME_HINT = "Letters/numbers/spaces fine — we'll format it automatically";
+  function allLookNames() { return Object.keys(((state.config || {}).config || {}).looks || {}); }
   function lookBank(name) {
     for (const [bank, names] of Object.entries(state.banks || {})) if ((names || []).includes(name)) return bank;
     return "other";
