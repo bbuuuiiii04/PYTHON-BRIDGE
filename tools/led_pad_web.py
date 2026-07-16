@@ -818,6 +818,49 @@ class LedPadService:
             config = copy.deepcopy(self._draft)
         return {"ok": True, "name": new_name, "errors": [], "warnings": warnings, "dirty": self._dirty_for(config)}
 
+    def rename_look(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Rename a look id in-place (same content, bank, and color-engine maps)."""
+        name = str(payload.get("name", "")).strip()
+        new_name = str(payload.get("new_name", "")).strip()
+        if name == new_name:
+            return {"ok": True, "name": new_name, "errors": [], "warnings": [], "dirty": self._dirty_for(self._draft)}
+        with self._lock:
+            candidate = copy.deepcopy(self._draft)
+            looks = candidate.setdefault("looks", {})
+            if name not in looks:
+                raise ValueError(f"unknown look: {name}")
+            self._validate_name(new_name, new=True, config=candidate)
+            bank = _bank_for(candidate, name)
+            if bank == "other":
+                bank = "drafts"
+            looks[new_name] = looks.pop(name)
+            engine = candidate.setdefault("color_engine", {})
+            for key in ("slot_fill_strategy_by_look", "slot_mono_chance_by_look", "locked_palette_by_look"):
+                mapping = engine.setdefault(key, {})
+                if name in mapping:
+                    mapping[new_name] = mapping.pop(name)
+            meta = candidate.setdefault("_pad_meta", {})
+            look_meta = meta.setdefault("looks", {})
+            if name in look_meta:
+                look_meta[new_name] = look_meta.pop(name)
+            session = meta.setdefault("pad_session", {})
+            for key in ("touched", "moved", "deleted"):
+                items = session.get(key)
+                if isinstance(items, list) and name in items:
+                    session[key] = [new_name if item == name else item for item in items]
+            _remove_from_pad_banks(candidate, name)
+            _add_to_bank(candidate, new_name, bank)
+            _mark_touched(candidate, new_name)
+            _mark_moved(candidate, new_name)
+            self._ensure_unique_bank_locked(candidate)
+            errors, warnings = self._validate(candidate)
+            if errors:
+                return {"ok": False, "errors": errors, "warnings": warnings, "dirty": self._dirty_for(candidate)}
+            self._draft = candidate
+            self._persist_draft_locked()
+            config = copy.deepcopy(self._draft)
+        return {"ok": True, "name": new_name, "errors": [], "warnings": warnings, "dirty": self._dirty_for(config)}
+
     def move_look(self, payload: dict[str, Any]) -> dict[str, Any]:
         name = str(payload.get("name", "")).strip()
         bank = str(payload.get("bank", "")).strip()
@@ -1569,6 +1612,7 @@ def build_handler(service: LedPadService) -> type[BaseHTTPRequestHandler]:
         _POST_ROUTES = {
             "/api/look/save": service.save_look,
             "/api/look/duplicate": service.duplicate_look,
+            "/api/look/rename": service.rename_look,
             "/api/look/move": service.move_look,
             "/api/look/delete": service.delete_look,
             "/api/play": service.play,

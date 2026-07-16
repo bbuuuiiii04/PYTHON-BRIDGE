@@ -261,7 +261,11 @@ function updateCalibrationBadge() {
   const candidate = String(state.profile.calibration_status);
   const status = ["unmeasured", "relative", "measured"].includes(candidate) ? candidate : "unmeasured";
   const badge = $("calibration-badge");
-  badge.textContent = status.toUpperCase();
+  badge.textContent = {
+    unmeasured: "Colors not calibrated yet",
+    relative: "Colors roughly matched",
+    measured: "Colors calibrated",
+  }[status];
   badge.classList.toggle("warn", status !== "measured");
 }
 
@@ -1329,6 +1333,14 @@ function wireKnobs() {
   // calibration-lock wired in wireShell (P-1)
 }
 
+function humanEffectName(name) {
+  return String(name || "")
+    .replace(/^rt_/, "")
+    .replaceAll("_", " ")
+    .replace("post drop", "post-drop")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function fillSourcePicker() {
   const kind = $("source-kind").value;
   const select = $("source-name");
@@ -1338,18 +1350,25 @@ function fillSourcePicker() {
   $("source-name-row").hidden = kind === "replay";
   renderButton.hidden = kind === "replay";
   renderButton.textContent = {
-    look: "Render configured look",
+    look: "Render saved look",
     effect: "Render effect",
     lab: "Render lab draft",
   }[kind] || "Render";
 
   if (kind === "effect") {
-    for (const name of state.catalog.effects) select.add(new Option(name, name));
+    for (const name of state.catalog.effects) select.add(new Option(humanEffectName(name), name));
   } else if (kind === "look") {
     const looks = state.catalog.looks.ok ? state.catalog.looks.looks : {};
-    for (const [name, entry] of Object.entries(looks)) select.add(new Option(name, name));
+    for (const [name, entry] of Object.entries(looks)) {
+      const scene = entry && entry.scene_ref ? humanEffectName(entry.scene_ref) : humanEffectName(name);
+      const lookLabel = humanEffectName(name);
+      select.add(new Option(scene === lookLabel ? scene : `${scene} · ${lookLabel}`, name));
+    }
   } else if (kind === "lab") {
-    for (const draft of state.catalog.lab.drafts || []) select.add(new Option(draft.name, draft.name));
+    for (const draft of state.catalog.lab.drafts || []) {
+      const label = draft.brief || humanEffectName(draft.name);
+      select.add(new Option(label, draft.name));
+    }
   }
   syncParamsFromSource();
 }
@@ -1750,8 +1769,8 @@ async function boot() {
   // U-8: modality-aware gesture copy
   const coarse = window.matchMedia?.("(pointer: coarse)")?.matches;
   $("layout-gesture-copy").textContent = coarse
-    ? "Drag vertices on the room. Long-press an edge to add a point, a vertex to remove one. LED spacing is fixed — the path is never stretched."
-    : "Drag vertices on the room. Double-click an edge to add a point, a vertex to remove one. On touch devices, long-press does the same. LED spacing is fixed — the path is never stretched.";
+    ? "Drag corners on the room. Long-press an edge to add a point, a corner to remove one. LED spacing is fixed — the path is never stretched."
+    : "Drag corners on the room. Double-click an edge to add a point, a corner to remove one. On touch devices, long-press does the same. LED spacing is fixed — the path is never stretched.";
 
   state.catalog = await api("GET", "/api/catalog");
   rememberProfileMtime(state.catalog);

@@ -2,7 +2,8 @@
   const api = window.LedPadApi;
   const $ = (id) => document.getElementById(id);
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
-  const ROLE_ABBREV = {ambient:"AMB", groove:"GRV", buildup:"BLD", pre_drop:"PRE", drop:"DRP", post_drop:"PST", breakdown:"BRK", utility:"UTL"};
+  const ROLE_ABBREV = {ambient:"Amb", groove:"Grv", buildup:"Bld", pre_drop:"Pre", drop:"Drp", post_drop:"Pst", breakdown:"Brk", utility:"Utl"};
+  const ROLE_FULL = {ambient:"Ambient", groove:"Groove", buildup:"Buildup", pre_drop:"Pre-drop", drop:"Drop", post_drop:"Post-drop", breakdown:"Breakdown", utility:"Utility"};
   const state = {
     entries: [],
     current: null,
@@ -31,12 +32,13 @@
   function clearError() { $("errorBanner").hidden = true; $("errorBanner").textContent = ""; }
   function labScene(name) { return `lab_${name}`; }
   function cue() { return Number(($("cueCustom") || {}).value || (state.current || {}).cue_beats || 16); }
-  function timingLabel(mode) { return ({beat:"♫ beat sync", mixed:"♫ beat + time", time:"◷ time driven", static:"static", unknown:"timing unknown"})[mode] || "timing unknown"; }
+  function timingLabel(mode) { return ({beat:"Locks to the beat", mixed:"Beat + clock", time:"Runs on a clock", static:"Still", unknown:"Timing unknown"})[mode] || "Timing unknown"; }
   function roleOf(entry) { return String((entry && entry.target_role) || ""); }
   function phraseChip(role) {
-    if (!role) return `<span class="lab-phrase-chip untagged" title="untagged">—</span>`;
+    if (!role) return `<span class="lab-phrase-chip untagged" title="Untagged">—</span>`;
     const abbr = ROLE_ABBREV[role] || "—";
-    return `<span class="lab-phrase-chip role-${esc(role)}" title="${esc(role)}">${abbr}</span>`;
+    const full = ROLE_FULL[role] || role;
+    return `<span class="lab-phrase-chip role-${esc(role)}" title="${esc(full)}">${abbr}</span>`;
   }
   function relativeDate(iso) {
     if (!iso) return "—";
@@ -309,7 +311,7 @@
     $("draftsDrawerCount").textContent = String(visible.length);
 
     const groups = [
-      {key: "iterating", label: "Iterating", items: []},
+      {key: "iterating", label: "Work in progress", items: []},
       {key: "accepted", label: "Accepted", items: []},
       {key: "rejected", label: "Rejected", items: []},
     ];
@@ -428,7 +430,7 @@
     $("notesSummary").textContent = notesPreview($("notesInput").value);
     $("kindText").textContent = e.kind || "";
     $("timingText").textContent = timingLabel(mem ? mem.timing_mode : e.timing_mode);
-    $("statusText").textContent = e.status;
+    $("statusText").textContent = ({iterating: "Work in progress", accepted: "Accepted", rejected: "Rejected", promoted: "Promoted"})[e.status] || e.status;
     $("statusText").className = `status-pill ${e.status}`;
     $("targetRoleSelect").value = mem ? mem.target_role : roleOf(e);
     $("timingModeSelect").value = (mem ? mem.timing_mode : e.timing_mode) || "unknown";
@@ -454,7 +456,7 @@
     $("bpmInput").disabled = !enabled;
     document.querySelectorAll("[data-step]").forEach(btn => { btn.disabled = !enabled; });
     $("bpmScope").textContent = enabled
-      ? (mode === "mixed" ? "Changes the beat-synced layer only" : "Changes this draft")
+      ? (mode === "mixed" ? "Only affects beat-locked cues" : "Changes this draft")
       : (mode === "time" ? "This draft follows seconds; BPM has no effect"
         : mode === "static" ? "This draft does not animate"
         : "Set timing (header) to enable BPM");
@@ -673,7 +675,7 @@
           }
         } catch (err) {
           if (err && err.message === "ownership_required") {
-            PadModal.confirm("The bridge owns the LEDs right now. Take over?", "LEDs go dark on the bridge side until you release.", "Take over", () => play(true));
+            PadModal.confirm("The show is running the lights right now. Take control?", "The show side goes dark until you release.", "Take control", () => play(true));
             return;
           }
           throw err;
@@ -686,7 +688,7 @@
       await updateRuntime();
     } catch (err) {
       if (err && err.message === "ownership_required") {
-        PadModal.confirm("The bridge owns the LEDs right now. Take over?", "LEDs go dark on the bridge side until you release.", "Take over", () => play(true));
+        PadModal.confirm("The show is running the lights right now. Take control?", "The show side goes dark until you release.", "Take control", () => play(true));
         return;
       }
       showError(err);
@@ -729,10 +731,10 @@
       state.playingLook = pb.playing ? (pb.playing_look || "") : "";
       state.health.playingName = state.playingLook;
       state.health.playingBeat = typeof pb.beat === "number" ? pb.beat : null;
-      $("ownershipPill").textContent = ownership === "bridge_owned" ? "Bridge owns LEDs" : ownership === "pad_owned" ? "Pad owns LEDs" : "Free";
+      $("ownershipPill").textContent = ownership === "bridge_owned" ? "The show is running the lights" : ownership === "pad_owned" ? "This pad is running the lights" : "Lights are free";
       $("ownershipPill").className = `pill ${ownership === "bridge_owned" ? "bridge" : ownership === "pad_owned" ? "pad" : ""}`;
       $("ownershipBtn").hidden = ownership === "free";
-      $("ownershipBtn").textContent = ownership === "pad_owned" ? "Release" : "Take over";
+      $("ownershipBtn").textContent = ownership === "pad_owned" ? "Release" : "Take control";
       // Live beat: phase-lock to server status.beat; preview owns the meter while its raf runs.
       if (beatUI.mode !== "preview") {
         if (pb.playing && typeof pb.beat === "number") {
@@ -1317,7 +1319,7 @@
     }
     PadModal.fields(
       "New cue",
-      "Name it in plain words. Start from a working cue so Preview and tuning work right away.",
+      "Name it in plain words. Letters/numbers/spaces fine — we'll format it automatically. Start from a working cue so Preview and tuning work right away.",
       [
         {name: "display_name", label: "Display name", type: "text", value: ""},
         {

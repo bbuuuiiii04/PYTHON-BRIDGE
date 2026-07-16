@@ -27,9 +27,9 @@
     <span>41.656 mm/LED</span>
   </div>
   <div class="top-actions">
-    <span id="calibration-badge" class="chip warn" title="Screen colors not yet calibrated against the real strip — Calibrate tab">UNMEASURED</span>
-    <span class="chip ok" id="offline-badge" title="This studio never opens a network path to the LEDs">Never touches the strip</span>
-    <span id="paint-health" class="chip mono" title="Browser draw health, not hardware">—</span>
+    <span id="calibration-badge" class="chip warn" title="Screen colors not yet calibrated against the real strip — Calibrate tab">Colors not calibrated yet</span>
+    <span class="chip ok" id="offline-badge" title="Preview only — this page never contacts the lights">Preview only — never touches the lights</span>
+    <span id="paint-health" class="chip mono" title="Browser draw health, not hardware" hidden>—</span>
     <button id="top-stop" class="btn-stop" type="button" aria-label="Stop playback" title="Stop">■ STOP</button>
     <button id="help-btn" class="icon-btn" type="button" aria-label="Keyboard shortcuts" aria-expanded="false" aria-controls="help-popover">?</button>
   </div>
@@ -41,7 +41,7 @@
     <div><dt><kbd>Space</kbd></dt><dd>Play / pause</dd></div>
     <div><dt><kbd>L</kbd></dt><dd>Toggle labels</dd></div>
     <div><dt><kbd>←</kbd><kbd>→</kbd></dt><dd>Step frame (when paused)</dd></div>
-    <div><dt><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd></dt><dd>Nudge selected vertex 10 mm</dd></div>
+    <div><dt><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd></dt><dd>Nudge selected corner 10 mm</dd></div>
     <div><dt><kbd>⇧</kbd>+arrows</dt><dd>Nudge 100 mm</dd></div>
     <div><dt><kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>Z</kbd></dt><dd>Undo layout edit (Layout tab only)</dd></div>
   </dl>
@@ -131,10 +131,10 @@
         <span class="panel-label">Source</span>
         <label class="field">Type
           <select id="source-kind">
-            <option value="look">Configured look (before live injection)</option>
-            <option value="effect">Production effect</option>
+            <option value="look">Saved look</option>
+            <option value="effect">Built-in effect</option>
             <option value="lab">Lab draft</option>
-            <option value="replay">Recorded frames</option>
+            <option value="replay">Recording</option>
           </select>
         </label>
         <label id="source-name-row" class="field">Look or effect
@@ -148,15 +148,15 @@
         </div>
         <div class="settings-grid">
           <label class="field">BPM<input type="number" id="bpm" value="128" min="20" max="300"></label>
-          <label class="field">Duration<input type="number" id="duration" value="8" min="1" max="30"></label>
-          <label class="field">Seed<input type="number" id="seed" value="0"></label>
+          <label class="field">Duration (seconds)<input type="number" id="duration" value="8" min="1" max="30"></label>
         </div>
         <details class="advanced">
-          <summary>Advanced effect parameters</summary>
+          <summary>Advanced</summary>
+          <label class="field">Variation seed<input type="number" id="seed" value="0"></label>
           <label class="field">JSON<textarea id="params" rows="6">{}</textarea></label>
         </details>
         <button id="render" class="primary action" type="button">Render</button>
-        <p class="fine-print">Frame source and timing appear on the stage. This page never contacts the strip.</p>
+        <p class="fine-print">Frame source and timing appear on the stage. Preview only — never touches the lights.</p>
       </section>
 
       <section id="layout-panel" class="panel-stack" data-panel="layout" hidden role="tabpanel" aria-labelledby="tab-layout">
@@ -176,12 +176,12 @@
           <span class="panel-label">Strip layout</span>
           <button id="layout-lock" type="button" class="lock-toggle" aria-pressed="false" title="Lock layout editing">🔓 Unlocked</button>
         </div>
-        <p class="fine-print" id="layout-gesture-copy">Drag vertices on the room. Double-click (desktop) or long-press (touch) an edge to add a point, a vertex to remove one. LED spacing is fixed — the path is never stretched.</p>
+        <p class="fine-print" id="layout-gesture-copy">Drag corners on the room. Double-click (desktop) or long-press (touch) an edge to add a point, a corner to remove one. LED spacing is fixed — the path is never stretched.</p>
         <div class="preset-cards" role="listbox" aria-label="Layout presets">
           <button type="button" class="preset-card" data-preset="perimeter" id="preset-perimeter" aria-selected="true">
             <canvas class="preset-thumb" id="thumb-perimeter" width="120" height="56" aria-hidden="true"></canvas>
             <strong>Perimeter</strong>
-            <span>Room loop · junction top-center</span>
+            <span>Room loop · join at top-center</span>
           </button>
           <button type="button" class="preset-card" data-preset="snake" id="preset-snake" aria-selected="false">
             <canvas class="preset-thumb" id="thumb-snake" width="120" height="56" aria-hidden="true"></canvas>
@@ -207,7 +207,7 @@
         <p id="path-length-status" class="dim-bar" aria-live="polite">Path —</p>
         <div id="layout-warnings" class="layout-warnings" hidden role="status"></div>
         <div class="button-row wrap">
-          <button type="button" id="layout-flip">Flip chain</button>
+          <button type="button" id="layout-flip">Reverse direction</button>
           <button type="button" id="layout-reset">Reset to Perimeter</button>
           <button type="button" id="layout-undo" disabled>Undo</button>
           <button type="button" id="layout-save" class="primary">Save changes</button>
@@ -245,20 +245,20 @@
           <summary>Device calibration values</summary>
           <p class="fine-print">These remain assumptions until fitted from the real capture.</p>
           <div id="calibration-controls">
-            <label class="slider">Gamma<input type="range" id="knob-gamma" min="0.2" max="5" step="0.01"><output id="knob-gamma-val" class="mono"></output></label>
-            <label class="slider">Red gain<input type="range" id="knob-white-0" min="0" max="2" step="0.01"><output id="knob-white-0-val" class="mono"></output></label>
-            <label class="slider">Green gain<input type="range" id="knob-white-1" min="0" max="2" step="0.01"><output id="knob-white-1-val" class="mono"></output></label>
-            <label class="slider">Blue gain<input type="range" id="knob-white-2" min="0" max="2" step="0.01"><output id="knob-white-2-val" class="mono"></output></label>
+            <label class="slider">Overall color curve<span class="field-hint">Gamma — how midtones compress</span><input type="range" id="knob-gamma" min="0.2" max="5" step="0.01"><output id="knob-gamma-val" class="mono"></output></label>
+            <label class="slider">Red balance<span class="field-hint">Red gain</span><input type="range" id="knob-white-0" min="0" max="2" step="0.01"><output id="knob-white-0-val" class="mono"></output></label>
+            <label class="slider">Green balance<span class="field-hint">Green gain</span><input type="range" id="knob-white-1" min="0" max="2" step="0.01"><output id="knob-white-1-val" class="mono"></output></label>
+            <label class="slider">Blue balance<span class="field-hint">Blue gain</span><input type="range" id="knob-white-2" min="0" max="2" step="0.01"><output id="knob-white-2-val" class="mono"></output></label>
             <label class="slider">Brightness<input type="range" id="knob-brightness" min="0" max="2" step="0.01"><output id="knob-brightness-val" class="mono"></output></label>
             <label class="slider">Glow size<input type="range" id="knob-glow-radius" min="0.1" max="6" step="0.05"><output id="knob-glow-radius-val" class="mono"></output></label>
-            <label class="slider">Glow strength<input type="range" id="knob-glow-gain" min="0" max="4" step="0.05"><output id="knob-glow-gain-val" class="mono"></output></label>
-            <label class="slider">Neighbor bleed<input type="range" id="knob-bleed" min="0" max="1" step="0.01"><output id="knob-bleed-val" class="mono"></output></label>
+            <label class="slider">Glow amount<span class="field-hint">Glow strength</span><input type="range" id="knob-glow-gain" min="0" max="4" step="0.05"><output id="knob-glow-gain-val" class="mono"></output></label>
+            <label class="slider">Color spill<span class="field-hint">Neighbor bleed between segments</span><input type="range" id="knob-bleed" min="0" max="1" step="0.01"><output id="knob-bleed-val" class="mono"></output></label>
             <label class="slider">Target FPS<input type="range" id="knob-fps" min="1" max="120" step="1"><output id="knob-fps-val" class="mono"></output></label>
-            <label class="slider">Latency ms<input type="range" id="knob-latency" min="-500" max="500" step="1"><output id="knob-latency-val" class="mono"></output></label>
+            <label class="slider">Latency (ms)<input type="range" id="knob-latency" min="-500" max="500" step="1"><output id="knob-latency-val" class="mono"></output></label>
             <label class="field">Response model
               <select id="knob-hold"><option value="zoh">Hold exact frames</option><option value="slew">Measured color transition</option></select>
             </label>
-            <label class="slider">Transition ms<input type="range" id="knob-slew" min="0" max="1000" step="1"><output id="knob-slew-val" class="mono"></output></label>
+            <label class="slider">Transition (ms)<input type="range" id="knob-slew" min="0" max="1000" step="1"><output id="knob-slew-val" class="mono"></output></label>
           </div>
           <div class="button-row">
             <button id="profile-save" class="primary" type="button">Save values</button>
