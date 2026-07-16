@@ -701,6 +701,16 @@ like-for-like to SOL's 15-track/113-marker sample. The growl-centroid values the
 carry are present, aligned, and real-valued in the strict v4 cache — no backfill remains; only
 their *musical* correctness is an open Stage-2 question.
 
+**2026-07-15 operator closure:** the gold-label curation pass (AWR-205) is permanently
+closed by operator ruling — the 1-1 labeling session will never run. Consequence:
+AWR-200's accuracy axes stay UNAVAILABLE forever and AWR-200 is FINAL at PARTIAL (the
+marker-sensitivity axis delivered its value and fed the AWR-239 pilot). Musical-correctness
+questions (growl centroid, lowmid_pulse/wobble thresholds) validate ONLY through normal
+live mixing — the operator vetoes wrong-looking moments by timestamp; silence is a pass;
+agents correlate against decision logs. No labeling sessions, ear batches, or
+"name-me-tracks" asks, ever (operator ruling 2026-07-15). A feature whose validation would
+require structured listening from the operator is redesigned or killed at spec time.
+
 ---
 
 ## 10. Intrinsic-hardness shadow descriptor (AWR-203, offline, 2026-07-11)
