@@ -553,15 +553,20 @@ function syncLayoutActiveHint({flashSaved = false} = {}) {
     syncLayoutActiveHint._timer = setTimeout(() => syncLayoutActiveHint(), 1800);
     return;
   }
-  if (hint.dataset.flashUntil && Date.now() < Number(hint.dataset.flashUntil)) return;
-  delete hint.dataset.flashUntil;
   const selected = selectedLayoutName();
   const active = state.profile.active_layout;
   const savedActive = state.savedProfile?.active_layout;
+  // Preview mode always wins over a lingering “Active layout saved” flash.
   if (selected !== active) {
+    delete hint.dataset.flashUntil;
+    clearTimeout(syncLayoutActiveHint._timer);
     hint.textContent = "previewing — press Use to activate & edit";
     hint.hidden = false;
-  } else if (savedActive && savedActive !== active) {
+    return;
+  }
+  if (hint.dataset.flashUntil && Date.now() < Number(hint.dataset.flashUntil)) return;
+  delete hint.dataset.flashUntil;
+  if (savedActive && savedActive !== active) {
     hint.textContent = "Press Use to make this the active layout";
     hint.hidden = false;
   } else {
