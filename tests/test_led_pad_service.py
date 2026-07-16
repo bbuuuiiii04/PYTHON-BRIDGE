@@ -13,6 +13,7 @@ import unittest
 from contextlib import contextmanager
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -26,6 +27,7 @@ from rb_ss_bridge_v2.tools.led_pad_web import (  # noqa: E402
     process_start_time,
     resolve_sim_profile_state,
     sim_profile_response,
+    status_file_is_fresh,
 )
 
 
@@ -849,7 +851,7 @@ class FreshnessRestartDueTests(unittest.TestCase):
 
 
 class ConfigStaleComputationTests(unittest.TestCase):
-    """AWR-255: live config mtime vs bridge start (fake clocks only)."""
+    """AWR-255/261: live config mtime vs bridge start (fake clocks only)."""
 
     def test_stale_when_config_newer_than_bridge_start(self) -> None:
         out = compute_config_stale(
@@ -861,6 +863,7 @@ class ConfigStaleComputationTests(unittest.TestCase):
         self.assertTrue(out["stale"])
         self.assertEqual(out["signal"], "bridge_start")
         self.assertEqual(out["lag_s"], 100.0)
+        self.assertTrue(out["bridge_live"])
 
     def test_fresh_when_bridge_started_after_config(self) -> None:
         out = compute_config_stale(
@@ -919,6 +922,27 @@ class ConfigStaleComputationTests(unittest.TestCase):
         self.assertFalse(out["stale"])
         self.assertEqual(out["signal"], "bridge_start")
 
+    def test_not_running_when_bridge_not_live(self) -> None:
+        out = compute_config_stale(
+            config_mtime=200.0,
+            bridge_started_at=100.0,
+            last_commit_at=199.0,
+            bridge_live=False,
+        )
+        self.assertFalse(out["stale"])
+        self.assertEqual(out["signal"], "not_running")
+        self.assertFalse(out["bridge_live"])
+        self.assertIsNone(out["bridge_started_at"])
+
+    def test_status_file_freshness_window(self) -> None:
+        now = 1_000.0
+        self.assertTrue(status_file_is_fresh(999.0, now=now))
+        self.assertTrue(status_file_is_fresh(995.1, now=now))
+        self.assertFalse(status_file_is_fresh(995.0, now=now))
+        self.assertFalse(status_file_is_fresh(900.0, now=now))
+        self.assertFalse(status_file_is_fresh(None, now=now))
+        self.assertFalse(status_file_is_fresh(0, now=now))
+
     def test_process_start_time_self_pid(self) -> None:
         started = process_start_time(os.getpid())
         self.assertIsNotNone(started)
@@ -929,23 +953,127 @@ class ConfigStaleComputationTests(unittest.TestCase):
     def test_process_start_time_dead_pid(self) -> None:
         self.assertIsNone(process_start_time(2_147_483_646))
 
-    def test_runtime_status_exposes_config_stale(self) -> None:
+
+class ConfigStaleRuntimeStatusTests(unittest.TestCase):
+    """AWR-261: status freshness gates bridge.live (synthetic files + fake time)."""
+
+    NOW = 1_000_000.0
+
+    def _service(self, td: str) -> LedPadService:
+        path = Path(td) / "led_look_director.json"
+        shutil.copy2(_EXAMPLE_PATH, path)
+        service = LedPadService(path, dry_run=True, playback=_FakePlayback())
+        service._status_path = Path(td) / "status.json"
+        return service
+
+    def _write_status(self, service: LedPadService, payload: dict) -> None:
+        service._status_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    def test_fresh_status_older_config_is_green(self) -> None:
         with tempfile.TemporaryDirectory() as td:
-            playback = _FakePlayback()
-            path = Path(td) / "led_look_director.json"
-            shutil.copy2(_EXAMPLE_PATH, path)
-            service = LedPadService(path, dry_run=True, playback=playback)
-            status_path = Path(td) / "status.json"
-            status_path.write_text(
-                json.dumps({"process": {"pid": -1, "state": "on"}}),
-                encoding="utf-8",
+            service = self._service(td)
+            started = self.NOW - 100.0
+            config_mtime = started - 50.0
+            os.utime(service._config_path, (config_mtime, config_mtime))
+            self._write_status(
+                service,
+                {
+                    "written_at": self.NOW - 1.0,
+                    "process": {"pid": 4242, "state": "on"},
+                },
             )
-            service._status_path = status_path
-            service._last_commit_at = path.stat().st_mtime
-            payload = service.runtime_status()
-            self.assertIn("config_stale", payload)
-            self.assertTrue(payload["config_stale"]["stale"])
-            self.assertEqual(payload["config_stale"]["signal"], "commit_proxy")
+            with patch.object(led_pad_web, "process_start_time", return_value=started):
+                payload = service.runtime_status(now=self.NOW)
+            self.assertTrue(payload["bridge"]["live"])
+            self.assertEqual(payload["bridge"]["state"], "running")
+            stale = payload["config_stale"]
+            self.assertFalse(stale["stale"])
+            self.assertEqual(stale["signal"], "bridge_start")
+            self.assertTrue(stale["bridge_live"])
+
+    def test_fresh_status_newer_config_warns(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service = self._service(td)
+            started = self.NOW - 100.0
+            config_mtime = started + 25.0
+            os.utime(service._config_path, (config_mtime, config_mtime))
+            self._write_status(
+                service,
+                {
+                    "written_at": self.NOW - 0.5,
+                    "process": {"pid": 4242, "state": "on"},
+                },
+            )
+            with patch.object(led_pad_web, "process_start_time", return_value=started):
+                payload = service.runtime_status(now=self.NOW)
+            self.assertTrue(payload["bridge"]["live"])
+            stale = payload["config_stale"]
+            self.assertTrue(stale["stale"])
+            self.assertEqual(stale["signal"], "bridge_start")
+            self.assertEqual(stale["lag_s"], 25.0)
+
+    def test_stale_status_file_is_not_running(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service = self._service(td)
+            self._write_status(
+                service,
+                {
+                    "written_at": self.NOW - 60.0,
+                    "process": {"pid": 4242, "state": "on"},
+                },
+            )
+            with patch.object(led_pad_web, "process_start_time", return_value=self.NOW - 200.0):
+                payload = service.runtime_status(now=self.NOW)
+            self.assertFalse(payload["bridge"]["live"])
+            self.assertEqual(payload["bridge"]["state"], "not_running")
+            stale = payload["config_stale"]
+            self.assertFalse(stale["stale"])
+            self.assertEqual(stale["signal"], "not_running")
+            self.assertFalse(stale["bridge_live"])
+
+    def test_missing_status_file_is_not_running(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service = self._service(td)
+            self.assertFalse(service._status_path.exists())
+            payload = service.runtime_status(now=self.NOW)
+            self.assertFalse(payload["bridge"]["live"])
+            self.assertEqual(payload["bridge"]["state"], "not_running")
+            self.assertEqual(payload["config_stale"]["signal"], "not_running")
+
+    def test_fresh_status_dead_pid_is_cant_tell(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service = self._service(td)
+            config_mtime = self.NOW - 10.0
+            os.utime(service._config_path, (config_mtime, config_mtime))
+            service._last_commit_at = config_mtime
+            self._write_status(
+                service,
+                {
+                    "written_at": self.NOW - 1.0,
+                    "process": {"pid": 2_147_483_646, "state": "on"},
+                },
+            )
+            with patch.object(led_pad_web, "process_start_time", return_value=None):
+                payload = service.runtime_status(now=self.NOW)
+            self.assertTrue(payload["bridge"]["live"])
+            stale = payload["config_stale"]
+            self.assertTrue(stale["stale"])
+            self.assertEqual(stale["signal"], "commit_proxy")
+
+    def test_parseable_but_stale_file_is_not_live(self) -> None:
+        """Regression: yesterday's status file must not keep bridge.live=True."""
+        with tempfile.TemporaryDirectory() as td:
+            service = self._service(td)
+            self._write_status(
+                service,
+                {
+                    "written_at": self.NOW - 86_400.0,
+                    "process": {"pid": os.getpid(), "state": "on"},
+                },
+            )
+            payload = service.runtime_status(now=self.NOW)
+            self.assertFalse(payload["bridge"]["live"])
+            self.assertEqual(payload["config_stale"]["signal"], "not_running")
 
 
 class LiveChangedFingerprintTests(unittest.TestCase):

@@ -191,6 +191,10 @@ def freshness_restart_due(
     return stable_age_s >= min_stable_s
 
 
+# Mirror OwnershipGate freshness: a status file older than this is dead.
+STATUS_FRESH_S = 5.0
+
+
 def process_start_time(pid: int) -> float | None:
     """Epoch seconds when ``pid`` started, via ``ps -o lstart=`` (no psutil).
 
@@ -218,19 +222,32 @@ def process_start_time(pid: int) -> float | None:
         return None
 
 
+def status_file_is_fresh(written_at: float | None, *, now: float) -> bool:
+    """True when status ``written_at`` is present and younger than STATUS_FRESH_S."""
+    try:
+        stamp = float(written_at or 0.0)
+    except (TypeError, ValueError):
+        return False
+    if stamp <= 0.0:
+        return False
+    return (float(now) - stamp) < STATUS_FRESH_S
+
+
 def compute_config_stale(
     *,
     config_mtime: float | None,
     bridge_started_at: float | None,
     last_commit_at: float | None = None,
     now: float | None = None,
+    bridge_live: bool = True,
 ) -> dict[str, Any]:
     """Pure staleness: live LED config newer than the running bridge's start.
 
-    Primary signal (``bridge_start``): config mtime > process start → stale.
-    Weaker signal (``commit_proxy``): process start unknown, but this pad
-    session Applied — warn that a restart is still needed, and say we cannot
-    confirm when the bridge last started.
+    When ``bridge_live`` is False (missing/stale status file — AWR-261), signal
+    is ``not_running``: applied changes will load on the next bridge start.
+    Primary live signal (``bridge_start``): config mtime > process start → stale.
+    Weaker live signal (``commit_proxy``): fresh status but process start
+    unknown — keep the honest "(can't tell)" warn only for that corner.
     """
     _ = now  # reserved for future age caps; kept for a stable test seam
     payload: dict[str, Any] = {
@@ -240,7 +257,12 @@ def compute_config_stale(
         "bridge_started_at": bridge_started_at,
         "last_commit_at": last_commit_at,
         "lag_s": None,
+        "bridge_live": bool(bridge_live),
     }
+    if not bridge_live:
+        payload["signal"] = "not_running"
+        payload["bridge_started_at"] = None
+        return payload
     if config_mtime is None:
         return payload
     if bridge_started_at is not None:
@@ -1470,21 +1492,31 @@ class LedPadService:
         except OSError:
             return None
 
-    def runtime_status(self) -> dict[str, Any]:
-        bridge: dict[str, Any] = {"live": False, "path": str(self._status_path)}
+    def runtime_status(self, *, now: float | None = None) -> dict[str, Any]:
+        """Pad runtime snapshot. ``now`` is a test seam for status freshness."""
+        now_s = float(now) if now is not None else time.time()
+        bridge: dict[str, Any] = {
+            "live": False,
+            "path": str(self._status_path),
+            "state": "not_running",
+        }
         try:
             raw = json.loads(self._status_path.read_text(encoding="utf-8"))
             if isinstance(raw, dict):
                 bridge.update(raw)
-                bridge["live"] = True
+                fresh = status_file_is_fresh(raw.get("written_at"), now=now_s)
+                bridge["live"] = fresh
+                bridge["state"] = "running" if fresh else "not_running"
         except (FileNotFoundError, OSError, json.JSONDecodeError):
             pass
         playback = self._playback.status()
+        live = bool(bridge.get("live"))
         config_stale = compute_config_stale(
             config_mtime=self._config_mtime(),
-            bridge_started_at=self._bridge_started_at(bridge) if bridge.get("live") else None,
+            bridge_started_at=self._bridge_started_at(bridge) if live else None,
             last_commit_at=self._last_commit_at,
-            now=time.time(),
+            now=now_s,
+            bridge_live=live,
         )
         return {
             "ok": True,

@@ -518,17 +518,21 @@ pgrep -f rb_ss_bridge_v2 | wc -l
 
 Expected value is `1`.
 
-**Stale-config banner (AWR-255).** Pad and Template Lab both poll
-`GET /api/runtime_status`, which now includes a `config_stale` object. The pad
-compares the live `config/led_look_director.json` file time to the running
-bridge process start (status file `process.pid` → `ps` start time; the bridge
-status has no `started_at` field, and this work does not change bridge
-runtime). When the file is newer than the process, both pages show a persistent
-banner: applied changes are not live yet — restart the bridge from the menubar.
-When the process start cannot be resolved but this pad session just Applied, a
-weaker banner still asks for a restart and says so. When the comparison shows
-fresh, a quiet green line confirms the live file matches the running bridge.
-Covered by `tests/test_led_pad_service.py` (`ConfigStaleComputationTests`).
+**Stale-config banner (AWR-255 + AWR-261 freshness).** Pad and Template Lab both
+poll `GET /api/runtime_status`, which includes a `config_stale` object. The pad
+treats the bridge status file as live only when it parses **and**
+`written_at` is younger than 5 seconds (same freshness rule as
+`OwnershipGate`). A missing or stale file sets `bridge.live=False` /
+`state=not_running` and shows a calm banner: applied changes will load when the
+bridge next starts. A fresh status file compares live
+`config/led_look_director.json` mtime to the process start (status
+`process.pid` → `ps`; no bridge `started_at` field, and this work does not
+change bridge runtime). Config newer than process start → warn to restart from
+the menubar. Config older → quiet green "Live config matches the running
+bridge." The honest "(Can't tell…)" copy is kept **only** when the status file
+is fresh but the pid cannot be resolved. Covered by
+`tests/test_led_pad_service.py` (`ConfigStaleComputationTests`,
+`ConfigStaleRuntimeStatusTests`).
 
 ## iOS/iPad touch pass
 

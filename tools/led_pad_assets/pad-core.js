@@ -160,9 +160,10 @@
     return {start};
   }());
 
-  // AWR-255: shared config-stale banner for pad + lab. Non-dismissable while
-  // stale; quiet green when we positively know the running bridge loaded the
-  // current live file; hidden when we cannot tell.
+  // AWR-255/261: shared config-stale banner for pad + lab.
+  // not_running (calm): status missing/stale — bridge isn't writing.
+  // stale: fresh status + config newer than process start (or can't-tell).
+  // fresh/green: fresh status + config older than process start.
   window.PadConfigStale = (function () {
     function formatLag(seconds) {
       const s = Math.max(0, Number(seconds) || 0);
@@ -182,6 +183,13 @@
     function render(el, payload) {
       if (!el) return;
       const info = payload && typeof payload === "object" ? payload : {};
+      if (info.signal === "not_running") {
+        el.hidden = false;
+        el.dataset.state = "not_running";
+        el.textContent =
+          "The bridge isn't running — your applied changes will load when it next starts.";
+        return;
+      }
       if (info.stale) {
         el.hidden = false;
         el.dataset.state = "stale";

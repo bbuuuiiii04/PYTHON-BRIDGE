@@ -97,6 +97,11 @@ main { padding: var(--pad); }
   background: rgb(63 214 143 / .08);
   color: var(--ok);
 }
+.config-stale-banner[data-state="not_running"] {
+  border-color: var(--border);
+  background: var(--surface-2);
+  color: var(--text-dim);
+}
 .config-stale-banner[hidden] { display: none; }
 .toast { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 50; background: var(--surface-2); border: 1px solid var(--accent); border-radius: var(--radius); padding: 12px var(--pad); box-shadow: 0 8px 24px rgb(0 0 0 / .35); }
 .toast[hidden] { display: none; }
