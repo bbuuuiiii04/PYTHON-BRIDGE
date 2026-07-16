@@ -225,22 +225,28 @@
     $("loopLabel").textContent = $("loopToggle").checked ? "On" : "Off";
   }
 
+  function labDraftSearchHit(entry, rawQuery) {
+    // AWR-251 residue: plain case-insensitive SUBSTRING only — never subsequence/fuzzy.
+    const q = String(rawQuery || "").trim().toLowerCase();
+    if (!q) return true;
+    const name = String((entry && entry.name) || "").toLowerCase();
+    const brief = String((entry && entry.brief) || "").toLowerCase();
+    const notes = String((entry && entry.notes) || "").toLowerCase();
+    return name.includes(q) || brief.includes(q) || notes.includes(q);
+  }
+
   function matchesFilters(e) {
-    const q = state.filters.search.trim().toLowerCase();
+    const q = state.filters.search.trim();
     let exactName = false;
     if (q) {
-      // AWR-251 m-8: search name/brief/notes only — never params/fn/kind.
-      const name = String(e.name || "").toLowerCase();
-      const brief = String(e.brief || "").toLowerCase();
-      const notes = String(e.notes || "").toLowerCase();
-      if (!(name.includes(q) || brief.includes(q) || notes.includes(q))) return false;
-      exactName = name === q;
+      if (!labDraftSearchHit(e, q)) return false;
+      exactName = String(e.name || "").toLowerCase() === q.toLowerCase();
     }
     const role = roleOf(e);
     if (state.filters.phrase === "untagged" && role) return false;
     if (state.filters.phrase !== "all" && state.filters.phrase !== "untagged" && role !== state.filters.phrase) return false;
     // Exact-name search hit surfaces even when its status chip is off (same idea as
-    // the selected-draft pin).
+    // the selected-draft pin for status — search itself still must hit).
     if (exactName) return true;
     // Status chips: rejected chip also covers promoted (old Archived semantics)
     if (e.status === "iterating") return state.filters.iterating;
@@ -256,8 +262,13 @@
     state.showRejected = state.filters.rejected;
 
     const selectedName = state.current && state.current.name;
-    // Selected draft always stays visible (Accept with Accepted=off must not vanish).
-    const visible = state.entries.filter(e => matchesFilters(e) || (selectedName && e.name === selectedName));
+    // Selected draft stays visible across status chips, but NOT across a failed search
+    // (otherwise typing a nonsense token still ghosts the open draft).
+    const visible = state.entries.filter(e => {
+      if (matchesFilters(e)) return true;
+      if (!(selectedName && e.name === selectedName)) return false;
+      return labDraftSearchHit(e, state.filters.search);
+    });
     $("draftsDrawerCount").textContent = String(state.entries.filter(matchesFilters).length);
 
     const groups = [
