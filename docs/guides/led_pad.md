@@ -456,6 +456,10 @@ not fork the simulator:
 
 - Pad serves `GET /static/sim/ledsim-view.js` read-only from `tools/led_sim_assets/ledsim-view.js`
   (404 if missing; never crashes the pad).
+- **AWR-266:** Pad also serves `GET /static/sim/ledsim-player.js` (shared preview clock) the same
+  way. Lab + Sim both step frames with
+  `Math.floor((ts - start) / 1000 * fps) % frames.length` — one player module, no zoh/slew on
+  screen.
 - Pad serves `GET /api/sim/profile` with the same example-inherited merge shape as the sim's
   `LedSimService.profile_state()` (JSON-only; no Python import of `led_sim_engine` / `led_sim_web`,
   so the AWR-193 pad↔sim cycle fence stays intact). Failures return `{"ok": false, "error": …}`.
@@ -472,13 +476,11 @@ not fork the simulator:
 - **Honesty.** Room mode shows “Room view · simulator layout · preview only.” Live on-strip play is
   not frame-streamed to the browser; the room canvas shows the last offline preview. The LIVE chip
   logic is untouched.
-- **Editor chrome hidden — presentation mode (AWR-253).** Lab creates the view with
-  `createLedSimView(canvas, profile, {presentation: true})`, so the sim's editor chrome does not
-  draw in this small preview: segment ticks + tick labels, boundary/room-size labels, the clickable
-  room-size chip, vertex handles, and the unplaced/excess warning text are all suppressed. What
-  remains is only room walls, the strip path guide, the 360 LED emitters, the center junction
-  marker + its label, and the start/end markers (which orient chain direction). The default sim
-  editor view (no `options` argument) is unchanged.
+- **Editor chrome hidden — presentation mode (AWR-253 + AWR-266).** Lab creates the view with
+  `createLedSimView(canvas, profile, {presentation: true})`. The Sim Play stage uses the same
+  mode by default. Editor chrome stays off: segment ticks, room-size/measurement text, vertex
+  handles, unplaced warnings. What remains: walls, path, LEDs, junction, start/end. Sim Layout
+  tab calls `setPresentation(false)` so handles/ticks return for editing.
 
 ### Beat meter + metronome click (AWR-241)
 

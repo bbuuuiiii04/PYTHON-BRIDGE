@@ -13,7 +13,7 @@ validation_scope: >
   (AWR-249: topbar/nav, ≥900 desktop grid, HUD below canvas, label clamp),
   Use persists active_layout immediately without leaking unsaved knobs
   (AWR-250), perimeter/snake/custom presets, layout and
-  calibration lockers, timestamp-held playback, calibration sequence v2,
+  calibration lockers, shared lab-preview playback clock (AWR-266), calibration sequence v2,
   profile evidence guards, the local web service, and AWR-258 data-integrity
   (stale-write 409 via base_mtime, rotating .bak-* keep-5, refuse save while
   profile_error, beforeunload when dirty) are software-tested.
@@ -350,10 +350,17 @@ createLedSimView(canvas, profile, options?) -> {
 layoutLedPositions(profile)  // pure; mirrors led_sim_engine.layout_led_positions
 ```
 
-`options` defaults to `{}` (the sim page passes nothing, so its view is unchanged).
-`{presentation: true}` (AWR-253, used by the Lab room preview) draws only walls, path,
-LEDs, the junction marker + label, and start/end markers — it skips the editor chrome
-(segment ticks, boundary/room-size labels, vertex handles, unplaced/excess warnings).
+`options` defaults to `{}`.
+`{presentation: true}` (Lab Room AWR-253 + Sim Play stage AWR-266) draws walls, path, LEDs,
+junction, and start/end — it skips editor chrome (segment ticks, room-size/measurement labels,
+vertex handles, unplaced/excess warnings). Sim Layout tab calls `setPresentation(false)` so
+handles and ticks return for editing.
+
+**AWR-266 shared playback:** `tools/led_sim_assets/ledsim-player.js` is the one screen clock
+(Lab + Sim). Formula:
+`Math.floor((ts - start) / 1000 * fps) % frames.length`. Scrub/seek adjusts `start`; pause
+freezes cleanly. Hold-mode / slew / latency knobs remain calibration MODEL fields for a future
+capture pass — they do **not** change on-screen stepping.
 
 It does not fetch, save, or send frames. The Python engine contains the tested
 reference transfer, linear-bleed, and layout calculations mirrored by the view.

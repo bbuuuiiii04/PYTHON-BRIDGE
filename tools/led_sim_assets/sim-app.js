@@ -10,6 +10,7 @@ import {
   planLayoutDelete,
   snakePresetPoints,
 } from "./ledsim-view.js";
+import {createFramePlayer} from "./ledsim-player.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -41,12 +42,7 @@ const state = {
   provenance: "unknown",
   playing: false,
   loop: true,
-  t0: 0,
-  pausedElapsedMs: 0,
   manualIdx: 0,
-  lastPresentedOrdinal: null,
-  display: null,
-  lastTick: 0,
   healthWindowAt: 0,
   rafCount: 0,
   drawCount: 0,
@@ -68,6 +64,43 @@ const state = {
 };
 
 let view = null;
+let player = null;
+
+function onPlayerFrame(frame, index, meta) {
+  state.manualIdx = index;
+  state.playing = player ? player.isPlaying() : false;
+  if (view && frame) {
+    view.renderFrame(frame);
+    state.drawCount += 1;
+  }
+  const scrub = $("scrub");
+  if (scrub) scrub.value = String(index);
+  if ($("frame-label")) {
+    $("frame-label").textContent = `${index + 1} / ${state.frames.length}`;
+  }
+  const tMs = state.frameTimes[index];
+  if ($("time-label")) {
+    $("time-label").textContent = Number.isFinite(tMs)
+      ? `${(tMs / 1000).toFixed(3)} s`
+      : `${(index / Math.max(1, state.framesFps)).toFixed(3)} s`;
+  }
+  if ($("marker-label")) {
+    $("marker-label").textContent = markerFor(index) || "60 command segments · display calibration applied";
+  }
+  if (meta && meta.ended) {
+    state.playing = false;
+    if ($("play-pause")) $("play-pause").textContent = "Play";
+  } else if (player && player.isPlaying()) {
+    if ($("play-pause")) $("play-pause").textContent = "Pause";
+  }
+}
+
+function ensurePlayer() {
+  if (player) return player;
+  player = createFramePlayer({onFrame: onPlayerFrame});
+  player.setLoop(state.loop);
+  return player;
+}
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -269,13 +302,6 @@ function updateCalibrationBadge() {
   badge.classList.toggle("warn", status !== "measured");
 }
 
-function calibrationSupportsSlew() {
-  const allowed = ["relative", "measured"];
-  const status = String(state.profile.calibration_status);
-  const timingStatus = state.profile.calibration_domains?.timing;
-  return allowed.includes(status) && allowed.includes(String(timingStatus));
-}
-
 function invalidateCalibration() {
   state.profile.calibration_status = "unmeasured";
   state.profile.calibration_domains = {color: "unmeasured", timing: "unmeasured", spatial: "unmeasured"};
@@ -284,8 +310,6 @@ function invalidateCalibration() {
     "calibration_evidence_id", "calibration_measured_at",
     "measurement_evidence", "measurement_id", "measured_at", "evidence",
   ]) delete state.profile[key];
-  state.display = null;
-  state.lastPresentedOrdinal = null;
 }
 
 function syncEditGestureClass() {
@@ -346,6 +370,8 @@ function syncLockUi() {
   const roomEditing = view?.getViewMode() === "room" && state.activeTab === "layout"
     && !layoutLock && !previewing;
   view?.setEditing(Boolean(roomEditing));
+  // AWR-266: Play/Calibrate stages match Lab Room presentation; Layout tab restores editor chrome.
+  view?.setPresentation(state.activeTab !== "layout");
   syncEditGestureClass();
   updateResetLabel();
 }
@@ -1325,8 +1351,6 @@ function wireKnobs() {
     state.savedProfile = clone(result.profile);
     ensureLockDefaults(state.savedProfile);
     state.catalog.profile_warnings = result.profile_warnings || [];
-    state.display = null;
-    state.lastPresentedOrdinal = null;
     knobsFromProfile();
     pushProfileToView();
   });
@@ -1429,9 +1453,7 @@ function renderRequestBody() {
   };
 }
 
-async function doRender() {
-  const body = renderRequestBody();
-  if (!body) return;
+async function renderBody(body) {
   const result = await latestFrameRequest("/api/render", body);
   if (!result) return;
   loadFrames(result.frames, result.fps, result.t_ms, [], {
@@ -1439,6 +1461,33 @@ async function doRender() {
     durationSource: result.duration_source,
     provenance: result.frame_source || result.provenance || result.pipeline || "server render",
     timingSource: result.timing_source,
+  });
+}
+
+async function doRender() {
+  const body = renderRequestBody();
+  if (!body) return;
+  await renderBody(body);
+}
+
+// Look-groups shelf: drive a saved look by name through the exact render path
+// doRender uses for a "look" source (effect + its stored seed/sync/params).
+async function playLookByName(name) {
+  const entry = state.catalog.looks?.ok ? state.catalog.looks.looks[name] : null;
+  if (!entry) {
+    showError(`Look "${name}" is not in the current show config.`);
+    return;
+  }
+  await renderBody({
+    source: "effect",
+    name: entry.effect,
+    params: entry.params || {},
+    seed: entry.seed,
+    sync_mode: entry.sync_mode || "",
+    beat_division: entry.beat_division || 0,
+    fps: Number(state.profile.fps) || 60,
+    duration_s: Number($("duration").value) || 8,
+    bpm: Number($("bpm").value) || 128,
   });
 }
 
@@ -1532,9 +1581,6 @@ function loadFrames(frames, fps, tMs, markers = [], options = {}) {
   state.provenance = String(options.provenance || "not reported");
   state.markers = Array.isArray(markers) ? markers : [];
   state.manualIdx = 0;
-  state.pausedElapsedMs = -(Number(state.profile.latency_ms) || 0);
-  state.lastPresentedOrdinal = null;
-  state.display = null;
   state.healthWindowAt = 0;
   state.rafCount = 0;
   state.drawCount = 0;
@@ -1545,74 +1591,36 @@ function loadFrames(frames, fps, tMs, markers = [], options = {}) {
   const offlineSource = state.provenance === "production_runner_offline";
   $("pipeline-badge").textContent = offlineSource ? "Real show engine · offline" : `Source · ${state.provenance}`;
   $("pipeline-badge").title = `SOURCE · ${state.provenance.toUpperCase()}`;
-  $("timing-readout").textContent = `${state.framesFps} FPS · exact timing grid`;
-  $("timing-readout").title = `${state.framesFps} FPS · ${state.timingSource.toUpperCase()} · ${state.durationSource.toUpperCase()}`;
+  $("timing-readout").textContent = `${state.framesFps} FPS · shared preview clock`;
+  $("timing-readout").title = `${state.framesFps} FPS · ${state.timingSource.toUpperCase()} · ${state.durationSource.toUpperCase()} · AWR-266 ledsim-player`;
   $("fps-chip").textContent = `${state.framesFps} FPS`;
   $("paint-health").textContent = "WAITING";
+  const p = ensurePlayer();
+  p.setLoop(state.loop);
+  p.setFrames(state.frames, state.framesFps);
   startPlayback();
-}
-
-function indexAtTime(timeMs) {
-  let low = 0;
-  let high = state.frameTimes.length;
-  while (low < high) {
-    const middle = (low + high) >> 1;
-    if (state.frameTimes[middle] <= timeMs) low = middle + 1;
-    else high = middle;
-  }
-  return Math.max(0, Math.min(state.frames.length - 1, low - 1));
-}
-
-function positionForElapsed(elapsed) {
-  if (!state.frames.length) return {index: 0, ordinal: 0, ended: false, pending: false};
-  if (elapsed < 0) return {index: 0, ordinal: null, ended: false, pending: true};
-  if (state.loop && state.durationMs > 0) {
-    const cycle = Math.floor(elapsed / state.durationMs);
-    const local = elapsed - cycle * state.durationMs;
-    const index = indexAtTime(local);
-    return {index, ordinal: cycle * state.frames.length + index, ended: false, pending: false};
-  }
-  if (!state.loop && elapsed >= state.durationMs) {
-    const index = state.frames.length - 1;
-    return {index, ordinal: index, ended: true, pending: false};
-  }
-  const index = indexAtTime(elapsed);
-  return {index, ordinal: index, ended: false, pending: false};
-}
-
-function currentPosition(now) {
-  const elapsed = state.playing ? now - state.t0 : state.pausedElapsedMs;
-  const position = positionForElapsed(elapsed);
-  if (state.playing && position.ended) {
-    state.playing = false;
-    state.pausedElapsedMs = state.durationMs;
-    state.manualIdx = position.index;
-    $("play-pause").textContent = "Play";
-  }
-  return position;
 }
 
 function startPlayback() {
   if (!state.frames.length) return;
-  if (!state.loop && state.pausedElapsedMs >= state.durationMs) {
-    state.manualIdx = 0;
-    state.pausedElapsedMs = -(Number(state.profile.latency_ms) || 0);
-  }
+  const p = ensurePlayer();
+  p.setLoop(state.loop);
+  p.setFrames(state.frames, state.framesFps);
+  const fromFrame = (!state.loop && state.manualIdx >= state.frames.length - 1)
+    ? 0
+    : state.manualIdx;
+  p.play({fromFrame});
   state.playing = true;
-  state.t0 = performance.now() - state.pausedElapsedMs;
-  state.lastPresentedOrdinal = null;
   $("play-pause").textContent = "Pause";
 }
 
-function stopPlayback(now = performance.now()) {
-  if (state.playing && state.frames.length) {
-    state.pausedElapsedMs = now - state.t0;
-    const position = positionForElapsed(state.pausedElapsedMs);
-    state.manualIdx = position.index;
-    if (position.ended) state.pausedElapsedMs = state.durationMs;
-  }
+function stopPlayback() {
+  const p = ensurePlayer();
+  if (p.isPlaying()) p.pause();
   state.playing = false;
+  state.manualIdx = p.getIndex();
   $("play-pause").textContent = "Play";
+  p.show(state.manualIdx);
 }
 
 function markerFor(index) {
@@ -1624,35 +1632,10 @@ function markerFor(index) {
   return label;
 }
 
-function applyMeasuredSlew(target, now) {
-  if (
-    !calibrationSupportsSlew()
-    || state.profile.hold_mode !== "slew"
-    || Number(state.profile.slew_ms) <= 0
-  ) {
-    state.display = null;
-    return target;
-  }
-  const tau = Math.max(1, Number(state.profile.slew_ms));
-  const dt = Math.min(200, now - (state.lastTick || now));
-  const amount = 1 - Math.exp(-dt / tau);
-  if (!state.display || state.display.length !== target.length) {
-    state.display = target.map((pixel) => pixel.slice());
-  } else {
-    for (let index = 0; index < target.length; index += 1) {
-      for (let channel = 0; channel < 3; channel += 1) {
-        state.display[index][channel] += (target[index][channel] - state.display[index][channel]) * amount;
-      }
-    }
-  }
-  return state.display.map((pixel) => pixel.map(Math.round));
-}
-
 function updatePaintHealth(now) {
   if (!state.healthWindowAt) state.healthWindowAt = now;
   const span = now - state.healthWindowAt;
   if (span < 1000) return;
-  const rafRate = state.rafCount * 1000 / span;
   const drawRate = state.drawCount * 1000 / span;
   $("paint-health").textContent = `DRAW ${drawRate.toFixed(0)}`;
   $("fps-chip").textContent = `${drawRate.toFixed(0)} FPS`;
@@ -1662,38 +1645,16 @@ function updatePaintHealth(now) {
   state.missedFrames = 0;
 }
 
-function tick(now) {
+function healthTick(now) {
   state.rafCount += 1;
-  if (view && state.frames.length) {
-    const position = currentPosition(now);
-    const index = position.index;
-    const slewing = (
-      calibrationSupportsSlew()
-      && state.profile.hold_mode === "slew"
-      && Number(state.profile.slew_ms) > 0
-    );
-    if (position.pending) {
-      $("marker-label").textContent = "Holding the previous output for measured latency";
-      $("time-label").textContent = "LATENCY";
-    } else if (state.lastPresentedOrdinal !== position.ordinal || slewing) {
-      if (state.lastPresentedOrdinal !== null && position.ordinal > state.lastPresentedOrdinal + 1) {
-        state.missedFrames += position.ordinal - state.lastPresentedOrdinal - 1;
-      }
-      view.renderFrame(applyMeasuredSlew(state.frames[index], now));
-      state.drawCount += 1;
-      state.lastPresentedOrdinal = position.ordinal;
-    }
-    if (!position.pending) {
-      state.manualIdx = index;
-      $("scrub").value = String(index);
-      $("frame-label").textContent = `${index + 1} / ${state.frames.length}`;
-      $("time-label").textContent = `${((state.frameTimes[index] || 0) / 1000).toFixed(3)} s`;
-      $("marker-label").textContent = markerFor(index) || "60 command segments · display calibration applied";
-    }
-  }
   updatePaintHealth(now);
-  state.lastTick = now;
-  requestAnimationFrame(tick);
+  requestAnimationFrame(healthTick);
+}
+
+function setLoop(next) {
+  state.loop = next;
+  ensurePlayer().setLoop(next);
+  $("loop").setAttribute("aria-pressed", next ? "true" : "false");
 }
 
 function nudgeSelectedVertex(dxMm, dyMm) {
@@ -1748,21 +1709,9 @@ function wireKeyboard() {
         state.frames.length - 1,
         state.manualIdx + (event.key === "ArrowRight" ? 1 : -1),
       ));
-      state.pausedElapsedMs = state.frameTimes[state.manualIdx];
-      state.lastPresentedOrdinal = null;
+      ensurePlayer().seek(state.manualIdx);
     }
   });
-}
-
-function setLoop(next, now = performance.now()) {
-  let elapsed = state.playing ? now - state.t0 : state.pausedElapsedMs;
-  if (elapsed >= 0 && state.durationMs > 0) elapsed %= state.durationMs;
-  state.loop = next;
-  state.pausedElapsedMs = elapsed;
-  if (state.playing) state.t0 = now - elapsed;
-  state.manualIdx = positionForElapsed(elapsed).index;
-  state.lastPresentedOrdinal = null;
-  $("loop").setAttribute("aria-pressed", next ? "true" : "false");
 }
 
 async function boot() {
@@ -1780,7 +1729,8 @@ async function boot() {
   if (preset === "snake" || preset === "perimeter") state.lastChosenPreset = preset;
   state.savedProfile = clone(state.profile);
   ensureLockDefaults(state.savedProfile);
-  view = createLedSimView($("fixture-canvas"), state.profile);
+  view = createLedSimView($("fixture-canvas"), state.profile, {presentation: true});
+  ensurePlayer();
   view.renderFrame(Array.from({length: 60}, () => [0, 0, 0]));
   showWarnings();
   showLayoutWarnings(state.catalog.profile_warnings || []);
@@ -1816,8 +1766,7 @@ async function boot() {
   $("scrub").addEventListener("input", () => {
     stopPlayback();
     state.manualIdx = Number($("scrub").value) || 0;
-    state.pausedElapsedMs = state.frameTimes[state.manualIdx] || 0;
-    state.lastPresentedOrdinal = null;
+    ensurePlayer().seek(state.manualIdx);
   });
   for (const button of document.querySelectorAll("[data-card]")) {
     button.addEventListener("click", () => doTestCard(button.dataset.card));
@@ -1825,8 +1774,11 @@ async function boot() {
   for (const button of document.querySelectorAll("[data-sequence]")) {
     button.addEventListener("click", () => doCalibration(button.dataset.sequence));
   }
+  for (const button of document.querySelectorAll("[data-look]")) {
+    button.addEventListener("click", () => playLookByName(button.dataset.look));
+  }
 
-  requestAnimationFrame(tick);
+  requestAnimationFrame(healthTick);
   await doRender();
 }
 

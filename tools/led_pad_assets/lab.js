@@ -931,7 +931,7 @@
     }).join("");
   }
 
-  const preview = {frames: [], fps: 40, raf: 0};
+  const preview = {frames: [], fps: 40, player: null};
   // AWR-247: preview window length (2 bars / 4 bars / full cue). Default full.
   const PREVIEW_LEN_KEY = "labPreviewLength";
   let previewLengthMode = "full"; // "8" | "16" | "full"
@@ -1119,7 +1119,9 @@
   }
 
   function stopPreview() {
-    cancelAnimationFrame(preview.raf);
+    if (preview.player) {
+      try { preview.player.stop(); } catch (_) { /* fail-soft */ }
+    }
     preview.frames = [];
     renderPreviewDimNote(null);
     const canvas = $("previewStrip");
@@ -1129,6 +1131,20 @@
     }
     setPreviewHint(true);
     if (beatUI.mode === "preview") setBeatMode("off");
+  }
+  async function ensurePreviewPlayer() {
+    if (preview.player) return preview.player;
+    const mod = await import("/static/sim/ledsim-player.js");
+    if (!mod || typeof mod.createFramePlayer !== "function") {
+      throw new Error("createFramePlayer missing");
+    }
+    preview.player = mod.createFramePlayer({
+      onFrame(frame, index) {
+        beatUI.frameIndex = index;
+        paintPreviewFrame(frame);
+      },
+    });
+    return preview.player;
   }
   async function previewDraft(opts) {
     if (!state.current) return;
@@ -1177,16 +1193,11 @@
       ? (prevFrame % preview.frames.length)
       : 0;
     setBeatMode("preview", {bpm, fps: preview.fps, frameIndex: startFrame});
-    let start;
-    const step = (ts) => {
-      if (!preview.frames.length) return;
-      if (start === undefined) start = ts - (startFrame / preview.fps) * 1000;
-      const frameIndex = Math.floor((ts - start) / 1000 * preview.fps) % preview.frames.length;
-      beatUI.frameIndex = frameIndex;
-      paintPreviewFrame(preview.frames[frameIndex]);
-      preview.raf = requestAnimationFrame(step);
-    };
-    preview.raf = requestAnimationFrame(step);
+    // AWR-266: shared ledsim-player clock (same formula as Sim stage).
+    const player = await ensurePreviewPlayer();
+    player.setLoop(true);
+    player.setFrames(preview.frames, preview.fps);
+    player.play({fromFrame: startFrame});
   }
   $("previewBtn").onclick = async () => {
     $("previewBtn").disabled = true;

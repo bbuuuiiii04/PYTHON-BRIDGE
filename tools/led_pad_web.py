@@ -71,9 +71,10 @@ def _now_iso() -> str:
 _ASSETS_DIR = Path(__file__).resolve().parent / "led_pad_assets"
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _DEFAULT_CONFIG_PATH = _REPO_ROOT / "config" / "led_look_director.json"
-# AWR-245: serve sim view asset + profile JSON read-only. Paths only — never
-# import led_sim_engine / led_sim_web (AWR-193 fence; sim already imports pad-lab).
+# AWR-245/AWR-266: serve sim view + shared preview player read-only. Paths only —
+# never import led_sim_engine / led_sim_web (AWR-193 fence; sim already imports pad-lab).
 _SIM_VIEW_JS = _REPO_ROOT / "tools" / "led_sim_assets" / "ledsim-view.js"
+_SIM_PLAYER_JS = _REPO_ROOT / "tools" / "led_sim_assets" / "ledsim-player.js"
 _SIM_EXAMPLE_PROFILE = _REPO_ROOT / "config" / "led_sim_profile.example.json"
 _SIM_DEFAULT_PROFILE = _REPO_ROOT / "config" / "led_sim_profile.json"
 _SIM_DEFAULT_ROOM_MM = [5216.0, 2284.0]
@@ -1705,9 +1706,12 @@ def build_handler(service: LedPadService) -> type[BaseHTTPRequestHandler]:
                         access_payload(self.server.server_address[0], self.server.server_address[1])
                     )
                     return
-                # AWR-245: sim view module served read-only from disk (not under pad assets).
+                # AWR-245/AWR-266: sim modules served read-only from disk (not under pad assets).
                 if path == "/static/sim/ledsim-view.js":
                     self._send_file(_SIM_VIEW_JS)
+                    return
+                if path == "/static/sim/ledsim-player.js":
+                    self._send_file(_SIM_PLAYER_JS)
                     return
                 if path.startswith("/static/"):
                     target = (_ASSETS_DIR / path.removeprefix("/static/")).resolve()

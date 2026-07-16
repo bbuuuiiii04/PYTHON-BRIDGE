@@ -2,10 +2,10 @@
 // Layout math mirrors tools/led_sim_engine.py — keep in lockstep.
 // Consumed by BOTH the sim page and the Lab room preview (served read-only at
 // /static/sim/ledsim-view.js). createLedSimView's third arg `options` is a
-// mirror-safe extension: {presentation:true} (Lab preview, AWR-253) hides the
-// editor chrome — segment ticks, boundary/room-size labels, vertex handles, and
-// the unplaced/excess warnings — while keeping walls, path, LEDs, junction label,
-// and start/end markers. Default {} is byte-identical to the sim's editor view.
+// mirror-safe extension: {presentation:true} (Lab Room AWR-253 + Sim Play
+// AWR-266) draws walls, path, LEDs, junction, start/end — no tick labels, no
+// measurement text, no vertex handles. setPresentation(false) restores editor
+// chrome on the Sim Layout tab. Shared playback clock: ledsim-player.js.
 
 const H612D_SEGMENTS = 60;
 const H612D_LEDS_PER_SEGMENT = 6;
@@ -340,8 +340,8 @@ export function layoutLedPositions(profile) {
 
 export function createLedSimView(canvas, initialProfile, options = {}) {
   const ctx = canvas.getContext("2d", {alpha: false});
-  // AWR-253: presentation mode hides editor chrome for the Lab room preview.
-  const presentation = Boolean(options && options.presentation);
+  // AWR-253/AWR-266: presentation mode = Lab Room + Sim Play stage look.
+  let presentation = Boolean(options && options.presentation);
   let profile = structuredClone(initialProfile || {});
   let lastFrame = [];
   let viewWidth = 1;
@@ -947,17 +947,16 @@ export function createLedSimView(canvas, initialProfile, options = {}) {
 
     // Priority: center > start > end > ticks > room-size (lowest — drops first)
     if (junction) {
-      tryDraw("center · control box · 24.6 ft", junction, H612D_JUNCTION_MM, {
-        color: "#4dd8e6", offset: 16,
-      });
+      tryDraw(
+        presentation ? "center" : "center · control box · 24.6 ft",
+        junction,
+        H612D_JUNCTION_MM,
+        {color: "#4dd8e6", offset: 16},
+      );
     }
 
-    // AWR-253: presentation mode (Lab room preview) keeps only the junction label;
-    // start/end text, segment ticks, and the room-size chip are editor chrome.
-    // roomSizeHit stays null (set above), so the room-size click affordance is off.
-    if (presentation) return;
-
     // Start/end near the same gap: stack vertically when close.
+    // AWR-266: presentation keeps start/end labels (no length measurement).
     const gapClose = start && end && Math.hypot(start.x - end.x, start.y - end.y) < 40;
     if (start) {
       tryDraw("start", start, 0, {
@@ -967,12 +966,21 @@ export function createLedSimView(canvas, initialProfile, options = {}) {
       });
     }
     if (end) {
-      tryDraw(`end · ${formatLengthMm(layout.placed_length_mm)}`, end, layout.placed_length_mm, {
-        color: "#f25f5c",
-        offset: 14,
-        stack: gapClose ? 10 : 0,
-      });
+      tryDraw(
+        presentation ? "end" : `end · ${formatLengthMm(layout.placed_length_mm)}`,
+        end,
+        layout.placed_length_mm,
+        {
+          color: "#f25f5c",
+          offset: 14,
+          stack: gapClose ? 10 : 0,
+        },
+      );
     }
+
+    // AWR-253/AWR-266: presentation skips tick labels, room-size chip, measurement.
+    // roomSizeHit stays null here, so the room-size click affordance is off.
+    if (presentation) return;
 
     for (let segment = 0; segment < H612D_SEGMENTS; segment += 10) {
       if (shouldSuppressSegmentTick(segment)) continue;
@@ -1094,6 +1102,14 @@ export function createLedSimView(canvas, initialProfile, options = {}) {
     setEditing(next) {
       editing = Boolean(next);
       draw(lastFrame);
+    },
+    setPresentation(next) {
+      presentation = Boolean(next);
+      roomSizeHit = null;
+      draw(lastFrame);
+    },
+    getPresentation() {
+      return presentation;
     },
     mmToCanvas(xMm, yMm) {
       return mmToCanvas(xMm, yMm);
