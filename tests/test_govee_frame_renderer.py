@@ -818,7 +818,7 @@ class Awr156ParamAllowlistTests(unittest.TestCase):
                                       "dim_floor", "loop_beats", "color"},
             "rt_groove_heartbeat": {"base_width", "pulse_width", "decay",
                                     "loop_beats", "color_mode"},
-            "rt_post_drop_firework_remnants": {"dim_beats", "ember_hold_beats",
+            "rt_post_drop_firework_remnants": {"ember_hold_beats",
                                                "ember_decay_beats", "sparkle_density",
                                                "sparkle_size", "sparkle_life_s"},
             "rt_groove_chase": {"width"},
@@ -1148,6 +1148,48 @@ class PostDropFireworkRemnantsTests(unittest.TestCase):
         for beat in (8.0, 8.5, 31.9):
             field = _slot_rt_post_drop_firework_remnants(beat, 0.0, 0, {}, 60, 7)
             self.assertFalse(any(value > 0.0 for row in field for value in row))
+
+    def test_default_params_dark_at_hold_boundary(self) -> None:
+        """AWR-256: absent params keep the AWR-215 hard cut at beat 8."""
+        lit = _slot_rt_post_drop_firework_remnants(7.5, 0.0, 3, {}, 60, 7)
+        self.assertTrue(any(sum(row) > 0.0 for row in lit))
+        for beat in (8.0, 8.01, 15.0):
+            field = _slot_rt_post_drop_firework_remnants(beat, 0.0, 3, {}, 60, 7)
+            self.assertFalse(
+                any(value > 0.0 for row in field for value in row),
+                msg=f"expected dark at cue_beat={beat}",
+            )
+
+    def test_ember_hold_16_lit_at_12_dark_at_16(self) -> None:
+        params = {"ember_hold_beats": 16.0}
+        lit = _slot_rt_post_drop_firework_remnants(12.0, 0.0, 5, params, 60, 7)
+        self.assertTrue(any(sum(row) > 0.0 for row in lit))
+        dark = _slot_rt_post_drop_firework_remnants(16.0, 0.0, 5, params, 60, 7)
+        self.assertFalse(any(value > 0.0 for row in dark for value in row))
+        after = _slot_rt_post_drop_firework_remnants(20.0, 0.0, 5, params, 60, 7)
+        self.assertFalse(any(value > 0.0 for row in after for value in row))
+
+    def test_ember_decay_scales_monotonically(self) -> None:
+        params = {"ember_hold_beats": 8.0, "ember_decay_beats": 4.0}
+        # Same frame_index/seed so the underlying sparkle sample is identical;
+        # only the post-hold scale should change.
+        totals = []
+        for beat in (8.0, 9.0, 10.0, 11.0, 12.0):
+            field = _slot_rt_post_drop_firework_remnants(beat, 0.0, 11, params, 60, 7)
+            totals.append(sum(sum(row) for row in field))
+        self.assertGreater(totals[0], 0.0)
+        self.assertEqual(totals[-1], 0.0)
+        for earlier, later in zip(totals, totals[1:]):
+            self.assertGreaterEqual(earlier, later)
+
+    def test_absent_params_match_explicit_defaults(self) -> None:
+        explicit = {"ember_hold_beats": 8.0, "ember_decay_beats": 0.0}
+        for beat, frame_index in ((0.5, 2), (3.0, 9), (7.9, 15), (8.0, 1), (12.0, 4)):
+            with self.subTest(beat=beat):
+                a = _slot_rt_post_drop_firework_remnants(beat, 1.0, frame_index, {}, 60, 7)
+                b = _slot_rt_post_drop_firework_remnants(
+                    beat, 1.0, frame_index, explicit, 60, 7)
+                self.assertEqual(a, b)
 
 
 class Knob4MashupDeathTests(unittest.TestCase):

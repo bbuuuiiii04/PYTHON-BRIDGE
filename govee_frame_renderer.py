@@ -1578,6 +1578,45 @@ def _slot_post_drop_nebula(beat: float, local_t: float, frame_index: int,
     return field
 
 
+def _drop_chase_sparkle_field(
+    cue_beat: float,
+    frame_index: int,
+    segments: int,
+    seed: int,
+    *,
+    intro_beats: float = 8.0,
+) -> MotionField:
+    """Sparse per-pixel sparkle shared by drop-chase intro and remnants (AWR-215/256).
+
+    ``intro_beats`` is the density-progress window (default 8). Callers that need
+    a hard cutoff (drop-chase comet handoff) only invoke this while
+    ``cue_beat < intro_beats``. Remnants may sample at ``cue_beat == hold`` during
+    a decay fade by clamping the sample beat to the hold window.
+    """
+    field = _empty_motion_field(segments)
+    intro = max(0.001, float(intro_beats))
+    progress = min(1.0, max(0.0, float(cue_beat)) / intro)
+    density = max(0.02, min(1.0, (4.0 * (1.0 - progress) + 0.5) / max(1.0, segments)))
+    beat_bucket = int(float(cue_beat) * 16.0)
+    for idx in range(max(0, int(segments))):
+        color_slot = random.Random(idx).randint(0, 4)
+        rng = _rng(seed, frame_index, beat_bucket, idx)
+        if rng.random() >= density:
+            continue
+        intensity = rng.random() ** 1.5
+        field[idx][color_slot] = min(1.0, field[idx][color_slot] + intensity)
+    return field
+
+
+def _scale_motion_field(field: MotionField, scale: float) -> MotionField:
+    """Deterministic intensity scale for ember decay (no shared mutable state)."""
+    if scale >= 1.0:
+        return field
+    if scale <= 0.0:
+        return _empty_motion_field(len(field))
+    return [[min(1.0, value * scale) for value in row] for row in field]
+
+
 def _slot_drop_chase(beat: float, local_t: float, frame_index: int,
                      params: Mapping[str, Any], segments: int, seed: int) -> MotionField:
     """Generic slotized drop chase with the legacy sparkle intro."""
@@ -1590,17 +1629,9 @@ def _slot_drop_chase(beat: float, local_t: float, frame_index: int,
         return field
 
     if cue_beat < 8.0:
-        progress = cue_beat / 8.0
-        density = max(0.02, min(1.0, (4.0 * (1.0 - progress) + 0.5) / max(1.0, segments)))
-        beat_bucket = int(cue_beat * 16.0)
-        for idx in range(max(0, int(segments))):
-            color_slot = random.Random(idx).randint(0, 4)
-            rng = _rng(seed, frame_index, beat_bucket, idx)
-            if rng.random() >= density:
-                continue
-            intensity = rng.random() ** 1.5
-            field[idx][color_slot] = min(1.0, field[idx][color_slot] + intensity)
-        return field
+        return _drop_chase_sparkle_field(
+            cue_beat, frame_index, segments, seed, intro_beats=8.0
+        )
 
     width = max(0.001, float(params.get("width", 0.8)))
     travel_beats = max(0.001, float(params.get("travel_beats", 2.0)))
@@ -2074,17 +2105,35 @@ def _slot_rt_groove_heartbeat(beat: float, local_t: float, frame_index: int,
 
 def _slot_rt_post_drop_firework_remnants(beat: float, local_t: float, frame_index: int,
                                          params: Mapping[str, Any], segments: int, seed: int) -> MotionField:
-    """AWR-215: sparse firework tail using only drop-chase's sparkle intro.
+    """AWR-215/256: sparse firework tail using drop-chase's sparkle intro.
 
-    The synchronized drop-chase strobe gate is deliberately held open here:
-    frame-index re-rolls retain its aggressive per-pixel flicker without
-    turning this low-coverage tail into a whole-field strobe. The comet half
-    and the old full-strip background are both excluded.
+    The synchronized drop-chase strobe gate is deliberately held open here
+    (``local_t`` ignored for gating): frame-index re-rolls retain its aggressive
+    per-pixel flicker without turning this low-coverage tail into a whole-field
+    strobe. The comet half and the old full-strip background are both excluded.
+
+    AWR-256 wires ``ember_hold_beats`` (default 8, clamp 1..32) as the sparkle
+    cutoff and ``ember_decay_beats`` (default 0 = hard cut, clamp 0..8) as a
+    linear post-hold fade. ``dim_beats`` is not consumed (removed from allowlist).
     """
+    _ = local_t  # intentionally unused: strobe gate stays open (AWR-215)
     cue_beat = _edm_beat(beat, params)
-    if cue_beat >= 8.0:
+    hold = max(1.0, min(32.0, float(params.get("ember_hold_beats", 8.0))))
+    decay = max(0.0, min(8.0, float(params.get("ember_decay_beats", 0.0))))
+    if cue_beat >= hold + decay:
         return _empty_motion_field(segments)
-    return _slot_drop_chase(beat, 0.0, frame_index, params, segments, seed)
+    # Map the hold window onto the classic 8-beat drop-chase sparkle curve so
+    # default hold=8 stays byte-identical, and longer holds keep mid-intro
+    # density instead of stretching into near-empty territory.
+    sample_beat = min(cue_beat, hold)
+    mapped = (sample_beat / hold) * 8.0
+    field = _drop_chase_sparkle_field(
+        mapped, frame_index, segments, seed, intro_beats=8.0
+    )
+    if cue_beat < hold or decay <= 0.0:
+        return field
+    scale = 1.0 - (cue_beat - hold) / decay
+    return _scale_motion_field(field, scale)
 
 
 def _slot_palette_comet(beat: float, local_t: float, frame_index: int,
@@ -2288,7 +2337,7 @@ _M2_PHASE2A_PARAM_KEYS: dict[str, frozenset[str]] = {
                    "color_mode", "duration_beats"}) | _SYNC_PARAM_KEYS
     ),
     "rt_post_drop_firework_remnants": (
-        frozenset({"dim_beats", "ember_hold_beats", "ember_decay_beats",
+        frozenset({"ember_hold_beats", "ember_decay_beats",
                    "sparkle_density", "sparkle_size", "sparkle_life_s",
                    "duration_beats"}) | _SYNC_PARAM_KEYS
     ),

@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: 1a40ed2
+last_verified_commit: 7de93f5
 last_verified_date: 2026-07-15
-validation_scope: software-only; existing LED/Govee behavior plus the 2026-07-13 split-local-UUID classifier correction reverified: local Rekordbox 7 loads regain the early phrase worker, real `/Volumes` loads keep the resolved-time-only rule; AWR-241 Template Lab beat meter status field documented; AWR-242 Template Lab UX (`target_role` + lab-route UI) documented; AWR-243 Template Lab functional fixes (live test_palette for lab play + ownership payload on request errors) documented; AWR-245 Template Lab Strip|Room preview hookup (pad serves sim view + profile read-only; fail-soft; preview-only) documented; AWR-247 Template Lab preview length (default full cue_beats) documented; AWR-248 Pad|Lab|Sim cross-nav documented; AWR-254 pad look-editor close dirty check documented; AWR-255 pad+lab stale-config banner (config mtime vs bridge process start; no bridge runtime change) documented; no LED rendering/output behavior changed and hardware remains unvalidated
+validation_scope: software-only; existing LED/Govee behavior plus the 2026-07-13 split-local-UUID classifier correction reverified: local Rekordbox 7 loads regain the early phrase worker, real `/Volumes` loads keep the resolved-time-only rule; AWR-241 Template Lab beat meter status field documented; AWR-242 Template Lab UX (`target_role` + lab-route UI) documented; AWR-243 Template Lab functional fixes (live test_palette for lab play + ownership payload on request errors) documented; AWR-245 Template Lab Strip|Room preview hookup (pad serves sim view + profile read-only; fail-soft; preview-only) documented; AWR-247 Template Lab preview length (default full cue_beats) documented; AWR-248 Pad|Lab|Sim cross-nav documented; AWR-254 pad look-editor close dirty check documented; AWR-255 pad+lab stale-config banner (config mtime vs bridge process start; no bridge runtime change) documented; AWR-256 remnants ember_hold/decay wired (dim_beats removed as dead); no LED rendering/output hardware validation
 ---
 
 # LED / Govee Subsystem
@@ -39,18 +39,24 @@ idempotent live-config apply sets only missing values so it never overwrites ope
 
 Firework remnants rebuild (AWR-215, 2026-07-11; staged, software-tested, hardware-unvalidated):
 - `rt_post_drop_firework_remnants` no longer draws the old slot-5 full-strip wash or its separate
-  sine-envelope ember system. It reuses only the first eight beats of `_slot_drop_chase`: sparse,
-  frame-index-flickering palette sparks whose density falls across the tail. The drop-chase comet
-  half is excluded, and the field is dark from beat 8 until the normal 32-beat cue wrap.
+  sine-envelope ember system. It reuses the sparse drop-chase sparkle intro (palette sparks whose
+  density falls across the intro curve). The drop-chase comet half is excluded.
+- AWR-256 (2026-07-15): the AWR-215 rewrite had hard-coded `cue_beat >= 8` and ignored
+  `ember_hold_beats` / `ember_decay_beats` while the pad still showed those knobs. Hold is now
+  `clamp(ember_hold_beats, 1..32)` default 8; sparkle runs while `cue_beat < hold` (hold window
+  maps onto the classic 8-beat density curve so default stay byte-identical). Optional
+  `ember_decay_beats` (default 0 = hard cut, clamp 0..8) linearly fades intensities until
+  `hold+decay`, then empty. Dead `dim_beats` removed from this scene's allowlist and pad catalog
+  (drop-chase never consumed it). Strobe-gate-held-open behavior unchanged.
 - The drop-chase synchronized Hz gate is held open for this tail. That keeps low-coverage per-pixel
   flicker without classifying the effect as a whole-field strobe; `allow_strobe: false` remains.
 - At the physical-room shape of 60 segments, the dry-render test samples 480 frames and caps peak
   simultaneous lit coverage at 20%; it also pins zero slot-5 background, changing frames, exact
-  drop-chase-intro parity, and the eight-beat cutoff. The tracked example removes the six obsolete
-  remnants params; legacy ignored live params remain accepted for config compatibility.
+  drop-chase-intro parity at default hold, and the hold/decay cutoff. The tracked example keeps
+  empty params (defaults apply).
 - Bank membership and the `rt_drop_firework_explosion` pairing are unchanged because the temporary
-  unbank/repoint stopgap never landed. The ignored live config was not edited, no bridge restart was
-  performed, and room-visible acceptance remains an operator audition gate.
+  unbank/repoint stopgap never landed. Room-visible acceptance remains an operator audition gate
+  (after a bridge restart so live `ember_hold_beats` is loaded).
 
 Firework redesign (AWR-187, 2026-07-09; implemented, software-tested, hardware-unvalidated):
 - Operator visual spec (verbatim acceptance): "the firework background explosion should strobe with
@@ -1004,6 +1010,7 @@ Config:
 - AWR-253 (2026-07-15): Lab Room preview presentation mode. `createLedSimView(canvas, profile, options?)` gains an optional third arg; `tools/led_pad_assets/lab.js` passes `{presentation: true}` (`ensureRoomView`), and `tools/led_sim_assets/ledsim-view.js` guards its editor chrome so the small Lab preview draws only room walls, the strip path, the 360 LEDs, the junction marker + "center · control box" label, and the start/end markers. Suppressed: segment ticks + tick labels, boundary/room-size labels, the clickable room-size chip, vertex handles, and the unplaced/excess warning text (guard clauses, no drawing-function fork; optics `transformColor`/`applyBleed`/`drawEmitter` untouched). Default `{}` keeps the sim editor view byte-identical (the sim page passes nothing). JS is manual-smoke / Claude e2e after pad restart; no bridge/output behavior changed.
 - AWR-254 (2026-07-15): Pad look-editor close dirty check. `closeEditor` in `tools/led_pad_assets/pad-ui.js` compares against `cleanSnapshot` (updated after a successful Save), not a separate open-time snapshot, so Save → close exits silently and only edits since the last save show "Discard unsaved changes?". Covered by `tests/frontend/test_led_pad_defaults.py` (`test_close_after_save_skips_discard_modal`, `test_close_with_unsaved_edits_shows_discard_modal`). Lab/sim JS untouched.
 - AWR-255 (2026-07-15): Pad+Lab stale-config banner. Bridge status has `process.pid` / `written_at` but no `started_at` (confirmed; bridge runtime untouched). Pad `GET /api/runtime_status` adds `config_stale` via pure `compute_config_stale` (live config mtime vs `ps`-resolved process start; weaker post-Apply `commit_proxy` when start is unknown). Shared `PadConfigStale` UI on pad and lab: persistent warn while stale, quiet green when fresh. Covered by `tests/test_led_pad_service.py` (`ConfigStaleComputationTests`).
+- AWR-256 (2026-07-15): `rt_post_drop_firework_remnants` wires `ember_hold_beats` (default 8, clamp 1..32) and `ember_decay_beats` (default 0 hard cut, clamp 0..8). Shared `_drop_chase_sparkle_field` keeps default hold byte-identical to AWR-215; longer holds map onto the classic 8-beat density curve (no comet half). Dead `dim_beats` removed from allowlist + pad `CONTROL_META`. Covered by `PostDropFireworkRemnantsTests` in `tests/test_govee_frame_renderer.py`. Bridge restart required to load live params; implementer did not restart.
 - Template Lab persists draft metadata under gitignored `config/led_lab/drafts.json` and loads gitignored `config/led_lab/effects_lab.py` only inside the pad process. Lab scenes play as `lab_<name>` through `LabRenderer`; bridge runtime modules never import lab code, and production renderer registries are not mutated by lab playback.
 - Template Lab Round 1 adds three endpoints on `LedPadService` (`tools/led_pad_web.py`): `lab_update` re-applies params to the already-playing lab draft via the shared `PadPlayback.update()` path (no takeover, no `CueTimer`/`SyntheticClock` restart) and only applies when that exact draft is playing; `lab_switch` seamlessly reconfigures the shared playback slot from one already-playing lab draft to another (same `update()` path, beat keeps running) and refuses when nothing is playing or a pad look is playing; `lab_preview` renders frames offline through a fresh local `LabRenderer` (`render_preview_frames` in `tools/led_pad_lab.py`) and never touches `self._playback`, ownership, or the live renderer's effects. All three reuse `_lab_play_spec`'s reload-and-fail-dark behavior for a broken sandbox module. No code-level strobe rail was added (discipline-only, per operator decision).
 - LED Pad exposes `GET /api/access` (shared with Laser Pad via `tools/pad_access.py`), which reports the pad's current bind address/loopback state and, when non-loopback, a best-effort LAN URL for a QR "Open on another device" affordance. It never changes bind behavior itself; exposing the pad to the LAN stays an explicit `--host` operator action.
@@ -1113,7 +1120,7 @@ M2.5 slot cues in SLOT_EFFECTS (govee_frame_renderer.py):
 | rt_post_drop_center_comet | _slot_post_drop_center_comet | post_drop | yes | software-validated (Patch E2) |
 | rt_twinkle | _slot_twinkle | ambient | no | software-validated (Patch E3) |
 | rt_groove_heartbeat | _slot_rt_groove_heartbeat | groove | no | software-validated (AWR-156) |
-| rt_post_drop_firework_remnants | _slot_rt_post_drop_firework_remnants | post_drop | no | software-validated (AWR-156) |
+| rt_post_drop_firework_remnants | _slot_rt_post_drop_firework_remnants | post_drop | no | software-validated (AWR-215/256: ember_hold_beats + ember_decay_beats; dim_beats removed) |
 
 Non-slot (baked) frame effects added by AWR-156/AWR-161, registered in `_EFFECTS`:
 
