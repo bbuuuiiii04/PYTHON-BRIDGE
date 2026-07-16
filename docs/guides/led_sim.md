@@ -153,29 +153,30 @@ except the junction arc (segment 30) where the tick is suppressed under the
 control-box label.
 
 The Layout tab opens with a **layout slot picker** (select + Use / Save as… /
-Rename / Delete). The picker selects a library slot; the stage stays on the
-current active layout until **Use**. When the selected slot is not active, a
-hint says “Press Use to make this the active layout.” **Use** puts that slot on
-the stage **and immediately writes `active_layout` to disk** (GET the saved
-profile → set the pointer → POST). Unsaved local geometry or calibration knob
-edits stay local and are not committed by Use — Save layout / Save calibration
-still own those. If the selected name exists only in the browser (Save as… and
-not yet saved), Use asks you to Save layout first. Save as duplicates the active
-entry (prompt prefilled `Copy of <name>`). Delete targets the **selected** slot:
-it refuses the last layout and refuses the active layout, both via the error
-banner — select a non-active slot, then Delete. Confirm uses the same in-page
-dialog pattern as Save as (not `window.confirm`, which automation silently
-dismisses). On confirm, the slot leaves the picker and `layouts` immediately;
-Save layout writes the pruned library. Room W/H, presets, and the editor operate
-on the active layout (selecting a slot and editing auto-activates it locally;
-Use is still required to persist the pointer for Lab). The dimension bar is
+Rename / Delete). Selecting a slot **previews** that layout on the stage immediately
+(read-only ghost: vertices visible, drag/presets/room fields/Flip/Reset disabled,
+hint “previewing — press Use to activate & edit”). Editing tools bind only to the
+**active** layout — Use activates and persists. **Use** writes `active_layout` to
+disk immediately (GET the saved profile → set the pointer → POST). Unsaved local
+geometry or calibration knob edits stay local and are not committed by Use —
+**Save changes** still owns geometry/calibration. If the selected name exists only
+in the browser, Use asks you to Save changes first. **Save as / Rename / Delete**
+also persist to disk in the same action (library-structure ops are immediate;
+geometry edits remain explicit-Save). Save as duplicates the active entry (prompt
+prefilled `Copy of <name>`). Delete targets the **selected** slot: it refuses the
+last layout and refuses the active layout, both via the error banner — select a
+non-active slot, then Delete. Confirm uses the same in-page dialog pattern as
+Save as (not `window.confirm`, which automation silently dismisses). On confirm,
+the slot leaves the picker and is removed from disk immediately. Room W/H,
+presets, and the editor operate on the active layout only. The dimension bar is
 unchanged. Preset cards, drag handles (≥32 px), double-click / long-press vertex
 edit, flip chain, reset, bounded undo (up to 20, Cmd/Ctrl-Z on the Layout tab),
 and the per-layout locker still apply.
-**Save layout** persists the whole library via the existing validated profile
-POST. Unsaved badges are scoped: layout edits do not light the calibration
-badge, and vice versa. After Use, Lab’s Room preview picks up the new active
-layout on the next Preview click or Room toggle (AWR-250) — no manual reload.
+**Save changes** (formerly “Save layout”) persists geometry/calibration via the
+existing validated profile POST. Unsaved badges are scoped: layout edits do not
+light the calibration badge, and vice versa. After Use, Lab’s Room preview picks
+up the new active layout on the next Preview click or Room toggle (AWR-250) — no
+manual reload. AWR-251 journey: `tools/awr251_save_story_journey.mjs`.
 
 ## What is not exact yet
 

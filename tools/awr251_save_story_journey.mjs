@@ -233,6 +233,8 @@ run_server(port=${simPort}, profile_path=${JSON.stringify(simProfile)})
     await page.click("#acceptBtn");
     await page.waitForTimeout(500);
     await page.reload({waitUntil: "networkidle"});
+    // Accepted chip is off by default — exact-name search still surfaces the hit (m-8).
+    await page.fill("#draftSearch", "pulse");
     await page.click('#draftList button.lab-row[data-name="pulse"]');
     const phrase = await page.inputValue("#targetRoleSelect");
     const brief = await page.inputValue("#briefInput");
@@ -249,7 +251,8 @@ run_server(port=${simPort}, profile_path=${JSON.stringify(simProfile)})
     }
 
     // —— (b) slider local + switch restores; disk unchanged ——
-    // Reset pulse params on disk baseline after (a).
+    await page.fill("#draftSearch", "");
+    await page.click('[data-status-filter="accepted"]'); // show accepted pulse
     const beforeB = readFileSync(join(labDir, "drafts.json"), "utf8");
     await page.click('#draftList button.lab-row[data-name="pulse"]');
     const slider = page.locator('#paramControls input[data-param="level"]');
@@ -257,7 +260,6 @@ run_server(port=${simPort}, profile_path=${JSON.stringify(simProfile)})
     await slider.fill("0.85");
     await slider.dispatchEvent("input");
     await page.waitForTimeout(600); // debounce auto-apply
-    // Ensure no save POST happened: drafts.json unchanged while we wait, then switch.
     await page.click('#draftList button.lab-row[data-name="other"]');
     await page.waitForTimeout(300);
     const midB = readFileSync(join(labDir, "drafts.json"), "utf8");

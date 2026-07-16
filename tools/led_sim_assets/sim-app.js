@@ -362,6 +362,7 @@ function displayProfile() {
 }
 
 function isPreviewingLayout() {
+  if (!state.profile) return false;
   ensureLayoutLibrary();
   const selected = selectedLayoutName();
   return Boolean(selected && selected !== state.profile.active_layout && state.profile.layouts[selected]);

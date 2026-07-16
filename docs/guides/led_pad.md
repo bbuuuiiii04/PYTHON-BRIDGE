@@ -210,7 +210,8 @@ writes it on Save; list rows show a 3-letter phrase chip so you can see which mo
 
 The `/lab` page (lab-route only — Pad markup and playwright selectors are untouched) is reorganized:
 
-- **Draft list.** Sticky search (name substring), status chips (Iterating on by default; Accepted /
+- **Draft list.** Sticky search (name / brief / notes substring only — never params or `fn`),
+  status chips (Iterating on by default; Accepted /
   Rejected off — Rejected also covers archived/`promoted`), and a Phrase dropdown (All / Untagged /
   eight roles). Rows group by status with counts, sort by updated desc inside each group, and stay
   one line: phrase chip · name (ellipsis) · status dot · relative date. Timing badges and full
@@ -218,16 +219,23 @@ The `/lab` page (lab-route only — Pad markup and playwright selectors are unto
   detail panel (one left-aligned inline label); picking a draft closes it. **The selected draft
   always stays in the list** even when its status chip is off (Accept with Accepted=off no longer
   makes the row vanish); it drops out only after you select something else or change filters.
+  An **exact-name** search hit also surfaces even when its status chip is off (same pin rule).
 - **Detail (top → bottom).** Header flows title → Phrase/Timing → collision banner **only when**
   `production_collision` is true → preview hero (Strip|Room toggle + strip/room canvases; AWR-245;
   64px / 48px phone strip with a dim “press Preview” placeholder until frames arrive + Preview/Play/Stop
-  + AWR-241 beat meter IDs unchanged)
+  + AWR-241 beat meter IDs unchanged; Room mode scrolls the hero into view after Preview)
   → tuning card (labeled sliders; on phone, label+value on one line and full-width track below with
   ≥32px thumbs; cue segmented control; Save + dirty; dim hint when `/api/lab/update` returns
-  `applied:false`: “Edits saved to the draft — press ▶ Play to hear them live”) → Accept (solid
+  `applied:false`: “Live apply paused — press ▶ Play to hear edits on the lights”) → Accept (solid
   green) / Reject (outline red) verdict bar → Brief (2 rows) + Notes in a collapsed details →
   Advanced JSON / Traceback → footer Reload (transient “Loaded N effects ✓”) · Archive · Delete
-  (Archive/Delete/Save/Accept/Reject disabled with no selection).
+  (Archive/Delete/Save/Accept/Reject disabled with no selection). When another lab scene is already
+  live, Play becomes amber **⇄ Switch live lights**.
+- **Save contract (AWR-251).** What you see is what's saved; anything named is persisted; slider
+  tweaks are live-apply + editor-local until Save / Accept / Reject. Accept and Reject both write
+  the current editor fields (params, phrase, timing, brief, notes, cue) then flip status. Switching
+  drafts keeps unsaved edits in session memory per draft (restored when you click back) and writes
+  nothing to `drafts.json`. `/api/lab/update` remains runtime-only.
 - **Health strip (client-only).** Top-bar right cluster with title tooltips:
   - **Server** — green `ok` when last `/api/runtime_status` succeeded &lt;3s ago; red `stale` otherwise.
   - **Lab code** — amber `not loaded yet` before first successful reload/play/preview; green
@@ -290,13 +298,16 @@ agent-facing content). To promote an accepted draft:
 
 ### AWR-193 overhaul flows (2026-07-10)
 
-- **Accept-what-you-hear.** `_lab_play_spec` records the last APPLIED pre-injection params per
-  draft (author params + live UI overrides, snapshotted immediately before engine color
-  injection — palette-injected colors are never saved). Accept writes that snapshot into the
-  entry in the same save that flips status; the response carries `"snapshotted"` (false when the
-  draft was never played this server session, in which case params stay untouched). A dirty chip
-  next to Save reads "Unsaved tweaks" / "Saved" from comparing the editor params against the
-  saved entry.
+- **Accept-what-you-hear / Accept-what-you-see (AWR-251).** Accept and Reject both imply Save:
+  the UI posts the current editor payload (params, phrase/`target_role`, timing, brief, notes,
+  cue). Server merges those fields, then flips status. If the payload has no `params` (name-only
+  Accept after Play — agent path), `_lab_play_spec`'s last APPLIED pre-injection snapshot is used
+  as before (`snapshotted: true`); palette-injected colors are never saved. The dirty chip next to
+  Save reads "Unsaved tweaks" / "Saved" from comparing the editor against the saved entry — and
+  stays truthful because slider auto-apply no longer writes `drafts.json`.
+- **Live apply is not Save.** Debounced slider/JSON auto-apply calls `/api/lab/update` only
+  (runtime). Draft-switch stashes editor fields per draft in session memory and restores on return;
+  disk is untouched until Save / Accept / Reject.
 - **Decoupled preview.** ◉ Preview no longer saves first — it posts the current editor params
   straight to `/api/lab/preview`. Play keeps save-first, and a save failure shows
   "Save failed: …" in the banner and visibly aborts the play attempt. Auto-apply JSON parse
