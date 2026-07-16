@@ -46,6 +46,9 @@ class SmartPhrasingSnapshot:
     drop_window_beats: float
     post_drop_beats: float
     transition_window_beats: float
+    # AWR-257: LED true-drop sections (from d.meta.drop_sections). Empty ⇒ no
+    # section advances ever ⇒ today's per-fired-drop LED behavior (fail-open).
+    drop_sections: tuple[DropSection, ...] = ()
     phrase_anchor_last_beat: int = -1
     phrase_anchor_period_beats: int = 64
     # AWR-170 (D.2): laser blackout beats before every chorus phrase start. 0 ⇒
@@ -75,6 +78,11 @@ class SmartPhrasingState:
     smart_drop_rearm_requested: bool = False
     smart_post_drop_active: bool = False
     active_drop_beat: Optional[float] = None
+    # AWR-257: set on the tick the deck crosses an in-section advance marker.
+    # LED-look-cursor move only — never a drop fire or darkness decision.
+    section_advance: bool = False
+    section_advance_true_drop_beat: Optional[float] = None
+    section_advance_index: Optional[int] = None
     smart_buildup_active: bool = False
     smart_breakdown_active: bool = False
     breakdown_start_crossing: bool = False
@@ -151,6 +159,10 @@ class SmartPhrasingEngine:
     def __init__(self) -> None:
         self._previous_abs_beat: Optional[float] = None
         self._fired_drop_beats: set[float] = set()
+        # AWR-257: separate fired-set for in-section advance markers, reset on
+        # every path that resets _fired_drop_beats so a stale advance from the
+        # previous track can never re-fire.
+        self._fired_advance_beats: set[float] = set()
         self._active_drop_beat: Optional[float] = None
         self._last_deck_id: Optional[str] = None
         self._last_track_id: Optional[str] = None
@@ -163,6 +175,7 @@ class SmartPhrasingEngine:
     def reset(self, reason: str) -> SmartPhrasingState:
         self._previous_abs_beat = None
         self._fired_drop_beats.clear()
+        self._fired_advance_beats.clear()
         self._active_drop_beat = None
         self._last_deck_id = None
         self._last_track_id = None
@@ -350,6 +363,41 @@ class SmartPhrasingEngine:
                 scratch.active_drop_beat = drop_beat
                 break
 
+        # 2c. Section advance crossing (AWR-257). Mirrors the smart-drop crossing
+        # pattern exactly — both the historical crossing and the mutate-only exact
+        # resume landing — gated by an own fired-set so each advance surfaces once.
+        # An advance is a >=16-beat continuation marker inside a drop section;
+        # crossing one is an LED-look-cursor move only (no drop fire, no darkness).
+        section_advance = False
+        section_advance_true_drop_beat: Optional[float] = None
+        section_advance_index: Optional[int] = None
+        for section in snapshot.drop_sections:
+            if not (float(section.true_drop_beat) <= abs_beat < float(section.end_beat)):
+                continue
+            for adv_index, adv_beat in enumerate(section.advance_beats):
+                adv = float(adv_beat)
+                crossed_from_history = (
+                    prev_abs_beat is not None
+                    and prev_abs_beat < adv <= abs_beat
+                )
+                exact_resume_landing = (
+                    mutate
+                    and prev_abs_beat is None
+                    and abs(adv - abs_beat) <= _EXACT_DROP_EPSILON
+                )
+                if (
+                    (crossed_from_history or exact_resume_landing)
+                    and adv not in self._fired_advance_beats
+                ):
+                    section_advance = True
+                    if mutate:
+                        self._fired_advance_beats.add(adv)
+                    section_advance_true_drop_beat = float(section.true_drop_beat)
+                    section_advance_index = adv_index
+                    break
+            if section_advance:
+                break
+
         # 3. Resolve next Smart Drop
         next_smart_drop_beat = None
         beats_to_next_drop = None
@@ -519,6 +567,9 @@ class SmartPhrasingEngine:
             smart_drop_rearm_requested=smart_drop_rearm_requested,
             smart_post_drop_active=smart_post_drop_active,
             active_drop_beat=scratch.active_drop_beat,
+            section_advance=section_advance,
+            section_advance_true_drop_beat=section_advance_true_drop_beat,
+            section_advance_index=section_advance_index,
             smart_buildup_active=smart_buildup_active,
             smart_breakdown_active=smart_breakdown_active,
             breakdown_start_crossing=breakdown_start_crossing,

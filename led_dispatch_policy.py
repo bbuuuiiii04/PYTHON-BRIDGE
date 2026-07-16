@@ -1380,6 +1380,15 @@ class LEDDispatchPolicyMixin:
             )
             return
 
+        # AWR-257: an in-section advance is this tick's LED event. It rides here —
+        # AFTER the full gate stack, LED hold, and pre-drop blackout — so every
+        # owner that wins over a drop-time look wins over it too (invariant 7).
+        # (section_advance and smart_drop_crossing are disjoint by construction;
+        # the guard keeps a section's own true drop on the normal drop path.)
+        if sp_state.section_advance and not sp_state.smart_drop_crossing:
+            self._dispatch_led_section_advance(active=active, d=d, sp_state=sp_state)
+            return
+
         # WI-2: advance the phrase latch before building role_key so the seq is
         # current when groove/ambient/post_drop embed it into their marker.
         if self._phrase_monotonic_enabled:
@@ -2014,6 +2023,101 @@ class LEDDispatchPolicyMixin:
             self._led_committed_drop_anchor_beat = float(anchor)
             self._led_committed_drop_decision = decision
         return decision
+
+    def _dispatch_led_section_advance(
+        self,
+        *,
+        active: int,
+        d: DeckState,
+        sp_state: SmartPhrasingState,
+    ) -> None:
+        """AWR-257: an in-section advance re-draws the drop bag ONCE, from the
+        section's <=-tier same-family pool, and bumps the look cursor. Reached
+        only after _dispatch_led_automation's full gate stack (blackout,
+        not-ready, manual override, scripted, not-autoloop), so every owner that
+        wins over a drop-time look selection wins over an advance identically.
+        A look-cursor move ONLY: no laser, no darkness/blackout, no
+        autoloop/OS2L/MIDI, no push-loop I/O."""
+        tdb = sp_state.section_advance_true_drop_beat
+        idx = sp_state.section_advance_index
+        if tdb is None or idx is None:
+            return
+        role = "drop"
+        # post_drop's cycle-marker shape: a per-section index keeps every advance
+        # role-key distinct so the :1392 dedupe passes each one exactly once.
+        marker = f"{float(tdb):.3f}:a{int(idx)}"
+        role_key = f"{active}:{d.load_gen}:{role}:{marker}"
+        if role_key == self._led_last_auto_role_key:
+            return
+        section_id = f"{float(tdb):.3f}"
+        cycle = int(idx)
+
+        # Advance the color-engine journey (guarded; engine-off/error = no-op).
+        engine = self._led_color_engine
+        if engine is not None and engine.enabled:
+            try:
+                engine.begin_dispatch(
+                    active_deck=active,
+                    load_gen=d.load_gen,
+                    content_id=str(d.meta.content_id or ""),
+                    filepath=str(d.meta.filepath or ""),
+                    role=role,
+                    section_id=section_id,
+                    cycle=cycle,
+                    moments_blocked=bool(
+                        self._led_blackout_active()
+                        or self._led_manual_override
+                        or self._led_smart_drop_blackout_key
+                    ),
+                    scripted=False,
+                )
+            except Exception as exc:
+                self._led_last_error = f"color_engine_error:{type(exc).__name__}"
+
+        # Re-draw the drop bag at the section's TRUE drop (Task 4 explicit anchor),
+        # NEVER active_drop_beat (None at an advance beat — the red-team H1 ambush).
+        look_preference = self._led_look_preference_predicate(anchor_beat=float(tdb))
+        commit_role = getattr(self._led_look_director, "commit_role", None)
+        decision = None
+        if callable(commit_role):
+            try:
+                decision = commit_role(
+                    "drop",
+                    diy_eligible=self._led_diy_eligible_predicate(),
+                    look_preference=look_preference,
+                )
+            except Exception:
+                decision = None
+
+        self._led_last_auto_role_key = role_key
+        self._led_last_event = "automation:drop_advance"
+        if decision is None:
+            self._led_gate_no_look(
+                reason="no_look:drop_advance",
+                active_deck=active,
+                role=role,
+                role_key=role_key,
+            )
+            return
+
+        decision = self._led_inject_engine_colors(
+            decision, role=role, section_id=section_id, cycle=cycle, role_key=role_key,
+        )
+        decision = self._led_inject_f4_seasoning(decision, role=role)
+        look = str(getattr(decision, "look", ""))
+        self._led_send_decision(
+            decision,
+            look=look,
+            role=role,
+            role_key=role_key,
+            automation=True,
+            active_deck=active,
+            sp_state=sp_state,
+        )
+        log.debug(
+            "[RGB] section-advance deck=%d true_drop=%.3f idx=%d look=%s role_key=%s",
+            active, float(tdb), int(idx), look, role_key,
+        )
 
     def _led_diy_eligible_predicate(self) -> Any:
         # AWR-152 #6: under v2 the v1 palette is frozen at init, so tag filtering

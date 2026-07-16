@@ -5243,6 +5243,9 @@ class StateManager(LEDDispatchPolicyMixin):
             abs_beat=abs_beat_pos if bpm > 0 else None,
             phrase_segments=phrase_segments,
             smart_drop_beats=smart_drop_beats,
+            # AWR-257: precomputed immutable tuple; no cache needed (unlike the
+            # derived segment/beat caches above, it's read straight off meta).
+            drop_sections=d.meta.drop_sections,
             breakdown_segments=breakdown_segments,
             phrase_lookahead_beats=self._sp_phrase_lookahead,
             drop_window_beats=self._sp_drop_window,
