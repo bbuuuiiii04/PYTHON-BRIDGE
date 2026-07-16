@@ -294,8 +294,16 @@ class PatchDTests(unittest.TestCase):
             self.assertEqual(len(slots), MAX_SLOTS)
             self.assertEqual(slots[5], (220, 240, 255))
             self.assertGreater(len(set(slots[:5])), 1)
-            self.assertEqual(second["slot_colors_from"], second["slot_colors_to"])
-            self.assertNotIn("fade_beats", second)
+            # Live config runs LIGHTING ENGINE v2: fade from/to only appear during
+            # zone flip / bloom. Stable same-section resolves stay fade-free.
+            # v1 would set slot_colors_from==slot_colors_to with no fade_beats when
+            # fade_beats_by_role.drop == 0.0.
+            if getattr(engine, "_v2_active", False) and not getattr(engine, "_v2_stand_down", False):
+                self.assertNotIn("slot_colors_from", second)
+                self.assertNotIn("fade_beats", second)
+            else:
+                self.assertEqual(second["slot_colors_from"], second["slot_colors_to"])
+                self.assertNotIn("fade_beats", second)
 
 
 if __name__ == "__main__":
