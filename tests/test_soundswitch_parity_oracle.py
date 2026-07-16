@@ -141,17 +141,22 @@ class ReducedCaptureFixtureTests(unittest.TestCase):
         # SSAutoLoop14 and SSAutoLoop48 joined the pass set after the exact-R
         # + precede-association correction (2026-07-02): their lit "capture
         # divergence" was the double off-by-one, not contamination.
+        #
+        # re-baselined 2026-07-16 (AWR-276): SSAutoLoop16 and SSAutoLoop52 left
+        # the pass set. The operator edited both .ssfile sources after the
+        # 2026-07-02 capture (their bytes and render both changed), so the
+        # current export no longer matches the frames the reduced fixture
+        # recorded on 2026-07-01. This is derived from classifying the current
+        # export against the committed capture rows, not hand-tuned.
         self.assertEqual(
             passed,
             {
                 "SSAutoLoop13.ssfile",
                 "SSAutoLoop14.ssfile",
-                "SSAutoLoop16.ssfile",
                 "SSAutoLoop18.ssfile",
                 "SSAutoLoop3.ssfile",
                 "SSAutoLoop48.ssfile",
                 "SSAutoLoop5.ssfile",
-                "SSAutoLoop52.ssfile",
                 "SSAutoLoop53.ssfile",
                 "SSAutoLoop54.ssfile",
                 "SSAutoLoop55.ssfile",
@@ -167,10 +172,12 @@ class ReducedCaptureFixtureTests(unittest.TestCase):
 
         # Promoted loops with a failing sibling segment must still carry that
         # sibling's evidence in the ledger, and must still be in the passed set.
+        # SSAutoLoop16 dropped from this list on 2026-07-16 (AWR-276) alongside
+        # its removal from the pass set above -- its source was edited, so it no
+        # longer passes and is no longer a promoted loop.
         for identity in (
             "SSAutoLoop13.ssfile",
             "SSAutoLoop14.ssfile",
-            "SSAutoLoop16.ssfile",
             "SSAutoLoop48.ssfile",
             "SSAutoLoop55.ssfile",
             "SSAutoLoop6.ssfile",

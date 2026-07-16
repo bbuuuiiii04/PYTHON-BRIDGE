@@ -62,7 +62,9 @@ evidence, and physical validation remain open. The passive parity capture now
 feeds scripted, Autoloop, and Static Look evidence registries; Static Looks are
 generalized by the C6 assertion, capture-diverged Autoloop samples are recorded
 outside the positive registry, and a fresh export now reports active lanes
-`algorithm_generalized: 67`, `oracle_proven: 16`, `unverified_parity: 0`.
+`algorithm_generalized: 70`, `oracle_proven: 14`, `unverified_parity: 0`
+(re-baselined 2026-07-16, AWR-276, after the operator authored 2 new Static
+Looks and two edited Autoloops — 16/52 — retired to generalized).
 Trusted publication is software-gated green; physical validation remains open.
 
 | Output | Status | Evidence | Notes |

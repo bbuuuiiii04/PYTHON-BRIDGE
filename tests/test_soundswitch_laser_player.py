@@ -625,7 +625,12 @@ class CurrentPackGoldenTests(unittest.TestCase):
     def test_ddj_slots_8_16_17_24_exact_ch1_ch19(self):
         expected = {
             8: "1800260000797c0000d6ff000000000000006e",
-            16: "00000000000000000000000000000000000000",
+            # re-baselined 2026-07-16 (AWR-276): slot 16 was an empty look
+            # (all-zero) at the 2026-07-02 snapshot; the operator authored a new
+            # static look into SoundSwitchVenues.bin on 2026-07-16 that now
+            # renders here. Value taken from the export renderer against the
+            # current venue, not hand-tuned.
+            16: "ff00000e007586000000cf000000000000007c",
             17: "26001d00006483ffffff00000000000000004f",
             24: "010015ff00288a00ff00ff00ff005d000000ff",
         }
