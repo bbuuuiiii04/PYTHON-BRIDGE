@@ -527,7 +527,20 @@
       clearEditorMemory(state.current.name);
       await refresh();
       const note = $("acceptFallbackNote");
-      if (note) note.hidden = !showFallback;
+      if (note) {
+        if (showFallback) {
+          note.hidden = false;
+          note.textContent = "Accepted saved values — your last live-tuned values weren't available";
+          note.className = "lab-applied-hint warn-text";
+        } else if (res && res.message) {
+          note.hidden = false;
+          note.textContent = res.message;
+          note.className = "lab-applied-hint";
+        } else {
+          note.hidden = true;
+        }
+      }
+      flashReloadConfirm(true, (res && res.message) || "Live — wired into the show");
     } catch (err) {
       if (err && err.payload && err.payload.error === "stale_entry") {
         PadModal.show(
@@ -545,7 +558,20 @@
               clearEditorMemory(state.current.name);
               await refresh();
               const note = $("acceptFallbackNote");
-              if (note) note.hidden = !showFallback;
+              if (note) {
+                if (showFallback) {
+                  note.hidden = false;
+                  note.textContent = "Accepted saved values — your last live-tuned values weren't available";
+                  note.className = "lab-applied-hint warn-text";
+                } else if (res && res.message) {
+                  note.hidden = false;
+                  note.textContent = res.message;
+                  note.className = "lab-applied-hint";
+                } else {
+                  note.hidden = true;
+                }
+              }
+              flashReloadConfirm(true, (res && res.message) || "Live — wired into the show");
             }},
           ],
         );
@@ -558,9 +584,10 @@
   async function rejectDraft() {
     if (!state.current) return;
     try {
-      await api.labReject({...currentPayload(), status: "rejected"});
+      const res = await api.labReject({...currentPayload(), status: "rejected"});
       clearEditorMemory(state.current.name);
       await refresh();
+      flashReloadConfirm(true, (res && res.message) || "Rejected — stays out of the show. You can reopen it anytime.");
     } catch (err) {
       if (err && err.payload && err.payload.error === "stale_entry") {
         PadModal.show(
@@ -572,9 +599,10 @@
               await refresh();
             }},
             {label: "Overwrite & Reject", className: "danger-outline", run: async () => {
-              await api.labReject({...currentPayload(), status: "rejected", overwrite: true});
+              const res = await api.labReject({...currentPayload(), status: "rejected", overwrite: true});
               clearEditorMemory(state.current.name);
               await refresh();
+              flashReloadConfirm(true, (res && res.message) || "Rejected — stays out of the show. You can reopen it anytime.");
             }},
           ],
         );

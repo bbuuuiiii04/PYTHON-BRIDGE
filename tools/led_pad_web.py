@@ -27,7 +27,7 @@ from ..govee_frame_renderer import REALTIME_EFFECT_NAMES, REALTIME_EFFECT_PARAM_
 from ..led_color_engine import LedColorEngine
 from ..led_config import LEDConfigResult, _resolve_path, load_led_look_director_config_from_dict
 from ..led_pad_controls import controls_for, effective_lab_specs, render_catalog
-from ..runtime_status import STATUS_PATH
+from ..runtime_status import COMMANDS_PATH, STATUS_PATH
 from .led_pad_lab import LabRegistry, LabRenderer, StaleLabEntry, load_lab_effects, render_preview_frames
 from .led_pad_playback import PadPlayback, stable_seed
 from .pad_access import _is_loopback_host, access_payload
@@ -695,10 +695,15 @@ class LedPadService:
             if client_updated != disk_updated:
                 raise StaleLook(name, disk_updated=disk_updated, client_updated=client_updated)
         scene_ref = str(look_patch.get("scene_ref") or (candidate.get("looks", {}).get(name) or {}).get("scene_ref") or "")
-        allowed = REALTIME_EFFECT_PARAM_KEYS.get(scene_ref, frozenset())
-        unknown = sorted(str(key) for key in params if str(key) not in allowed)
-        if unknown:
-            raise ValueError(f"unknown params for {scene_ref}: {', '.join(unknown)}")
+        from ..govee_lab_adapter import is_lab_production_scene
+        if is_lab_production_scene(scene_ref):
+            allowed = None  # free-form lab draft params
+        else:
+            allowed = REALTIME_EFFECT_PARAM_KEYS.get(scene_ref, frozenset())
+        if allowed is not None:
+            unknown = sorted(str(key) for key in params if str(key) not in allowed)
+            if unknown:
+                raise ValueError(f"unknown params for {scene_ref}: {', '.join(unknown)}")
         looks = candidate.setdefault("looks", {})
         current = copy.deepcopy(looks.get(name, {}))
         current.update(copy.deepcopy(look_patch))
@@ -1014,12 +1019,115 @@ class LedPadService:
             return result
 
     def lab_accept(self, payload: dict[str, Any]) -> dict[str, Any]:
-        # AWR-251: Accept implies Save — persist what the editor shows, then accept.
-        return self._lab_persist_editor(payload, status="accepted")
+        # AWR-260: Accept = persist + wire into production bank + Apply + reload.
+        result = self._lab_persist_editor(payload, status="accepted")
+        entry = result.get("entry") or {}
+        try:
+            wired = self._lab_wire_into_production(entry)
+        except Exception as exc:
+            result["ok"] = False
+            result["wired"] = False
+            result["error"] = str(exc)
+            result["message"] = f"Accepted as draft, but live wire-in failed: {exc}"
+            return result
+        result.update(wired)
+        return result
 
     def lab_reject(self, payload: dict[str, Any]) -> dict[str, Any]:
         # AWR-251: Reject also persists the current editor state (named = saved).
-        return self._lab_persist_editor(payload, status="rejected")
+        result = self._lab_persist_editor(payload, status="rejected")
+        result["message"] = "Rejected — stays out of the show. You can reopen it anytime."
+        return result
+
+    def _lab_wire_into_production(self, entry: dict[str, Any]) -> dict[str, Any]:
+        """Write look → bank → commit live → append led_reload_looks (AWR-260)."""
+        name = str(entry.get("name") or "").strip()
+        if not name:
+            raise ValueError("lab accept requires a draft name")
+        role = str(entry.get("target_role") or "").strip()
+        bank = role if role in _ROLE_BANKS else "drafts"
+        params = copy.deepcopy(entry.get("params") or {})
+        if not isinstance(params, dict):
+            params = {}
+        cue_beats = float(entry.get("cue_beats") or 16)
+        scene_ref = f"lab:{name}"
+        with self._lock:
+            # Prefer a same-backend realtime blackout for lab looks.
+            looks = self._draft.get("looks") or {}
+            configured_blackout = str(self._draft.get("blackout") or "")
+            blackout_look = looks.get(configured_blackout) if configured_blackout else None
+            if (
+                isinstance(blackout_look, dict)
+                and blackout_look.get("backend") == "realtime_razer"
+            ):
+                blackout = configured_blackout
+            elif "rt_blackout" in looks:
+                blackout = "rt_blackout"
+            else:
+                blackout = ""
+            look = {
+                "target": "room_perimeter",
+                "action": "realtime",
+                "scene_ref": scene_ref,
+                "fallback": blackout,
+                "safety_class": role or "lab",
+                "brightness": 100,
+                "allow_strobe": False,
+                "backend": "realtime_razer",
+                "color_source": "engine",
+            }
+            save_payload = {
+                "name": name,
+                "look": look,
+                "params": params,
+                "cue_beats": cue_beats,
+            }
+            # Match draft stamp when the look already exists so CAS does not 409.
+            disk_meta = ((self._draft.get("_pad_meta") or {}).get("looks") or {}).get(name) or {}
+            if disk_meta.get("updated"):
+                save_payload["updated"] = disk_meta["updated"]
+            candidate = self._candidate_save_look(save_payload)
+            _add_to_bank(candidate, name, bank)
+            _mark_moved(candidate, name)
+            errors, warnings = self._validate(candidate)
+            if errors:
+                raise ValueError("; ".join(errors))
+            self._draft = candidate
+            self._persist_draft_locked()
+
+        commit_result = self.commit({})
+        if not commit_result.get("ok"):
+            raise ValueError("; ".join(commit_result.get("errors") or ["commit failed"]))
+
+        self._append_bridge_command({"cmd": "led_reload_looks"})
+        if bank == "drafts":
+            message = "Live — untagged shelf; tag a phrase to join rotation"
+            bank_label = "Untagged"
+        else:
+            bank_label = bank.replace("_", " ").title()
+            message = f"Live — added to {bank_label} bank"
+        return {
+            "ok": True,
+            "wired": True,
+            "look_name": name,
+            "scene_ref": scene_ref,
+            "bank": bank,
+            "bank_label": bank_label,
+            "message": message,
+            "warnings": warnings,
+            "backup_path": commit_result.get("backup_path") or "",
+            "reload_appended": True,
+        }
+
+    def _append_bridge_command(self, command: dict[str, Any]) -> None:
+        path = COMMANDS_PATH
+        gate = getattr(getattr(self, "_playback", None), "_ownership", None)
+        if gate is not None and getattr(gate, "command_path", None):
+            path = str(gate.command_path)
+        raw = json.dumps(command, separators=(",", ":")) + "\n"
+        fd = os.open(str(path), os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o600)
+        with os.fdopen(fd, "a", encoding="utf-8") as fp:
+            fp.write(raw)
 
     def lab_archive(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self._lock:

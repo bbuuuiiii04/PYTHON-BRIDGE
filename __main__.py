@@ -1598,6 +1598,58 @@ def main() -> None:
             log.warning("[MAIN] queue-full  event=led-clear-scene-override")
             return False
 
+    def _led_reload_looks() -> bool:
+        """Reload LED look-director config + lab effects off the push loop (AWR-260)."""
+        from .govee_lab_adapter import (
+            default_lab_module_path,
+            is_lab_production_scene,
+            lab_draft_from_scene,
+            load_lab_effects,
+        )
+
+        result = load_led_look_director_config()
+        if not result.available or result.config is None:
+            log.warning(
+                "[MAIN] led-reload-looks failed reason=%s errors=%s",
+                result.reason,
+                list(result.errors)[:3],
+            )
+            return False
+        director = led_look_director
+        if director is None:
+            log.warning("[MAIN] led-reload-looks failed reason=no_director")
+            return False
+        lab_path = default_lab_module_path()
+        lab_load = load_lab_effects(lab_path)
+        effects = lab_load.get("effects") or {}
+        module_ok = bool(lab_load.get("ok"))
+
+        def _look_available(look_name: str) -> bool:
+            look = director._config.looks.get(look_name)
+            if look is None:
+                return False
+            scene = str(getattr(look, "scene_ref", "") or "")
+            if not is_lab_production_scene(scene):
+                return True
+            if not module_ok:
+                return False
+            draft = lab_draft_from_scene(scene, getattr(look, "params", {}) or {})
+            return bool(draft) and draft in effects
+
+        director.replace_config(result.config)
+        director.set_look_availability(_look_available)
+        runner = led_bundle.realtime_runner
+        reload_lab = getattr(runner, "reload_lab", None) if runner is not None else None
+        if callable(reload_lab):
+            reload_lab(str(lab_path))
+        log.info(
+            "[MAIN] led-reload-looks ok looks=%d lab_ok=%s lab_effects=%d",
+            len(result.config.looks),
+            int(module_ok),
+            len(effects),
+        )
+        return True
+
     def _led_palette_command(cmd: str, name: str | None = None) -> bool:
         if cmd in ("led_palette_queue", "led_palette_override"):
             raw_name = str(name or "").strip()
@@ -1698,6 +1750,7 @@ def main() -> None:
         led_blackout_callback=_led_blackout,
         led_clear_blackout_callback=_led_clear_blackout,
         led_clear_scene_override_callback=_led_clear_scene_override,
+        led_reload_looks_callback=_led_reload_looks,
         led_palette_callback=_led_palette_command,
         record_session_toggle_callback=_toggle_record_session,
         pack_command_callback=soundswitch_pack_controller.handle,

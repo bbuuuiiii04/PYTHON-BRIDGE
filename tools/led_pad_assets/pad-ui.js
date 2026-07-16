@@ -1,7 +1,7 @@
 (function () {
   const bankOrder = ["drafts", "ambient", "groove", "buildup", "drop", "post_drop", "breakdown", "utility"];
   const moveBanks = ["ambient", "groove", "buildup", "pre_drop", "drop", "post_drop", "breakdown", "utility"];
-  const bankLabels = {drafts:"Drafts", ambient:"Ambient", groove:"Groove", buildup:"Buildup", pre_drop:"Pre-Drop", drop:"Drop", post_drop:"Post-Drop", breakdown:"Breakdown", utility:"Utility", other:"Other"};
+  const bankLabels = {drafts:"Untagged", ambient:"Ambient", groove:"Groove", buildup:"Buildup", pre_drop:"Pre-Drop", drop:"Drop", post_drop:"Post-Drop", breakdown:"Breakdown", utility:"Utility", other:"Other"};
   const bankColors = {drafts:"var(--lab)", ambient:"var(--role-ambient)", groove:"var(--role-groove)", buildup:"var(--role-buildup)", drop:"var(--role-drop)", post_drop:"var(--role-postdrop)", breakdown:"var(--role-breakdown)", utility:"var(--role-utility)", other:"var(--border)"};
   // AWR-259: single source for dirty-tracked editor fields (save payload must match).
   const EDITOR_FIELDS = ["look", "params", "cue_beats", "slot_fill", "mono_chance", "locked_palette"];
@@ -88,7 +88,7 @@
     const grid = $("lookGrid");
     if (!names.length) {
       grid.innerHTML = state.activeBank === "drafts"
-        ? `<div class="empty"><span class="panel-label">No drafts</span><span>New looks land here. Automation never plays drafts.</span></div>`
+        ? `<div class="empty"><span class="panel-label">No untagged looks</span><span>Accepted lab cues without a phrase tag land here. Automation never plays this shelf.</span></div>`
         : `<div class="empty"><span class="panel-label">Empty bank</span><span>Move or duplicate looks into this bank.</span></div>`;
       return;
     }
@@ -442,8 +442,13 @@
   $("qrBtn").addEventListener("click", openAccessModal);
   $("commitBtn").addEventListener("click", () => confirmModal("Apply draft to live config", `Apply writes the draft to live config - ${($("commitCount").textContent || "0")} looks affected. Bridge restart required to take effect live.${(state.config || {}).live_changed ? "\nLive config changed underneath this draft (bridge or agent edit). Review before Apply — Discard all changes reloads live." : ""}`, "Apply", async () => { const res = await api.commit(); if (!res.ok) throw new Error((res.errors || []).join("\n")); toast(res.restart_note || "Applied - bridge restart required to take effect live."); await refresh(); }));
   $("discardBtn").addEventListener("click", () => {
-    const n = ((state.config || {}).dirty || {}).looks || [];
-    const count = Array.isArray(n) ? n.length : 0;
+    // AWR-260 E: count from live dirty state at modal-open (editor + draft), not a stale DOM badge.
+    const fromServer = ((state.config || {}).dirty || {}).looks || [];
+    const names = new Set(Array.isArray(fromServer) ? fromServer : []);
+    if (state.editor && snapshotEditor() !== state.cleanSnapshot) {
+      names.add(state.editor.name);
+    }
+    const count = names.size;
     confirmModal(
       "Discard all changes",
       `This deletes EVERY unsaved-to-show edit across ${count} looks (the whole draft) and reloads the live config. Your applied looks are untouched.`,

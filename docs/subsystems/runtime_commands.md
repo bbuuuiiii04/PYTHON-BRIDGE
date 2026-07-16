@@ -281,6 +281,7 @@ Accepted commands:
 - `led_blackout`
 - `led_clear_blackout`
 - `led_clear_scene_override`
+- `led_reload_looks`
 - `led_palette_queue`
 - `led_palette_override`
 - `led_palette_lock`

@@ -315,6 +315,7 @@ class CommandReader(threading.Thread):
         led_blackout_callback: Optional[Callable[[Optional[str], Optional[str]], Any]] = None,
         led_clear_blackout_callback: Optional[Callable[[Optional[str]], Any]] = None,
         led_clear_scene_override_callback: Optional[Callable[[], Any]] = None,
+        led_reload_looks_callback: Optional[Callable[[], Any]] = None,
         led_palette_callback: Optional[Callable[[str, Optional[str]], Any]] = None,
         record_session_toggle_callback: Optional[Callable[[Optional[str], bool], Any]] = None,
         pack_command_callback: Optional[Callable[..., Any]] = None,
@@ -334,6 +335,7 @@ class CommandReader(threading.Thread):
         self._led_blackout_callback = led_blackout_callback
         self._led_clear_blackout_callback = led_clear_blackout_callback
         self._led_clear_scene_override_callback = led_clear_scene_override_callback
+        self._led_reload_looks_callback = led_reload_looks_callback
         self._led_palette_callback = led_palette_callback
         self._record_session_toggle_callback = record_session_toggle_callback
         self._pack_command_callback = pack_command_callback
@@ -501,6 +503,13 @@ class CommandReader(threading.Thread):
                     with self._lock:
                         self._last_error = f"led_clear_scene_override callback failed: {detail}"
             return
+        if cmd == "led_reload_looks":
+            if self._led_reload_looks_callback:
+                ok, detail = _invoke_callback(self._led_reload_looks_callback)
+                if not ok:
+                    with self._lock:
+                        self._last_error = f"led_reload_looks callback failed: {detail}"
+            return
         if cmd in {
             "led_palette_queue",
             "led_palette_override",
@@ -576,6 +585,7 @@ def parse_command(line: str) -> dict[str, Any]:
         "led_blackout",
         "led_clear_blackout",
         "led_clear_scene_override",
+        "led_reload_looks",
         "set_led_look_director",
         "led_palette_queue",
         "led_palette_override",
@@ -689,6 +699,10 @@ def parse_command(line: str) -> dict[str, Any]:
             obj = dict(obj)
             obj["reason"] = reason.strip()
     if cmd == "led_clear_scene_override":
+        extra = set(obj.keys()) - {"cmd"}
+        if extra:
+            raise ValueError(f"{cmd} does not accept payload fields")
+    if cmd == "led_reload_looks":
         extra = set(obj.keys()) - {"cmd"}
         if extra:
             raise ValueError(f"{cmd} does not accept payload fields")

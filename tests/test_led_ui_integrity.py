@@ -41,6 +41,9 @@ class PadUiIntegrityTests(unittest.TestCase):
         )
         self.assertIn("Discard all changes", src)
         self.assertIn("EVERY unsaved-to-show edit across", src)
+        # AWR-260 E: dirty count from live editor+draft state at modal-open.
+        self.assertIn("snapshotEditor() !== state.cleanSnapshot", src)
+        self.assertIn('bankLabels = {drafts:"Untagged"', src)
 
     def test_beforeunload_guards_present_on_lab_pad_sim(self) -> None:
         lab = (_ASSETS / "lab.js").read_text(encoding="utf-8")
@@ -67,6 +70,9 @@ class PadUiIntegrityTests(unittest.TestCase):
             html,
         )
         self.assertIn('id="acceptFallbackNote"', html)
+        # AWR-260: Accept wires into production; Reject stays out of the show.
+        self.assertIn("Live —", lab)
+        self.assertIn("Rejected — stays out of the show", lab)
 
 
 if __name__ == "__main__":

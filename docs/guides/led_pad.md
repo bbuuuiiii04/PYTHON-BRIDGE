@@ -107,7 +107,7 @@ Logs are written to `/tmp/led_pad.log` and `/tmp/led_pad.err`.
 
 ## What It Can Do
 
-- Show banks first: Drafts, Ambient, Groove, Buildup, Drop, Post-Drop, Breakdown, Utility, plus
+- Show banks first: Untagged, Ambient, Groove, Buildup, Drop, Post-Drop, Breakdown, Utility, plus
   a read-only Other chip for `pre_drop` or unknown memberships.
 - Duplicate, move, delete, save, discard, and apply LED looks through
   `config/led_look_director.draft.json`.
@@ -316,6 +316,14 @@ agent-facing content). To promote an accepted draft:
 
 ### AWR-193 overhaul flows (2026-07-10)
 
+- **Accept wires into the show (AWR-260).** Accept still implies Save (AWR-251), but it also
+  writes a production look (`scene_ref=lab:<draft>`, `color_source=engine`, saved params +
+  cue_beats), places it in the phrase bank matching `target_role` (or the **Untagged** pad shelf
+  when untagged — manually playable, excluded from automation), auto-Applies via the existing
+  commit path (timestamped `.bak` by design), and appends `led_reload_looks` so a running bridge
+  picks it up without a restart. The Lab UI confirms with “Live — added to Drop bank” or
+  “Live — untagged shelf; tag a phrase to join rotation.” Reject stays a status flip: “Rejected —
+  stays out of the show. You can reopen it anytime.”
 - **Accept-what-you-hear / Accept-what-you-see (AWR-251).** Accept and Reject both imply Save:
   the UI posts the current editor payload (params, phrase/`target_role`, timing, brief, notes,
   cue). Server merges those fields, then flips status. If the payload has no `params` (name-only
