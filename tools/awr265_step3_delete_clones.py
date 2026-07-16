@@ -149,6 +149,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Explicit dry-run (default when --apply is omitted)",
+    )
+    parser.add_argument(
         "--include-residuals",
         action="store_true",
         help="Also delete IMPOSSIBLE A/B residuals (dangerous; default keep)",

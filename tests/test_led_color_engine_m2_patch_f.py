@@ -164,12 +164,12 @@ class PatchFBankCleanupTests(unittest.TestCase):
             self.assertEqual(result.config.looks[look_name].color_source, "engine")
 
     def test_drop_pairs_resolve_and_generic_chase_pair_exists(self) -> None:
-        # AWR-156 bank recast (f), T6.4 amended: rt_drop_chase moved to the
-        # post_drop bank AND renamed to rt_post_drop_remnant_chase, so it no
-        # longer fires a drop_pairs entry -- rt_drop_center_burst is the
-        # remaining generic (non-legacy-suffixed) drop pair.
+        # AWR-265 Step 2: palette-fed rt_drop_chase is the default drop base
+        # and pairs to rt_post_drop_chase; center_burst still pairs to comet.
         result = _load()
-        self.assertIsNone(result.config.drop_pairs.get("rt_drop_chase"))
+        chase = result.config.drop_pairs.get("rt_drop_chase")
+        self.assertIsNotNone(chase)
+        self.assertEqual(chase.post_drop, "rt_post_drop_chase")
         self.assertIsNone(result.config.drop_pairs.get("rt_post_drop_remnant_chase"))
         pair = result.config.drop_pairs.get("rt_drop_center_burst")
         self.assertIsNotNone(pair)

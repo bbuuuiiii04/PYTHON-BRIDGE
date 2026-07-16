@@ -962,9 +962,9 @@ class Awr156Round2ConfigTests(unittest.TestCase):
         self.assertEqual(looks["rt_drop_chase"].color_source, "engine")
         self.assertEqual(looks["rt_drop_chase"].scene_ref, "rt_drop_chase")
         self.assertNotIn("rt_drop_nebula", looks)
-        # Step 1 is pure addition — banks still list colorway clones, not yet
-        # the new base look (bank rewrite is AWR-265 Step 2).
-        self.assertNotIn("rt_drop_chase", banks.drop)
+        # AWR-265 Step 2: palette-fed rt_drop_chase IS the default drop base.
+        self.assertIn("rt_drop_chase", banks.drop)
+        self.assertIn("rt_drop_strobe", banks.drop)
         self.assertNotIn("rt_drop_nebula", banks.drop)
         self.assertNotIn("rt_post_drop_remnant_chase", banks.drop)
         self.assertNotIn("rt_post_drop_remnant_nebula", banks.drop)
@@ -972,7 +972,10 @@ class Awr156Round2ConfigTests(unittest.TestCase):
     def test_bank_recast_drop_pairs_entries_removed(self) -> None:
         result = load_led_look_director_config_from_dict(_example_config())
         self.assertTrue(result.available, msg=result.errors)
-        self.assertNotIn("rt_drop_chase", result.config.drop_pairs)
+        # AWR-265 Step 2: palette-fed base chase is paired again.
+        pair = result.config.drop_pairs.get("rt_drop_chase")
+        self.assertIsNotNone(pair)
+        self.assertEqual(pair.post_drop, "rt_post_drop_chase")
         self.assertNotIn("rt_drop_nebula", result.config.drop_pairs)
         self.assertNotIn("rt_post_drop_remnant_chase", result.config.drop_pairs)
         self.assertNotIn("rt_post_drop_remnant_nebula", result.config.drop_pairs)
