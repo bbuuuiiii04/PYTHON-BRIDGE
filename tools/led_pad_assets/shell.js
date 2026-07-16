@@ -38,8 +38,12 @@
     const bankRow = $("padBankRow");
     if (bankRow) bankRow.hidden = isLab;
 
-    const health = $("healthStrip");
-    if (health) health.hidden = !isLab;
+    const diag = $("diagnostics");
+    if (diag) {
+      diag.hidden = !isLab;
+      // Cold Lab screen: telemetry stays collapsed until opened.
+      if (!isLab) diag.open = false;
+    }
     const selfTest = $("selfTestPanel");
     if (selfTest && !isLab) selfTest.hidden = true;
     const helpBtn = $("labHelpBtn");

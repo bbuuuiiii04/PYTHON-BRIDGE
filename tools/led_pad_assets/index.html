@@ -27,13 +27,16 @@
         <label class="switch">Loop <input id="loopToggle" type="checkbox"><span id="loopLabel">On</span></label>
       </form>
       <div class="transport" id="shellTransport">
-<div id="healthStrip" class="lab-health" hidden aria-label="Health">
-          <span class="lab-health-item" id="healthServer" title="Server: green ok (&lt;3s), red stale/error"><span class="lab-health-dot" data-state="unknown"></span><span class="lab-health-label">Server</span></span>
-          <span class="lab-health-item" id="healthLab" title="Lab code: amber not loaded yet, green loaded ✓, red load failed (click for traceback)" role="button" tabindex="0"><span class="lab-health-dot" data-state="unknown"></span><span class="lab-health-label">not loaded yet</span></span>
-          <span class="lab-health-item" id="healthPlayback" title="Playback: green playing &lt;name&gt;, gray idle"><span class="lab-health-dot" data-state="idle"></span> <span id="healthPlaybackText">idle</span></span>
-          <button id="selfTestBtn" type="button" class="ghost lab-selftest-btn" title="Checks the selected draft only — effect code, frames, and colors">Check this draft</button>
-        </div>
-        <div id="selfTestPanel" class="lab-selftest-panel" hidden></div>
+        <details id="diagnostics" class="diagnostics-corner lab-diagnostics" hidden>
+          <summary>Diagnostics</summary>
+          <div id="healthStrip" class="lab-health" aria-label="Health">
+            <span class="lab-health-item" id="healthServer" title="Server: green ok (&lt;3s), red stale/error"><span class="lab-health-dot" data-state="unknown"></span><span class="lab-health-label">Server</span></span>
+            <span class="lab-health-item" id="healthLab" title="Lab code: amber not loaded yet, green loaded ✓, red load failed (click for traceback)" role="button" tabindex="0"><span class="lab-health-dot" data-state="unknown"></span><span class="lab-health-label">not loaded yet</span></span>
+            <span class="lab-health-item" id="healthPlayback" title="Playback: green playing &lt;name&gt;, gray idle"><span class="lab-health-dot" data-state="idle"></span> <span id="healthPlaybackText">idle</span></span>
+            <button id="selfTestBtn" type="button" class="ghost lab-selftest-btn" title="Checks the selected draft only — effect code, frames, and colors">Check this draft</button>
+          </div>
+          <div id="selfTestPanel" class="lab-selftest-panel" hidden></div>
+        </details>
                 <span id="ownershipPill" class="pill">Lights are free</span>
         <button id="ownershipBtn" type="button" class="ghost">Take control</button>
         <button id="qrBtn" type="button" class="ghost" title="Open on another device">📱</button>

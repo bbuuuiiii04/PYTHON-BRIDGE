@@ -22,7 +22,10 @@ validation_scope: >
   gate FIX: Add corner raises the unsaved chip — stable layout-entry identity
   so splice/assign cannot orphan points_mm vs savedProfile), and AWR-270 R8
   one-shell chrome (shared LIGHTING CONSOLE header + N9 absolute pad/lab links
-  from sim; stage remains the initial landing; ? help what-is intact)
+  from sim; stage remains the initial landing; ? help what-is intact), and
+  AWR-274 R11 Setup demotion (Layout+Calibrate behind one Setup entry; gamma/gains
+  behind closed Advanced with plain caution; FPS/provenance/frame/health telemetry
+  in a collapsed Diagnostics corner; cold main screens zero banned telemetry strings)
   are software-tested.
   Optics (glow/bleed/gamma) remain uncalibrated assumptions. Generated timing
   uses an ideal grid. Device color, PWM, latency, physical response, packet
@@ -47,7 +50,8 @@ Junction is always at absolute **24.6 ft / 7498.08 mm**. A **Strip** toggle keep
 the old 6×10 bench grid for command inspection.
 
 Round 3 rebuilds the page as a **lighting-console shell**: stage-first room
-canvas, collapsible right sidecar (Play / Layout / Calibrate tabs), bottom
+canvas, collapsible right sidecar (Play / Setup tabs — Layout and Calibrate live
+under Setup per AWR-274 / D2), bottom
 transport, layout and calibration lockers, and Archivo + mono numeric chrome.
 Round 4 polishes the lockers (persist + stage padlock chip), the phone bottom
 sheet (zero page scroll), tablist semantics, and contrast.
@@ -260,7 +264,21 @@ selected vertex (10 mm, Shift = 100 mm) when layout is unlocked, and a **?**
 shortcuts popover. On phones the sidecar becomes a bottom sheet; the stage
 stays first.
 
-## Calibrate mode
+## Calibrate mode (behind Setup)
+
+**AWR-274 / D2:** Layout and Calibrate are no longer top-level sidecar tabs.
+Open **Setup**, then **Calibrate**. Gamma / white-balance / bleed / FPS / latency /
+slew knobs sit behind a closed **Advanced — screen color matching** fold with a
+plain caution that defaults are fine. Measurement sequences (segment map, color
+response, timing response) stay visible in Calibrate. Save path, locks, and
+`.bak` rotation are unchanged.
+
+Frame counters, provenance chips, FPS/timing readouts, hardware-fact strings, and
+browser draw health live in a collapsed **Diagnostics** corner on the stage
+(cold Play screen shows none of those strings). AWR-266 Play/Layout presentation
+parity and AWR-267 layout gestures are unchanged — only where the chrome lives.
+
+## Calibrate mode (detail)
 
 These deterministic sequences are generated offline. Selecting one does not
 send it to the strip. Sequence results include the version

@@ -807,3 +807,221 @@ class Awr273SingleLiveFireTests(unittest.TestCase):
             self.assertIn('data-shell="lighting"', html)
             self.assertIn('id="view-lab"', html)
             self.assertIn("Play once on lights", html)
+
+
+# AWR-274 R11 — banned telemetry strings must not appear on cold main screens.
+# Keep this list explicit: cold HTML outside Diagnostics / Setup must stay clean.
+_AWR274_BANNED_COLD = (
+    "FPS",
+    "DRAW",
+    "WAITING",
+    "60 seg",
+    "360 LEDs",
+    "41.656",
+    "mm/LED",
+    "Real show engine",
+    "Source ·",
+    "not loaded yet",
+)
+
+
+def _strip_diagnostics_and_setup(html: str) -> str:
+    """Remove Diagnostics corners + Setup panel bodies (telemetry may live there)."""
+    out = re.sub(
+        r'<details\b[^>]*\bid="diagnostics"[^>]*>.*?</details>',
+        "",
+        html,
+        flags=re.S | re.I,
+    )
+    # Nested sections inside Setup — cut from opening tag through the close marker.
+    marker = "<!-- #setup-panel -->"
+    start = re.search(r'<section\b[^>]*\bid="setup-panel"[^>]*>', out, flags=re.I)
+    if start and marker in out[start.start():]:
+        end = out.index(marker, start.start()) + len(marker)
+        out = out[: start.start()] + out[end:]
+    # Scripts / help dialogs are not cold main chrome.
+    out = re.sub(r"<script\b[^>]*>.*?</script>", "", out, flags=re.S | re.I)
+    out = re.sub(
+        r'<div\b[^>]*\bid="help-popover"[^>]*>.*?</div>',
+        "",
+        out,
+        flags=re.S | re.I,
+    )
+    out = re.sub(
+        r'<div\b[^>]*\bid="labHelpPopover"[^>]*>.*?</div>',
+        "",
+        out,
+        flags=re.S | re.I,
+    )
+    return out
+
+
+class Awr274SetupDiagnosticsTests(unittest.TestCase):
+    """R11 remainder: Setup demotion + Diagnostics corner + cold-screen gate."""
+
+    def test_sim_setup_demotes_layout_and_calibrate(self) -> None:
+        html = (_SIM / "index.html").read_text(encoding="utf-8")
+        js = (_SIM / "sim-app.js").read_text(encoding="utf-8")
+
+        self.assertIn('id="tab-setup"', html)
+        self.assertIn(">Setup<", html)
+        self.assertIn('id="setup-panel"', html)
+        self.assertIn('id="setup-tab-layout"', html)
+        self.assertIn('id="setup-tab-calibrate"', html)
+        # Top-level Layout/Calibrate tabs are gone (D2 bury-not-delete).
+        self.assertNotIn('id="tab-layout"', html)
+        self.assertNotIn('id="tab-calibrate"', html)
+        self.assertIn('data-tab="setup"', html)
+        # Nested panels + save path IDs preserved.
+        self.assertIn('id="layout-panel"', html)
+        self.assertIn('id="calibrate-panel"', html)
+        self.assertIn('id="layout-add-corner"', html)
+        self.assertIn('id="profile-save"', html)
+        self.assertIn('id="knob-gamma"', html)
+        # Advanced fold is closed by default + plain caution.
+        self.assertIn("Advanced — screen color matching", html)
+        self.assertIn("Defaults are fine for everyday use", html)
+        calib = re.search(
+            r'<details class="advanced calibration-controls"[^>]*>',
+            html,
+        )
+        self.assertIsNotNone(calib)
+        self.assertNotIn(" open", calib.group(0))
+
+        # activeTab remains play|layout|calibrate for AWR-266 presentation.
+        self.assertIn('view?.setPresentation(state.activeTab !== "layout")', js)
+        self.assertIn('if (next === "setup")', js)
+        self.assertIn('id="layout-dirty"', html)
+        self.assertLess(html.index('id="layout-dirty"'), html.index('id="layout-panel"'))
+
+    def test_diagnostics_corners_collapsed(self) -> None:
+        sim = (_SIM / "index.html").read_text(encoding="utf-8")
+        pad = (_ASSETS / "index.html").read_text(encoding="utf-8")
+        shell = (_ASSETS / "shell.js").read_text(encoding="utf-8")
+
+        for label, html in (("sim", sim), ("pad", pad)):
+            match = re.search(
+                r'<details\b([^>]*)\bid="diagnostics"([^>]*)>',
+                html,
+            )
+            self.assertIsNotNone(match, f"{label} missing #diagnostics")
+            attrs = match.group(1) + match.group(2)
+            self.assertNotIn(" open", attrs, f"{label} Diagnostics must start collapsed")
+            self.assertIn(">Diagnostics<", html)
+
+        # Sim telemetry IDs live inside diagnostics.
+        diag_block = re.search(
+            r'<details\b[^>]*\bid="diagnostics"[^>]*>.*?</details>',
+            sim,
+            flags=re.S,
+        )
+        self.assertIsNotNone(diag_block)
+        body = diag_block.group(0)
+        for needle in (
+            'id="fps-chip"',
+            'id="paint-health"',
+            'id="pipeline-badge"',
+            'id="timing-readout"',
+            'id="frame-label"',
+            "60 seg",
+            "41.656",
+        ):
+            self.assertIn(needle, body)
+
+        # Beat meter stays a musician tool on the lab editor (not in Diagnostics).
+        self.assertIn('id="beatMeter"', pad)
+        pad_diag = re.search(
+            r'<details\b[^>]*\bid="diagnostics"[^>]*>.*?</details>',
+            pad,
+            flags=re.S,
+        )
+        self.assertIsNotNone(pad_diag)
+        self.assertNotIn('id="beatMeter"', pad_diag.group(0))
+
+        # Shell shows Diagnostics on Lab only; never forces it open.
+        self.assertIn('diag.hidden = !isLab', shell)
+        self.assertNotIn('health.hidden = !isLab', shell)
+
+    def test_cold_screens_zero_telemetry_strings(self) -> None:
+        sim = (_SIM / "index.html").read_text(encoding="utf-8")
+        pad = (_ASSETS / "index.html").read_text(encoding="utf-8")
+
+        for label, html in (("sim Play", sim), ("pad/lab shell", pad)):
+            cold = _strip_diagnostics_and_setup(html)
+            for banned in _AWR274_BANNED_COLD:
+                self.assertNotIn(
+                    banned,
+                    cold,
+                    f"{label} cold chrome still contains banned telemetry {banned!r}",
+                )
+
+    def test_calibrate_value_round_trip_via_profile_save(self) -> None:
+        """Change a calibrate knob value → Save → reload → persisted (API path)."""
+        import json
+        import tempfile
+        import threading
+        from contextlib import contextmanager
+        from http.server import ThreadingHTTPServer
+
+        from rb_ss_bridge_v2.tools.led_sim_web import LedSimService, build_handler
+
+        example = Path(__file__).resolve().parents[1] / "config" / "led_sim_profile.example.json"
+
+        @contextmanager
+        def _sim():
+            with tempfile.TemporaryDirectory() as td:
+                profile = Path(td) / "led_sim_profile.json"
+                profile.write_text(example.read_text(encoding="utf-8"), encoding="utf-8")
+                service = LedSimService(profile_path=profile)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), build_handler(service))
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    yield server.server_port, profile
+                finally:
+                    server.shutdown()
+                    server.server_close()
+                    thread.join(timeout=2.0)
+
+        def _req(port: int, method: str, path: str, body=None):
+            import http.client
+
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            raw = None if body is None else json.dumps(body).encode("utf-8")
+            headers = {"Content-Type": "application/json"} if raw is not None else {}
+            conn.request(method, path, body=raw, headers=headers)
+            res = conn.getresponse()
+            data = json.loads(res.read().decode("utf-8"))
+            status = res.status
+            conn.close()
+            return status, data
+
+        with _sim() as (port, profile_path):
+            st, before = _req(port, "GET", "/api/profile")
+            self.assertEqual(st, 200)
+            prof = before["profile"]
+            original = float(prof.get("gamma", 1.0))
+            changed = round(original + 0.37, 2)
+            if changed == original:
+                changed = round(original + 0.41, 2)
+            prof["gamma"] = changed
+            st, saved = _req(port, "POST", "/api/profile", prof)
+            self.assertEqual(st, 200, saved)
+            self.assertTrue(saved.get("ok"))
+            st, after = _req(port, "GET", "/api/profile")
+            self.assertEqual(st, 200)
+            self.assertAlmostEqual(float(after["profile"]["gamma"]), changed, places=2)
+            # Disk persistence (reload story).
+            disk = json.loads(profile_path.read_text(encoding="utf-8"))
+            self.assertAlmostEqual(float(disk["gamma"]), changed, places=2)
+
+        # UI still wires Save values inside Setup → Calibrate advanced fold.
+        html = (_SIM / "index.html").read_text(encoding="utf-8")
+        self.assertLess(html.index('id="setup-panel"'), html.index('id="profile-save"'))
+        self.assertLess(html.index("Advanced — screen color matching"), html.index('id="knob-gamma"'))
+        self.assertLess(html.index('id="knob-gamma"'), html.index('id="profile-save"'))
+
+
+if __name__ == "__main__":
+    unittest.main()
+

@@ -280,7 +280,9 @@ run_server(port=${simPort}, profile_path=${JSON.stringify(simProfile)})
 
     // —— (c) Sim Save as persists ——
     await page.goto(`http://127.0.0.1:${simPort}/`, {waitUntil: "networkidle"});
-    await page.click("#tab-layout");
+    // AWR-274: Layout lives under Setup (not a top-level tab).
+    await page.click("#tab-setup");
+    await page.click("#setup-tab-layout");
     await page.click("#layout-save-as");
     await page.waitForSelector("#name-dialog:not([hidden])");
     await page.fill("#name-dialog-input", "Journey Copy");
@@ -294,7 +296,8 @@ run_server(port=${simPort}, profile_path=${JSON.stringify(simProfile)})
     }
     // Cold reload via fresh GET through a new page context.
     await page.reload({waitUntil: "networkidle"});
-    await page.click("#tab-layout");
+    await page.click("#tab-setup");
+    await page.click("#setup-tab-layout");
     const options = await page.$$eval("#layout-slot option", (els) => els.map((e) => e.value));
     if (!options.includes("Journey Copy")) {
       failures.push(`(c) cold reload missing Journey Copy; options=${options.join(",")}`);

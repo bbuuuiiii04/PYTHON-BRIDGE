@@ -356,6 +356,33 @@ main { padding: var(--pad); }
 .lab-route .lab-health-dot[data-state="bad"] { background: var(--danger); }
 .lab-route .lab-health-dot[data-state="idle"] { background: var(--text-faint); }
 .lab-route .lab-health-dot[data-state="unknown"] { background: var(--warn); }
+/* AWR-274: health/telemetry live under a collapsed Diagnostics corner. */
+.diagnostics-corner.lab-diagnostics {
+  position: relative;
+  max-width: min(360px, 50vw);
+  margin-right: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.diagnostics-corner.lab-diagnostics > summary {
+  cursor: pointer;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  list-style: none;
+}
+.diagnostics-corner.lab-diagnostics > summary::-webkit-details-marker { display: none; }
+.diagnostics-corner.lab-diagnostics[open] {
+  padding-bottom: 6px;
+}
+.diagnostics-corner.lab-diagnostics .lab-health {
+  display: flex;
+  margin-top: 6px;
+}
 .lab-route .lab-selftest-btn { min-height: 32px; font-size: 12px; }
 .lab-route .lab-selftest-panel { position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; min-width: 240px; max-width: 360px; background: var(--surface-3); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--sp-3); font-family: var(--font-data); font-size: 12px; box-shadow: 0 8px 24px rgb(0 0 0 / .45); }
 .lab-route .lab-selftest-panel[hidden] { display: none; }

@@ -1054,20 +1054,59 @@ function canvasEventPoint(event) {
 }
 
 function setActiveTab(tab, {expandSheet = true} = {}) {
-  state.activeTab = tab;
-  const order = ["play", "layout", "calibrate"];
-  for (const name of order) {
+  // Keep play|layout|calibrate for presentation + gesture logic (AWR-266 / R6).
+  // UI shows Play | Setup; Layout/Calibrate live under Setup.
+  let next = tab;
+  if (next === "setup") {
+    next = (state.activeTab === "layout" || state.activeTab === "calibrate")
+      ? state.activeTab
+      : "layout";
+  }
+  if (next !== "play" && next !== "layout" && next !== "calibrate") next = "play";
+  state.activeTab = next;
+  const isSetup = next === "layout" || next === "calibrate";
+
+  const playPanel = $("play-panel");
+  const setupPanel = $("setup-panel");
+  if (playPanel) {
+    playPanel.hidden = next !== "play";
+    playPanel.setAttribute("aria-hidden", next === "play" ? "false" : "true");
+  }
+  if (setupPanel) {
+    setupPanel.hidden = !isSetup;
+    setupPanel.setAttribute("aria-hidden", isSetup ? "false" : "true");
+  }
+
+  for (const name of ["layout", "calibrate"]) {
     const panelEl = $(`${name}-panel`);
-    const selected = name === tab;
+    if (!panelEl) continue;
+    const selected = name === next;
     panelEl.hidden = !selected;
     panelEl.setAttribute("aria-hidden", selected ? "false" : "true");
-    const tabBtn = $(`tab-${name}`);
-    tabBtn.classList.toggle("active", selected);
-    tabBtn.setAttribute("aria-selected", selected ? "true" : "false");
-    tabBtn.tabIndex = selected ? 0 : -1;
+    const subBtn = $(`setup-tab-${name}`);
+    if (subBtn) {
+      subBtn.classList.toggle("active", selected);
+      subBtn.setAttribute("aria-selected", selected ? "true" : "false");
+      subBtn.tabIndex = selected ? 0 : -1;
+    }
   }
+
+  const playTab = $("tab-play");
+  const setupTab = $("tab-setup");
+  if (playTab) {
+    playTab.classList.toggle("active", next === "play");
+    playTab.setAttribute("aria-selected", next === "play" ? "true" : "false");
+    playTab.tabIndex = next === "play" ? 0 : -1;
+  }
+  if (setupTab) {
+    setupTab.classList.toggle("active", isSetup);
+    setupTab.setAttribute("aria-selected", isSetup ? "true" : "false");
+    setupTab.tabIndex = isSetup ? 0 : -1;
+  }
+
   for (const btn of document.querySelectorAll(".rail-btn[data-tab]")) {
-    const on = btn.dataset.tab === tab;
+    const railTab = btn.dataset.tab;
+    const on = railTab === "setup" ? isSetup : railTab === next;
     btn.classList.toggle("active", on);
     btn.setAttribute("aria-pressed", on ? "true" : "false");
   }
@@ -1085,12 +1124,17 @@ function wireShell() {
       if (btn.dataset.tab) setActiveTab(btn.dataset.tab);
     });
   }
+  for (const btn of document.querySelectorAll(".setup-subtabs [role='tab']")) {
+    btn.addEventListener("click", () => {
+      if (btn.dataset.tab) setActiveTab(btn.dataset.tab);
+    });
+  }
   for (const btn of document.querySelectorAll(".rail-btn[data-tab]")) {
     btn.addEventListener("click", () => {
       if (btn.dataset.tab) setActiveTab(btn.dataset.tab);
     });
   }
-  // P-3: Left/Right arrow navigation within the tablist.
+  // P-3: Left/Right arrow navigation within the top-level tablist.
   document.querySelector(".sidecar-tabs")?.addEventListener("keydown", (event) => {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
     const current = tabButtons.findIndex((btn) => btn.getAttribute("aria-selected") === "true");
@@ -1101,6 +1145,17 @@ function wireShell() {
     const name = tabButtons[next].dataset.tab;
     setActiveTab(name);
     tabButtons[next].focus();
+  });
+  document.querySelector(".setup-subtabs")?.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    const subs = [...document.querySelectorAll('.setup-subtabs [role="tab"]')];
+    const current = subs.findIndex((btn) => btn.getAttribute("aria-selected") === "true");
+    if (current < 0) return;
+    event.preventDefault();
+    const delta = event.key === "ArrowRight" ? 1 : -1;
+    const next = (current + delta + subs.length) % subs.length;
+    setActiveTab(subs[next].dataset.tab);
+    subs[next].focus();
   });
 
   $("sidecar-collapse").addEventListener("click", () => {

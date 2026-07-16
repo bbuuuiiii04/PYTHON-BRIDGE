@@ -20,17 +20,10 @@
       <a class="active" href="http://127.0.0.1:8767/" aria-current="page">Sim</a>
     </nav>
   </div>
-  <div class="device-facts mono" aria-label="Hardware facts">
-    <span>60 seg</span><i aria-hidden="true"></i>
-    <span>360 LEDs</span><i aria-hidden="true"></i>
-    <span>49.2 ft</span><i aria-hidden="true"></i>
-    <span>41.656 mm/LED</span>
-  </div>
   <div class="top-actions">
     <span id="layout-dirty" class="chip warn sentence" hidden>Unsaved layout changes</span>
-    <span id="calibration-badge" class="chip warn sentence" title="Screen colors not yet calibrated against the real strip — Calibrate tab">Colors not calibrated yet</span>
+    <span id="calibration-badge" class="chip warn sentence" title="Screen colors not yet calibrated against the real strip — Setup → Calibrate">Colors not calibrated yet</span>
     <span class="chip ok sentence" id="offline-badge" title="Preview only — this page never contacts the lights">Preview only — never touches the lights</span>
-    <span id="paint-health" class="chip mono" title="Browser draw health, not hardware" hidden>—</span>
     <button id="top-stop" class="btn-stop" type="button" aria-label="Stop playback" title="Stop">■ STOP</button>
     <button id="help-btn" class="icon-btn" type="button" aria-label="Help" aria-expanded="false" aria-controls="help-popover">?</button>
   </div>
@@ -45,9 +38,9 @@
     <div><dt><kbd>←</kbd><kbd>→</kbd></dt><dd>Step frame (when paused)</dd></div>
     <div><dt><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd></dt><dd>Nudge selected corner 10 mm</dd></div>
     <div><dt><kbd>⇧</kbd>+arrows</dt><dd>Nudge 100 mm</dd></div>
-    <div><dt><kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>Z</kbd></dt><dd>Undo layout edit (Layout tab only)</dd></div>
+    <div><dt><kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>Z</kbd></dt><dd>Undo layout edit (Setup → Layout only)</dd></div>
   </dl>
-  <p class="fine-print">Editing gestures are off while Layout is locked. Undo only applies on the Layout tab. Use Add corner / Remove corner on the Layout tab when double-click is hard to find.</p>
+  <p class="fine-print">Editing gestures are off while Layout is locked. Undo only applies under Setup → Layout. Use Add corner / Remove corner there when double-click is hard to find.</p>
   <p class="fine-print mono" id="help-provenance" hidden></p>
 </div>
 
@@ -83,28 +76,40 @@
         <button id="view-strip" type="button" aria-pressed="false">Strip</button>
       </div>
       <button id="toggle-labels" type="button" class="chip-btn" aria-pressed="true">Labels</button>
-      <span id="fps-chip" class="chip mono">— FPS</span>
       <span id="lock-chip" class="chip lock-chip" hidden title="Layout locked">🔒 Layout</span>
     </div>
 
     <div class="canvas-wrap" id="canvas-wrap">
-      <canvas id="fixture-canvas" width="1600" height="900" role="img" aria-label="H612D room view with strip path and 360 emitters"></canvas>
+      <canvas id="fixture-canvas" width="1600" height="900" role="img" aria-label="H612D room view with strip path and emitters"></canvas>
+      <details id="diagnostics" class="diagnostics-corner">
+        <summary>Diagnostics</summary>
+        <div class="diagnostics-body" aria-label="Diagnostics">
+          <div class="device-facts mono" aria-label="Hardware facts">
+            <span>60 seg</span><i aria-hidden="true"></i>
+            <span>360 LEDs</span><i aria-hidden="true"></i>
+            <span>49.2 ft</span><i aria-hidden="true"></i>
+            <span>41.656 mm/LED</span>
+          </div>
+          <span id="fps-chip" class="chip mono"></span>
+          <span id="paint-health" class="chip mono" title="Browser draw health, not hardware"></span>
+          <div class="stage-provenance" id="stage-provenance">
+            <span id="pipeline-badge" class="chip mono" title=""></span>
+            <span id="timing-readout" class="chip mono" title=""></span>
+          </div>
+          <span id="time-label" class="mono"></span>
+          <span id="frame-label" class="mono"></span>
+        </div>
+      </details>
     </div>
     <div class="stage-hud" id="stage-hud">
       <div class="canvas-overlay">
         <span id="marker-label">Choose a look and render</span>
-        <span id="time-label" class="mono">0.000 s</span>
-      </div>
-      <div class="stage-provenance" id="stage-provenance">
-        <span id="pipeline-badge" class="chip mono" title="">—</span>
-        <span id="timing-readout" class="chip mono" title="">—</span>
       </div>
     </div>
 
     <div class="transport" role="group" aria-label="Transport">
       <button id="play-pause" class="play" type="button" aria-label="Play or pause">Play</button>
       <input type="range" id="scrub" min="0" max="0" value="0" aria-label="Frame position">
-      <span id="frame-label" class="mono">0 / 0</span>
       <button id="loop" type="button" class="chip-btn" aria-pressed="true">Loop</button>
     </div>
   </main>
@@ -115,18 +120,15 @@
     </div>
     <div class="sidecar-rail">
       <button type="button" class="rail-btn active" data-tab="play" aria-label="Play tab" title="Play">▶</button>
-      <button type="button" class="rail-btn" data-tab="layout" aria-label="Layout tab" title="Layout">▦</button>
-      <button type="button" class="rail-btn" data-tab="calibrate" aria-label="Calibrate tab" title="Calibrate">◎</button>
+      <button type="button" class="rail-btn" data-tab="setup" aria-label="Setup tab" title="Setup">⚙</button>
       <button type="button" class="rail-btn rail-collapse" id="sidecar-collapse" aria-label="Collapse sidecar" title="Collapse">‹</button>
     </div>
     <div class="sidecar-main">
       <nav class="sidecar-tabs" role="tablist" aria-label="Sidecar tabs">
         <button id="tab-play" class="active" type="button" role="tab" data-tab="play"
           aria-selected="true" aria-controls="play-panel" tabindex="0">Play</button>
-        <button id="tab-layout" type="button" role="tab" data-tab="layout"
-          aria-selected="false" aria-controls="layout-panel" tabindex="-1">Layout</button>
-        <button id="tab-calibrate" type="button" role="tab" data-tab="calibrate"
-          aria-selected="false" aria-controls="calibrate-panel" tabindex="-1">Calibrate</button>
+        <button id="tab-setup" type="button" role="tab" data-tab="setup"
+          aria-selected="false" aria-controls="setup-panel" tabindex="-1">Setup</button>
       </nav>
       <div class="sidecar-panels" id="sidecar-panels">
       <section id="play-panel" class="panel-stack" data-panel="play" role="tabpanel" aria-labelledby="tab-play">
@@ -235,7 +237,16 @@
         </details>
       </section>
 
-      <section id="layout-panel" class="panel-stack" data-panel="layout" hidden role="tabpanel" aria-labelledby="tab-layout">
+      <section id="setup-panel" class="panel-stack setup-panel" data-panel="setup" hidden role="tabpanel" aria-labelledby="tab-setup">
+        <p class="fine-print">Room shape and screen-matching tools. One extra step on purpose — everyday Play stays simple.</p>
+        <nav class="setup-subtabs" role="tablist" aria-label="Setup sections">
+          <button id="setup-tab-layout" type="button" role="tab" data-tab="layout"
+            aria-selected="true" aria-controls="layout-panel" tabindex="0">Layout</button>
+          <button id="setup-tab-calibrate" type="button" role="tab" data-tab="calibrate"
+            aria-selected="false" aria-controls="calibrate-panel" tabindex="-1">Calibrate</button>
+        </nav>
+
+      <section id="layout-panel" class="panel-stack setup-section" data-panel="layout" role="tabpanel" aria-labelledby="setup-tab-layout">
         <div class="layout-slot-row" role="group" aria-label="Layout library">
           <label class="field layout-slot-field">Layout
             <select id="layout-slot" aria-label="Selected layout"></select>
@@ -297,12 +308,12 @@
         </div>
       </section>
 
-      <section id="calibrate-panel" class="panel-stack" data-panel="calibrate" hidden role="tabpanel" aria-labelledby="tab-calibrate">
+      <section id="calibrate-panel" class="panel-stack setup-section" data-panel="calibrate" hidden role="tabpanel" aria-labelledby="setup-tab-calibrate">
         <div class="panel-head-row">
           <span class="panel-label">Calibrate</span>
           <button id="calibration-lock" type="button" class="lock-toggle" aria-pressed="false" title="Lock calibration edits">🔓 Unlocked</button>
         </div>
-        <p class="muted">Deterministic measurement frames for a later synchronized hardware capture. Nothing is sent now. Optics stay assumptions until fitted.</p>
+        <p class="muted">Measurement frames for a later capture against the real strip. Nothing is sent now.</p>
         <button class="sequence-card" data-sequence="segment_map" type="button">
           <strong>Segment map</strong><span>Walk all 60 groups at levels 16, 64, and 255</span>
         </button>
@@ -323,9 +334,9 @@
             <button data-card="single_segment" type="button">Segment 0</button>
           </div>
         </details>
-        <details class="advanced calibration-controls" open>
-          <summary>Device calibration values</summary>
-          <p class="fine-print">These remain assumptions until fitted from the real capture.</p>
+        <details class="advanced calibration-controls">
+          <summary>Advanced — screen color matching</summary>
+          <p class="fine-print caution">These knobs change how the preview mimics the real strip. Defaults are fine for everyday use — only open this when matching a real capture.</p>
           <div id="calibration-controls">
             <label class="slider">Overall color curve<span class="field-hint">Gamma — how midtones compress</span><input type="range" id="knob-gamma" min="0.2" max="5" step="0.01"><output id="knob-gamma-val" class="mono"></output></label>
             <label class="slider">Red balance<span class="field-hint">Red gain</span><input type="range" id="knob-white-0" min="0" max="2" step="0.01"><output id="knob-white-0-val" class="mono"></output></label>
@@ -349,6 +360,7 @@
           <span id="profile-dirty" class="dirty" hidden>Unsaved calibration changes</span>
         </details>
       </section>
+      </section><!-- #setup-panel -->
       </div><!-- .sidecar-panels -->
     </div><!-- .sidecar-main -->
   </aside>
