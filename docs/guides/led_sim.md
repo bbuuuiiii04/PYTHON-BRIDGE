@@ -1,8 +1,8 @@
 ---
 doc_status: current
 truth_level: software-tested
-last_verified_commit: 6eb441d
-last_verified_date: 2026-07-15
+last_verified_commit: 7c1e67e
+last_verified_date: 2026-07-16
 validation_scope: >
   H612D LED Studio (AWR-196 + AWR-244 room-view + AWR-246 layout library):
   offline production-runner frame composition, room polyline layout with

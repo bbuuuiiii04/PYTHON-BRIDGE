@@ -96,6 +96,10 @@
     for (const [bank, names] of Object.entries(state.banks || {})) if ((names || []).includes(name)) return bank;
     return "other";
   }
+  function inLegacyColorSuffixBank(name) {
+    const legacy = ((((state.config || {}).config || {}).banks || {}).default || {}).legacy_color_suffix;
+    return Array.isArray(legacy) && legacy.includes(name);
+  }
   function lookDirty(name) { return (state.config.dirty.looks || []).includes(name); }
   function currentSession() { return (((state.config || {}).config || {})._pad_meta || {}).ui || {}; }
   function editorPayload() {
@@ -173,7 +177,7 @@
     const colorMode = render && render.slot_based
       ? "<span class='gradient-dot'></span>Uses show colors"
       : "<span class='fixed-dot'></span>Set colors";
-    const colorway = bank === "legacy_color_suffix" ? colorwayChip(look) : "";
+    const colorway = inLegacyColorSuffixBank(name) ? colorwayChip(look) : "";
     return `<article class="look-card ${esc(bank)} ${playing ? "playing" : ""}" style="--bank-color:${bankColors[bank]}">
       <div class="card-title"><span>${esc(title)}</span>${dirty ? "<span class='dirty-dot' title='Unsaved changes'>●</span>" : ""}</div>
       <div class="card-id mono">${esc(name)}</div>
