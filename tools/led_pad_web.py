@@ -28,7 +28,7 @@ from ..led_color_engine import LedColorEngine
 from ..led_config import LEDConfigResult, _resolve_path, load_led_look_director_config_from_dict
 from ..led_pad_controls import controls_for, effective_lab_specs, render_catalog
 from ..runtime_status import STATUS_PATH
-from .led_pad_lab import LabRegistry, LabRenderer, load_lab_effects, render_preview_frames
+from .led_pad_lab import LabRegistry, LabRenderer, StaleLabEntry, load_lab_effects, render_preview_frames
 from .led_pad_playback import PadPlayback, stable_seed
 from .pad_access import _is_loopback_host, access_payload
 
