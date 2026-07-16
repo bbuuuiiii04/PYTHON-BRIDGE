@@ -1547,12 +1547,16 @@
       if (state.health.labTrace) $("traceText").textContent = state.health.labTrace;
     }
   };
-  $("bpmInput").onchange = ev => api.session({bpm:Number(ev.target.value)}).catch(showError);
-  document.querySelectorAll("[data-step]").forEach(btn => btn.onclick = () => { $("bpmInput").value = Number($("bpmInput").value || 128) + Number(btn.dataset.step); $("bpmInput").dispatchEvent(new Event("change")); });
-  $("paletteSelect").onchange = ev => api.session({test_palette:ev.target.value}).catch(showError);
-  $("loopToggle").onchange = ev => { $("loopLabel").textContent = ev.target.checked ? "On" : "Off"; api.session({loop:ev.target.checked}).catch(showError); };
-  $("stopBtn").onclick = () => api.emergencyStop().then(() => { setBeatMode("off"); return updateRuntime(); }).catch(showError);
-  $("ownershipBtn").onclick = async () => { const rt = await api.runtime(); if ((rt.ownership || {}).state === "pad_owned") await api.release(); else await api.takeover(); await updateRuntime(); };
+  // AWR-271: shared shell owns session/ownership/STOP — pad-ui binds those once.
+  const shellShared = Boolean(document.body && document.body.dataset.shell === "lighting");
+  if (!shellShared) {
+    $("bpmInput").onchange = ev => api.session({bpm:Number(ev.target.value)}).catch(showError);
+    document.querySelectorAll("[data-step]").forEach(btn => btn.onclick = () => { $("bpmInput").value = Number($("bpmInput").value || 128) + Number(btn.dataset.step); $("bpmInput").dispatchEvent(new Event("change")); });
+    $("paletteSelect").onchange = ev => api.session({test_palette:ev.target.value}).catch(showError);
+    $("loopToggle").onchange = ev => { $("loopLabel").textContent = ev.target.checked ? "On" : "Off"; api.session({loop:ev.target.checked}).catch(showError); };
+    $("stopBtn").onclick = () => api.emergencyStop().then(() => { setBeatMode("off"); return updateRuntime(); }).catch(showError);
+    $("ownershipBtn").onclick = async () => { const rt = await api.runtime(); if ((rt.ownership || {}).state === "pad_owned") await api.release(); else await api.takeover(); await updateRuntime(); };
+  }
   document.addEventListener("keydown", ev => {
     if (ev.key === "Escape") {
       if (PadModal.isOpen()) PadModal.close();
@@ -1583,4 +1587,12 @@
   // Health strip refresh between PadHealth polls (~1s) so "Ns ago" stays honest.
   setInterval(renderHealth, 1000);
   refresh().catch(showError);
+
+  // Shared-component export: one store / one save path for pad-mounted Lab and /lab.
+  window.LabEditor = {
+    isDirty: isEditorDirty,
+    refresh,
+    updateRuntime,
+    onEmergencyStop: () => { setBeatMode("off"); },
+  };
 }());

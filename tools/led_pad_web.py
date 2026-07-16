@@ -1764,11 +1764,14 @@ def build_handler(service: LedPadService) -> type[BaseHTTPRequestHandler]:
             path = parsed.path
             try:
                 if path == "/":
+                    # AWR-271 R9a: one shell document for Pad + Lab (view from path).
                     self._send_file(_ASSETS_DIR / "index.html")
                     return
                 if path == "/lab":
-                    self._send_file(_ASSETS_DIR / "lab.html")
+                    # Same shared component as / — not a redirect (R9c). /lab stays a real URL.
+                    self._send_file(_ASSETS_DIR / "index.html")
                     return
+
                 if path == "/api/access":
                     self._send_json(
                         access_payload(self.server.server_address[0], self.server.server_address[1])

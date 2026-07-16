@@ -617,8 +617,18 @@
   document.querySelectorAll("[data-step]").forEach(btn => btn.addEventListener("click", () => { $("bpmInput").value = Number($("bpmInput").value || 128) + Number(btn.dataset.step); $("bpmInput").dispatchEvent(new Event("change")); }));
   $("paletteSelect").addEventListener("change", ev => api.session({test_palette:ev.target.value}).catch(showError));
   $("loopToggle").addEventListener("change", ev => { $("loopLabel").textContent = ev.target.checked ? "On" : "Off"; api.session({loop:ev.target.checked}).catch(showError); });
-  $("stopBtn").addEventListener("click", () => api.emergencyStop().then(refresh).catch(showError));
-  $("ownershipBtn").addEventListener("click", async () => { try { const rt = await api.runtime(); if ((rt.ownership || {}).state === "pad_owned") await api.release(); else await api.takeover(); await updateRuntime(); } catch (err) { showError(err); } });
+  $("stopBtn").addEventListener("click", () => api.emergencyStop().then(async () => {
+    // AWR-271: shared STOP also clears Lab beat meter when Lab is mounted in-shell.
+    if (window.LabEditor && typeof window.LabEditor.onEmergencyStop === "function") {
+      window.LabEditor.onEmergencyStop();
+    }
+    await refresh();
+    if (window.LabEditor && typeof window.LabEditor.updateRuntime === "function") {
+      await window.LabEditor.updateRuntime();
+    }
+  }).catch(showError));
+  $("ownershipBtn").addEventListener("click", async () => { try { const rt = await api.runtime(); if ((rt.ownership || {}).state === "pad_owned") await api.release(); else await api.takeover(); await updateRuntime(); if (window.LabEditor && window.LabEditor.updateRuntime) await window.LabEditor.updateRuntime(); } catch (err) { showError(err); } });
+
   $("qrBtn").addEventListener("click", openAccessModal);
   $("commitBtn").addEventListener("click", () => confirmModal("Save draft to the show", `Save to show writes the draft into the live show file — ${($("commitCount").textContent || "0")} looks affected. Bridge restart required to take effect live.${(state.config || {}).live_changed ? "\nThe live show file changed while you were editing. Review before Save to show — Undo all changes reloads the live file." : ""}`, "Save to show", async () => { const res = await api.commit(); if (!res.ok) throw new Error((res.errors || []).join("\n")); toast(res.restart_note || "Saved to show — bridge restart required to take effect live."); await refresh(); }));
   $("discardBtn").addEventListener("click", () => {

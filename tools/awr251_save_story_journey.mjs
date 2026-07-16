@@ -239,7 +239,7 @@ run_server(port=${simPort}, profile_path=${JSON.stringify(simProfile)})
     const phrase = await page.inputValue("#targetRoleSelect");
     const brief = await page.inputValue("#briefInput");
     const status = await page.textContent("#statusText");
-    if (phrase !== "drop" || brief !== "journey phrase" || !String(status).includes("accepted")) {
+    if (phrase !== "drop" || brief !== "journey phrase" || !/accept/i.test(String(status || ""))) {
       failures.push(`(a) accept reopen failed phrase=${phrase} brief=${brief} status=${status}`);
     } else {
       console.log("(a) accept→reopen phrase survived: ok");

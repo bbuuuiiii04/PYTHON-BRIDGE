@@ -440,7 +440,9 @@ class Awr270OneShellTests(unittest.TestCase):
         self.assertIn('id="help-what-is"', sim)
         self.assertIn("never turns the real lights on", sim)
         self.assertIn('id="help-btn"', sim)
+        # AWR-271: lab help lives in the shared shell; visibility is view-toggled.
         self.assertIn('id="labHelpBtn"', lab)
+        self.assertIn("labHelpBtn", (_ASSETS / "shell.js").read_text(encoding="utf-8"))
 
     def test_pad_landing_bank_prefers_content(self) -> None:
         src = (_ASSETS / "pad-ui.js").read_text(encoding="utf-8")
@@ -521,7 +523,125 @@ class Awr270OneShellTests(unittest.TestCase):
         _id_not_hidden(pad_html, "lookGrid")
         _id_not_hidden(lab_html, "draftList")
         _id_not_hidden(sim_html, "stage")
+        # AWR-271: / and /lab serve the same shell document (not a redirect).
+        self.assertIn('data-shell="lighting"', pad_html)
+        self.assertIn('data-shell="lighting"', lab_html)
+        self.assertIn('id="view-lab"', pad_html)
+        self.assertIn('id="view-pad"', lab_html)
 
 
-if __name__ == "__main__":
-    unittest.main()
+class Awr271LabInShellTests(unittest.TestCase):
+    """R9a: Lab editor mounts inside Pad shell; /lab still serves the same component."""
+
+    def test_shared_shell_markup_and_scripts(self) -> None:
+        html = (_ASSETS / "index.html").read_text(encoding="utf-8")
+        lab_link = (_ASSETS / "lab.html")
+        shell = (_ASSETS / "shell.js").read_text(encoding="utf-8")
+        lab_js = (_ASSETS / "lab.js").read_text(encoding="utf-8")
+        pad_js = (_ASSETS / "pad-ui.js").read_text(encoding="utf-8")
+        core = (_ASSETS / "pad-core.js").read_text(encoding="utf-8")
+
+        # One document hosts both views + shared chrome.
+        self.assertIn('data-shell="lighting"', html)
+        self.assertIn('id="view-pad"', html)
+        self.assertIn('id="view-lab"', html)
+        self.assertIn('data-shell-view="pad"', html)
+        self.assertIn('data-shell-view="lab"', html)
+        self.assertIn("/static/shell.js", html)
+        self.assertIn("/static/lab.js", html)
+        self.assertIn("/static/pad-ui.js", html)
+        # Lab disk entry is the shared shell (symlink or identical bytes).
+        self.assertTrue(lab_link.is_symlink() or lab_link.read_text(encoding="utf-8") == html)
+        if lab_link.is_symlink():
+            self.assertEqual(lab_link.resolve(), (_ASSETS / "index.html").resolve())
+
+        # Shell switches views without full navigation for Pad↔Lab.
+        self.assertIn("history.pushState", shell)
+        self.assertIn("data-shell-view", shell)
+        self.assertIn("lab-route", shell)
+        self.assertNotIn("iframe", shell)
+
+        # One Lab store export; Accept path untouched (still labAccept).
+        self.assertIn("window.LabEditor", lab_js)
+        self.assertIn("api.labAccept", lab_js)
+        self.assertIn("isEditorDirty()", lab_js)
+        self.assertIn("beforeunload", lab_js)
+        self.assertIn('error === "stale_entry"', lab_js)
+        self.assertIn("shellShared", lab_js)
+
+        # Pad STOP reaches Lab beat meter via shared export.
+        self.assertIn("LabEditor.onEmergencyStop", pad_js)
+        # PadHealth accepts multiple subscribers (pad + lab).
+        self.assertIn("state.subs", core)
+        self.assertIn("state.subs.push", core)
+
+    def test_integrity_behaviors_still_present_on_merged_component(self) -> None:
+        """AWR-258/259/260 loss scenarios must still be wired in the shared lab.js."""
+        lab = (_ASSETS / "lab.js").read_text(encoding="utf-8")
+        pad = (_ASSETS / "pad-ui.js").read_text(encoding="utf-8")
+        html = (_ASSETS / "index.html").read_text(encoding="utf-8")
+
+        # Lab lock+CAS / stale flows.
+        self.assertIn("stale_entry", lab)
+        self.assertIn("updated", lab)
+        # Discard / dirty scope.
+        self.assertIn("isEditorDirty()", lab)
+        self.assertIn("EDITOR_FIELDS", pad)
+        self.assertIn("locked_palette", pad)
+        self.assertIn('error === "stale_look"', pad)
+        self.assertIn("Undo all changes", pad)
+        # Accept still present in UI + JS (AWR-260 wire-in).
+        self.assertIn('id="acceptBtn"', html)
+        self.assertIn("labAccept", lab)
+        self.assertIn("Live —", lab)
+        self.assertIn("snapshot_fallback", lab)
+        for label, src in (("lab.js", lab), ("pad-ui.js", pad)):
+            self.assertIn("beforeunload", src, f"{label} missing beforeunload")
+
+    def test_lab_and_root_serve_identical_shell(self) -> None:
+        import http.client
+        import tempfile
+        import threading
+        from contextlib import contextmanager
+        from http.server import ThreadingHTTPServer
+
+        from rb_ss_bridge_v2.tools.led_pad_web import LedPadService, build_handler as pad_handler
+
+        example = Path(__file__).resolve().parents[1] / "config" / "led_look_director.example.json"
+
+        @contextmanager
+        def _pad():
+            with tempfile.TemporaryDirectory() as td:
+                cfg = Path(td) / "led_look_director.json"
+                cfg.write_text(example.read_text(encoding="utf-8"), encoding="utf-8")
+                service = LedPadService(cfg, dry_run=True)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), pad_handler(service))
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    yield server.server_port
+                finally:
+                    server.shutdown()
+                    server.server_close()
+                    thread.join(timeout=2.0)
+
+        def _get(port: int, path: str) -> tuple[int, str]:
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            conn.request("GET", path)
+            res = conn.getresponse()
+            body = res.read().decode("utf-8")
+            status = res.status
+            conn.close()
+            return status, body
+
+        with _pad() as port:
+            st_root, root = _get(port, "/")
+            st_lab, lab = _get(port, "/lab")
+        self.assertEqual(st_root, 200)
+        self.assertEqual(st_lab, 200)
+        # Not a redirect — same shell body (R9c is when /lab becomes redirect-only).
+        self.assertEqual(root, lab)
+        self.assertIn('data-shell="lighting"', root)
+        self.assertIn('id="view-lab"', root)
+        self.assertIn('id="acceptBtn"', root)
+        self.assertIn("/static/shell.js", root)

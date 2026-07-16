@@ -169,31 +169,54 @@
   // full refresh() and clear the banner, so pages heal instead of corpsing
   // when the pad server restarts.
   window.PadHealth = (function () {
-    const state = {fails: 0, down: false, timer: 0, delay: 2000, poll: null, refresh: null, banner: null};
+    // AWR-271: pad + lab share one shell — multiple subscribers, one reconnect loop.
+    const state = {fails: 0, down: false, timer: 0, delay: 2000, subs: []};
     function schedule() { clearTimeout(state.timer); state.timer = setTimeout(tick, state.delay); }
     async function tick() {
+      if (!state.subs.length) {
+        schedule();
+        return;
+      }
       let ok = true;
-      try { await state.poll(); } catch (_) { ok = false; }
+      for (const sub of state.subs) {
+        try { await sub.poll(); } catch (_) { ok = false; }
+      }
       if (ok && state.down) {
-        try { await state.refresh(); } catch (_) { ok = false; }
+        for (const sub of state.subs) {
+          try { await sub.refresh(); } catch (_) { ok = false; }
+        }
       }
       if (ok) {
-        if (state.down) { state.down = false; state.banner(false); }
+        if (state.down) {
+          state.down = false;
+          for (const sub of state.subs) {
+            if (sub.banner) sub.banner(false);
+          }
+        }
         state.fails = 0;
         state.delay = 2000;
       } else {
         state.fails += 1;
-        if (state.fails >= 2 && !state.down) { state.down = true; state.banner(true); }
+        if (state.fails >= 2 && !state.down) {
+          state.down = true;
+          for (const sub of state.subs) {
+            if (sub.banner) sub.banner(true);
+          }
+        }
         if (state.down) state.delay = Math.min(5000, state.delay + 1500);
       }
       schedule();
     }
     function start(hooks) {
-      state.poll = hooks.poll;
-      state.refresh = hooks.refresh;
-      state.banner = hooks.banner;
-      state.delay = 2000;
-      schedule();
+      state.subs.push({
+        poll: hooks.poll,
+        refresh: hooks.refresh,
+        banner: hooks.banner,
+      });
+      if (state.subs.length === 1) {
+        state.delay = 2000;
+        schedule();
+      }
     }
     return {start};
   }());
