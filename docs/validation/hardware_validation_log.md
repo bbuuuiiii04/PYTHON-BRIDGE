@@ -12,6 +12,11 @@ Current repo-facing hardware validation status:
 
 > **HARDWARE-UNVALIDATED**
 
+AWR-256 (2026-07-15): `rt_post_drop_firework_remnants` ember_hold/decay wiring is
+software-tested only. No bridge restart, Govee packet, strip audition, or room-visible
+hardware validation was performed by the implementer. Operator restart is required for
+live `ember_hold_beats` to take effect.
+
 AWR-238 (2026-07-15): pack startup retry + laser MIDI `port_unavailable` reopen +
 SS-MIDI `InvalidPortError` rebind are SOFTWARE-TESTED only. Foreign-Mac hot-plug
 (Enttec/IAC/Stream Deck appearing or vanishing after bridge start) remains

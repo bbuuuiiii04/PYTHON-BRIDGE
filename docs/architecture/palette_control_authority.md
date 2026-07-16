@@ -343,4 +343,5 @@ switch in `scripts/bridge_menubar.py`; v2 bindings in `led_config.py`,
 
 AWR-215 changes no palette authority or control path. The rebuilt firework-remnants renderer
 continues to consume the already-injected engine palette; it only removes the full-strip slot-5
-background and reuses the sparse drop-chase sparkle intro.
+background and reuses the sparse drop-chase sparkle intro. AWR-256 only wires remnants time-window
+params (`ember_hold_beats` / `ember_decay_beats`); palette injection is unchanged.

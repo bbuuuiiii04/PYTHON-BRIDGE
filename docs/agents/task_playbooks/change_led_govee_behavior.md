@@ -109,9 +109,11 @@ Implementation notes:
   recast, rename, or new registration can break — they are not named in this playbook's required
   test list but do need updating in the same change (AWR-156 touched all of them).
 - When rebuilding an existing effect and retiring its knobs, remove those params from the tracked
-  example and its renderer-default tests. If the ignored live config still carries them, keeping
-  them allowlisted as documented no-op compatibility input is permitted until an operator-approved
-  live mirror; do not edit the live config to make tests pass (AWR-215).
+  example and its renderer-default tests. If the ignored live config still carries a **now-forbidden**
+  key (removed from the effect allowlist), strip that key from live so validation stays clean —
+  dead allowlist entries that keep showing pad sliders are worse than a one-key live edit
+  (AWR-256 `dim_beats`). Keeping retired keys allowlisted as no-op compatibility input is only for
+  transitional cases where the operator has not yet approved removing them (AWR-215 historical).
 
 Required tests:
 - Run the targeted tests listed in the subsystem card.

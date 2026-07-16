@@ -646,4 +646,5 @@ Stream Deck surface this doc specifies.
 
 AWR-215 (2026-07-11) is renderer-only beside this surface: firework remnants still consume the
 same injected engine palette, but no longer draw a slot-5 room wash. It adds no Stream Deck binding,
-gesture, feedback, mute, Solo, Rainbow, or palette-authority behavior.
+gesture, feedback, mute, Solo, Rainbow, or palette-authority behavior. AWR-256 (2026-07-15) only
+wires remnants hold/decay timing knobs; same non-impact on this surface.
