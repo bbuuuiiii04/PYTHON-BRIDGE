@@ -16,10 +16,74 @@ const H612D_LED_PITCH_MM = H612D_LENGTH_MM / H612D_PHYSICAL_LEDS; // 41.656
 const H612D_SEGMENT_MM = H612D_LENGTH_MM / H612D_SEGMENTS;
 const MM_PER_FOOT = 304.8;
 const DEFAULT_ROOM_MM = [5216, 2284];
+/** AWR-267 R6: polyline must keep at least this many corners. */
+export const MIN_LAYOUT_CORNERS = 2;
 
 /** AF-4: true when the segment tick coincides with the junction control-box glyph. */
 export function shouldSuppressSegmentTick(segment) {
   return Math.abs(Number(segment) * H612D_SEGMENT_MM - H612D_JUNCTION_MM) < 1e-6;
+}
+
+/** Index of the longest edge in a points_mm polyline (display or stored order). */
+export function longestEdgeIndex(pointsMm) {
+  const points = Array.isArray(pointsMm) ? pointsMm : [];
+  let best = 0;
+  let bestLen = -1;
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const a = points[index];
+    const b = points[index + 1];
+    if (!a || !b) continue;
+    const len = Math.hypot(Number(b[0]) - Number(a[0]), Number(b[1]) - Number(a[1]));
+    if (len > bestLen) {
+      bestLen = len;
+      best = index;
+    }
+  }
+  return best;
+}
+
+/** Midpoint of edge `edgeIndex` → `edgeIndex+1` in mm. */
+export function midpointOnEdge(pointsMm, edgeIndex) {
+  const a = pointsMm[edgeIndex];
+  const b = pointsMm[edgeIndex + 1];
+  return [
+    (Number(a[0]) + Number(b[0])) / 2,
+    (Number(a[1]) + Number(b[1])) / 2,
+  ];
+}
+
+/** True when removing one corner still leaves a valid path. */
+export function canRemoveCorner(pointsMm) {
+  return Array.isArray(pointsMm) && pointsMm.length > MIN_LAYOUT_CORNERS;
+}
+
+/**
+ * Insert a corner at the midpoint of `edgeIndex`. Returns a new points array,
+ * or the original when the edge index is out of range.
+ */
+export function insertCornerAtEdgeMidpoint(pointsMm, edgeIndex) {
+  const points = Array.isArray(pointsMm)
+    ? pointsMm.map((point) => [Number(point[0]), Number(point[1])])
+    : [];
+  if (edgeIndex < 0 || edgeIndex >= points.length - 1) return points;
+  const next = points.slice();
+  next.splice(edgeIndex + 1, 0, midpointOnEdge(points, edgeIndex));
+  return next;
+}
+
+/**
+ * Remove corner at `index`. Returns a new points array, or null when removal
+ * would leave fewer than MIN_LAYOUT_CORNERS corners.
+ */
+export function removeCornerAt(pointsMm, index) {
+  const points = Array.isArray(pointsMm)
+    ? pointsMm.map((point) => [Number(point[0]), Number(point[1])])
+    : [];
+  if (!canRemoveCorner(points)) return null;
+  if (index < 0 || index >= points.length) return null;
+  const next = points.slice();
+  next.splice(index, 1);
+  return next;
 }
 
 /** Half-even (banker's) rounding — mirrors Python int(round(x)) used in
@@ -350,6 +414,9 @@ export function createLedSimView(canvas, initialProfile, options = {}) {
   let viewMode = "room";
   let labelsVisible = typeof window !== "undefined" ? window.innerWidth >= 700 : true;
   let editing = false;
+  /** Display-index selection for Layout tab (AWR-267 R6). */
+  let selectedVertex = -1;
+  let selectedEdge = -1;
   let layoutCache = null;
   let screenCache = null;
   let roomSizeHit = null;
