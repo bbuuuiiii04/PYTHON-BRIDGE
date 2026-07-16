@@ -418,6 +418,13 @@ not fork the simulator:
 - **Honesty.** Room mode shows “Room view · simulator layout · preview only.” Live on-strip play is
   not frame-streamed to the browser; the room canvas shows the last offline preview. The LIVE chip
   logic is untouched.
+- **Editor chrome hidden — presentation mode (AWR-253).** Lab creates the view with
+  `createLedSimView(canvas, profile, {presentation: true})`, so the sim's editor chrome does not
+  draw in this small preview: segment ticks + tick labels, boundary/room-size labels, the clickable
+  room-size chip, vertex handles, and the unplaced/excess warning text are all suppressed. What
+  remains is only room walls, the strip path guide, the 360 LED emitters, the center junction
+  marker + its label, and the start/end markers (which orient chain direction). The default sim
+  editor view (no `options` argument) is unchanged.
 
 ### Beat meter + metronome click (AWR-241)
 

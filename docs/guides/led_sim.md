@@ -333,13 +333,18 @@ python3 -m tools.led_sim_engine render-jsonl --name beat_chase \
 `tools/led_sim_assets/ledsim-view.js` is a drawing-only ES module:
 
 ```js
-createLedSimView(canvas, profile) -> {
+createLedSimView(canvas, profile, options?) -> {
   renderFrame(frame), setProfile(profile),
   setViewMode("room"|"strip"), setLabelsVisible(bool), setEditing(bool),
   hitTestVertex, hitTestEdge, canvasToMm, mmToCanvas, destroy()
 }
 layoutLedPositions(profile)  // pure; mirrors led_sim_engine.layout_led_positions
 ```
+
+`options` defaults to `{}` (the sim page passes nothing, so its view is unchanged).
+`{presentation: true}` (AWR-253, used by the Lab room preview) draws only walls, path,
+LEDs, the junction marker + label, and start/end markers — it skips the editor chrome
+(segment ticks, boundary/room-size labels, vertex handles, unplaced/excess warnings).
 
 It does not fetch, save, or send frames. The Python engine contains the tested
 reference transfer, linear-bleed, and layout calculations mirrored by the view.

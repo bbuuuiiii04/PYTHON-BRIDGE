@@ -848,7 +848,8 @@
       return roomView.view;
     }
     destroyRoomView();
-    roomView.view = mod.createLedSimView(canvas, profile);
+    // AWR-253: presentation mode hides the sim's editor chrome in this small preview.
+    roomView.view = mod.createLedSimView(canvas, profile, {presentation: true});
     roomView.layoutFingerprint = fp;
     return roomView.view;
   }

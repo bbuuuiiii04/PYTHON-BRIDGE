@@ -1,5 +1,11 @@
 // ledsim-view.js — H612D fixture view. Draws only; never fetches or persists.
 // Layout math mirrors tools/led_sim_engine.py — keep in lockstep.
+// Consumed by BOTH the sim page and the Lab room preview (served read-only at
+// /static/sim/ledsim-view.js). createLedSimView's third arg `options` is a
+// mirror-safe extension: {presentation:true} (Lab preview, AWR-253) hides the
+// editor chrome — segment ticks, boundary/room-size labels, vertex handles, and
+// the unplaced/excess warnings — while keeping walls, path, LEDs, junction label,
+// and start/end markers. Default {} is byte-identical to the sim's editor view.
 
 const H612D_SEGMENTS = 60;
 const H612D_LEDS_PER_SEGMENT = 6;
@@ -332,8 +338,10 @@ export function layoutLedPositions(profile) {
   };
 }
 
-export function createLedSimView(canvas, initialProfile) {
+export function createLedSimView(canvas, initialProfile, options = {}) {
   const ctx = canvas.getContext("2d", {alpha: false});
+  // AWR-253: presentation mode hides editor chrome for the Lab room preview.
+  const presentation = Boolean(options && options.presentation);
   let profile = structuredClone(initialProfile || {});
   let lastFrame = [];
   let viewWidth = 1;
@@ -753,7 +761,7 @@ export function createLedSimView(canvas, initialProfile) {
       roomSizeHit = null;
     }
 
-    if (layout.unplaced_mm > 0) {
+    if (layout.unplaced_mm > 0 && !presentation) {
       ctx.beginPath();
       ctx.fillStyle = "rgba(255, 193, 92, .95)";
       ctx.font = "700 12px ui-sans-serif, -apple-system, sans-serif";
@@ -772,7 +780,7 @@ export function createLedSimView(canvas, initialProfile) {
       ctx.beginPath();
     }
 
-    if (editing) {
+    if (editing && !presentation) {
       const handleR = 6;
       for (const point of points) {
         ctx.fillStyle = "#f2f4fb";
@@ -943,6 +951,11 @@ export function createLedSimView(canvas, initialProfile) {
         color: "#4dd8e6", offset: 16,
       });
     }
+
+    // AWR-253: presentation mode (Lab room preview) keeps only the junction label;
+    // start/end text, segment ticks, and the room-size chip are editor chrome.
+    // roomSizeHit stays null (set above), so the room-size click affordance is off.
+    if (presentation) return;
 
     // Start/end near the same gap: stack vertically when close.
     const gapClose = start && end && Math.hypot(start.x - end.x, start.y - end.y) < 40;
