@@ -589,6 +589,7 @@
       }
       renderLive();
       renderHealth();
+      if (window.PadConfigStale) window.PadConfigStale.render($("configStaleBanner"), rt.config_stale);
     } catch (err) {
       state.health.serverFailAt = performance.now();
       renderHealth();

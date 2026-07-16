@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: software-tested
-last_verified_commit: b7ccfcb
+last_verified_commit: 1a40ed2
 last_verified_date: 2026-07-15
-validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (live-apply + variant switch + preview), Round 2 (param_specs sliders/toggles, slot swatches, JSON demoted to Advanced), Round 3 (rejected-drafts filter, draft delete), QR same-network access, the iOS/iPad touch pass, the editor unset-param-defaults fix, the AWR-193 pad/lab overhaul (accept snapshot, decoupled preview, archive flow, fn fallback, effective bounds, color pickers + regime badges, reconnect, freshness watchdog + live fingerprint + no-cache), the AWR-202 commit read-modify-merge with the gate fix that tracks look CONTENT (`touched`) separately from role-bank PLACEMENT (`moved`) so a params-only edit keeps the look's LIVE bank while an explicit pad move still applies, AWR-240 pad offline v2 stand-down so Test Palette still injects slot_colors, AWR-241 Template Lab beat meter + metronome click (preview exact / live server-synced), AWR-242 Template Lab UX overhaul (search/filter/group draft list, target_role phrase tags, settable timing_mode, detail restructure, health strip + self-test), AWR-243 Template Lab functional fix round (collision banner gate, selected-draft list pin, ownership takeover catch, applied:false hint, live test_palette for lab play, header/phone/preview/health/utility UX), AWR-245 Template Lab Strip|Room preview hookup (pad serves sim view JS + profile read-only; fail-soft; preview-only honesty), AWR-247 Template Lab preview length (default full cue_beats; 2/4 bars / full control), AWR-248 Pad|Lab|Sim cross-nav (plain links to :8767), AWR-250 Lab Room preview re-fetches sim profile on Preview / Room toggle so active_layout changes from Sim show without reload, and AWR-254 pad look-editor close dirty check (compares against last Save, not editor-open snapshot); SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
+validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (live-apply + variant switch + preview), Round 2 (param_specs sliders/toggles, slot swatches, JSON demoted to Advanced), Round 3 (rejected-drafts filter, draft delete), QR same-network access, the iOS/iPad touch pass, the editor unset-param-defaults fix, the AWR-193 pad/lab overhaul (accept snapshot, decoupled preview, archive flow, fn fallback, effective bounds, color pickers + regime badges, reconnect, freshness watchdog + live fingerprint + no-cache), the AWR-202 commit read-modify-merge with the gate fix that tracks look CONTENT (`touched`) separately from role-bank PLACEMENT (`moved`) so a params-only edit keeps the look's LIVE bank while an explicit pad move still applies, AWR-240 pad offline v2 stand-down so Test Palette still injects slot_colors, AWR-241 Template Lab beat meter + metronome click (preview exact / live server-synced), AWR-242 Template Lab UX overhaul (search/filter/group draft list, target_role phrase tags, settable timing_mode, detail restructure, health strip + self-test), AWR-243 Template Lab functional fix round (collision banner gate, selected-draft list pin, ownership takeover catch, applied:false hint, live test_palette for lab play, header/phone/preview/health/utility UX), AWR-245 Template Lab Strip|Room preview hookup (pad serves sim view JS + profile read-only; fail-soft; preview-only honesty), AWR-247 Template Lab preview length (default full cue_beats; 2/4 bars / full control), AWR-248 Pad|Lab|Sim cross-nav (plain links to :8767), AWR-250 Lab Room preview re-fetches sim profile on Preview / Room toggle so active_layout changes from Sim show without reload, AWR-254 pad look-editor close dirty check (compares against last Save, not editor-open snapshot), and AWR-255 pad+lab banner when live config is newer than the running bridge; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # LED Pad
@@ -495,6 +495,18 @@ pgrep -f rb_ss_bridge_v2 | wc -l
 
 Expected value is `1`.
 
+**Stale-config banner (AWR-255).** Pad and Template Lab both poll
+`GET /api/runtime_status`, which now includes a `config_stale` object. The pad
+compares the live `config/led_look_director.json` file time to the running
+bridge process start (status file `process.pid` → `ps` start time; the bridge
+status has no `started_at` field, and this work does not change bridge
+runtime). When the file is newer than the process, both pages show a persistent
+banner: applied changes are not live yet — restart the bridge from the menubar.
+When the process start cannot be resolved but this pad session just Applied, a
+weaker banner still asks for a restart and says so. When the comparison shows
+fresh, a quiet green line confirms the live file matches the running bridge.
+Covered by `tests/test_led_pad_service.py` (`ConfigStaleComputationTests`).
+
 ## iOS/iPad touch pass
 
 The pad and Template Lab pages carry code-level iOS/iPad accommodations: `viewport-fit=cover` plus
@@ -555,6 +567,9 @@ AWR-254 fixes the pad look-editor close guard so it compares against the last su
 (not the snapshot taken when the editor opened); covered by
 `tests/frontend/test_led_pad_defaults.py` (`test_close_after_save_skips_discard_modal`,
 `test_close_with_unsaved_edits_shows_discard_modal`).
+AWR-255 adds a persistent pad+lab banner when the live LED config file is newer than the
+running bridge process (or a weaker post-Apply warning when process start cannot be read);
+covered by `ConfigStaleComputationTests` in `tests/test_led_pad_service.py`.
 AWR-193/241/242/243/245/247 JS/UI behavior otherwise has no automated harness — code-review +
 manual-smoke covered only (registry `production_collision` + session lab palette live-update + sim
 routes + preview default beats are unit-tested). Locked Palette and renderer param unlock behavior

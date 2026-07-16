@@ -159,6 +159,54 @@
     return {start};
   }());
 
+  // AWR-255: shared config-stale banner for pad + lab. Non-dismissable while
+  // stale; quiet green when we positively know the running bridge loaded the
+  // current live file; hidden when we cannot tell.
+  window.PadConfigStale = (function () {
+    function formatLag(seconds) {
+      const s = Math.max(0, Number(seconds) || 0);
+      if (s < 60) return "less than a minute";
+      if (s < 3600) {
+        const m = Math.round(s / 60);
+        return m === 1 ? "1 minute" : `${m} minutes`;
+      }
+      if (s < 86400) {
+        const h = Math.round(s / 3600);
+        return h === 1 ? "1 hour" : `${h} hours`;
+      }
+      const d = Math.round(s / 86400);
+      return d === 1 ? "1 day" : `${d} days`;
+    }
+
+    function render(el, payload) {
+      if (!el) return;
+      const info = payload && typeof payload === "object" ? payload : {};
+      if (info.stale) {
+        el.hidden = false;
+        el.dataset.state = "stale";
+        if (info.signal === "bridge_start" && typeof info.lag_s === "number") {
+          el.textContent =
+            `Your applied changes aren't live yet — the bridge started ${formatLag(info.lag_s)} before the last config change. Restart the bridge (menubar) to load them.`;
+        } else {
+          el.textContent =
+            "Your applied changes aren't live yet — restart the bridge (menubar) to load them. (Can't tell when the bridge last started.)";
+        }
+        return;
+      }
+      if (info.signal === "bridge_start") {
+        el.hidden = false;
+        el.dataset.state = "fresh";
+        el.textContent = "Live config matches the running bridge.";
+        return;
+      }
+      el.hidden = true;
+      el.dataset.state = "";
+      el.textContent = "";
+    }
+
+    return {formatLag, render};
+  }());
+
   window.LedPadApi = {
     config: () => request("/api/config"),
     renders: () => request("/api/renders"),

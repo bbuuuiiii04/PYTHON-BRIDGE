@@ -386,6 +386,7 @@
       clearError();
     }
     if (changed) { renderCards(); renderEditorLive(); }
+    if (window.PadConfigStale) window.PadConfigStale.render($("configStaleBanner"), rt.config_stale);
   }
   document.addEventListener("keydown", ev => {
     if (ev.key !== "Escape") return;

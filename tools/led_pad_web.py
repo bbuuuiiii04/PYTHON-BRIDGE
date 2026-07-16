@@ -10,6 +10,7 @@ import mimetypes
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
@@ -170,6 +171,71 @@ def freshness_restart_due(
     if current == baseline:
         return False
     return stable_age_s >= min_stable_s
+
+
+def process_start_time(pid: int) -> float | None:
+    """Epoch seconds when ``pid`` started, via ``ps -o lstart=`` (no psutil).
+
+    Returns None when the process is gone or ``ps`` output cannot be parsed.
+    Bridge status has process.pid but no started_at — this is the pad-side
+    heuristic (AWR-255). Does not touch bridge runtime modules.
+    """
+    try:
+        completed = subprocess.run(
+            ["ps", "-o", "lstart=", "-p", str(int(pid))],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=2.0,
+        )
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+    raw = (completed.stdout or "").strip()
+    if completed.returncode != 0 or not raw:
+        return None
+    try:
+        # macOS/BSD: "Sun Jul 12 16:11:11 2026"
+        return datetime.strptime(raw, "%a %b %d %H:%M:%S %Y").timestamp()
+    except ValueError:
+        return None
+
+
+def compute_config_stale(
+    *,
+    config_mtime: float | None,
+    bridge_started_at: float | None,
+    last_commit_at: float | None = None,
+    now: float | None = None,
+) -> dict[str, Any]:
+    """Pure staleness: live LED config newer than the running bridge's start.
+
+    Primary signal (``bridge_start``): config mtime > process start → stale.
+    Weaker signal (``commit_proxy``): process start unknown, but this pad
+    session Applied — warn that a restart is still needed, and say we cannot
+    confirm when the bridge last started.
+    """
+    _ = now  # reserved for future age caps; kept for a stable test seam
+    payload: dict[str, Any] = {
+        "stale": False,
+        "signal": "none",
+        "config_mtime": config_mtime,
+        "bridge_started_at": bridge_started_at,
+        "last_commit_at": last_commit_at,
+        "lag_s": None,
+    }
+    if config_mtime is None:
+        return payload
+    if bridge_started_at is not None:
+        lag = float(config_mtime) - float(bridge_started_at)
+        payload["lag_s"] = lag
+        payload["signal"] = "bridge_start"
+        payload["stale"] = lag > 0.0
+        return payload
+    if last_commit_at is not None and float(config_mtime) >= float(last_commit_at) - 2.0:
+        payload["signal"] = "commit_proxy"
+        payload["stale"] = True
+        return payload
+    return payload
 
 
 def _resolved_config_path(explicit: Path | str | None = None) -> Path:
@@ -405,6 +471,9 @@ class LedPadService:
         # Accept-what-you-hear: last APPLIED pre-injection params per lab draft
         # (author params + live UI overrides; palette-injected colors excluded).
         self._last_lab_applied: dict[str, dict[str, Any]] = {}
+        # AWR-255: wall time of last successful /api/commit in this pad process
+        # (weaker stale signal when bridge process start cannot be resolved).
+        self._last_commit_at: float | None = None
 
     @property
     def draft_path(self) -> Path:
@@ -1145,6 +1214,7 @@ class LedPadService:
             self._draft = copy.deepcopy(merged)
             self._persist_draft_locked()
             self._write_draft_base()
+            self._last_commit_at = time.time()
         return {
             "ok": True,
             "backup_path": str(backup) if backup else "",
@@ -1198,6 +1268,26 @@ class LedPadService:
             self._write_draft_base()
         return {"ok": True, "errors": [], "warnings": warnings, "dirty": self._dirty_for(config)}
 
+    def _bridge_started_at(self, bridge: dict[str, Any]) -> float | None:
+        """Resolve bridge process start from status process.pid (AWR-255)."""
+        proc = bridge.get("process")
+        if not isinstance(proc, dict):
+            return None
+        raw_pid = proc.get("pid")
+        try:
+            pid = int(raw_pid)
+        except (TypeError, ValueError):
+            return None
+        if pid <= 0:
+            return None
+        return process_start_time(pid)
+
+    def _config_mtime(self) -> float | None:
+        try:
+            return float(self._config_path.stat().st_mtime)
+        except OSError:
+            return None
+
     def runtime_status(self) -> dict[str, Any]:
         bridge: dict[str, Any] = {"live": False, "path": str(self._status_path)}
         try:
@@ -1208,12 +1298,19 @@ class LedPadService:
         except (FileNotFoundError, OSError, json.JSONDecodeError):
             pass
         playback = self._playback.status()
+        config_stale = compute_config_stale(
+            config_mtime=self._config_mtime(),
+            bridge_started_at=self._bridge_started_at(bridge) if bridge.get("live") else None,
+            last_commit_at=self._last_commit_at,
+            now=time.time(),
+        )
         return {
             "ok": True,
             "bridge": bridge,
             "ownership": self._playback.ownership(),
             "playing_look": playback.get("playing_look", ""),
             "playback": playback,
+            "config_stale": config_stale,
         }
 
 

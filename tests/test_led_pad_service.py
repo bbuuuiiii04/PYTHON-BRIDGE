@@ -3,10 +3,12 @@ from __future__ import annotations
 import copy
 import http.client
 import json
+import os
 import shutil
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from contextlib import contextmanager
 from http.server import ThreadingHTTPServer
@@ -18,7 +20,9 @@ import rb_ss_bridge_v2.tools.led_pad_web as led_pad_web  # noqa: E402
 from rb_ss_bridge_v2.tools.led_pad_web import (  # noqa: E402
     LedPadService,
     build_handler,
+    compute_config_stale,
     freshness_restart_due,
+    process_start_time,
     resolve_sim_profile_state,
     sim_profile_response,
 )
@@ -741,6 +745,106 @@ class FreshnessRestartDueTests(unittest.TestCase):
         current = {"a.py": 1.0}  # b.py vanished
         self.assertFalse(freshness_restart_due(self.BASE, current, playing=False, pad_owned=False, stable_age_s=1.0))
         self.assertTrue(freshness_restart_due(self.BASE, current, playing=False, pad_owned=False, stable_age_s=5.0))
+
+
+class ConfigStaleComputationTests(unittest.TestCase):
+    """AWR-255: live config mtime vs bridge start (fake clocks only)."""
+
+    def test_stale_when_config_newer_than_bridge_start(self) -> None:
+        out = compute_config_stale(
+            config_mtime=1_000_100.0,
+            bridge_started_at=1_000_000.0,
+            last_commit_at=None,
+            now=1_000_200.0,
+        )
+        self.assertTrue(out["stale"])
+        self.assertEqual(out["signal"], "bridge_start")
+        self.assertEqual(out["lag_s"], 100.0)
+
+    def test_fresh_when_bridge_started_after_config(self) -> None:
+        out = compute_config_stale(
+            config_mtime=1_000_000.0,
+            bridge_started_at=1_000_050.0,
+            last_commit_at=1_000_000.0,
+            now=1_000_200.0,
+        )
+        self.assertFalse(out["stale"])
+        self.assertEqual(out["signal"], "bridge_start")
+        self.assertEqual(out["lag_s"], -50.0)
+
+    def test_fresh_when_mtime_equals_start(self) -> None:
+        out = compute_config_stale(
+            config_mtime=50.0,
+            bridge_started_at=50.0,
+        )
+        self.assertFalse(out["stale"])
+        self.assertEqual(out["signal"], "bridge_start")
+        self.assertEqual(out["lag_s"], 0.0)
+
+    def test_commit_proxy_when_start_unknown(self) -> None:
+        out = compute_config_stale(
+            config_mtime=200.0,
+            bridge_started_at=None,
+            last_commit_at=199.0,
+        )
+        self.assertTrue(out["stale"])
+        self.assertEqual(out["signal"], "commit_proxy")
+        self.assertIsNone(out["lag_s"])
+
+    def test_no_signal_when_start_and_commit_unknown(self) -> None:
+        out = compute_config_stale(
+            config_mtime=200.0,
+            bridge_started_at=None,
+            last_commit_at=None,
+        )
+        self.assertFalse(out["stale"])
+        self.assertEqual(out["signal"], "none")
+
+    def test_missing_config_mtime_is_not_stale(self) -> None:
+        out = compute_config_stale(
+            config_mtime=None,
+            bridge_started_at=10.0,
+            last_commit_at=20.0,
+        )
+        self.assertFalse(out["stale"])
+        self.assertEqual(out["signal"], "none")
+
+    def test_bridge_start_wins_over_commit_proxy(self) -> None:
+        out = compute_config_stale(
+            config_mtime=100.0,
+            bridge_started_at=150.0,
+            last_commit_at=100.0,
+        )
+        self.assertFalse(out["stale"])
+        self.assertEqual(out["signal"], "bridge_start")
+
+    def test_process_start_time_self_pid(self) -> None:
+        started = process_start_time(os.getpid())
+        self.assertIsNotNone(started)
+        assert started is not None
+        self.assertLessEqual(started, time.time() + 1.0)
+        self.assertGreater(started, time.time() - 86400.0 * 30)
+
+    def test_process_start_time_dead_pid(self) -> None:
+        self.assertIsNone(process_start_time(2_147_483_646))
+
+    def test_runtime_status_exposes_config_stale(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            playback = _FakePlayback()
+            path = Path(td) / "led_look_director.json"
+            shutil.copy2(_EXAMPLE_PATH, path)
+            service = LedPadService(path, dry_run=True, playback=playback)
+            status_path = Path(td) / "status.json"
+            status_path.write_text(
+                json.dumps({"process": {"pid": -1, "state": "on"}}),
+                encoding="utf-8",
+            )
+            service._status_path = status_path
+            service._last_commit_at = path.stat().st_mtime
+            payload = service.runtime_status()
+            self.assertIn("config_stale", payload)
+            self.assertTrue(payload["config_stale"]["stale"])
+            self.assertEqual(payload["config_stale"]["signal"], "commit_proxy")
 
 
 class LiveChangedFingerprintTests(unittest.TestCase):
