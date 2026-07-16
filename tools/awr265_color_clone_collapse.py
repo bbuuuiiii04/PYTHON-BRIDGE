@@ -319,6 +319,7 @@ def _edited_v1_cfg(cfg):
     stops["white"] = (255, 255, 255)
     stops["sky"] = (0, 135, 255)  # strobe blue_cyan color_b
     stops["ice"] = (0, 200, 255)  # center-burst cyan-ish
+    stops["periwinkle"] = (100, 105, 255)  # strobe cyan_white color_b
     palettes = dict(cfg.palettes)
     for name, rng in (
         ("pure_blue", ("blue", "blue")),
@@ -326,6 +327,7 @@ def _edited_v1_cfg(cfg):
         ("pure_red", ("red", "red")),
         ("pure_green", ("green", "green")),
         ("cyan_white", ("cyan", "white")),
+        ("cyan_periwinkle", ("cyan", "periwinkle")),
         ("red_white", ("red", "white")),
         ("blue_sky", ("blue", "sky")),
         ("blue_ice", ("blue", "ice")),
@@ -334,7 +336,11 @@ def _edited_v1_cfg(cfg):
     return replace(cfg, scale_stops=stops, palettes=palettes, v2=None)
 
 
-def _family_edit_palette(family: str) -> str:
+def _family_edit_palette(family: str, *, cue_class: str = "") -> str:
+    if cue_class == "drop_strobe" and family == "cyan_white":
+        return "cyan_periwinkle"
+    if cue_class in ("center_burst", "center_comet") and family == "blue_cyan":
+        return "blue_ice"
     return {
         "blue": "pure_blue",
         "cyan": "pure_cyan",
@@ -342,7 +348,7 @@ def _family_edit_palette(family: str) -> str:
         "green": "pure_green",
         "cyan_white": "cyan_white",
         "red_white": "red_white",
-        "blue_cyan": "blue_sky",  # strobe; center uses blue_ice
+        "blue_cyan": "blue_sky",
     }.get(family, "pure_blue")
 
 
@@ -561,10 +567,7 @@ def classify_clone(cfg, looks: dict[str, Any], spec: CloneSpec) -> MappingRow:
     today_match = today_multi == target
 
     edited = _edited_v1_cfg(cfg)
-    # center burst/comet prefer blue_ice over blue_sky
-    edit_pal = _family_edit_palette(spec.family)
-    if spec.cue_class in ("center_burst", "center_comet") and spec.family == "blue_cyan":
-        edit_pal = "blue_ice"
+    edit_pal = _family_edit_palette(spec.family, cue_class=spec.cue_class)
     edit_multi = _resolve_v1_multi(edited, edit_pal)
     edit_match = edit_multi == target
 

@@ -6,7 +6,9 @@ pass base+literal frame identity on a seeded grid.
 """
 from __future__ import annotations
 
+import runpy
 import sys
+import types
 import unittest
 from pathlib import Path
 
@@ -14,15 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 
 def _load_tool():
-    import importlib.util
-
     path = Path(__file__).resolve().parents[1] / "tools" / "awr265_color_clone_collapse.py"
-    spec = importlib.util.spec_from_file_location("awr265_color_clone_collapse", path)
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    return types.SimpleNamespace(**runpy.run_path(str(path), run_name="awr265_tool"))
 
 
 _TOOL = _load_tool()
@@ -116,6 +111,11 @@ class Awr265Step0MappingTests(unittest.TestCase):
         self.assertEqual(duo.spec.color_b, (0, 135, 255))
         self.assertTrue(duo.edit_match)
         self.assertEqual(duo.classification, "CONFIG_EDIT")
+        cyan_white = self.by_name["rt_drop_strobe_cyan_white"]
+        self.assertEqual(cyan_white.spec.color_b, (100, 105, 255))
+        self.assertTrue(cyan_white.edit_match)
+        self.assertEqual(cyan_white.classification, "CONFIG_EDIT")
+        self.assertEqual(cyan_white.clone_vs_base_mismatches, 0)
 
     def test_base_plus_literal_injection_is_byte_identical(self) -> None:
         """Motion-identical-by-construction gate for every collapse-scope cue."""
