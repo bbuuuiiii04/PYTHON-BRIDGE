@@ -43,6 +43,13 @@ _LEGACY_COLOR_SUFFIX_BY_ROLE = {
         "rt_drop_chase_green",
         "rt_drop_chase_cyan_white",
         "rt_drop_center_burst_blue_cyan",
+        "rt_drop_strobe_blue",
+        "rt_drop_strobe_cyan",
+        "rt_drop_strobe_green",
+        "rt_drop_strobe_red",
+        "rt_drop_strobe_red_white",
+        "rt_drop_strobe_blue_cyan",
+        "rt_drop_strobe_cyan_white",
     ),
     "post_drop": (
         "rt_post_drop_chase_blue",
@@ -105,23 +112,14 @@ class PatchFBankCleanupTests(unittest.TestCase):
         self.assertEqual(tuple(result.errors), ())
 
     def test_default_bank_contains_no_moved_legacy_color_suffix_looks(self) -> None:
-        # f0b40ba (AWR-180 Part C, operator-gated 2026-07-09): the four gentle
-        # rt_drop_chase colorways returned to banks.default.drop as the tier-1
-        # gentle-drop routing set — the ONLY approved re-entries. They also stay
-        # in legacy_color_suffix (that bank's roster is unchanged; the sibling
-        # test still pins it exactly). Any other moved look reappearing in the
-        # default bank is still a regression this tripwire must catch.
-        approved_part_c_quartet = {
-            "rt_drop_chase_blue",
-            "rt_drop_chase_cyan",
-            "rt_drop_chase_red",
-            "rt_drop_chase_green",
-        }
+        # AWR-265 Step 2: all color-suffix clones (including the former Part C
+        # gentle-drop quartet and the seven drop strobes) live only in
+        # legacy_color_suffix. Default drop rotates the palette-fed bases.
         result = _load()
         default_names = _bank_names(result.config.banks["default"])
-        self.assertEqual(
-            default_names & _MOVED_LEGACY_LOOKS, approved_part_c_quartet
-        )
+        self.assertEqual(default_names & _MOVED_LEGACY_LOOKS, set())
+        self.assertIn("rt_drop_chase", result.config.banks["default"].drop)
+        self.assertIn("rt_drop_strobe", result.config.banks["default"].drop)
 
     def test_legacy_color_suffix_bank_contains_exactly_moved_looks(self) -> None:
         result = _load()

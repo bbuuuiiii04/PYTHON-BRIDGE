@@ -1,8 +1,31 @@
 (function () {
-  const bankOrder = ["drafts", "ambient", "groove", "buildup", "drop", "post_drop", "breakdown", "utility"];
+  const bankOrder = ["drafts", "ambient", "groove", "buildup", "drop", "post_drop", "breakdown", "utility", "legacy_color_suffix"];
   const moveBanks = ["ambient", "groove", "buildup", "pre_drop", "drop", "post_drop", "breakdown", "utility"];
-  const bankLabels = {drafts:"Untagged", ambient:"Ambient", groove:"Groove", buildup:"Buildup", pre_drop:"Pre-Drop", drop:"Drop", post_drop:"Post-Drop", breakdown:"Breakdown", utility:"Utility", other:"Other"};
-  const bankColors = {drafts:"var(--lab)", ambient:"var(--role-ambient)", groove:"var(--role-groove)", buildup:"var(--role-buildup)", drop:"var(--role-drop)", post_drop:"var(--role-postdrop)", breakdown:"var(--role-breakdown)", utility:"var(--role-utility)", other:"var(--border)"};
+  const bankLabels = {
+    drafts: "Untagged",
+    ambient: "Ambient",
+    groove: "Groove",
+    buildup: "Buildup",
+    pre_drop: "Pre-Drop",
+    drop: "Drop",
+    post_drop: "Post-Drop",
+    breakdown: "Breakdown",
+    utility: "Utility",
+    legacy_color_suffix: "Legacy — replaced by palette-driven cues, removed after live verify",
+    other: "Other",
+  };
+  const bankColors = {
+    drafts: "var(--lab)",
+    ambient: "var(--role-ambient)",
+    groove: "var(--role-groove)",
+    buildup: "var(--role-buildup)",
+    drop: "var(--role-drop)",
+    post_drop: "var(--role-postdrop)",
+    breakdown: "var(--role-breakdown)",
+    utility: "var(--role-utility)",
+    legacy_color_suffix: "var(--border)",
+    other: "var(--border)",
+  };
   // AWR-259: single source for dirty-tracked editor fields (save payload must match).
   const EDITOR_FIELDS = ["look", "params", "cue_beats", "slot_fill", "mono_chance", "locked_palette"];
   const state = {config:null, banks:{}, renders:[], renderMap:new Map(), palettes:[], activeBank:"drafts", editor:null, cleanSnapshot:null, updateTimer:null, lastFocus:null, playingLook:""};
@@ -97,8 +120,9 @@
     return "other";
   }
   function inLegacyColorSuffixBank(name) {
-    const legacy = ((((state.config || {}).config || {}).banks || {}).default || {}).legacy_color_suffix;
-    return Array.isArray(legacy) && legacy.includes(name);
+    const legacy = (((state.config || {}).config || {}).banks || {}).legacy_color_suffix;
+    if (!legacy || typeof legacy !== "object") return false;
+    return Object.values(legacy).some(list => Array.isArray(list) && list.includes(name));
   }
   function lookDirty(name) { return (state.config.dirty.looks || []).includes(name); }
   function currentSession() { return (((state.config || {}).config || {})._pad_meta || {}).ui || {}; }

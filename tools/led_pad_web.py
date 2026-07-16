@@ -79,7 +79,17 @@ _SIM_DEFAULT_PROFILE = _REPO_ROOT / "config" / "led_sim_profile.json"
 _SIM_DEFAULT_ROOM_MM = [5216.0, 2284.0]
 _IDENT_RE = re.compile(r"^[a-z0-9_]+$")
 _ROLE_BANKS = ("ambient", "groove", "buildup", "pre_drop", "drop", "post_drop", "breakdown", "utility")
-_VISIBLE_BANKS = ("drafts", "ambient", "groove", "buildup", "drop", "post_drop", "breakdown", "utility")
+_VISIBLE_BANKS = (
+    "drafts",
+    "ambient",
+    "groove",
+    "buildup",
+    "drop",
+    "post_drop",
+    "breakdown",
+    "utility",
+    "legacy_color_suffix",
+)
 _STOP_LOOKS = frozenset({"safe_default", "blackout"})
 logger = logging.getLogger("led_pad_web")
 
@@ -454,6 +464,16 @@ def _pad_lists(config: dict[str, Any]) -> dict[str, list[str]]:
     default = _default_bank(config)
     lists = {bank: _dedupe(default.get(bank, [])) for bank in _ROLE_BANKS}
     lists["drafts"] = _dedupe(config["_pad_meta"].get("drafts", []))
+    # AWR-265: expose the storage-only legacy color-suffix bank as its own pad
+    # tab (read via payload; moves into it still go through role banks).
+    legacy = (config.get("banks") or {}).get("legacy_color_suffix") or {}
+    legacy_names: list[str] = []
+    if isinstance(legacy, dict):
+        for role in _ROLE_BANKS:
+            values = legacy.get(role, [])
+            if isinstance(values, list):
+                legacy_names.extend(str(item) for item in values)
+    lists["legacy_color_suffix"] = _dedupe(legacy_names)
     return lists
 
 

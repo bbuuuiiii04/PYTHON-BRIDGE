@@ -2128,19 +2128,10 @@
         "rt_drop_chase_freestyle_nebula",
         "rt_drop_white_aggressive",
         "rt_drop_center_burst",
-        "rt_drop_strobe_blue",
-        "rt_drop_strobe_cyan",
-        "rt_drop_strobe_green",
-        "rt_drop_strobe_red",
-        "rt_drop_strobe_red_white",
-        "rt_drop_strobe_blue_cyan",
-        "rt_drop_strobe_cyan_white",
+        "rt_drop_chase",
+        "rt_drop_strobe",
         "rt_rainbow_drop",
-        "rt_drop_firework_explosion",
-        "rt_drop_chase_blue",
-        "rt_drop_chase_cyan",
-        "rt_drop_chase_red",
-        "rt_drop_chase_green"
+        "rt_drop_firework_explosion"
       ],
       "post_drop": [
         "rt_post_drop_chase",
@@ -2184,7 +2175,14 @@
         "rt_drop_chase_red",
         "rt_drop_chase_green",
         "rt_drop_chase_cyan_white",
-        "rt_drop_center_burst_blue_cyan"
+        "rt_drop_center_burst_blue_cyan",
+        "rt_drop_strobe_blue",
+        "rt_drop_strobe_cyan",
+        "rt_drop_strobe_green",
+        "rt_drop_strobe_red",
+        "rt_drop_strobe_red_white",
+        "rt_drop_strobe_blue_cyan",
+        "rt_drop_strobe_cyan_white"
       ],
       "post_drop": [
         "rt_post_drop_chase_blue",

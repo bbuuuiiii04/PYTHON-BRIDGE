@@ -930,8 +930,14 @@ class Awr156Round2ConfigTests(unittest.TestCase):
         result = load_led_look_director_config_from_dict(_example_config())
         self.assertTrue(result.available, msg=result.errors)
         banks = result.config.banks["default"]
+        legacy = result.config.banks["legacy_color_suffix"]
+        # AWR-265 Step 2: colorway strobes moved to legacy_color_suffix; default
+        # drop rotates the single palette-fed rt_drop_strobe base instead.
         for name in self._COLORWAY_LOOKS:
-            self.assertIn(name, banks.drop)
+            self.assertIn(name, legacy.drop)
+            self.assertNotIn(name, banks.drop)
+        self.assertIn("rt_drop_strobe", banks.drop)
+        self.assertIn("rt_drop_chase", banks.drop)
         self.assertIn("rt_buildup_balloon_comet", banks.buildup)
         self.assertIn("rt_groove_heartbeat", banks.groove)
         self.assertIn("rt_post_drop_firework_remnants", banks.post_drop)
