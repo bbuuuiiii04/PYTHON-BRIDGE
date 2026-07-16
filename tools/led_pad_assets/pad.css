@@ -324,3 +324,12 @@ main { padding: var(--pad); }
 }
 @media (max-width: 720px) { .drawer { width: 100%; } .editor-form label, .control-row { grid-template-columns: 1fr; } }
 @media (pointer: coarse) { button, select, input[type="number"] { min-height: 44px; } .icon, .danger-outline, .danger { min-width: 44px; } .route-tabs a { min-height: 40px; } }
+/* AWR-252: lab help popover + dim-cue note (lab route only) */
+.lab-route .lab-help-popover { position: fixed; top: 64px; right: 16px; z-index: 60; max-width: 420px; max-height: min(70vh, 560px); overflow-y: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--pad); box-shadow: 0 12px 32px rgba(0,0,0,.5); }
+.lab-route .lab-help-popover[hidden] { display: none; }
+.lab-route .lab-help-list { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 0; }
+.lab-route .lab-help-list dt { color: var(--text); font-weight: 600; }
+.lab-route .lab-help-list dd { color: var(--text-dim); margin: 2px 0 0; }
+.lab-route .lab-preview-dim-note { font-size: 12px; }
+.lab-route .lab-preview-dim-note[hidden] { display: none; }
+@media (max-width: 720px) { .lab-route .lab-help-popover { left: 8px; right: 8px; max-width: none; } }
