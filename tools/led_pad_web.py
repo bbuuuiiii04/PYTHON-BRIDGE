@@ -15,7 +15,7 @@ import sys
 import tempfile
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -31,6 +31,24 @@ from ..runtime_status import STATUS_PATH
 from .led_pad_lab import LabRegistry, LabRenderer, StaleLabEntry, load_lab_effects, render_preview_frames
 from .led_pad_playback import PadPlayback, stable_seed
 from .pad_access import _is_loopback_host, access_payload
+
+
+class StaleLook(ValueError):
+    """Raised when a pad look save's ``updated`` stamp does not match the draft."""
+
+    def __init__(self, name: str, *, disk_updated: str, client_updated: str) -> None:
+        super().__init__(
+            f"stale_look: {name} changed since you loaded it "
+            f"(disk={disk_updated!r}, client={client_updated!r})"
+        )
+        self.name = name
+        self.disk_updated = disk_updated
+        self.client_updated = client_updated
+        self.code = "stale_look"
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds")
 
 _ASSETS_DIR = Path(__file__).resolve().parent / "led_pad_assets"
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -470,10 +488,31 @@ class LedPadService:
         self._last_play_editor: dict[str, Any] | None = None
         # Accept-what-you-hear: last APPLIED pre-injection params per lab draft
         # (author params + live UI overrides; palette-injected colors excluded).
-        self._last_lab_applied: dict[str, dict[str, Any]] = {}
+        # AWR-259: persist beside drafts so a pad restart does not lose the snapshot.
+        self._last_lab_applied_path = self._lab.lab_dir / "last_applied.json"
+        self._last_lab_applied: dict[str, dict[str, Any]] = self._load_last_lab_applied()
         # AWR-255: wall time of last successful /api/commit in this pad process
         # (weaker stale signal when bridge process start cannot be resolved).
         self._last_commit_at: float | None = None
+
+    def _load_last_lab_applied(self) -> dict[str, dict[str, Any]]:
+        path = self._last_lab_applied_path
+        if not path.exists():
+            return {}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        out: dict[str, dict[str, Any]] = {}
+        for key, value in data.items():
+            if isinstance(value, dict):
+                out[str(key)] = copy.deepcopy(value)
+        return out
+
+    def _persist_last_lab_applied_locked(self) -> None:
+        _write_json_atomic(self._last_lab_applied_path, self._last_lab_applied)
 
     @property
     def draft_path(self) -> Path:
@@ -648,6 +687,13 @@ class LedPadService:
             params = {}
         candidate = copy.deepcopy(self._draft)
         self._validate_name(name, config=candidate)
+        # AWR-259 L7: same-look two-tab CAS — client must carry the stamp it loaded.
+        if "updated" in payload:
+            disk_meta = ((candidate.get("_pad_meta") or {}).get("looks") or {}).get(name) or {}
+            disk_updated = str(disk_meta.get("updated") or "")
+            client_updated = str(payload.get("updated") or "")
+            if client_updated != disk_updated:
+                raise StaleLook(name, disk_updated=disk_updated, client_updated=client_updated)
         scene_ref = str(look_patch.get("scene_ref") or (candidate.get("looks", {}).get(name) or {}).get("scene_ref") or "")
         allowed = REALTIME_EFFECT_PARAM_KEYS.get(scene_ref, frozenset())
         unknown = sorted(str(key) for key in params if str(key) not in allowed)
@@ -671,9 +717,10 @@ class LedPadService:
             else:
                 locked.pop(name, None)
         meta = candidate.setdefault("_pad_meta", {}).setdefault("looks", {})
-        meta.setdefault(name, {})
+        look_meta = meta.setdefault(name, {})
         if "cue_beats" in payload:
-            meta[name]["cue_beats"] = float(payload.get("cue_beats") or 0)
+            look_meta["cue_beats"] = float(payload.get("cue_beats") or 0)
+        look_meta["updated"] = _now_iso()
         _mark_touched(candidate, name)
         self._ensure_unique_bank_locked(candidate)
         return candidate
@@ -687,7 +734,15 @@ class LedPadService:
             self._draft = candidate
             self._persist_draft_locked()
             config = copy.deepcopy(self._draft)
-        return {"ok": True, "errors": [], "warnings": warnings, "dirty": self._dirty_for(config)}
+            name = str(payload.get("name", "")).strip()
+            updated = str((((config.get("_pad_meta") or {}).get("looks") or {}).get(name) or {}).get("updated") or "")
+        return {
+            "ok": True,
+            "errors": [],
+            "warnings": warnings,
+            "dirty": self._dirty_for(config),
+            "updated": updated,
+        }
 
     def duplicate_look(self, payload: dict[str, Any]) -> dict[str, Any]:
         source = str(payload.get("source", "")).strip()
@@ -911,14 +966,20 @@ class LedPadService:
         with self._lock:
             return self._lab.save(payload)
 
-    def _lab_merge_editor(self, entry: dict[str, Any], payload: dict[str, Any]) -> bool:
+    def _lab_merge_editor(self, entry: dict[str, Any], payload: dict[str, Any]) -> tuple[bool, bool]:
         """Merge editor fields into entry. Accept/Reject = Save then flip status.
 
         Params preference: payload.params (what the editor shows) wins; else the
         last live-applied pre-injection snapshot (agent Accept-after-Play); else
-        leave entry params alone. Returns whether params came from that snapshot.
+        leave entry params alone.
+
+        Returns (snapshotted, snapshot_fallback):
+        - snapshotted: params came from the last-applied snapshot
+        - snapshot_fallback: param-less Accept/Reject with no snapshot available
+          (kept entry params; UI should warn)
         """
         snapshotted = False
+        snapshot_fallback = False
         if isinstance(payload.get("params"), dict):
             entry["params"] = copy.deepcopy(payload["params"])
         else:
@@ -926,19 +987,21 @@ class LedPadService:
             if snapshot is not None:
                 entry["params"] = copy.deepcopy(snapshot)
                 snapshotted = True
+            else:
+                snapshot_fallback = True
         for key in ("brief", "notes", "target_role", "timing_mode"):
             if key in payload:
                 entry[key] = str(payload.get(key) or "")
         if "cue_beats" in payload:
             entry["cue_beats"] = float(payload.get("cue_beats") or 16)
-        return snapshotted
+        return snapshotted, snapshot_fallback
 
     def _lab_persist_editor(self, payload: dict[str, Any], *, status: str) -> dict[str, Any]:
         """Save editor fields + status under the service lock (AWR-258)."""
         name = str(payload.get("name", "")).strip()
         with self._lock:
             entry = self._lab.get(name)
-            snapshotted = self._lab_merge_editor(entry, payload)
+            snapshotted, snapshot_fallback = self._lab_merge_editor(entry, payload)
             entry["status"] = status
             # CAS uses the stamp the client loaded, not a fresh disk read.
             if "updated" in payload:
@@ -947,6 +1010,7 @@ class LedPadService:
                 entry["overwrite"] = True
             result = self._lab.save(entry)
             result["snapshotted"] = snapshotted
+            result["snapshot_fallback"] = snapshot_fallback
             return result
 
     def lab_accept(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -982,6 +1046,7 @@ class LedPadService:
         if isinstance(payload.get("params"), dict):
             params.update(copy.deepcopy(payload["params"]))
         self._last_lab_applied[name] = copy.deepcopy(params)
+        self._persist_last_lab_applied_locked()
         look = {"scene_ref": LabRegistry.scene_ref(name), "color_source": "engine"}
         self._inject_engine_colors(config, LabRegistry.scene_ref(name), look, params, force_slot=(kind == "slot"))
         return {
@@ -1445,7 +1510,7 @@ def build_handler(service: LedPadService) -> type[BaseHTTPRequestHandler]:
                     self.send_error(HTTPStatus.NOT_FOUND)
                     return
                 self._send_json(route(self._read_json()))
-            except StaleLabEntry as exc:
+            except (StaleLabEntry, StaleLook) as exc:
                 self._send_json(
                     {
                         "ok": False,

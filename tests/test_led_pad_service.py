@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import rb_ss_bridge_v2.tools.led_pad_web as led_pad_web  # noqa: E402
 from rb_ss_bridge_v2.tools.led_pad_web import (  # noqa: E402
     LedPadService,
+    StaleLook,
     build_handler,
     compute_config_stale,
     freshness_restart_due,
@@ -517,6 +518,7 @@ class LedPadServiceTests(unittest.TestCase):
 
             self.assertTrue(result["ok"])
             self.assertTrue(result["snapshotted"])
+            self.assertFalse(result.get("snapshot_fallback", False))
             self.assertEqual(entry["status"], "accepted")
             # Saved params == author params + live overlay, pre-injection.
             self.assertEqual(entry["params"], {"level": 0.9})
@@ -614,8 +616,107 @@ class LedPadServiceTests(unittest.TestCase):
 
             self.assertTrue(result["ok"])
             self.assertFalse(result["snapshotted"])
+            self.assertTrue(result["snapshot_fallback"])
             self.assertEqual(entry["status"], "accepted")
             self.assertEqual(entry["params"], {"level": 0.3})
+
+    def test_lab_accept_uses_persisted_snapshot_after_restart(self) -> None:
+        """AWR-259 L8: last-applied survives pad restart (new LedPadService)."""
+        with tempfile.TemporaryDirectory() as td:
+            service, _playback = self._lab_service(td)
+            lab_dir = Path(td) / "led_lab"
+            service.lab_save({"name": "pulse", "kind": "slot", "fn": "pulse", "params": {"level": 0.3}, "cue_beats": 8})
+            service.lab_play({"name": "pulse", "params": {"level": 0.9}})
+            snap_path = lab_dir / "last_applied.json"
+            self.assertTrue(snap_path.exists())
+            on_disk = json.loads(snap_path.read_text(encoding="utf-8"))
+            self.assertEqual(on_disk["pulse"], {"level": 0.9})
+
+            # Simulate pad restart: new service, empty memory, same lab dir.
+            restarted, _ = self._lab_service(td)
+            result = restarted.lab_accept({"name": "pulse"})
+            entry = restarted._lab.get("pulse")
+
+            self.assertTrue(result["ok"])
+            self.assertTrue(result["snapshotted"])
+            self.assertFalse(result["snapshot_fallback"])
+            self.assertEqual(entry["params"], {"level": 0.9})
+
+    def test_save_look_rejects_stale_updated_stamp(self) -> None:
+        """AWR-259 L7: Tab A save then Tab B stale stamp → 409 stale_look."""
+        with tempfile.TemporaryDirectory() as td:
+            service, _playback, _path = self._service(td)
+            first = service.save_look({
+                "name": "rt_groove_chase",
+                "look": {"scene_ref": "rt_groove_chase", "brightness": 20},
+                "params": {},
+                "updated": "",
+            })
+            self.assertTrue(first["ok"])
+            stamp_a = first["updated"]
+            self.assertTrue(stamp_a)
+
+            second = service.save_look({
+                "name": "rt_groove_chase",
+                "look": {"scene_ref": "rt_groove_chase", "brightness": 20},
+                "params": {},
+                "updated": stamp_a,
+            })
+            self.assertTrue(second["ok"])
+            stamp_b = second["updated"]
+            self.assertNotEqual(stamp_a, stamp_b)
+
+            with self.assertRaises(StaleLook) as ctx:
+                service.save_look({
+                    "name": "rt_groove_chase",
+                    "look": {"scene_ref": "rt_groove_chase", "brightness": 90},
+                    "params": {},
+                    "updated": stamp_a,  # stale Tab B
+                })
+            self.assertEqual(ctx.exception.code, "stale_look")
+            # Winning tab's brightness still on draft.
+            self.assertEqual(
+                service._draft["looks"]["rt_groove_chase"]["brightness"],
+                20,
+            )
+
+            # Fresh stamp still saves.
+            third = service.save_look({
+                "name": "rt_groove_chase",
+                "look": {"scene_ref": "rt_groove_chase", "brightness": 55},
+                "params": {},
+                "updated": stamp_b,
+            })
+            self.assertTrue(third["ok"])
+            self.assertEqual(
+                service._draft["looks"]["rt_groove_chase"]["brightness"],
+                55,
+            )
+
+    def test_save_look_stale_via_http_returns_409(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            service, _playback, _path = self._service(td)
+            first = service.save_look({
+                "name": "rt_groove_chase",
+                "look": {"scene_ref": "rt_groove_chase", "brightness": 20},
+                "params": {},
+                "updated": "",
+            })
+            with self._running_server(service) as port:
+                status, payload = self._request_json(
+                    port,
+                    "POST",
+                    "/api/look/save",
+                    {
+                        "name": "rt_groove_chase",
+                        "look": {"scene_ref": "rt_groove_chase", "brightness": 90},
+                        "params": {},
+                        "updated": "",  # stale vs first save's stamp
+                    },
+                )
+            self.assertEqual(status, 409)
+            self.assertEqual(payload["error"], "stale_look")
+            self.assertEqual(payload["disk_updated"], first["updated"])
 
     def test_session_test_palette_live_updates_playing_lab_draft(self) -> None:
         """AWR-243 F5: test_palette must color-push while a lab_* scene is playing."""
@@ -1028,7 +1129,8 @@ class SimRoomHookupRouteTests(unittest.TestCase):
         lab_html = (root / "tools" / "led_pad_assets" / "lab.html").read_text(encoding="utf-8")
         pad_core = (root / "tools" / "led_pad_assets" / "pad-core.js").read_text(encoding="utf-8")
         self.assertIn("async function acceptDraft(", lab_js)
-        self.assertIn('api.labAccept({...currentPayload(), status: "accepted"})', lab_js)
+        self.assertIn("api.labAccept(payload)", lab_js)
+        self.assertIn('status: "accepted"', lab_js)
         self.assertIn('api.labReject({...currentPayload(), status: "rejected"})', lab_js)
         self.assertIn("editorMemory", lab_js)
         self.assertIn("stashEditor()", lab_js)

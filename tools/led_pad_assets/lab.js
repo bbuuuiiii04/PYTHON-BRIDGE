@@ -349,6 +349,10 @@
     else if (state.current && isEditorDirty()) stashEditor();
     stopPreview();
     renderSwatches(null);
+    if (state.current && state.current.name !== name) {
+      const note = $("acceptFallbackNote");
+      if (note) note.hidden = true;
+    }
     state.current = state.entries.find(e => e.name === name) || null;
     renderList();
     renderDetail();
@@ -506,10 +510,24 @@
 
   async function acceptDraft() {
     if (!state.current) return;
+    const payload = {...currentPayload(), status: "accepted"};
+    // Accept-what-you-hear: when editor params match the saved entry, omit them
+    // so the server can prefer the last-applied snapshot (survives pad restart).
+    let paramsDirty = false;
     try {
-      await api.labAccept({...currentPayload(), status: "accepted"});
+      const editorParams = JSON.parse($("paramsInput").value || "{}");
+      paramsDirty = JSON.stringify(editorParams) !== JSON.stringify(state.current.params || {});
+    } catch (_) {
+      paramsDirty = true;
+    }
+    if (!paramsDirty) delete payload.params;
+    try {
+      const res = await api.labAccept(payload);
+      const showFallback = !!(res && res.snapshot_fallback);
       clearEditorMemory(state.current.name);
       await refresh();
+      const note = $("acceptFallbackNote");
+      if (note) note.hidden = !showFallback;
     } catch (err) {
       if (err && err.payload && err.payload.error === "stale_entry") {
         PadModal.show(
@@ -521,9 +539,13 @@
               await refresh();
             }},
             {label: "Overwrite & Accept", className: "danger-outline", run: async () => {
-              await api.labAccept({...currentPayload(), status: "accepted", overwrite: true});
+              const over = {...payload, overwrite: true};
+              const res = await api.labAccept(over);
+              const showFallback = !!(res && res.snapshot_fallback);
               clearEditorMemory(state.current.name);
               await refresh();
+              const note = $("acceptFallbackNote");
+              if (note) note.hidden = !showFallback;
             }},
           ],
         );

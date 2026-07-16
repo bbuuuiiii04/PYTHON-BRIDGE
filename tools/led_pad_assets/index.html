@@ -35,14 +35,14 @@
       <nav id="bankTabs" class="bank-tabs" aria-label="Banks"></nav>
       <div class="commit-actions">
         <button id="commitBtn" type="button" class="primary">Apply <span id="commitCount" class="badge">0</span></button>
-        <button id="discardBtn" type="button" class="ghost">Discard</button>
+        <button id="discardBtn" type="button" class="ghost">Discard all changes</button>
       </div>
     </div>
   </header>
   <main>
     <div id="configStaleBanner" class="config-stale-banner" hidden role="status" aria-live="polite"></div>
     <div id="errorBanner" class="error-banner" hidden></div>
-    <div id="liveChangedBanner" class="error-banner warn-banner" hidden>Live config changed underneath this draft (bridge or agent edit). Review before Apply — Discard reloads live.</div>
+    <div id="liveChangedBanner" class="error-banner warn-banner" hidden>Live config changed underneath this draft (bridge or agent edit). Review before Apply — Discard all changes reloads live.</div>
     <section id="lookGrid" class="look-grid" aria-live="polite"></section>
   </main>
   <div id="toast" class="toast" hidden></div>

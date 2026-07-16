@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: software-tested
-last_verified_commit: 6eb441d
+last_verified_commit: bb26475
 last_verified_date: 2026-07-15
-validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (live-apply + variant switch + preview), Round 2 (param_specs sliders/toggles, slot swatches, JSON demoted to Advanced), Round 3 (rejected-drafts filter, draft delete), QR same-network access, the iOS/iPad touch pass, the editor unset-param-defaults fix, the AWR-193 pad/lab overhaul (accept snapshot, decoupled preview, archive flow, fn fallback, effective bounds, color pickers + regime badges, reconnect, freshness watchdog + live fingerprint + no-cache), the AWR-202 commit read-modify-merge with the gate fix that tracks look CONTENT (`touched`) separately from role-bank PLACEMENT (`moved`) so a params-only edit keeps the look's LIVE bank while an explicit pad move still applies, AWR-240 pad offline v2 stand-down so Test Palette still injects slot_colors, AWR-241 Template Lab beat meter + metronome click (preview exact / live server-synced), AWR-242 Template Lab UX overhaul (search/filter/group draft list, target_role phrase tags, settable timing_mode, detail restructure, health strip + self-test), AWR-243 Template Lab functional fix round (collision banner gate, selected-draft list pin, ownership takeover catch, applied:false hint, live test_palette for lab play, header/phone/preview/health/utility UX), AWR-245 Template Lab Strip|Room preview hookup (pad serves sim view JS + profile read-only; fail-soft; preview-only honesty), AWR-247 Template Lab preview length (default full cue_beats; 2/4 bars / full control), AWR-248 Pad|Lab|Sim cross-nav (plain links to :8767), AWR-250 Lab Room preview re-fetches sim profile on Preview / Room toggle so active_layout changes from Sim show without reload, AWR-254 pad look-editor close dirty check (compares against last Save, not editor-open snapshot), AWR-255 pad+lab banner when live config is newer than the running bridge, and AWR-258 data-integrity (lab registry lock + optimistic concurrency, pad locked_palette save parity, beforeunload + reconnect stash, rotating lab backups); SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
+validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (live-apply + variant switch + preview), Round 2 (param_specs sliders/toggles, slot swatches, JSON demoted to Advanced), Round 3 (rejected-drafts filter, draft delete), QR same-network access, the iOS/iPad touch pass, the editor unset-param-defaults fix, the AWR-193 pad/lab overhaul (accept snapshot, decoupled preview, archive flow, fn fallback, effective bounds, color pickers + regime badges, reconnect, freshness watchdog + live fingerprint + no-cache), the AWR-202 commit read-modify-merge with the gate fix that tracks look CONTENT (`touched`) separately from role-bank PLACEMENT (`moved`) so a params-only edit keeps the look's LIVE bank while an explicit pad move still applies, AWR-240 pad offline v2 stand-down so Test Palette still injects slot_colors, AWR-241 Template Lab beat meter + metronome click (preview exact / live server-synced), AWR-242 Template Lab UX overhaul (search/filter/group draft list, target_role phrase tags, settable timing_mode, detail restructure, health strip + self-test), AWR-243 Template Lab functional fix round (collision banner gate, selected-draft list pin, ownership takeover catch, applied:false hint, live test_palette for lab play, header/phone/preview/health/utility UX), AWR-245 Template Lab Strip|Room preview hookup (pad serves sim view JS + profile read-only; fail-soft; preview-only honesty), AWR-247 Template Lab preview length (default full cue_beats; 2/4 bars / full control), AWR-248 Pad|Lab|Sim cross-nav (plain links to :8767), AWR-250 Lab Room preview re-fetches sim profile on Preview / Room toggle so active_layout changes from Sim show without reload, AWR-254 pad look-editor close dirty check (compares against last Save, not editor-open snapshot), AWR-255 pad+lab banner when live config is newer than the running bridge, AWR-258 data-integrity (lab registry lock + optimistic concurrency, pad locked_palette save parity, beforeunload + reconnect stash, rotating lab backups), and AWR-259 pad integrity tail (same-look stale_look 409, Discard-all copy, persisted last_applied Accept snapshot, EDITOR_FIELDS parity); SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # LED Pad
@@ -239,14 +239,21 @@ The `/lab` page (lab-route only — Pad markup and playwright selectors are unto
   the current editor fields (params, phrase, timing, brief, notes, cue) then flip status. Switching
   drafts keeps unsaved edits in session memory per draft (restored when you click back) and writes
   nothing to `drafts.json`. `/api/lab/update` remains runtime-only.
-- **Data integrity (AWR-258).** Lab registry writes (`/api/lab/save|accept|reject|archive|delete`)
+- **Data integrity (AWR-258 + AWR-259).** Lab registry writes (`/api/lab/save|accept|reject|archive|delete`)
   take the pad service lock so two concurrent saves cannot silently discard each other (adversary
   repro: 60/60 losses → 0/60 under test). Saves that carry an entry `updated` stamp are rejected
   with HTTP 409 `stale_entry` when disk moved on; the Lab UI offers Reload vs Overwrite. Every
   successful drafts write also rotates `.bak-*` snapshots of `drafts.json` and `effects_lab.py`
-  (keep 5). Pad Save sends `locked_palette` with the other editor fields. Closing/reloading a dirty
-  Lab or Pad tab prompts via `beforeunload`; Lab reconnect stashes dirty editor fields before
-  rebuilding the detail pane.
+  (keep 5). Pad Save sends `locked_palette` with the other editor fields (shared `EDITOR_FIELDS`
+  list with the dirty snapshot). Pad look Save also carries per-look `_pad_meta.looks[<name>].updated`;
+  a mismatch returns HTTP 409 `stale_look` and the Pad UI prompts Reload (re-opens the editor fresh)
+  — two-tab same-look lost updates fail safe. Top-bar **Discard all changes** confirms it deletes
+  every unsaved-to-show edit across N dirty looks (whole draft) and reloads live; applied looks stay
+  untouched (editor-drawer discard copy unchanged). Lab Accept persists last-applied params to
+  `config/led_lab/last_applied.json` so a pad restart still Accept-what-you-hear; param-less Accept
+  without a snapshot returns `snapshot_fallback: true` and the Lab UI shows “Accepted saved values —
+  your last live-tuned values weren't available”. Closing/reloading a dirty Lab or Pad tab prompts
+  via `beforeunload`; Lab reconnect stashes dirty editor fields before rebuilding the detail pane.
 - **Health strip (client-only).** Top-bar right cluster with title tooltips:
   - **Server** — green `ok` when last `/api/runtime_status` succeeded &lt;3s ago; red `stale` otherwise.
   - **Lab code** — amber `not loaded yet` before first successful reload/play/preview; green
@@ -539,7 +546,9 @@ runtime/API behavior change):
 - Vendored Archivo variable font at `tools/led_pad_assets/archivo-var.woff2`, served at
   `/static/archivo-var.woff2` (no CDN or runtime network dependency).
 - UI vocabulary: the draft-commit button now reads **Apply** (confirm dialog "Apply draft to live
-  config"); the editor's look-level button stays **Save**, and `#dirtyText` reads "Draft saved" /
+  config"); the top-bar discard control reads **Discard all changes** (confirm states it deletes
+  every unsaved-to-show edit across N dirty looks / the whole draft and reloads live; applied looks
+  untouched). The editor's look-level button stays **Save**, and `#dirtyText` reads "Draft saved" /
   "Unsaved changes". API routes are unchanged (`/api/commit` keeps its name).
 - **Editor close dirty check (AWR-254).** Closing the look editor compares against the last
   successful Save (or the state at open if you never saved). Save then close exits silently; only

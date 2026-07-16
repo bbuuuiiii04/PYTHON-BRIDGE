@@ -3,6 +3,8 @@
   const moveBanks = ["ambient", "groove", "buildup", "pre_drop", "drop", "post_drop", "breakdown", "utility"];
   const bankLabels = {drafts:"Drafts", ambient:"Ambient", groove:"Groove", buildup:"Buildup", pre_drop:"Pre-Drop", drop:"Drop", post_drop:"Post-Drop", breakdown:"Breakdown", utility:"Utility", other:"Other"};
   const bankColors = {drafts:"var(--lab)", ambient:"var(--role-ambient)", groove:"var(--role-groove)", buildup:"var(--role-buildup)", drop:"var(--role-drop)", post_drop:"var(--role-postdrop)", breakdown:"var(--role-breakdown)", utility:"var(--role-utility)", other:"var(--border)"};
+  // AWR-259: single source for dirty-tracked editor fields (save payload must match).
+  const EDITOR_FIELDS = ["look", "params", "cue_beats", "slot_fill", "mono_chance", "locked_palette"];
   const state = {config:null, banks:{}, renders:[], renderMap:new Map(), palettes:[], activeBank:"drafts", editor:null, cleanSnapshot:null, updateTimer:null, lastFocus:null, playingLook:""};
   const $ = (id) => document.getElementById(id);
   const api = window.LedPadApi;
@@ -34,7 +36,11 @@
   function currentSession() { return (((state.config || {}).config || {})._pad_meta || {}).ui || {}; }
   function editorPayload() {
     const e = state.editor;
-    return {look: e.look, params: e.params, cue_beats: e.cue_beats, slot_fill: e.slot_fill, mono_chance: e.mono_chance, locked_palette: e.locked_palette || ""};
+    const out = {};
+    for (const key of EDITOR_FIELDS) {
+      out[key] = key === "locked_palette" ? (e.locked_palette || "") : e[key];
+    }
+    return out;
   }
   function snapshotEditor() { return JSON.stringify(editorPayload()); }
   function setDirty() {
@@ -117,17 +123,34 @@
   }
   async function saveCurrentEditor() {
     const e = state.editor;
-    const res = await api.saveLook({
-      name: e.name,
-      look: e.look,
-      params: e.params,
-      cue_beats: e.cue_beats,
-      slot_fill: e.slot_fill,
-      mono_chance: e.mono_chance,
-      locked_palette: e.locked_palette || "",
-    });
-    if (!res.ok) throw new Error((res.errors || []).join("\n"));
-    state.cleanSnapshot = snapshotEditor();
+    const body = {name: e.name, updated: e.updated || ""};
+    for (const key of EDITOR_FIELDS) {
+      body[key] = key === "locked_palette" ? (e.locked_palette || "") : e[key];
+    }
+    try {
+      const res = await api.saveLook(body);
+      if (!res.ok) throw new Error((res.errors || []).join("\n"));
+      if (res.updated) e.updated = res.updated;
+      state.cleanSnapshot = snapshotEditor();
+      return true;
+    } catch (err) {
+      if (err && err.payload && err.payload.error === "stale_look") {
+        const name = e.name;
+        PadModal.show(
+          "Look changed elsewhere",
+          "Someone else edited this look — reload to get the latest, then re-apply",
+          [
+            {label: "Reload", className: "primary", run: async () => {
+              await refresh();
+              await openEditor(name, false);
+            }},
+            {label: "Cancel", className: "ghost", run: () => {}},
+          ],
+        );
+        return false;
+      }
+      throw err;
+    }
   }
   async function switchEditor(name, play) {
     if (state.editor && state.editor.name !== name && snapshotEditor() !== state.cleanSnapshot) {
@@ -158,7 +181,16 @@
     const look = JSON.parse(JSON.stringify(state.config.config.looks[name] || {}));
     const meta = (((state.config.config._pad_meta || {}).looks || {})[name] || {});
     const engine = state.config.config.color_engine || {};
-    state.editor = {name, look, params: JSON.parse(JSON.stringify(look.params || {})), cue_beats: meta.cue_beats || 16, slot_fill: ((engine.slot_fill_strategy_by_look || {})[name] || "gradient_even"), mono_chance: ((engine.slot_mono_chance_by_look || {})[name] || 0), locked_palette: ((engine.locked_palette_by_look || {})[name] || "")};
+    state.editor = {
+      name,
+      look,
+      params: JSON.parse(JSON.stringify(look.params || {})),
+      cue_beats: meta.cue_beats || 16,
+      slot_fill: ((engine.slot_fill_strategy_by_look || {})[name] || "gradient_even"),
+      mono_chance: ((engine.slot_mono_chance_by_look || {})[name] || 0),
+      locked_palette: ((engine.locked_palette_by_look || {})[name] || ""),
+      updated: meta.updated || "",
+    };
     state.cleanSnapshot = snapshotEditor();
     renderEditor();
     $("editorDrawer").hidden = false;
@@ -313,7 +345,7 @@
   }
   function threeWaySwitch(name, play) {
     modal("Unsaved changes", "Save this look before switching?", [
-      {label:"Save and switch", className:"primary", run:async () => { await saveCurrentEditor(); await refresh(); await openEditor(name, play); }},
+      {label:"Save and switch", className:"primary", run:async () => { if (!(await saveCurrentEditor())) return; await refresh(); await openEditor(name, play); }},
       {label:"Discard and switch", className:"danger-outline", run:async () => { await openEditor(name, play); }},
       {label:"Stay", className:"ghost", run:() => {}},
     ]);
@@ -408,12 +440,21 @@
   $("stopBtn").addEventListener("click", () => api.emergencyStop().then(refresh).catch(showError));
   $("ownershipBtn").addEventListener("click", async () => { try { const rt = await api.runtime(); if ((rt.ownership || {}).state === "pad_owned") await api.release(); else await api.takeover(); await updateRuntime(); } catch (err) { showError(err); } });
   $("qrBtn").addEventListener("click", openAccessModal);
-  $("commitBtn").addEventListener("click", () => confirmModal("Apply draft to live config", `Apply writes the draft to live config - ${($("commitCount").textContent || "0")} looks affected. Bridge restart required to take effect live.${(state.config || {}).live_changed ? "\nLive config changed underneath this draft (bridge or agent edit). Review before Apply — Discard reloads live." : ""}`, "Apply", async () => { const res = await api.commit(); if (!res.ok) throw new Error((res.errors || []).join("\n")); toast(res.restart_note || "Applied - bridge restart required to take effect live."); await refresh(); }));
-  $("discardBtn").addEventListener("click", () => confirmModal("Discard draft", "Discard reloads the live config and deletes your draft changes.", "Discard", async () => { await api.discard(); await refresh(); }));
+  $("commitBtn").addEventListener("click", () => confirmModal("Apply draft to live config", `Apply writes the draft to live config - ${($("commitCount").textContent || "0")} looks affected. Bridge restart required to take effect live.${(state.config || {}).live_changed ? "\nLive config changed underneath this draft (bridge or agent edit). Review before Apply — Discard all changes reloads live." : ""}`, "Apply", async () => { const res = await api.commit(); if (!res.ok) throw new Error((res.errors || []).join("\n")); toast(res.restart_note || "Applied - bridge restart required to take effect live."); await refresh(); }));
+  $("discardBtn").addEventListener("click", () => {
+    const n = ((state.config || {}).dirty || {}).looks || [];
+    const count = Array.isArray(n) ? n.length : 0;
+    confirmModal(
+      "Discard all changes",
+      `This deletes EVERY unsaved-to-show edit across ${count} looks (the whole draft) and reloads the live config. Your applied looks are untouched.`,
+      "Discard all changes",
+      async () => { await api.discard(); await refresh(); },
+    );
+  });
   $("closeEditorBtn").addEventListener("click", () => closeEditor(false));
   $("cancelBtn").addEventListener("click", () => closeEditor(false));
   $("undoBtn").addEventListener("click", () => confirmModal("Undo editor changes", "Undo reverts this editor to the last saved or opened state.", "Undo", () => { const data = JSON.parse(state.cleanSnapshot); state.editor.look = data.look; state.editor.params = data.params; state.editor.cue_beats = data.cue_beats; state.editor.slot_fill = data.slot_fill; state.editor.mono_chance = data.mono_chance; state.editor.locked_palette = data.locked_palette || ""; renderEditor(); liveUpdate(); }));
-  $("saveLookBtn").addEventListener("click", async () => { try { await saveCurrentEditor(); await refresh(); setDirty(); } catch (err) { showError(err); } });
+  $("saveLookBtn").addEventListener("click", async () => { try { if (!(await saveCurrentEditor())) return; await refresh(); setDirty(); } catch (err) { showError(err); } });
   $("editorPlayBtn").addEventListener("click", () => playEditor(false));
   $("editorStopBtn").addEventListener("click", () => api.stop().then(refresh).catch(showError));
   $("rendererSelect").addEventListener("change", ev => { const render = state.renderMap.get(ev.target.value); const allowed = new Set((render.controls || []).map(c => c.key)); state.editor.look.scene_ref = ev.target.value; state.editor.params = Object.fromEntries(Object.entries(state.editor.params).filter(([k]) => allowed.has(k))); renderEditor(); liveUpdate(); });
