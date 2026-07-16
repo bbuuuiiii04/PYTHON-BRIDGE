@@ -219,13 +219,13 @@ class PatchDTests(unittest.TestCase):
             "config/led_look_director.json": {
                 "rt_drop_chase_freestyle_nebula": ("drop_chase_freestyle_nebula", "engine", {}, "drop", "drop"),
                 "rt_drop_center_burst": ("rt_drop_center_burst", "engine", {}, "drop", "drop"),
-                "rt_drop_strobe_blue": ("drop_strobe_colorway", "baked", {"color_a": [0, 0, 255], "hz": 6.0, "duty": 0.3}, "drop", "drop"),
-                "rt_drop_strobe_cyan": ("drop_strobe_colorway", "baked", {"color_a": [0, 255, 255], "hz": 6.0, "duty": 0.3}, "drop", "drop"),
-                "rt_drop_strobe_green": ("drop_strobe_colorway", "baked", {"color_a": [0, 255, 0], "hz": 6.0, "duty": 0.3}, "drop", "drop"),
-                "rt_drop_strobe_red": ("drop_strobe_colorway", "baked", {"color_a": [255, 0, 0], "hz": 6.0, "duty": 0.3}, "drop", "drop"),
-                "rt_drop_strobe_red_white": ("drop_strobe_colorway", "baked", {"color_a": [255, 0, 0], "color_b": [255, 255, 255], "hz": 5.5, "duty": 0.25}, "drop", "drop"),
-                "rt_drop_strobe_blue_cyan": ("drop_strobe_colorway", "baked", {"color_a": [0, 0, 255], "color_b": [0, 135, 255], "hz": 5.0, "duty": 0.25}, "drop", "drop"),
-                "rt_drop_strobe_cyan_white": ("drop_strobe_colorway", "baked", {"color_a": [0, 255, 255], "color_b": [100, 105, 255], "hz": 5.0, "duty": 0.25}, "drop", "drop"),
+                "rt_drop_strobe_blue": ("drop_strobe_colorway", "baked", {"color_a": [0, 0, 255], "hz": 6.0, "duty": 0.3}, None, "drop"),
+                "rt_drop_strobe_cyan": ("drop_strobe_colorway", "baked", {"color_a": [0, 255, 255], "hz": 6.0, "duty": 0.3}, None, "drop"),
+                "rt_drop_strobe_green": ("drop_strobe_colorway", "baked", {"color_a": [0, 255, 0], "hz": 6.0, "duty": 0.3}, None, "drop"),
+                "rt_drop_strobe_red": ("drop_strobe_colorway", "baked", {"color_a": [255, 0, 0], "hz": 6.0, "duty": 0.3}, None, "drop"),
+                "rt_drop_strobe_red_white": ("drop_strobe_colorway", "baked", {"color_a": [255, 0, 0], "color_b": [255, 255, 255], "hz": 5.5, "duty": 0.25}, None, "drop"),
+                "rt_drop_strobe_blue_cyan": ("drop_strobe_colorway", "baked", {"color_a": [0, 0, 255], "color_b": [0, 135, 255], "hz": 5.0, "duty": 0.25}, None, "drop"),
+                "rt_drop_strobe_cyan_white": ("drop_strobe_colorway", "baked", {"color_a": [0, 255, 255], "color_b": [100, 105, 255], "hz": 5.0, "duty": 0.25}, None, "drop"),
                 # Approved rainbow pull: the look def stands, the bank row is gone.
                 "rt_rainbow_drop": ("rainbow_ordered", "baked", {"width": 6, "cycle_beats": 1, "travel_per_beat": 30}, None, "drop"),
                 # AWR-188 Part G palette-comet banking (drop + post_drop).
