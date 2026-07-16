@@ -134,7 +134,7 @@ CONTROL_META: dict[str, dict[str, Any]] = {
     "sparkle_life_s": _meta("Sparkle Life (s)", "number", min=0.1, max=2, step=0.05, help="How many real seconds each ember lives.", default=0.8),
     # AWR-161 additions (defaults hand-extracted from govee_frame_renderer.py's
     # `_rainbow_ordered` / `_drop_firework_explosion` params.get fallbacks).
-    "cycle_beats": _meta("Rainbow Cycle Beats", "number", min=1, max=64, step=0.5, help="How many beats the rainbow hue cycle takes.", default=8.0),
+    "cycle_beats": _meta("Color cycle (beats)", "number", min=1, max=64, step=0.5, help="How many beats one full color cycle takes.", default=8.0),
     "rainbow_span": _meta("Rainbow Span", "number", min=0.1, max=2, step=0.05, help="How much of the spectrum spans the strip.", default=1.0),
     "travel_per_beat": _meta("Travel Per Beat", "number", min=2, max=120, step=1, help="Beat-locked head advance (auto = legacy loop pace).", advanced=True, default=None),
     "surge_beats": _meta("Surge Beats", "number", min=0.1, max=8, step=0.1, help="How many beats the explosion surge lasts.", default=0.5),
@@ -437,26 +437,95 @@ def dropped_params_on_switch(from_ref: str, to_ref: str, params: dict[str, Any])
     return dropped
 
 
-def effective_lab_specs(param_specs: dict[str, Any]) -> tuple[dict[str, dict[str, Any]], list[str]]:
-    """Single-source lab slider bounds: CONTROL_META wins for shared keys.
+# AWR-263: lab enum params that used to ship as cryptic 0..N sliders.
+# effective_lab_specs upgrades matching keys to select controls with word labels.
+LAB_SELECT_OPTIONS: dict[str, dict[str, Any]] = {
+    "zone": {
+        "label": "Zone",
+        "options": [
+            {"value": 0, "label": "GLA"},
+            {"value": 1, "label": "DEEP"},
+            {"value": 2, "label": "TWI"},
+            {"value": 3, "label": "ION"},
+            {"value": 4, "label": "VOLT"},
+            {"value": 5, "label": "EMBER"},
+            {"value": 6, "label": "NEU"},
+        ],
+    },
+    "texture": {
+        "label": "Texture",
+        "options": [
+            {"value": 0, "label": "Sparkle"},
+            {"value": 1, "label": "Blocks"},
+            {"value": 2, "label": "Wash"},
+        ],
+    },
+    "color_mode": {
+        "label": "Color Mode",
+        "options": [
+            {"value": 0, "label": "Both heads → slot 1"},
+            {"value": 1, "label": "Blend slots by position"},
+            {"value": 2, "label": "Head1 → slot 1, Head2 → slot 3"},
+            {"value": 3, "label": "Core → slot 1, Edge → slot 3"},
+        ],
+    },
+}
 
-    For every key in ``param_specs`` that also exists in CONTROL_META, the
-    returned spec carries CONTROL_META's min/max/step/label (kind stays from
-    the spec). Keys whose stored bounds differ from CONTROL_META's are
-    reported in the conflicts list (surfaced, not silently absorbed). Lab-only
-    keys pass through unchanged. Pure function; input is not mutated.
+
+# Correct param_specs for the lab firework explosion (fn drop_firework_explosion_2).
+# Dropped dead knobs: color_b_* (unused), sparkles_per_beat (unused). Lives in
+# code so a local drafts.json can be repaired without guessing.
+FIREWORK_EXPLOSION_LAB_SPECS: dict[str, dict[str, Any]] = {
+    "surge_beats": {"kind": "slider", "label": "Surge dark→bright (beats)", "min": 0.1, "max": 4.0, "step": 0.05},
+    "bg_level": {"kind": "slider", "label": "Background brightness", "min": 0.2, "max": 1.0, "step": 0.05},
+    "bg_hold": {"kind": "slider", "label": "Background hold level (post-surge)", "min": 0.0, "max": 1.0, "step": 0.05},
+    "color_a_r": {"kind": "slider", "label": "Background R", "min": 0.0, "max": 255.0, "step": 5.0},
+    "color_a_g": {"kind": "slider", "label": "Background G", "min": 0.0, "max": 255.0, "step": 5.0},
+    "color_a_b": {"kind": "slider", "label": "Background B", "min": 0.0, "max": 255.0, "step": 5.0},
+    "spark_a_r": {"kind": "slider", "label": "Spark A R", "min": 0.0, "max": 255.0, "step": 5.0},
+    "spark_a_g": {"kind": "slider", "label": "Spark A G", "min": 0.0, "max": 255.0, "step": 5.0},
+    "spark_a_b": {"kind": "slider", "label": "Spark A B", "min": 0.0, "max": 255.0, "step": 5.0},
+    "spark_b_r": {"kind": "slider", "label": "Spark B R", "min": 0.0, "max": 255.0, "step": 5.0},
+    "spark_b_g": {"kind": "slider", "label": "Spark B G", "min": 0.0, "max": 255.0, "step": 5.0},
+    "spark_b_b": {"kind": "slider", "label": "Spark B B", "min": 0.0, "max": 255.0, "step": 5.0},
+    "sparkle_density": {"kind": "slider", "label": "Sparkle density", "min": 0.0, "max": 0.8, "step": 0.05},
+    "sparkle_size": {"kind": "slider", "label": "Sparkle size (px)", "min": 0.5, "max": 3.0, "step": 0.25},
+    "sparkle_life_s": {"kind": "slider", "label": "Sparkle life (seconds)", "min": 0.1, "max": 2.0, "step": 0.05},
+}
+
+
+def effective_lab_specs(param_specs: dict[str, Any]) -> tuple[dict[str, dict[str, Any]], list[str]]:
+    """Single-source lab slider bounds: CONTROL_META wins min/max/step for shared keys.
+
+    Draft labels are preserved (AWR-263: CONTROL_META's old "Rainbow Cycle Beats"
+    was stomping non-rainbow draft labels). Missing labels fall back to
+    CONTROL_META. Known enum keys (zone/texture/color_mode) upgrade to select
+    controls with word labels. Pure function; input is not mutated.
     """
     effective: dict[str, dict[str, Any]] = {}
     conflicts: list[str] = []
     for raw_key, raw_spec in (param_specs or {}).items():
         key = str(raw_key)
         spec = dict(raw_spec) if isinstance(raw_spec, dict) else {}
+        draft_label = str(spec.get("label") or "").strip()
+        catalog = LAB_SELECT_OPTIONS.get(key)
+        if catalog is not None:
+            effective[key] = {
+                "kind": "select",
+                "label": draft_label or str(catalog["label"]),
+                "options": [dict(opt) for opt in catalog["options"]],
+            }
+            continue
         meta = CONTROL_META.get(key)
-        if meta is not None:
+        if meta is not None and str(spec.get("kind", "slider")) == "slider":
             if any(spec.get(field) != meta.get(field) for field in ("min", "max", "step")):
                 conflicts.append(key)
-            for field in ("min", "max", "step", "label"):
+            for field in ("min", "max", "step"):
                 spec[field] = meta.get(field)
+            if not draft_label:
+                spec["label"] = meta.get("label")
+            else:
+                spec["label"] = draft_label
         effective[key] = spec
     return effective, conflicts
 

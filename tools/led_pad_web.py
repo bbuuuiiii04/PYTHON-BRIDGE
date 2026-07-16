@@ -26,11 +26,29 @@ from urllib.parse import urlparse
 from ..govee_frame_renderer import REALTIME_EFFECT_NAMES, REALTIME_EFFECT_PARAM_KEYS, SLOT_EFFECTS
 from ..led_color_engine import LedColorEngine
 from ..led_config import LEDConfigResult, _resolve_path, load_led_look_director_config_from_dict
-from ..led_pad_controls import controls_for, effective_lab_specs, render_catalog
+from ..led_pad_controls import (
+    FIREWORK_EXPLOSION_LAB_SPECS,
+    controls_for,
+    effective_lab_specs,
+    render_catalog,
+)
 from ..runtime_status import COMMANDS_PATH, STATUS_PATH
 from .led_pad_lab import LabRegistry, LabRenderer, StaleLabEntry, load_lab_effects, render_preview_frames
 from .led_pad_playback import PadPlayback, stable_seed
 from .pad_access import _is_loopback_host, access_payload
+
+
+def _lab_firework_specs_dead(specs: Any, fn: str) -> bool:
+    """True when a firework draft still exposes unused color_b / sparkles_per_beat knobs."""
+    if fn not in ("drop_firework_explosion", "drop_firework_explosion_2"):
+        return False
+    if not isinstance(specs, dict):
+        return True
+    if "sparkles_per_beat" in specs:
+        return True
+    if "color_b_r" in specs and "spark_a_r" not in specs:
+        return True
+    return False
 
 
 class StaleLook(ValueError):
@@ -972,9 +990,18 @@ class LedPadService:
 
     def lab_list(self) -> dict[str, Any]:
         entries = self._lab.list()
+        loaded = load_lab_effects(self._lab.module_path)
+        effect_keys = set(loaded["effects"]) if loaded.get("ok") else set()
         for entry in entries:
-            # Decoration only (never persisted): CONTROL_META wins shared keys.
-            specs, conflicts = effective_lab_specs(entry.get("param_specs") or {})
+            name = str(entry.get("name") or "")
+            fn = str(entry.get("fn") or name)
+            entry["previewable"] = name in effect_keys or fn in effect_keys
+            # Decoration only (never persisted): CONTROL_META wins shared bounds;
+            # firework dead-knob drafts get the live spark_a/spark_b family.
+            raw_specs = entry.get("param_specs") or {}
+            if _lab_firework_specs_dead(raw_specs, fn):
+                raw_specs = FIREWORK_EXPLOSION_LAB_SPECS
+            specs, conflicts = effective_lab_specs(raw_specs)
             entry["effective_param_specs"] = specs
             entry["spec_conflicts"] = conflicts
         return {"ok": True, "entries": entries, "module_path": str(self._lab.module_path)}

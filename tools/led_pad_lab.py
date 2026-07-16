@@ -35,6 +35,7 @@ class StaleLabEntry(ValueError):
         self.code = "stale_entry"
 
 _IDENT_RE = re.compile(r"^[a-z0-9_]+$")
+_SLUG_RE = re.compile(r"[^a-z0-9]+")
 _KINDS = {"slot", "frame"}
 _STATUSES = {"iterating", "accepted", "rejected", "promoted"}
 _TIMING_MODES = {"beat", "time", "mixed", "static", "unknown"}
@@ -43,6 +44,28 @@ _TARGET_ROLES = {"", "ambient", "groove", "buildup", "pre_drop", "drop", "post_d
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="microseconds")
+
+
+def slugify_lab_name(display: str, existing: set[str] | None = None) -> str:
+    """Turn any display name into a unique [a-z0-9_]+ draft id.
+
+    ``"My Drop Cue"`` → ``my_drop_cue``; collisions append ``_2``, ``_3``, …
+    Empty / non-slugable input becomes ``untitled``. Also skips production
+    renderer names so Create never lands on a collision brick.
+    """
+    raw = _SLUG_RE.sub("_", str(display or "").strip().lower()).strip("_")
+    base = raw if raw and _IDENT_RE.fullmatch(raw) else "untitled"
+    taken = set(existing or ())
+    candidate = base
+    n = 2
+    while (
+        candidate in taken
+        or candidate in REALTIME_EFFECT_NAMES
+        or f"lab_{candidate}" in REALTIME_EFFECT_NAMES
+    ):
+        candidate = f"{base}_{n}"
+        n += 1
+    return candidate
 
 
 def _write_json_atomic(path: Path, data: dict[str, Any]) -> None:
@@ -187,8 +210,8 @@ class LabRegistry:
             if not str(key) or not isinstance(spec, dict):
                 raise ValueError(f"param_specs[{key!r}] must be a dict")
             kind = str(spec.get("kind", "slider"))
-            if kind not in ("slider", "toggle"):
-                raise ValueError(f"param_specs[{key!r}].kind must be slider or toggle")
+            if kind not in ("slider", "toggle", "select"):
+                raise ValueError(f"param_specs[{key!r}].kind must be slider, toggle, or select")
             clean: dict[str, Any] = {"kind": kind, "label": str(spec.get("label", key))}
             if kind == "slider":
                 if "min" not in spec or "max" not in spec:
@@ -197,6 +220,30 @@ class LabRegistry:
                 if not (hi > lo) or step <= 0:
                     raise ValueError(f"param_specs[{key!r}] needs max > min and step > 0")
                 clean.update({"min": lo, "max": hi, "step": step})
+            elif kind == "select":
+                options = spec.get("options")
+                if not isinstance(options, list) or len(options) < 2:
+                    raise ValueError(f"param_specs[{key!r}] select needs ≥2 options")
+                clean_opts: list[dict[str, Any]] = []
+                seen: set[str] = set()
+                for opt in options:
+                    if not isinstance(opt, dict) or "value" not in opt:
+                        raise ValueError(f"param_specs[{key!r}] options need value+label")
+                    val = opt["value"]
+                    if isinstance(val, bool) or val is None:
+                        raise ValueError(f"param_specs[{key!r}] option value must be str/number")
+                    if isinstance(val, (int, float)):
+                        # Persist ints as ints when whole; else float.
+                        if isinstance(val, float) and val.is_integer():
+                            val = int(val)
+                    else:
+                        val = str(val)
+                    token = repr(val)
+                    if token in seen:
+                        raise ValueError(f"param_specs[{key!r}] duplicate option value")
+                    seen.add(token)
+                    clean_opts.append({"value": val, "label": str(opt.get("label", val))})
+                clean["options"] = clean_opts
             out[str(key)] = clean
         return out
 

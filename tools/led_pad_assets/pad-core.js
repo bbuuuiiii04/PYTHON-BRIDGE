@@ -99,30 +99,68 @@
     // pad-ui.js/lab.js), which cancels without invoking onConfirm.
     function prompt(title, message, options, onConfirm) {
       const opts = options || {};
+      fields(title, message, [
+        {name: "value", label: opts.label || "", type: "text", value: opts.value ?? ""},
+      ], opts, (values) => onConfirm(values.value));
+    }
+
+    // Multi-field form (AWR-263 New-draft dialog). fieldSpecs:
+    // [{name, label, type:'text'|'select'|'checkbox', options?, value?, help?}]
+    // onConfirm receives {name: value, ...}.
+    function fields(title, message, fieldSpecs, options, onConfirm) {
+      const opts = options || {};
+      const specs = Array.isArray(fieldSpecs) ? fieldSpecs : [];
       const dom = ensureDom();
       state.lastFocus = document.activeElement;
       dom.title.textContent = title;
       dom.text.textContent = message || "";
       dom.form.hidden = false;
-      dom.form.innerHTML = `<label>${esc(opts.label || "")}<input id="modalPromptInput" type="text" value="${esc(opts.value ?? "")}"></label>`;
+      dom.form.innerHTML = specs.map((f, i) => {
+        const id = `modalField_${i}`;
+        const label = esc(f.label || f.name || "");
+        const help = f.help ? `<div class="dim" style="font-size:11px;margin-top:4px">${esc(f.help)}</div>` : "";
+        if (f.type === "select") {
+          const optionsHtml = (f.options || []).map(o => {
+            const selected = String(o.value) === String(f.value ?? "") ? " selected" : "";
+            return `<option value="${esc(o.value)}"${selected}>${esc(o.label)}</option>`;
+          }).join("");
+          return `<label>${label}<select id="${id}" name="${esc(f.name)}" data-field-type="select">${optionsHtml}</select>${help}</label>`;
+        }
+        if (f.type === "checkbox") {
+          return `<label class="modal-check"><span>${label}</span><input id="${id}" name="${esc(f.name)}" type="checkbox" data-field-type="checkbox" ${f.value ? "checked" : ""}>${help}</label>`;
+        }
+        return `<label>${label}<input id="${id}" name="${esc(f.name)}" type="text" data-field-type="text" value="${esc(f.value ?? "")}">${help}</label>`;
+      }).join("");
       dom.actions.innerHTML = `
         <button type="button" class="ghost" data-modal-cancel>${esc(opts.cancelText || "Cancel")}</button>
         <button type="submit" form="modalForm" class="primary" data-modal-confirm>${esc(opts.confirmText || "Save")}</button>`;
       dom.backdrop.hidden = false;
       state.open = true;
-      const input = dom.form.querySelector("#modalPromptInput");
+      const readValues = () => {
+        const out = {};
+        specs.forEach((f, i) => {
+          const el = dom.form.querySelector(`#modalField_${i}`);
+          if (!el) return;
+          if (f.type === "checkbox") out[f.name] = el.checked;
+          else out[f.name] = el.value;
+        });
+        return out;
+      };
       const submit = async () => {
-        const value = input.value;
+        const values = readValues();
         close();
-        try { await onConfirm(value); } catch (err) { reportError(err); }
+        try { await onConfirm(values); } catch (err) { reportError(err); }
       };
       dom.form.onsubmit = (ev) => { ev.preventDefault(); submit(); };
       dom.actions.querySelector("[data-modal-cancel]").onclick = () => close();
-      input.focus();
-      input.select();
+      const first = dom.form.querySelector("input, select");
+      if (first) {
+        first.focus();
+        if (first.select) first.select();
+      }
     }
 
-    return {show, confirm, prompt, close, isOpen, setErrorHandler};
+    return {show, confirm, prompt, fields, close, isOpen, setErrorHandler};
   }());
 
   // Shared reconnect helper for both pages' runtime polls: after >=2

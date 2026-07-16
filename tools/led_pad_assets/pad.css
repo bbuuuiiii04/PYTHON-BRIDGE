@@ -209,7 +209,11 @@ main { padding: var(--pad); }
 .lab-route .lab-list-sticky #draftSearch { width: 100%; min-height: 36px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0 10px; }
 .lab-route .lab-filter-row { display: flex; gap: var(--sp-1); flex-wrap: wrap; }
 .lab-route .lab-filter-chip { font-size: 12px; min-height: 32px; padding: 0 10px; border-radius: 999px; color: var(--text-dim); }
-.lab-route .lab-filter-chip.on { border-color: var(--lab); color: var(--text); background: var(--surface-3); }
+.lab-route .lab-search-relax { font-size: 11px; padding: 4px 4px 0; }
+.lab-route .lab-search-relax[hidden] { display: none; }
+.lab-route .lab-row.status-relaxed { opacity: 0.72; }
+.lab-route .param-row.param-select { grid-template-columns: minmax(96px, 1fr) 2fr; }
+.lab-route .param-row.param-select select { min-height: 36px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); width: 100%; }
 .lab-route .lab-phrase-filter { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .08em; font-weight: 600; }
 .lab-route .lab-phrase-filter select { text-transform: none; letter-spacing: normal; font-weight: 400; min-height: 36px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .lab-route .lab-list { display: flex; flex-direction: column; gap: 2px; margin-top: var(--sp-2); overflow-y: auto; flex: 1; min-height: 0; }
