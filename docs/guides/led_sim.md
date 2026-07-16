@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: software-tested
-last_verified_commit: 7c1e67e
+last_verified_commit: f2e66dcd
 last_verified_date: 2026-07-16
 validation_scope: >
   H612D LED Studio (AWR-196 + AWR-244 room-view + AWR-246 layout library):
@@ -14,9 +14,12 @@ validation_scope: >
   Use persists active_layout immediately without leaking unsaved knobs
   (AWR-250), perimeter/snake/custom presets, layout and
   calibration lockers, shared lab-preview playback clock (AWR-266), calibration sequence v2,
-  profile evidence guards, the local web service, and AWR-258 data-integrity
+  profile evidence guards, the local web service, AWR-258 data-integrity
   (stale-write 409 via base_mtime, rotating .bak-* keep-5, refuse save while
-  profile_error, beforeunload when dirty) are software-tested.
+  profile_error, beforeunload when dirty), and AWR-267 R6 Layout corner tools
+  (Add/Remove corner buttons alongside dblclick/long-press, header unsaved
+  warning, Reset confirm, label crowding offsets, ? help what-is sentence)
+  are software-tested.
   Optics (glow/bleed/gamma) remain uncalibrated assumptions. Generated timing
   uses an ideal grid. Device color, PWM, latency, physical response, packet
   delivery, and hardware cadence remain unmeasured; SOFTWARE-VALIDATED ONLY /
@@ -171,9 +174,17 @@ non-active slot, then Delete. Confirm uses the same in-page dialog pattern as
 Save as (not `window.confirm`, which automation silently dismisses). On confirm,
 the slot leaves the picker and is removed from disk immediately. Room W/H,
 presets, and the editor operate on the active layout only. The dimension bar is
-unchanged. Preset cards, drag handles (≥32 px), double-click / long-press vertex
-edit, flip chain, reset, bounded undo (up to 20, Cmd/Ctrl-Z on the Layout tab),
-and the per-layout locker still apply.
+unchanged. Preset cards, drag handles (≥32 px), double-click / long-press corner
+edit (kept; human check of dblclick still pending), **Add corner / Remove corner**
+buttons (AWR-267 R6 — touch-friendly; Add uses the selected edge or the longest
+edge; Remove needs a selected corner and keeps ≥2 corners), Reverse direction,
+Reset with an honest confirm (“puts the corners back… unsaved changes go away”),
+bounded undo (up to 20, Cmd/Ctrl-Z on the Layout tab), and the per-layout locker
+still apply. The **Unsaved layout changes** chip sits in the sim header so it is
+visible without scrolling the Layout panel. Stage labels drop or offset when they
+crowd at the current zoom (center / start / end keep priority over ticks and
+room-size). The **?** help opens with one plain sentence on what the page is
+before listing shortcuts.
 **Save changes** (formerly “Save layout”) persists geometry/calibration via the
 existing validated profile POST. Unsaved badges are scoped: layout edits do not
 light the calibration badge, and vice versa. After Use, Lab’s Room preview picks

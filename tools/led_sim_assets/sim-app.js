@@ -2,12 +2,15 @@
 
 import {
   applyLayoutDelete,
+  canRemoveCorner,
   createLedSimView,
   feetToMm,
   formatLengthMm,
+  longestEdgeIndex,
   mmToFeet,
   perimeterPresetPoints,
   planLayoutDelete,
+  removeCornerAt,
   snakePresetPoints,
 } from "./ledsim-view.js";
 import {createFramePlayer} from "./ledsim-player.js";
@@ -50,13 +53,15 @@ const state = {
   frameRequestToken: 0,
   layoutUndoStack: [],
   lastChosenPreset: "perimeter",
-    dragVertex: -1,
+  dragVertex: -1,
   selectedVertex: -1,
+  selectedEdge: -1,
   dragUndoPushed: false,
   dragStartPoint: null,
   longPressTimer: null,
   longPressPoint: null,
   longPressStart: null,
+  longPressFired: false,
   activeTab: "play",
   _labelsUserSet: false,
   /** Picker selection for Use/Rename/Delete; may differ from active_layout. */
@@ -345,7 +350,10 @@ function syncLockUi() {
 
   // Geometry editors bind only to the ACTIVE layout — disabled while previewing.
   const geometryBlocked = layoutLock || previewing;
-  for (const id of ["room-width-ft", "room-height-ft", "layout-flip", "layout-reset"]) {
+  for (const id of [
+    "room-width-ft", "room-height-ft", "layout-flip", "layout-reset",
+    "layout-add-corner",
+  ]) {
     const el = $(id);
     if (el) el.disabled = geometryBlocked;
   }
@@ -354,6 +362,7 @@ function syncLockUi() {
   }
   const undoBtn = $("layout-undo");
   if (undoBtn) undoBtn.disabled = geometryBlocked || state.layoutUndoStack.length === 0;
+  syncCornerButtons(geometryBlocked);
 
   const calibRoot = $("calibration-controls");
   if (calibRoot) {
@@ -373,7 +382,57 @@ function syncLockUi() {
   // AWR-266: Play/Calibrate stages match Lab Room presentation; Layout tab restores editor chrome.
   view?.setPresentation(state.activeTab !== "layout");
   syncEditGestureClass();
+  syncSelectionToView();
   updateResetLabel();
+}
+
+function syncSelectionToView() {
+  view?.setSelection?.({
+    vertex: state.selectedVertex,
+    edge: state.selectedEdge,
+  });
+}
+
+function syncCornerButtons(geometryBlocked = null) {
+  const blocked = geometryBlocked === null
+    ? (layoutLocked() || isPreviewingLayout())
+    : geometryBlocked;
+  const addBtn = $("layout-add-corner");
+  const removeBtn = $("layout-remove-corner");
+  const hint = $("layout-corner-hint");
+  if (addBtn) {
+    addBtn.disabled = blocked;
+    addBtn.title = blocked
+      ? "Unlock the layout (and Use this layout if you are only previewing) to add a corner"
+      : "Add a corner in the middle of the selected edge, or the longest edge";
+  }
+  const points = activeEntry()?.points_mm;
+  const canRemove = !blocked
+    && state.selectedVertex >= 0
+    && canRemoveCorner(points);
+  if (removeBtn) {
+    removeBtn.disabled = !canRemove;
+    if (blocked) {
+      removeBtn.title = "Unlock the layout to remove a corner";
+    } else if (state.selectedVertex < 0) {
+      removeBtn.title = "Select a corner on the room first";
+    } else if (!canRemoveCorner(points)) {
+      removeBtn.title = "The path needs at least two corners";
+    } else {
+      removeBtn.title = "Remove the selected corner";
+    }
+  }
+  if (hint) {
+    if (blocked) {
+      hint.textContent = "Corner tools are off while the layout is locked or you are only previewing another layout.";
+    } else if (state.selectedVertex < 0) {
+      hint.textContent = "Add corner places a new bend in the middle of the selected edge (or the longest edge if none is selected). Tap a corner to enable Remove corner.";
+    } else if (!canRemoveCorner(points)) {
+      hint.textContent = "Remove corner stays off — the path needs at least two corners.";
+    } else {
+      hint.textContent = "Remove corner deletes the selected bend. Add corner still uses the selected edge, or the longest edge if none is selected.";
+    }
+  }
 }
 
 function toggleLayoutLock() {
@@ -1149,10 +1208,18 @@ function wireLayoutEditor() {
     activeEntry().flip_chain = !activeEntry().flip_chain;
     pushProfileToView();
   });
-  $("layout-reset").addEventListener("click", () => {
+  $("layout-reset").addEventListener("click", async () => {
     if (isPreviewingLayout()) return;
     if (layoutLocked()) return;
-    applyPreset(state.lastChosenPreset === "snake" ? "snake" : "perimeter");
+    const preset = state.lastChosenPreset === "snake" ? "snake" : "perimeter";
+    const shapeName = preset === "snake" ? "Snake" : "Perimeter";
+    const ok = await confirmDialog({
+      title: "Reset corners?",
+      message: `Puts the corners back to the saved ${shapeName} shape for this room size. Your unsaved layout changes go away.`,
+      okLabel: "Reset",
+    });
+    if (!ok) return;
+    applyPreset(preset);
   });
   $("layout-undo").addEventListener("click", undoLayout);
   $("layout-save").addEventListener("click", async () => {
@@ -1185,33 +1252,6 @@ function wireLayoutEditor() {
       && !layoutLocked() && !isPreviewingLayout();
   }
 
-  function pointerDown(event) {
-    const point = canvasEventPoint(event);
-    if (view?.getViewMode?.() === "room" && view.hitTestRoomSizeLabel?.(point.x, point.y)) {
-      event.preventDefault();
-      openRoomSizeEditor();
-      return;
-    }
-    if (!editsAllowed()) return;
-    const vertex = view.hitTestVertex(point.x, point.y, HIT);
-    if (vertex >= 0) {
-      event.preventDefault();
-      // F-2: defer undo snapshot until actual drag movement (>6px).
-      state.dragVertex = vertex;
-      state.selectedVertex = vertex;
-      state.dragUndoPushed = false;
-      state.dragStartPoint = point;
-      canvas.setPointerCapture?.(event.pointerId);
-      return;
-    }
-    state.longPressPoint = point;
-    state.longPressStart = point;
-    state.longPressTimer = setTimeout(() => {
-      if (state.longPressPoint) mutateAtCanvasPoint(state.longPressPoint);
-      clearLongPress();
-    }, 550);
-  }
-
   function storedIndex(displayIndex) {
     const count = ensureProfileLayout().points_mm.length;
     return activeEntry().flip_chain ? count - 1 - displayIndex : displayIndex;
@@ -1223,25 +1263,111 @@ function wireLayoutEditor() {
     return count - 1 - displayEdgeIndex;
   }
 
+  function addCornerFromButton() {
+    if (!editsAllowed()) return;
+    ensureProfileLayout();
+    const displayPoints = view.getLayout().points_mm;
+    let edgeIndex = state.selectedEdge;
+    if (edgeIndex < 0 || edgeIndex >= displayPoints.length - 1) {
+      edgeIndex = longestEdgeIndex(displayPoints);
+    }
+    if (edgeIndex < 0 || edgeIndex >= displayPoints.length - 1) return;
+    const mid = [
+      (Number(displayPoints[edgeIndex][0]) + Number(displayPoints[edgeIndex + 1][0])) / 2,
+      (Number(displayPoints[edgeIndex][1]) + Number(displayPoints[edgeIndex + 1][1])) / 2,
+    ];
+    pushUndo();
+    activeEntry().points_mm.splice(insertIndexForEdge(edgeIndex), 0, mid);
+    state.selectedEdge = -1;
+    state.selectedVertex = edgeIndex + 1;
+    markLayoutCustom();
+    pushProfileToView();
+    syncCornerButtons();
+    syncSelectionToView();
+  }
+
+  function removeCornerFromButton() {
+    if (!editsAllowed()) return;
+    ensureProfileLayout();
+    if (state.selectedVertex < 0) return;
+    const next = removeCornerAt(
+      activeEntry().points_mm,
+      storedIndex(state.selectedVertex),
+    );
+    if (!next) return;
+    pushUndo();
+    activeEntry().points_mm = next;
+    state.selectedVertex = -1;
+    state.selectedEdge = -1;
+    markLayoutCustom();
+    pushProfileToView();
+    syncCornerButtons();
+    syncSelectionToView();
+  }
+
+  $("layout-add-corner")?.addEventListener("click", addCornerFromButton);
+  $("layout-remove-corner")?.addEventListener("click", removeCornerFromButton);
+
+  function pointerDown(event) {
+    const point = canvasEventPoint(event);
+    if (view?.getViewMode?.() === "room" && view.hitTestRoomSizeLabel?.(point.x, point.y)) {
+      event.preventDefault();
+      openRoomSizeEditor();
+      return;
+    }
+    if (!editsAllowed()) return;
+    state.longPressFired = false;
+    const vertex = view.hitTestVertex(point.x, point.y, HIT);
+    if (vertex >= 0) {
+      event.preventDefault();
+      // F-2: defer undo snapshot until actual drag movement (>6px).
+      state.dragVertex = vertex;
+      state.selectedVertex = vertex;
+      state.selectedEdge = -1;
+      state.dragUndoPushed = false;
+      state.dragStartPoint = point;
+      syncCornerButtons();
+      syncSelectionToView();
+      canvas.setPointerCapture?.(event.pointerId);
+      return;
+    }
+    state.longPressPoint = point;
+    state.longPressStart = point;
+    state.longPressTimer = setTimeout(() => {
+      if (state.longPressPoint) {
+        state.longPressFired = true;
+        mutateAtCanvasPoint(state.longPressPoint);
+      }
+      clearLongPress();
+    }, 550);
+  }
+
   function mutateAtCanvasPoint(point) {
     if (!editsAllowed()) return;
     const vertexHit = view.hitTestVertex(point.x, point.y, HIT);
     ensureProfileLayout();
     if (vertexHit >= 0) {
-      if (activeEntry().points_mm.length <= 2) return;
+      if (!canRemoveCorner(activeEntry().points_mm)) return;
       pushUndo();
       activeEntry().points_mm.splice(storedIndex(vertexHit), 1);
       state.selectedVertex = -1;
+      state.selectedEdge = -1;
       markLayoutCustom();
       pushProfileToView();
+      syncCornerButtons();
+      syncSelectionToView();
       return;
     }
     const edge = view.hitTestEdge(point.x, point.y, HIT);
     if (!edge) return;
     pushUndo();
     activeEntry().points_mm.splice(insertIndexForEdge(edge.edgeIndex), 0, [edge.mm.x, edge.mm.y]);
+    state.selectedVertex = edge.edgeIndex + 1;
+    state.selectedEdge = -1;
     markLayoutCustom();
     pushProfileToView();
+    syncCornerButtons();
+    syncSelectionToView();
   }
 
   function pointerMove(event) {
@@ -1266,11 +1392,16 @@ function wireLayoutEditor() {
     points[storedIndex(state.dragVertex)] = [mm.x, mm.y];
     activeEntry().points_mm = points;
     state.selectedVertex = state.dragVertex;
+    state.selectedEdge = -1;
     markLayoutCustom();
     pushProfileToView();
   }
 
   function pointerUp(event) {
+    const point = canvasEventPoint(event);
+    const wasDragging = state.dragVertex >= 0;
+    const longPressStart = state.longPressStart;
+    const longPressFired = state.longPressFired;
     clearLongPress();
     if (state.dragVertex >= 0) {
       state.dragVertex = -1;
@@ -1278,12 +1409,32 @@ function wireLayoutEditor() {
       state.dragStartPoint = null;
       try { canvas.releasePointerCapture?.(event.pointerId); } catch (_error) { /* ignore */ }
     }
+    // AWR-267: short-press an edge selects it for Add corner (dblclick/long-press stay).
+    if (
+      editsAllowed()
+      && !wasDragging
+      && !longPressFired
+      && longPressStart
+      && Math.hypot(point.x - longPressStart.x, point.y - longPressStart.y) <= LONG_PRESS_MOVE_PX
+    ) {
+      const edge = view.hitTestEdge(point.x, point.y, HIT);
+      if (edge) {
+        state.selectedEdge = edge.edgeIndex;
+        state.selectedVertex = -1;
+      } else {
+        state.selectedEdge = -1;
+      }
+      syncSelectionToView();
+    }
+    state.longPressFired = false;
+    syncCornerButtons();
   }
 
   canvas.addEventListener("pointerdown", pointerDown);
   canvas.addEventListener("pointermove", pointerMove);
   canvas.addEventListener("pointerup", pointerUp);
   canvas.addEventListener("pointercancel", pointerUp);
+  // Keep existing dblclick path — human check of that gesture is still pending (AWR-267).
   canvas.addEventListener("dblclick", (event) => {
     if (!editsAllowed()) return;
     event.preventDefault();
@@ -1668,6 +1819,8 @@ function nudgeSelectedVertex(dxMm, dyMm) {
   activeEntry().points_mm[stored] = [Number(point[0]) + dxMm, Number(point[1]) + dyMm];
   markLayoutCustom();
   pushProfileToView();
+  syncCornerButtons();
+  syncSelectionToView();
 }
 
 function wireKeyboard() {
@@ -1718,8 +1871,8 @@ async function boot() {
   // U-8: modality-aware gesture copy
   const coarse = window.matchMedia?.("(pointer: coarse)")?.matches;
   $("layout-gesture-copy").textContent = coarse
-    ? "Drag corners on the room. Long-press an edge to add a point, a corner to remove one. LED spacing is fixed — the path is never stretched."
-    : "Drag corners on the room. Double-click an edge to add a point, a corner to remove one. On touch devices, long-press does the same. LED spacing is fixed — the path is never stretched.";
+    ? "Drag corners on the room. Use Add corner / Remove corner, or long-press an edge to add a point and a corner to remove one. LED spacing is fixed — the path is never stretched."
+    : "Drag corners on the room. Use Add corner / Remove corner, or double-click an edge to add a point and a corner to remove one. On touch devices, long-press does the same. LED spacing is fixed — the path is never stretched.";
 
   state.catalog = await api("GET", "/api/catalog");
   rememberProfileMtime(state.catalog);

@@ -795,6 +795,22 @@ export function createLedSimView(canvas, initialProfile, options = {}) {
         ctx.setLineDash([]);
         ctx.beginPath();
       }
+
+      // AWR-267: highlight the selected edge so Add corner has a clear target.
+      if (editing && !presentation && selectedEdge >= 0 && selectedEdge < points.length - 1) {
+        const a = points[selectedEdge];
+        const b = points[selectedEdge + 1];
+        if (a && b) {
+          ctx.strokeStyle = "rgba(77, 216, 230, .95)";
+          ctx.lineWidth = 3.5;
+          ctx.setLineDash([]);
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.stroke();
+          ctx.beginPath();
+        }
+      }
     }
 
     const emitterRadius = Math.max(2.4, Math.min(5.5, transform.scale * 18));
@@ -849,15 +865,16 @@ export function createLedSimView(canvas, initialProfile, options = {}) {
 
     if (editing && !presentation) {
       const handleR = 6;
-      for (const point of points) {
-        ctx.fillStyle = "#f2f4fb";
-        ctx.strokeStyle = "#8a6cff";
-        ctx.lineWidth = 2;
+      points.forEach((point, index) => {
+        const selected = index === selectedVertex;
+        ctx.fillStyle = selected ? "#4dd8e6" : "#f2f4fb";
+        ctx.strokeStyle = selected ? "#4dd8e6" : "#8a6cff";
+        ctx.lineWidth = selected ? 3 : 2;
         ctx.beginPath();
-        ctx.arc(point.x, point.y, handleR, 0, Math.PI * 2);
+        ctx.arc(point.x, point.y, selected ? handleR + 1.5 : handleR, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
-      }
+      });
       ctx.beginPath();
     }
   }
@@ -962,9 +979,11 @@ export function createLedSimView(canvas, initialProfile, options = {}) {
       const screenTangent = {dx: tangent.dx, dy: -tangent.dy};
       let screenNormal = outwardNormal(screenTangent, anchor, roomCx, roomCy);
       const offset = options.offset ?? 14;
-      const stack = options.stack || 0;
+      const baseStack = options.stack || 0;
+      // AWR-267: when labels crowd, try small offsets before dropping.
+      const stackAttempts = [0, 12, -12, 22, -22, 34, -34];
 
-      function placeWithNormal(normal) {
+      function placeWithNormal(normal, stack) {
         let x = anchor.x + normal.nx * offset;
         let y = anchor.y + normal.ny * offset + stack;
         if (options.align === "center") {
@@ -976,40 +995,37 @@ export function createLedSimView(canvas, initialProfile, options = {}) {
         return {x, y, w: size.w, h: size.h};
       }
 
-      let box = placeWithNormal(screenNormal);
-      const wouldClip = (
-        box.x < edgePad
-        || box.y < edgePad
-        || box.x + box.w > viewWidth - edgePad
-        || box.y + box.h > viewHeight - edgePad
-      );
-      if (wouldClip) {
-        const inward = {nx: -screenNormal.nx, ny: -screenNormal.ny};
-        const flipped = placeWithNormal(inward);
-        const flippedClips = (
-          flipped.x < edgePad
-          || flipped.y < edgePad
-          || flipped.x + flipped.w > viewWidth - edgePad
-          || flipped.y + flipped.h > viewHeight - edgePad
+      function wouldClip(box) {
+        return (
+          box.x < edgePad
+          || box.y < edgePad
+          || box.x + box.w > viewWidth - edgePad
+          || box.y + box.h > viewHeight - edgePad
         );
-        if (!flippedClips || (
-          Math.min(flipped.x, viewWidth - (flipped.x + flipped.w))
-          > Math.min(box.x, viewWidth - (box.x + box.w))
-        )) {
-          box = flipped;
-          screenNormal = inward;
+      }
+
+      const normals = [screenNormal, {nx: -screenNormal.nx, ny: -screenNormal.ny}];
+      for (const stackDelta of stackAttempts) {
+        for (const normal of normals) {
+          let box = placeWithNormal(normal, baseStack + stackDelta);
+          if (wouldClip(box)) {
+            box = clampBox(box);
+            if (!box) continue;
+          } else {
+            box = clampBox(box);
+            if (!box) continue;
+          }
+          if (placed.some((other) => boxesOverlap(box, other))) continue;
+          placed.push(box);
+          ctx.font = useFont;
+          ctx.fillStyle = options.color || "#4dd8e6";
+          ctx.textAlign = "left";
+          ctx.textBaseline = "top";
+          ctx.fillText(text, box.x, box.y);
+          return true;
         }
       }
-      box = clampBox(box);
-      if (!box) return false;
-      if (placed.some((other) => boxesOverlap(box, other))) return false;
-      placed.push(box);
-      ctx.font = useFont;
-      ctx.fillStyle = options.color || "#4dd8e6";
-      ctx.textAlign = "left";
-      ctx.textBaseline = "top";
-      ctx.fillText(text, box.x, box.y);
-      return true;
+      return false;
     }
 
     // Priority: center > start > end > ticks > room-size (lowest — drops first)
@@ -1169,6 +1185,14 @@ export function createLedSimView(canvas, initialProfile, options = {}) {
     setEditing(next) {
       editing = Boolean(next);
       draw(lastFrame);
+    },
+    setSelection({vertex = selectedVertex, edge = selectedEdge} = {}) {
+      selectedVertex = Number.isFinite(vertex) ? Number(vertex) : -1;
+      selectedEdge = Number.isFinite(edge) ? Number(edge) : -1;
+      draw(lastFrame);
+    },
+    getSelection() {
+      return {vertex: selectedVertex, edge: selectedEdge};
     },
     setPresentation(next) {
       presentation = Boolean(next);

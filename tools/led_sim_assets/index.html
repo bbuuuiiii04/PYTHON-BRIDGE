@@ -27,15 +27,17 @@
     <span>41.656 mm/LED</span>
   </div>
   <div class="top-actions">
+    <span id="layout-dirty" class="chip warn sentence" hidden>Unsaved layout changes</span>
     <span id="calibration-badge" class="chip warn sentence" title="Screen colors not yet calibrated against the real strip — Calibrate tab">Colors not calibrated yet</span>
     <span class="chip ok sentence" id="offline-badge" title="Preview only — this page never contacts the lights">Preview only — never touches the lights</span>
     <span id="paint-health" class="chip mono" title="Browser draw health, not hardware" hidden>—</span>
     <button id="top-stop" class="btn-stop" type="button" aria-label="Stop playback" title="Stop">■ STOP</button>
-    <button id="help-btn" class="icon-btn" type="button" aria-label="Keyboard shortcuts" aria-expanded="false" aria-controls="help-popover">?</button>
+    <button id="help-btn" class="icon-btn" type="button" aria-label="Help" aria-expanded="false" aria-controls="help-popover">?</button>
   </div>
 </header>
 
-<div id="help-popover" class="help-popover" hidden role="dialog" aria-label="Keyboard shortcuts">
+<div id="help-popover" class="help-popover" hidden role="dialog" aria-label="Help">
+  <p class="fine-print" id="help-what-is">This page is a room preview of what the show would send to your LED strip — it never turns the real lights on.</p>
   <h2 class="panel-label">Shortcuts</h2>
   <dl class="shortcut-list">
     <div><dt><kbd>Space</kbd></dt><dd>Play / pause</dd></div>
@@ -45,7 +47,7 @@
     <div><dt><kbd>⇧</kbd>+arrows</dt><dd>Nudge 100 mm</dd></div>
     <div><dt><kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>Z</kbd></dt><dd>Undo layout edit (Layout tab only)</dd></div>
   </dl>
-  <p class="fine-print">Editing gestures are off while Layout is locked. Undo only applies on the Layout tab.</p>
+  <p class="fine-print">Editing gestures are off while Layout is locked. Undo only applies on the Layout tab. Use Add corner / Remove corner on the Layout tab when double-click is hard to find.</p>
   <p class="fine-print mono" id="help-provenance" hidden></p>
 </div>
 
@@ -251,6 +253,13 @@
           <button id="layout-lock" type="button" class="lock-toggle" aria-pressed="false" title="Lock layout editing">🔓 Unlocked</button>
         </div>
         <p class="fine-print" id="layout-gesture-copy">Drag corners on the room. Double-click (desktop) or long-press (touch) an edge to add a point, a corner to remove one. LED spacing is fixed — the path is never stretched.</p>
+        <div class="corner-tools" role="group" aria-label="Corner tools">
+          <div class="button-row wrap">
+            <button type="button" id="layout-add-corner">Add corner</button>
+            <button type="button" id="layout-remove-corner" disabled>Remove corner</button>
+          </div>
+          <p class="fine-print" id="layout-corner-hint">Add corner places a new bend in the middle of the selected edge (or the longest edge if none is selected). Remove corner needs a selected corner and keeps at least two corners.</p>
+        </div>
         <div class="preset-cards" role="listbox" aria-label="Layout presets">
           <button type="button" class="preset-card" data-preset="perimeter" id="preset-perimeter" aria-selected="true">
             <canvas class="preset-thumb" id="thumb-perimeter" width="120" height="56" aria-hidden="true"></canvas>
@@ -286,7 +295,6 @@
           <button type="button" id="layout-undo" disabled>Undo</button>
           <button type="button" id="layout-save" class="primary">Save changes</button>
         </div>
-        <span id="layout-dirty" class="dirty" hidden>Unsaved layout changes</span>
       </section>
 
       <section id="calibrate-panel" class="panel-stack" data-panel="calibrate" hidden role="tabpanel" aria-labelledby="tab-calibrate">

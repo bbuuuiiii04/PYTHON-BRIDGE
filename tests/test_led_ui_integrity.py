@@ -96,6 +96,92 @@ class PadUiIntegrityTests(unittest.TestCase):
         self.assertIn('querySelectorAll("[data-look]")', js)
         self.assertIn("playLookByName", js)
 
+    def test_awr267_layout_corner_buttons_wired(self) -> None:
+        """R6: Add/Remove corner buttons exist and handlers are attached."""
+        html = (_SIM / "index.html").read_text(encoding="utf-8")
+        js = (_SIM / "sim-app.js").read_text(encoding="utf-8")
+        self.assertIn('id="layout-add-corner"', html)
+        self.assertIn('id="layout-remove-corner"', html)
+        self.assertIn(">Add corner<", html)
+        self.assertIn(">Remove corner<", html)
+        self.assertIn('id="layout-dirty"', html)
+        # Unsaved warning lives in the header, not only the Layout panel.
+        self.assertLess(
+            html.index('id="layout-dirty"'),
+            html.index('id="layout-panel"'),
+        )
+        self.assertIn('id="help-what-is"', html)
+        self.assertIn("never turns the real lights on", html)
+        self.assertIn("addCornerFromButton", js)
+        self.assertIn("removeCornerFromButton", js)
+        self.assertIn(
+            '$("layout-add-corner")?.addEventListener("click", addCornerFromButton)',
+            js,
+        )
+        self.assertIn(
+            '$("layout-remove-corner")?.addEventListener("click", removeCornerFromButton)',
+            js,
+        )
+        # Existing dblclick path must remain (human check still pending).
+        self.assertIn('canvas.addEventListener("dblclick"', js)
+        self.assertIn("Puts the corners back to the saved", js)
+        self.assertIn("Your unsaved layout changes go away", js)
+
+
+class Awr267LayoutCornerMathTests(unittest.TestCase):
+    """Unit-level midpoint insert + minimum-corner guard (JS helpers via node)."""
+
+    def test_midpoint_insert_and_min_corner_guard(self) -> None:
+        import json
+        import subprocess
+
+        script = r"""
+import {
+  canRemoveCorner,
+  insertCornerAtEdgeMidpoint,
+  longestEdgeIndex,
+  midpointOnEdge,
+  MIN_LAYOUT_CORNERS,
+  removeCornerAt,
+} from './tools/led_sim_assets/ledsim-view.js';
+
+const points = [[0, 0], [10, 0], [10, 10]];
+const mid = midpointOnEdge(points, 0);
+const inserted = insertCornerAtEdgeMidpoint(points, 0);
+const removed = removeCornerAt(inserted, 1);
+const blocked = removeCornerAt([[0, 0], [1, 1]], 0);
+const longest = longestEdgeIndex([[0, 0], [1, 0], [1, 100]]);
+
+console.log(JSON.stringify({
+  min: MIN_LAYOUT_CORNERS,
+  mid,
+  inserted,
+  removed,
+  blocked,
+  canTwo: canRemoveCorner([[0, 0], [1, 1]]),
+  canThree: canRemoveCorner(points),
+  longest,
+}));
+"""
+        root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = json.loads(result.stdout.strip().splitlines()[-1])
+        self.assertEqual(data["min"], 2)
+        self.assertEqual(data["mid"], [5, 0])
+        self.assertEqual(data["inserted"], [[0, 0], [5, 0], [10, 0], [10, 10]])
+        self.assertEqual(data["removed"], [[0, 0], [10, 0], [10, 10]])
+        self.assertIsNone(data["blocked"])
+        self.assertFalse(data["canTwo"])
+        self.assertTrue(data["canThree"])
+        self.assertEqual(data["longest"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
