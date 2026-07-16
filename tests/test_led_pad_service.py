@@ -1269,7 +1269,10 @@ class SimRoomHookupRouteTests(unittest.TestCase):
         self.assertIn("exactName", lab_js)
         self.assertIn("⇄ Switch live lights", lab_js)
         self.assertIn("scrollIntoView", lab_js)
-        self.assertIn("Live apply paused", lab_html)
+        self.assertIn("Preview updates as you tune — Play sends to the real lights.", lab_html)
+        self.assertIn("queuePreviewRetune", lab_js)
+        self.assertIn("slugifyLabName", lab_js)
+        self.assertIn("__blank__", lab_js)
         self.assertIn('typeof body === "string" ? {name: body} : body', pad_core)
 
     def test_lab_draft_search_is_substring_not_subsequence(self) -> None:
