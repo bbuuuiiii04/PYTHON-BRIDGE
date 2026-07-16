@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Literal, Optional, Sequence
+from .models import DropSection
 from .config import (
     SMART_DROP_IGNORE_INTRO_BEATS,
     SMART_DROP_IGNORE_OUTRO_BEATS,
@@ -725,6 +726,87 @@ def select_smart_breakdowns(
         min_gap_beats=0,
     )
 
+
+
+def select_true_drops(
+    smart_drops: Sequence[int],
+    phrase_segments: Sequence[PhraseSegment],
+) -> list[int]:
+    """AWR-257: keep only smart drops with an up/breakdown runway in front of them.
+
+    Brandon's TRUE DROP rule: a genuine drop has a buildup (or breakdown) climbing
+    into it; a mid-section continuation has a chorus (groove) in front, so
+    ``runway_beats`` returns 0. Fail open: if the runway filter would empty a
+    non-empty input (sparse/absent phrase data), return the input unchanged so a
+    track never loses its drop identity. Pure; no I/O.
+    """
+    kept = [b for b in smart_drops if runway_beats(float(b), phrase_segments) > 0.0]
+    if smart_drops and not kept:
+        return list(smart_drops)
+    return kept
+
+
+def drop_sections(
+    true_drops: Sequence[int],
+    raw_drops: Sequence[int],
+    phrase_segments: Sequence[PhraseSegment],
+    *,
+    total_beats: int = 0,
+    advance_min_gap_beats: int = SECTION_ADVANCE_MIN_GAP_BEATS,
+) -> tuple[DropSection, ...]:
+    """AWR-257: build the drop sections that govern LED look identity + cycling.
+
+    For each true drop T: ``end_beat`` = end of the contiguous run of "chorus"
+    phrase segments starting at T (raw drop markers map to "chorus"), clamped to
+    the next true drop if it lands earlier. ``advance_beats`` = the raw markers
+    strictly inside ``(T, end_beat)`` that are at least ``advance_min_gap_beats``
+    after the previous KEPT beat (T is the first kept beat), EXCLUDING any marker
+    in the outro-trim region (``total_beats - SMART_DROP_IGNORE_OUTRO_BEATS``,
+    the same region ``select_smart_drops`` suppresses) so an outro continuation
+    never drives a look change today's selection already hides. Pure; no I/O.
+    """
+    segs_by_start: dict[float, PhraseSegment] = {}
+    for seg in phrase_segments:
+        segs_by_start.setdefault(seg.start_beat, seg)
+
+    ordered_true = sorted(int(t) for t in true_drops)
+    unique_raw = sorted({int(m) for m in raw_drops})
+    outro_start = total_beats - SMART_DROP_IGNORE_OUTRO_BEATS if total_beats > 0 else 0
+
+    sections: list[DropSection] = []
+    for i, t in enumerate(ordered_true):
+        # Walk the contiguous chorus run starting at T for the section end.
+        boundary = float(t)
+        end_beat = float(t)
+        while True:
+            seg = segs_by_start.get(boundary)
+            if seg is None or seg.label != "chorus":
+                break
+            end_beat = seg.end_beat
+            boundary = seg.end_beat
+        # Clamp to the next true drop if the chorus run would spill past it.
+        if i + 1 < len(ordered_true):
+            end_beat = min(end_beat, float(ordered_true[i + 1]))
+
+        advances: list[int] = []
+        prev_kept = float(t)  # T counts as the first kept beat
+        for m in unique_raw:
+            if not (float(t) < m < end_beat):
+                continue
+            if outro_start > 0 and m >= outro_start:
+                continue
+            if m - prev_kept < advance_min_gap_beats:
+                continue
+            advances.append(m)
+            prev_kept = float(m)
+
+        sections.append(DropSection(
+            true_drop_beat=t,
+            end_beat=float(end_beat),
+            advance_beats=tuple(advances),
+        ))
+
+    return tuple(sections)
 
 
 def find_restore_beat(

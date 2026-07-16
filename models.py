@@ -30,6 +30,16 @@ class SmartDropEnergyShadow:
     source: str = "v1"
 
 
+@dataclass(frozen=True)
+class DropSection:
+    """AWR-257: one drop section — the true drop that opens it, the end of its
+    contiguous chorus run, and the in-section LED look-advance points. Frozen;
+    built purely by smart_phrasing.drop_sections at marker-select time."""
+    true_drop_beat: int
+    end_beat: float
+    advance_beats: tuple[int, ...] = ()
+
+
 @dataclass
 class TrackMetadata:
     filepath: str = ""
