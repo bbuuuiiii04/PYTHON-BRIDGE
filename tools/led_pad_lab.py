@@ -5,6 +5,7 @@ import importlib.util
 import json
 import re
 import tempfile
+import threading
 import traceback as traceback_mod
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,6 +18,21 @@ from ..govee_frame_renderer import (
     MotionField,
     universal_colorizer,
 )
+from .file_backup import rotate_backup
+
+
+class StaleLabEntry(ValueError):
+    """Raised when a lab save's ``updated`` stamp does not match disk."""
+
+    def __init__(self, name: str, *, disk_updated: str, client_updated: str) -> None:
+        super().__init__(
+            f"stale_entry: {name} changed since you loaded it "
+            f"(disk={disk_updated!r}, client={client_updated!r})"
+        )
+        self.name = name
+        self.disk_updated = disk_updated
+        self.client_updated = client_updated
+        self.code = "stale_entry"
 
 _IDENT_RE = re.compile(r"^[a-z0-9_]+$")
 _KINDS = {"slot", "frame"}
@@ -49,6 +65,7 @@ class LabRegistry:
         self.lab_dir = Path(lab_dir)
         self.path = self.lab_dir / "drafts.json"
         self.module_path = self.lab_dir / "effects_lab.py"
+        self._lock = threading.RLock()
 
     def _empty(self) -> dict[str, Any]:
         return {"entries": []}
@@ -65,13 +82,19 @@ class LabRegistry:
 
     def _save(self, data: dict[str, Any]) -> None:
         self.lab_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        # AWR-258: rotating snapshots for both crown-jewel lab files.
+        rotate_backup(self.path, keep=5)
+        if self.module_path.exists():
+            rotate_backup(self.module_path, keep=5)
         _write_json_atomic(self.path, data)
 
     def list(self) -> list[dict[str, Any]]:
         # "production_collision" is a decoration for callers (UI chips/banners),
         # never persisted: save() copies only its known payload keys.
+        with self._lock:
+            raw = self._load()
         out: list[dict[str, Any]] = []
-        for item in self._load()["entries"]:
+        for item in raw["entries"]:
             entry = copy.deepcopy(item)
             name = str(entry.get("name", ""))
             entry["production_collision"] = name in REALTIME_EFFECT_NAMES or f"lab_{name}" in REALTIME_EFFECT_NAMES
@@ -88,57 +111,66 @@ class LabRegistry:
 
     def save(self, payload: dict[str, Any]) -> dict[str, Any]:
         name = str(payload.get("name", "")).strip()
-        data = self._load()
-        entries = data["entries"]
-        existing = next((item for item in entries if item.get("name") == name), None)
-        # Collision with production renderer names blocks CREATE only. An
-        # existing entry whose name later became a production effect must stay
-        # saveable (Save/Accept/Reject/Archive) — otherwise promotion bricks it.
-        self._validate_name(name, check_collision=existing is None)
-        created = existing.get("created") if existing else _now()
-        current = copy.deepcopy(existing or {})
-        current.update({
-            "name": name,
-            "kind": str(payload.get("kind", current.get("kind", "slot"))),
-            "fn": str(payload.get("fn", current.get("fn", name))),
-            "params": payload.get("params", current.get("params", {})) if isinstance(payload.get("params", current.get("params", {})), dict) else {},
-            "cue_beats": float(payload.get("cue_beats", current.get("cue_beats", 16)) or 16),
-            "notes": str(payload.get("notes", current.get("notes", ""))),
-            "brief": str(payload.get("brief", current.get("brief", ""))),
-            "status": str(payload.get("status", current.get("status", "iterating"))),
-            "timing_mode": str(payload.get("timing_mode", current.get("timing_mode", "unknown"))),
-            "target_role": str(payload.get("target_role", current.get("target_role", ""))),
-            "param_specs": self._validate_param_specs(payload.get("param_specs", current.get("param_specs", {}))),
-            "created": created,
-            "updated": _now(),
-        })
-        self._validate_entry(current)
-        if existing:
-            entries[entries.index(existing)] = current
-        else:
-            entries.append(current)
-        self._save(data)
-        return {"ok": True, "entry": copy.deepcopy(current)}
+        overwrite = bool(payload.get("overwrite"))
+        with self._lock:
+            data = self._load()
+            entries = data["entries"]
+            existing = next((item for item in entries if item.get("name") == name), None)
+            # Collision with production renderer names blocks CREATE only. An
+            # existing entry whose name later became a production effect must stay
+            # saveable (Save/Accept/Reject/Archive) — otherwise promotion bricks it.
+            self._validate_name(name, check_collision=existing is None)
+            if existing is not None and not overwrite and "updated" in payload:
+                client_updated = str(payload.get("updated") or "")
+                disk_updated = str(existing.get("updated") or "")
+                if client_updated != disk_updated:
+                    raise StaleLabEntry(name, disk_updated=disk_updated, client_updated=client_updated)
+            created = existing.get("created") if existing else _now()
+            current = copy.deepcopy(existing or {})
+            current.update({
+                "name": name,
+                "kind": str(payload.get("kind", current.get("kind", "slot"))),
+                "fn": str(payload.get("fn", current.get("fn", name))),
+                "params": payload.get("params", current.get("params", {})) if isinstance(payload.get("params", current.get("params", {})), dict) else {},
+                "cue_beats": float(payload.get("cue_beats", current.get("cue_beats", 16)) or 16),
+                "notes": str(payload.get("notes", current.get("notes", ""))),
+                "brief": str(payload.get("brief", current.get("brief", ""))),
+                "status": str(payload.get("status", current.get("status", "iterating"))),
+                "timing_mode": str(payload.get("timing_mode", current.get("timing_mode", "unknown"))),
+                "target_role": str(payload.get("target_role", current.get("target_role", ""))),
+                "param_specs": self._validate_param_specs(payload.get("param_specs", current.get("param_specs", {}))),
+                "created": created,
+                "updated": _now(),
+            })
+            self._validate_entry(current)
+            if existing:
+                entries[entries.index(existing)] = current
+            else:
+                entries.append(current)
+            self._save(data)
+            return {"ok": True, "entry": copy.deepcopy(current)}
 
     def set_status(self, name: str, status: str) -> dict[str, Any]:
         if status not in _STATUSES:
             raise ValueError("lab status must be iterating, accepted, rejected, or promoted")
         entry = self.get(name)
         entry["status"] = status
+        # Internal status flip always has the disk stamp from get(); allow write.
         return self.save(entry)
 
     def archive(self, name: str) -> dict[str, Any]:
         return self.set_status(name, "promoted")
 
     def delete(self, name: str) -> dict[str, Any]:
-        data = self._load()
-        entries = data["entries"]
-        existing = next((item for item in entries if item.get("name") == name), None)
-        if existing is None:
-            raise ValueError(f"unknown lab draft: {name}")
-        entries.remove(existing)
-        self._save(data)
-        return {"ok": True, "deleted": name}
+        with self._lock:
+            data = self._load()
+            entries = data["entries"]
+            existing = next((item for item in entries if item.get("name") == name), None)
+            if existing is None:
+                raise ValueError(f"unknown lab draft: {name}")
+            entries.remove(existing)
+            self._save(data)
+            return {"ok": True, "deleted": name}
 
     @staticmethod
     def scene_ref(name: str) -> str:
