@@ -20,7 +20,9 @@ validation_scope: >
   (Add/Remove corner buttons alongside dblclick/long-press, header unsaved
   warning, Reset confirm, label crowding offsets, ? help what-is sentence;
   gate FIX: Add corner raises the unsaved chip — stable layout-entry identity
-  so splice/assign cannot orphan points_mm vs savedProfile)
+  so splice/assign cannot orphan points_mm vs savedProfile), and AWR-270 R8
+  one-shell chrome (shared LIGHTING CONSOLE header + N9 absolute pad/lab links
+  from sim; stage remains the initial landing; ? help what-is intact)
   are software-tested.
   Optics (glow/bleed/gamma) remain uncalibrated assumptions. Generated timing
   uses an ideal grid. Device color, PWM, latency, physical response, packet
@@ -54,7 +56,9 @@ sheet (zero page scroll), tablist semantics, and contrast.
 (plain links: pad `:8766`, lab `:8766/lab`, sim `:8767` — canonical defaults)
 and a stage **room-size** label near the bottom wall of the room drawing
 (e.g. `17.1 × 7.5 ft`, lowest label priority). Clicking it opens the Layout
-tab and focuses Room width.
+tab and focuses Room width. **AWR-270 / N9** keeps sim↔pad/lab links absolute
+(separate `:8767` server) and matches the shared **LIGHTING CONSOLE** eyebrow /
+route-tab chrome with Pad and Lab; the first screen is still the stage.
 
 **AWR-249** hardens mid-width shell layout (≈900–1280): topbar owns brand+nav
 without clipping; desktop stage+sidecar holds from ≥900px (sidecar ≥300px);

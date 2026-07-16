@@ -214,6 +214,11 @@
     if (!state.current) {
       const firstVisible = state.entries.find(matchesFilters) || state.entries[0];
       if (firstVisible) selectDraft(firstVisible.name);
+      else {
+        $("draftTitle").textContent = state.entries.length
+          ? "No drafts match — clear filters or press New."
+          : "No drafts yet — press New to make one.";
+      }
     } else {
       const fresh = state.entries.find(e => e.name === state.current.name);
       if (fresh) selectDraft(fresh.name);
@@ -342,7 +347,7 @@
     }
     $("draftList").innerHTML = parts.length
       ? parts.join("")
-      : `<div class="empty"><span class="panel-label">No drafts</span><span>Adjust filters or create one with New.</span></div>`;
+      : `<div class="empty"><span class="panel-label">No drafts</span><span>Press New to make one, or clear the filters above.</span></div>`;
     $("draftList").querySelectorAll("button.lab-row").forEach(btn => {
       btn.onclick = () => {
         selectDraft(btn.dataset.name);

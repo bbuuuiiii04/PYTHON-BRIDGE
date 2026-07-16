@@ -28,7 +28,7 @@
   };
   // AWR-259: single source for dirty-tracked editor fields (save payload must match).
   const EDITOR_FIELDS = ["look", "params", "cue_beats", "slot_fill", "mono_chance", "locked_palette"];
-  const state = {config:null, banks:{}, renders:[], renderMap:new Map(), palettes:[], activeBank:"drafts", editor:null, cleanSnapshot:null, updateTimer:null, lastFocus:null, playingLook:""};
+  const state = {config:null, banks:{}, renders:[], renderMap:new Map(), palettes:[], activeBank:"drafts", editor:null, cleanSnapshot:null, updateTimer:null, lastFocus:null, playingLook:"", landingPicked:false};
   const $ = (id) => document.getElementById(id);
   const api = window.LedPadApi;
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
@@ -141,6 +141,17 @@
     $("dirtyText").textContent = dirty ? "Unsaved changes" : "Draft saved";
     $("dirtyText").className = dirty ? "warn-text" : "dim";
   }
+  // AWR-270 I5: first paint should show looks, not an empty Untagged shelf.
+  function pickLandingBank() {
+    const phraseFirst = bankOrder.filter((bank) => bank !== "drafts" && bank !== "legacy_color_suffix");
+    for (const bank of phraseFirst) {
+      if ((state.banks[bank] || []).length) return bank;
+    }
+    if ((state.banks.drafts || []).length) return "drafts";
+    if ((state.banks.other || []).length) return "other";
+    if ((state.banks.legacy_color_suffix || []).length) return "legacy_color_suffix";
+    return "drafts";
+  }
   async function refresh() {
     clearError();
     const [cfg, renders, palettes] = await Promise.all([api.config(), api.renders(), api.palettes()]);
@@ -150,6 +161,10 @@
     state.renderMap = new Map(state.renders.map(r => [r.name, r]));
     state.palettes = palettes.palettes || [];
     $("liveChangedBanner").hidden = !cfg.live_changed;
+    if (!state.landingPicked) {
+      state.activeBank = pickLandingBank();
+      state.landingPicked = true;
+    }
     renderSession();
     renderBanks();
     renderCards();
@@ -188,9 +203,14 @@
     const names = state.banks[state.activeBank] || [];
     const grid = $("lookGrid");
     if (!names.length) {
-      grid.innerHTML = state.activeBank === "drafts"
-        ? `<div class="empty"><span class="panel-label">No untagged looks</span><span>Accepted lab cues without a phrase tag land here. Automation never plays this shelf.</span></div>`
-        : `<div class="empty"><span class="panel-label">Empty bank</span><span>Move or duplicate looks into this bank.</span></div>`;
+      const anyLooks = Object.values(state.banks).some((list) => (list || []).length);
+      if (!anyLooks) {
+        grid.innerHTML = `<div class="empty"><span class="panel-label">No looks yet</span><span>Accept a Lab draft into a phrase, or duplicate a look once you have one.</span></div>`;
+      } else if (state.activeBank === "drafts") {
+        grid.innerHTML = `<div class="empty"><span class="panel-label">No untagged looks</span><span>Accepted lab cues without a phrase tag land here. Open a phrase tab above, or tag a draft in Lab.</span></div>`;
+      } else {
+        grid.innerHTML = `<div class="empty"><span class="panel-label">Nothing in this shelf</span><span>Move or duplicate a look into this phrase tab, or open another tab that already has looks.</span></div>`;
+      }
       return;
     }
     grid.innerHTML = names.map(name => cardHtml(name)).join("");

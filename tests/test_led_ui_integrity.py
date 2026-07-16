@@ -362,5 +362,166 @@ console.log(JSON.stringify({
         self.assertEqual(data["longest"], 1)
 
 
+def _route_tab_hrefs(html: str) -> dict[str, str]:
+    """Map Pad/Lab/Sim label → href inside the first route-tabs nav."""
+    nav = re.search(
+        r'<nav class="route-tabs"[^>]*>(.*?)</nav>',
+        html,
+        flags=re.S,
+    )
+    if nav is None:
+        raise AssertionError("missing route-tabs nav")
+    found = re.findall(
+        r'<a\b([^>]*)>(Pad|Lab|Sim)</a>',
+        nav.group(1),
+    )
+    out: dict[str, str] = {}
+    for attrs, label in found:
+        href_m = re.search(r'href="([^"]+)"', attrs)
+        if href_m is None:
+            raise AssertionError(f"{label} tab missing href")
+        out[label] = href_m.group(1)
+    return out
+
+
+def _id_not_hidden(html: str, element_id: str) -> None:
+    """Assert id=… exists and that opening tag is not marked hidden."""
+    match = re.search(
+        rf'<(?P<tag>\w+)\b(?P<attrs>[^>]*\bid="{re.escape(element_id)}"[^>]*)>',
+        html,
+    )
+    if match is None:
+        raise AssertionError(f"missing #{element_id}")
+    attrs = match.group("attrs")
+    if re.search(r"\bhidden\b", attrs):
+        raise AssertionError(f"#{element_id} is hidden on initial markup")
+
+
+class Awr270OneShellTests(unittest.TestCase):
+    """R8 chrome: shared Pad|Lab|Sim nav (N9 hrefs) + honest landings."""
+
+    def test_shared_nav_hrefs_n9(self) -> None:
+        pad = (_ASSETS / "index.html").read_text(encoding="utf-8")
+        lab = (_ASSETS / "lab.html").read_text(encoding="utf-8")
+        sim = (_SIM / "index.html").read_text(encoding="utf-8")
+
+        pad_tabs = _route_tab_hrefs(pad)
+        lab_tabs = _route_tab_hrefs(lab)
+        sim_tabs = _route_tab_hrefs(sim)
+
+        self.assertEqual(pad_tabs, {"Pad": "/", "Lab": "/lab", "Sim": "http://127.0.0.1:8767/"})
+        self.assertEqual(lab_tabs, {"Pad": "/", "Lab": "/lab", "Sim": "http://127.0.0.1:8767/"})
+        self.assertEqual(
+            sim_tabs,
+            {
+                "Pad": "http://127.0.0.1:8766/",
+                "Lab": "http://127.0.0.1:8766/lab",
+                "Sim": "http://127.0.0.1:8767/",
+            },
+        )
+        # Pad↔lab must stay relative; no absolute :8766 self-links on pad server pages.
+        self.assertNotIn("127.0.0.1:8766", pad)
+        self.assertNotIn("127.0.0.1:8766", lab)
+        for html in (pad, lab, sim):
+            self.assertIn("LIGHTING CONSOLE", html)
+            self.assertIn('class="eyebrow"', html)
+
+    def test_landing_containers_present_not_hidden(self) -> None:
+        pad = (_ASSETS / "index.html").read_text(encoding="utf-8")
+        lab = (_ASSETS / "lab.html").read_text(encoding="utf-8")
+        sim = (_SIM / "index.html").read_text(encoding="utf-8")
+
+        _id_not_hidden(pad, "lookGrid")
+        _id_not_hidden(lab, "draftList")
+        _id_not_hidden(lab, "labPreviewHero")
+        _id_not_hidden(sim, "stage")
+        _id_not_hidden(sim, "fixture-canvas")
+        # R5/R6 jargon / page-purpose must not regress.
+        self.assertIn('id="help-what-is"', sim)
+        self.assertIn("never turns the real lights on", sim)
+        self.assertIn('id="help-btn"', sim)
+        self.assertIn('id="labHelpBtn"', lab)
+
+    def test_pad_landing_bank_prefers_content(self) -> None:
+        src = (_ASSETS / "pad-ui.js").read_text(encoding="utf-8")
+        self.assertIn("function pickLandingBank()", src)
+        self.assertIn("state.landingPicked", src)
+        self.assertIn("No looks yet", src)
+        self.assertIn("Nothing in this shelf", src)
+        # Preference order: phrase banks before empty drafts.
+        self.assertLess(src.index("bank !== \"drafts\""), src.index("state.banks.drafts"))
+
+    def test_lab_empty_landing_copy(self) -> None:
+        lab = (_ASSETS / "lab.js").read_text(encoding="utf-8")
+        self.assertIn("No drafts yet — press New to make one.", lab)
+        self.assertIn("Press New to make one, or clear the filters above.", lab)
+
+    def test_initial_get_serves_landing_shell(self) -> None:
+        import http.client
+        import tempfile
+        import threading
+        from contextlib import contextmanager
+        from http.server import ThreadingHTTPServer
+
+        from rb_ss_bridge_v2.tools.led_pad_web import LedPadService, build_handler as pad_handler
+        from rb_ss_bridge_v2.tools.led_sim_web import LedSimService, build_handler as sim_handler
+
+        example = Path(__file__).resolve().parents[1] / "config" / "led_look_director.example.json"
+
+        @contextmanager
+        def _pad():
+            with tempfile.TemporaryDirectory() as td:
+                cfg = Path(td) / "led_look_director.json"
+                cfg.write_text(example.read_text(encoding="utf-8"), encoding="utf-8")
+                service = LedPadService(cfg, dry_run=True)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), pad_handler(service))
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    yield server.server_port
+                finally:
+                    server.shutdown()
+                    server.server_close()
+                    thread.join(timeout=2.0)
+
+        @contextmanager
+        def _sim():
+            with tempfile.TemporaryDirectory() as td:
+                profile = Path(td) / "led_sim_profile.json"
+                service = LedSimService(profile_path=profile)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), sim_handler(service))
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    yield server.server_port
+                finally:
+                    server.shutdown()
+                    server.server_close()
+                    thread.join(timeout=2.0)
+
+        def _get(port: int, path: str) -> str:
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            conn.request("GET", path)
+            res = conn.getresponse()
+            body = res.read().decode("utf-8")
+            status = res.status
+            conn.close()
+            self.assertEqual(status, 200, path)
+            return body
+
+        with _pad() as port:
+            pad_html = _get(port, "/")
+            lab_html = _get(port, "/lab")
+        with _sim() as port:
+            sim_html = _get(port, "/")
+
+        self.assertEqual(_route_tab_hrefs(pad_html)["Sim"], "http://127.0.0.1:8767/")
+        self.assertEqual(_route_tab_hrefs(lab_html)["Pad"], "/")
+        self.assertEqual(_route_tab_hrefs(sim_html)["Pad"], "http://127.0.0.1:8766/")
+        _id_not_hidden(pad_html, "lookGrid")
+        _id_not_hidden(lab_html, "draftList")
+        _id_not_hidden(sim_html, "stage")
+
+
 if __name__ == "__main__":
     unittest.main()
