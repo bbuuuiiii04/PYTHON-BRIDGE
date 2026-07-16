@@ -1,6 +1,6 @@
 ---
-doc_status: current
-truth_level: executive seat-handoff state brief (AWR-195 program, overnight shift 2026-07-16) — written at handoff ~01:30 local
+doc_status: historical
+truth_level: executive seat-handoff state brief (AWR-195 program, overnight shift 2026-07-16) — RETIRED 10:57 2026-07-16: the morning review seat took the watch (morning.REVIEWBOOT.done); results in docs/prompts/active/spectral_morning_review_2026_07_16.md
 last_verified_commit: verify fresh at boot (git log --oneline -15)
 last_verified_date: 2026-07-16
 validation_scope: >
