@@ -79,7 +79,40 @@ def _enable_drop_presentation(sm, **overrides) -> None:
     sm._drop_presentation_window = WindowMachine(sm._drop_presentation_config)
 
 
-class WsHandoffNoOpGuardTests(unittest.TestCase):
+class _HermeticLearnedStoreTestCase(unittest.TestCase):
+    """Shared fixture: keep every StateManager in this module off the REAL
+    learned store (local/state/laser_solo_learned.json).
+
+    Why this exists: StateManager.__init__ loads AND starts a background writer
+    against that real persistent file. Two concurrent full-suite runs once
+    cross-poisoned it with this module's synthetic fixture track -- the file
+    ended up holding {"content-1:32": true, "content-1:64": true}, which made
+    beats_for_track("content-1") return (32.0, 64.0) and failed the solo
+    fire/learn tests deterministically.
+
+    The seam: state_manager.py binds LEARNED_STORE_PATH into its OWN namespace
+    at import time (`from .drop_presentation import ... LEARNED_STORE_PATH`) and
+    re-reads that name inside __init__ for all three touches -- the makedirs,
+    LearnedStore.load(), and the PaletteFeedbackWriter target. So patching this
+    one name before construction redirects the load path and the writer target
+    together, with no production change. Patching drop_presentation's copy would
+    NOT work: state_manager already bound its own reference.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        tmp = tempfile.TemporaryDirectory(prefix="rbss_learned_store_")
+        self.addCleanup(tmp.cleanup)
+        patcher = mock.patch(
+            "rb_ss_bridge_v2.state_manager.LEARNED_STORE_PATH",
+            str(Path(tmp.name) / "laser_solo_learned.json"),
+        )
+        # .start() returns the patched value: the per-test throwaway path.
+        self.learned_store_path = patcher.start()
+        self.addCleanup(patcher.stop)
+
+
+class WsHandoffNoOpGuardTests(_HermeticLearnedStoreTestCase):
     """Task 5: ws_handoff_enabled is parsed but its ritual tier is not
     implemented in this package; a named no-op guard must log a clear signal
     if an operator ever flips it on, rather than doing silently nothing."""
@@ -103,7 +136,7 @@ class WsHandoffNoOpGuardTests(unittest.TestCase):
             _make_sm()
 
 
-class MasterRegressionGateTests(unittest.TestCase):
+class MasterRegressionGateTests(_HermeticLearnedStoreTestCase):
     """With /drop_presentation enabled: false, this package must be inert."""
 
     def test_disabled_config_never_touches_blackout_owner_or_suppression(self) -> None:
@@ -126,7 +159,7 @@ class MasterRegressionGateTests(unittest.TestCase):
         self.assertIsNone(sm._drop_presentation_armed_key)
 
 
-class ScriptedExemptionIntegrationTests(unittest.TestCase):
+class ScriptedExemptionIntegrationTests(_HermeticLearnedStoreTestCase):
     def test_scripted_lighting_mode_never_applies_suppression_or_blackout(self) -> None:
         sm = _make_sm()
         _enable_drop_presentation(sm)
@@ -139,7 +172,7 @@ class ScriptedExemptionIntegrationTests(unittest.TestCase):
         self.assertFalse(sm._drop_presentation_base_suppressed_held)
 
 
-class DamperAudibleLatchIntegrationTests(unittest.TestCase):
+class DamperAudibleLatchIntegrationTests(_HermeticLearnedStoreTestCase):
     """Task 4 item 3: the >=16-beat audible latch lives inside
     _drop_presentation_tick itself (distinct from SessionState.mark_track_counted's
     own idempotency, which tests/test_drop_presentation.py already covers)."""
@@ -188,7 +221,7 @@ class DamperAudibleLatchIntegrationTests(unittest.TestCase):
         self.assertEqual(sm._drop_presentation_session.opening_tracks_counted, 0)
 
 
-class PerLoadStructureTrimTests(unittest.TestCase):
+class PerLoadStructureTrimTests(_HermeticLearnedStoreTestCase):
     """AWR-179 D4-F4: the per-load maps stay bounded instead of growing one
     dead entry per track over a multi-hour set. Behavior otherwise unchanged."""
 
@@ -248,7 +281,7 @@ class PerLoadStructureTrimTests(unittest.TestCase):
         self.assertIsNone(sm._pending_arm, "sub-2.0 s re-arm was not debounced")
 
 
-class PlanAndTickIntegrationTests(unittest.TestCase):
+class PlanAndTickIntegrationTests(_HermeticLearnedStoreTestCase):
     def _sm_with_plan(
         self, *, drops=(64.0,), tags=(), learned=(), with_player=False,
         phrase_segments=None,
@@ -668,7 +701,7 @@ class PlanAndTickIntegrationTests(unittest.TestCase):
         self.assertIn("solo-refused", refusal_records[0].getMessage())
 
 
-class SoloPadIntegrationTests(unittest.TestCase):
+class SoloPadIntegrationTests(_HermeticLearnedStoreTestCase):
     def test_press_while_active_cancels_not_role_exit(self) -> None:
         # AWR-159 Task 1: isolate the cancel mechanism from a coincidental
         # role exit -- drop_role stays "post_drop" (a WINDOW_ACTIVE_ROLE)
@@ -915,7 +948,7 @@ class SoloPadIntegrationTests(unittest.TestCase):
         self.assertNotEqual(sm._drop_presentation_last_actions.reason, "solo_learned")
 
 
-class ByteIdentityRegressionTests(unittest.TestCase):
+class ByteIdentityRegressionTests(_HermeticLearnedStoreTestCase):
     def _drive(self, *, enabled: bool) -> tuple:
         backend = _FakeBackend()
         midi_input = _FakeInput()
@@ -955,7 +988,7 @@ class ByteIdentityRegressionTests(unittest.TestCase):
             suppressed.assert_not_called()
 
 
-class LearnedStorePersistenceTests(unittest.TestCase):
+class LearnedStorePersistenceTests(_HermeticLearnedStoreTestCase):
     def test_fire_enqueues_to_a_background_writer_not_the_tick_path(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "learned.json"
@@ -997,7 +1030,7 @@ class LearnedStorePersistenceTests(unittest.TestCase):
             self.assertIn("content-1:64", on_disk)
 
 
-class StopFailOpenReleaseTests(unittest.TestCase):
+class StopFailOpenReleaseTests(_HermeticLearnedStoreTestCase):
     """DD1 regression: a held Laser-Solo / pre-dark LED dark-hold must fail-open
     on stop -- including the reader-stale stop branch that returns before
     _drop_presentation_tick, whose owner-clear was previously the only release."""
@@ -1139,7 +1172,7 @@ def _dp_release_state(sm) -> dict:
     }
 
 
-class IdleNoAudibleReleasesDropWindowTests(unittest.TestCase):
+class IdleNoAudibleReleasesDropWindowTests(_HermeticLearnedStoreTestCase):
     """AWR-171 / D3-F1: _enter_idle_no_audible must release the drop-presentation
     window exactly like _do_stop, so a resolver-to-0 mid-solo-window can't leave
     the room latched dark (active_deck=0 early-returns _push_tick_inner forever)."""
@@ -1206,7 +1239,7 @@ class IdleNoAudibleReleasesDropWindowTests(unittest.TestCase):
         self.assertEqual(_dp_release_state(sm), before)
 
 
-class SectionVerdictLatchTests(unittest.TestCase):
+class SectionVerdictLatchTests(_HermeticLearnedStoreTestCase):
     """AWR-220: true-drop leds_only verdict holds base suppression across
     coarse chorus re-arms after the WindowMachine released on a role gap."""
 
@@ -1462,6 +1495,63 @@ class SectionVerdictLatchTests(unittest.TestCase):
         self.assertEqual(sm._dp_section_verdict, LEDS_PLUS_LASERS)
         self.assertEqual(sm._drop_presentation_last_actions.presentation, LEDS_PLUS_LASERS)
         self.assertFalse(sm._drop_presentation_base_suppressed_held)
+
+
+class LearnedStoreHermeticityRegressionTests(_HermeticLearnedStoreTestCase):
+    """Guard for _HermeticLearnedStoreTestCase itself: if someone later drops
+    the shared fixture or its redirect, fail here loudly instead of silently
+    writing this module's synthetic fixture tracks into the operator's real
+    persistent learned store (the 2026-07-16 cross-run poisoning)."""
+
+    def test_fixture_keeps_store_load_and_writer_off_the_real_path(self) -> None:
+        from rb_ss_bridge_v2 import drop_presentation as _dp
+        from rb_ss_bridge_v2 import led_palette_control as _lpc
+        from rb_ss_bridge_v2 import state_manager as _sm_mod
+
+        # drop_presentation's copy is never patched, so it still holds the
+        # true persistent path -- the thing no test may ever write.
+        real_path = str(_dp.LEARNED_STORE_PATH)
+        self.assertNotEqual(self.learned_store_path, real_path)
+        # The name StateManager.__init__ reads for BOTH load and writer.
+        self.assertEqual(str(_sm_mod.LEARNED_STORE_PATH), self.learned_store_path)
+
+        # The writer persists via atomic_write_json, which writes a
+        # "{path}.{pid}.tmp" sibling and os.replace()s it onto the target --
+        # so guard the funnel, not open(): open() only ever sees the tmp name.
+        writes: list[str] = []
+        real_atomic_write_json = _lpc.atomic_write_json
+
+        def _record(path, data, *args, **kwargs):
+            writes.append(str(path))
+            return real_atomic_write_json(path, data, *args, **kwargs)
+
+        with mock.patch.object(_lpc, "atomic_write_json", _record):
+            sm = _make_sm()
+            # The live writer instance built by the fixture targets the tmpdir.
+            self.assertEqual(
+                str(sm._drop_presentation_learned_writer._path), self.learned_store_path
+            )
+            # Force one real synchronous persist (skips the debounce thread, so
+            # this asserts on a completed write rather than a race).
+            sm._drop_presentation_learned_writer._write_once({"content-1:32": True})
+
+        self.assertNotIn(real_path, writes)
+        self.assertIn(self.learned_store_path, writes)
+        # The write really landed in the throwaway dir, not merely nowhere.
+        self.assertTrue(Path(self.learned_store_path).exists())
+
+    def test_store_loads_from_the_tmpdir_so_a_poisoned_real_file_cannot_leak_in(self) -> None:
+        # The other half of the redirect: a StateManager must read the tmpdir,
+        # so pre-existing junk in the real file can never reach beats_for_track.
+        Path(self.learned_store_path).write_text('{"content-9:16": true}', encoding="utf-8")
+        sm = _make_sm()
+        self.assertEqual(
+            sm._drop_presentation_learned_store.beats_for_track("content-9"), (16.0,)
+        )
+        # And the fixture track this module uses starts clean every test.
+        self.assertEqual(
+            sm._drop_presentation_learned_store.beats_for_track("content-1"), ()
+        )
 
 
 if __name__ == "__main__":
