@@ -84,5 +84,42 @@ def test_editing_control_clears_default_tag_and_reveals_reset(
     expect(duration_input).to_have_value("32")
 
 
+def test_close_after_save_skips_discard_modal(page: Page, led_pad_server) -> None:
+    """AWR-254: dirty close compares against last save, not editor-open snapshot."""
+    _open_editor(page, led_pad_server)
+
+    duration_input = page.locator('input[data-param="duration_beats"]')
+    duration_input.fill("40")
+    duration_input.dispatch_event("input")
+    expect(page.locator("#dirtyText")).to_contain_text("Unsaved changes")
+    expect(page.locator("#saveLookBtn")).to_be_enabled()
+
+    page.locator("#saveLookBtn").click()
+    expect(page.locator("#dirtyText")).to_contain_text("Draft saved")
+    expect(page.locator("#saveLookBtn")).to_be_disabled()
+
+    page.locator("#closeEditorBtn").click()
+    expect(page.locator("#modal")).to_be_hidden()
+    expect(page.locator("#editorDrawer")).to_be_hidden()
+
+
+def test_close_with_unsaved_edits_shows_discard_modal(page: Page, led_pad_server) -> None:
+    """AWR-254: closing with edits since last save still asks before discarding."""
+    _open_editor(page, led_pad_server)
+
+    duration_input = page.locator('input[data-param="duration_beats"]')
+    duration_input.fill("44")
+    duration_input.dispatch_event("input")
+
+    page.locator("#closeEditorBtn").click()
+    expect(page.locator("#modal")).to_be_visible()
+    expect(page.locator("#modalTitle")).to_have_text("Discard unsaved changes?")
+    expect(page.locator("#modalText")).to_contain_text("edits since your last save")
+
+    page.locator('#modalActions button:has-text("Discard")').click()
+    expect(page.locator("#modal")).to_be_hidden()
+    expect(page.locator("#editorDrawer")).to_be_hidden()
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -3,7 +3,7 @@
   const moveBanks = ["ambient", "groove", "buildup", "pre_drop", "drop", "post_drop", "breakdown", "utility"];
   const bankLabels = {drafts:"Drafts", ambient:"Ambient", groove:"Groove", buildup:"Buildup", pre_drop:"Pre-Drop", drop:"Drop", post_drop:"Post-Drop", breakdown:"Breakdown", utility:"Utility", other:"Other"};
   const bankColors = {drafts:"var(--lab)", ambient:"var(--role-ambient)", groove:"var(--role-groove)", buildup:"var(--role-buildup)", drop:"var(--role-drop)", post_drop:"var(--role-postdrop)", breakdown:"var(--role-breakdown)", utility:"var(--role-utility)", other:"var(--border)"};
-  const state = {config:null, banks:{}, renders:[], renderMap:new Map(), palettes:[], activeBank:"drafts", editor:null, openSnapshot:null, cleanSnapshot:null, updateTimer:null, lastFocus:null, playingLook:""};
+  const state = {config:null, banks:{}, renders:[], renderMap:new Map(), palettes:[], activeBank:"drafts", editor:null, cleanSnapshot:null, updateTimer:null, lastFocus:null, playingLook:""};
   const $ = (id) => document.getElementById(id);
   const api = window.LedPadApi;
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
@@ -151,7 +151,6 @@
     const meta = (((state.config.config._pad_meta || {}).looks || {})[name] || {});
     const engine = state.config.config.color_engine || {};
     state.editor = {name, look, params: JSON.parse(JSON.stringify(look.params || {})), cue_beats: meta.cue_beats || 16, slot_fill: ((engine.slot_fill_strategy_by_look || {})[name] || "gradient_even"), mono_chance: ((engine.slot_mono_chance_by_look || {})[name] || 0), locked_palette: ((engine.locked_palette_by_look || {})[name] || "")};
-    state.openSnapshot = snapshotEditor();
     state.cleanSnapshot = snapshotEditor();
     renderEditor();
     $("editorDrawer").hidden = false;
@@ -360,8 +359,8 @@
     $("modalText").innerHTML = html;
   }
   function closeEditor(force) {
-    if (!force && snapshotEditor() !== state.openSnapshot) {
-      confirmModal("Discard editor changes?", "Cancel discards changes since opening this editor.", "Discard", () => closeEditor(true));
+    if (!force && snapshotEditor() !== state.cleanSnapshot) {
+      confirmModal("Discard unsaved changes?", "You have edits since your last save. Discard them and close?", "Discard", () => closeEditor(true));
       return;
     }
     $("editorDrawer").hidden = true; state.editor = null; if (state.lastFocus) state.lastFocus.focus(); renderCards();

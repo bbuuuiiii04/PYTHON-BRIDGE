@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: software-tested
-last_verified_commit: b3a255a
+last_verified_commit: b7ccfcb
 last_verified_date: 2026-07-15
-validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (live-apply + variant switch + preview), Round 2 (param_specs sliders/toggles, slot swatches, JSON demoted to Advanced), Round 3 (rejected-drafts filter, draft delete), QR same-network access, the iOS/iPad touch pass, the editor unset-param-defaults fix, the AWR-193 pad/lab overhaul (accept snapshot, decoupled preview, archive flow, fn fallback, effective bounds, color pickers + regime badges, reconnect, freshness watchdog + live fingerprint + no-cache), the AWR-202 commit read-modify-merge with the gate fix that tracks look CONTENT (`touched`) separately from role-bank PLACEMENT (`moved`) so a params-only edit keeps the look's LIVE bank while an explicit pad move still applies, AWR-240 pad offline v2 stand-down so Test Palette still injects slot_colors, AWR-241 Template Lab beat meter + metronome click (preview exact / live server-synced), AWR-242 Template Lab UX overhaul (search/filter/group draft list, target_role phrase tags, settable timing_mode, detail restructure, health strip + self-test), AWR-243 Template Lab functional fix round (collision banner gate, selected-draft list pin, ownership takeover catch, applied:false hint, live test_palette for lab play, header/phone/preview/health/utility UX), AWR-245 Template Lab Strip|Room preview hookup (pad serves sim view JS + profile read-only; fail-soft; preview-only honesty), AWR-247 Template Lab preview length (default full cue_beats; 2/4 bars / full control), AWR-248 Pad|Lab|Sim cross-nav (plain links to :8767), and AWR-250 Lab Room preview re-fetches sim profile on Preview / Room toggle so active_layout changes from Sim show without reload; SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
+validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (live-apply + variant switch + preview), Round 2 (param_specs sliders/toggles, slot swatches, JSON demoted to Advanced), Round 3 (rejected-drafts filter, draft delete), QR same-network access, the iOS/iPad touch pass, the editor unset-param-defaults fix, the AWR-193 pad/lab overhaul (accept snapshot, decoupled preview, archive flow, fn fallback, effective bounds, color pickers + regime badges, reconnect, freshness watchdog + live fingerprint + no-cache), the AWR-202 commit read-modify-merge with the gate fix that tracks look CONTENT (`touched`) separately from role-bank PLACEMENT (`moved`) so a params-only edit keeps the look's LIVE bank while an explicit pad move still applies, AWR-240 pad offline v2 stand-down so Test Palette still injects slot_colors, AWR-241 Template Lab beat meter + metronome click (preview exact / live server-synced), AWR-242 Template Lab UX overhaul (search/filter/group draft list, target_role phrase tags, settable timing_mode, detail restructure, health strip + self-test), AWR-243 Template Lab functional fix round (collision banner gate, selected-draft list pin, ownership takeover catch, applied:false hint, live test_palette for lab play, header/phone/preview/health/utility UX), AWR-245 Template Lab Strip|Room preview hookup (pad serves sim view JS + profile read-only; fail-soft; preview-only honesty), AWR-247 Template Lab preview length (default full cue_beats; 2/4 bars / full control), AWR-248 Pad|Lab|Sim cross-nav (plain links to :8767), AWR-250 Lab Room preview re-fetches sim profile on Preview / Room toggle so active_layout changes from Sim show without reload, and AWR-254 pad look-editor close dirty check (compares against last Save, not editor-open snapshot); SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # LED Pad
@@ -521,6 +521,10 @@ runtime/API behavior change):
 - UI vocabulary: the draft-commit button now reads **Apply** (confirm dialog "Apply draft to live
   config"); the editor's look-level button stays **Save**, and `#dirtyText` reads "Draft saved" /
   "Unsaved changes". API routes are unchanged (`/api/commit` keeps its name).
+- **Editor close dirty check (AWR-254).** Closing the look editor compares against the last
+  successful Save (or the state at open if you never saved). Save then close exits silently; only
+  edits since the last save show "Discard unsaved changes?" / "You have edits since your last
+  save. Discard them and close?".
 - Bank tabs use a 3px bottom rail in the bank's role color and scroll inside the tab strip on
   narrow viewports. This also fixes a pre-existing defect the frontend test harness caught at
   baseline: the unwrapped tab row previously forced horizontal page scroll at iPhone width
@@ -547,6 +551,10 @@ hookup (pad read-only sim routes + Lab toggle; route unit tests in `tests/test_l
 JS toggle/fail-soft is code-review + Claude e2e after pad restart). AWR-247 defaults Preview to the
 draft's full `cue_beats` (was silently capped at 8) and adds a 2 bars / 4 bars / Full cue control
 (`labPreviewLength`); covered by `test_lab_preview_default_beats_equals_full_cue_beats`.
+AWR-254 fixes the pad look-editor close guard so it compares against the last successful Save
+(not the snapshot taken when the editor opened); covered by
+`tests/frontend/test_led_pad_defaults.py` (`test_close_after_save_skips_discard_modal`,
+`test_close_with_unsaved_edits_shows_discard_modal`).
 AWR-193/241/242/243/245/247 JS/UI behavior otherwise has no automated harness — code-review +
 manual-smoke covered only (registry `production_collision` + session lab palette live-update + sim
 routes + preview default beats are unit-tested). Locked Palette and renderer param unlock behavior
