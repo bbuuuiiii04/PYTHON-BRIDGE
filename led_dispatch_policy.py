@@ -2189,11 +2189,17 @@ class LEDDispatchPolicyMixin:
         return names if names else None
 
     def _led_look_preference_predicate(self, anchor_beat: float | None = None) -> Any:
-        # Return independently fail-open narrowing terms in authority order: v2
-        # dressing, F2 family×tier routing, then F4 euphoric bright preference.
-        # The director applies each term to the current subset, so an empty later
-        # intersection keeps the earlier routing choice instead of reopening the
-        # full bank.
+        # Return independently fail-open narrowing terms in authority order: F2
+        # family×tier routing FIRST, then v2 dressing, then F4 euphoric bright.
+        # AWR-257-B: the family/tier pool is the musical guarantee and must be the
+        # HARD rule -- dressing only refines WITHIN it. The director applies each
+        # term to the current subset and fails open on an empty intersection, so
+        # putting the family term first means dressing can narrow the family pool
+        # but can never replace it. (The old order applied dressing first; when it
+        # preferred strobes and the family chase-pool then intersected empty, the
+        # chases were silently dropped and a wrong-pool look fired -- live proof
+        # 2026-07-16, a NEUTRAL T1 drop firing a WALL-T3 strobe look.) The
+        # empty-intersection fail-open semantics themselves are unchanged.
         # AWR-257: anchor_beat (advances pass the section true drop) routes the
         # F2 term to the section's pool; None keeps today's active_drop_beat path
         # AND the exact no-arg call the default drop path has always made.
@@ -2205,10 +2211,10 @@ class LEDDispatchPolicyMixin:
         )
         bright = self._led_f4_euphoric_bright()
         preds = []
-        if base is not None:
-            preds.append(base)
         if f2_names:
             preds.append(lambda name, s=f2_names: name in s)
+        if base is not None:
+            preds.append(base)
         if bright:
             preds.append(lambda name, s=bright: name in s)
         if not preds:

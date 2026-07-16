@@ -259,6 +259,136 @@ class TestLedPoolGovernance(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# D5b — AWR-257-B preference-term authority order (family pool is the HARD rule)
+# ---------------------------------------------------------------------------
+def _apply_pref(preds, candidates):
+    """The director's fail-open narrowing loop (led_look_director.py:507-510):
+    each term narrows the surviving set, but an empty intersection is skipped."""
+    surviving = list(candidates)
+    if preds is None:
+        return surviving
+    for pred in preds:
+        narrowed = [c for c in surviving if pred(c)]
+        if narrowed:
+            surviving = narrowed
+    return surviving
+
+
+class _PrefOrderHost(P.LEDDispatchPolicyMixin):
+    """Drives the three preference terms directly so the composed ORDER is the
+    only thing under test (each term's own logic is pinned by D5 / F4 suites)."""
+    def __init__(self, *, f2_names=None, dressing=None, bright=None):
+        self._f2 = set(f2_names) if f2_names else None
+        self._dressing = dressing        # callable(name)->bool, or None
+        self._bright = set(bright) if bright else None
+
+    def _led_f2_drop_look_names(self, anchor_beat=None):
+        return set(self._f2) if self._f2 else None
+
+    def _led_v2_look_preference_predicate(self):
+        return self._dressing
+
+    def _led_f4_euphoric_bright(self):
+        return set(self._bright) if self._bright else None
+
+
+# Tonight's live shape: NEUTRAL T1 drop, family pool = 4 chases, dressing
+# prefers strobes. The 4 chases and the strobes never intersect.
+_CHASES = ["rt_drop_chase_blue", "rt_drop_chase_red",
+           "rt_drop_chase_green", "rt_drop_chase_cyan"]
+_STROBES = ["rt_drop_strobe_red_white", "rt_drop_strobe_blue"]
+_prefers_strobes = lambda n: "strobe" in n
+
+
+class TestPreferenceAuthorityOrder(unittest.TestCase):
+    def test_family_pool_wins_when_dressing_rejects_all_of_it(self):
+        # Regression pin of the 2026-07-16 "The Ceiling" failure: dressing that
+        # accepts ONLY strobes must NOT drag the draw out of the chase family
+        # pool. Family term is first, so dressing's empty intersection fails open.
+        host = _PrefOrderHost(f2_names=_CHASES, dressing=_prefers_strobes)
+        preds = host._led_look_preference_predicate()
+        surviving = _apply_pref(preds, _CHASES + _STROBES)
+        self.assertEqual(set(surviving), set(_CHASES))
+        for name in surviving:
+            self.assertIn("chase", name)   # never a wrong-pool strobe
+
+    def test_dressing_refines_within_pool_when_they_overlap(self):
+        # Pool holds 2 dressing-compatible looks -> the draw comes from those 2.
+        pool = ["rt_drop_chase_blue", "rt_drop_chase_red",
+                "rt_drop_strobe_blue", "rt_drop_strobe_cyan"]
+        host = _PrefOrderHost(f2_names=pool, dressing=_prefers_strobes)
+        preds = host._led_look_preference_predicate()
+        surviving = _apply_pref(preds, pool + ["rt_drop_white_aggressive"])
+        self.assertEqual(
+            set(surviving), {"rt_drop_strobe_blue", "rt_drop_strobe_cyan"})
+
+    def test_f4_bright_applies_last_within_surviving_set(self):
+        # Bright narrows AFTER family+dressing, and only within what survives:
+        # chase_red is in both the family pool and bright; white_aggressive is in
+        # bright but was never in the pool, so it can never surface.
+        host = _PrefOrderHost(
+            f2_names=["rt_drop_chase_blue", "rt_drop_chase_red"],
+            bright={"rt_drop_chase_red", "rt_drop_white_aggressive"})
+        preds = host._led_look_preference_predicate()
+        surviving = _apply_pref(
+            preds, ["rt_drop_chase_blue", "rt_drop_chase_red",
+                    "rt_drop_white_aggressive"])
+        self.assertEqual(surviving, ["rt_drop_chase_red"])
+        # And bright fails open (never empties the set) when it misses the pool.
+        host2 = _PrefOrderHost(
+            f2_names=["rt_drop_chase_blue", "rt_drop_chase_red"],
+            bright={"rt_drop_white_aggressive"})
+        surviving2 = _apply_pref(
+            host2._led_look_preference_predicate(),
+            ["rt_drop_chase_blue", "rt_drop_chase_red"])
+        self.assertEqual(
+            set(surviving2), {"rt_drop_chase_blue", "rt_drop_chase_red"})
+
+    def test_advance_path_obeys_same_order(self):
+        # The in-section advance entry (_dispatch_led_section_advance) builds the
+        # SAME predicate (with an explicit anchor) and hands it to commit_role.
+        # Drive the real entry with a recording director and assert the drawn
+        # look stayed in the chase family pool despite strobe-preferring dressing.
+        drawn = {}
+
+        def commit_role(role, diy_eligible=None, look_preference=None):
+            surviving = _apply_pref(look_preference, _CHASES + _STROBES)
+            drawn["look"] = surviving[0]
+            return SimpleNamespace(look=surviving[0])
+
+        class _AdvanceHost(_PrefOrderHost):
+            _led_color_engine = None
+            _led_manual_override = False
+            _led_smart_drop_blackout_key = None
+            _led_v2_latch = False
+            _led_last_auto_role_key = None
+            _led_last_event = None
+            _led_last_error = None
+            _led_look_director = SimpleNamespace(commit_role=commit_role)
+
+            def _led_blackout_active(self):
+                return False
+
+            def _led_inject_engine_colors(self, decision, **_):
+                return decision
+
+            def _led_inject_f4_seasoning(self, decision, **_):
+                return decision
+
+            def _led_send_decision(self, decision, **_):
+                drawn["sent"] = str(getattr(decision, "look", ""))
+
+        host = _AdvanceHost(f2_names=_CHASES, dressing=_prefers_strobes)
+        sp_state = SimpleNamespace(
+            section_advance_true_drop_beat=64.0, section_advance_index=0)
+        d = SimpleNamespace(
+            load_gen=0, meta=SimpleNamespace(content_id="", filepath=""))
+        host._dispatch_led_section_advance(active=1, d=d, sp_state=sp_state)
+        self.assertIn("chase", drawn["look"])          # family pool held
+        self.assertEqual(drawn["sent"], drawn["look"])  # and it was dispatched
+
+
+# ---------------------------------------------------------------------------
 # D6 — laser byte-identity pin
 # ---------------------------------------------------------------------------
 class TestLaserByteIdentity(unittest.TestCase):
