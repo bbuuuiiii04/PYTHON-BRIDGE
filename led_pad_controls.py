@@ -179,6 +179,111 @@ PARAM_DEFAULT_OVERRIDES: dict[str, dict[str, Any]] = {
 }
 
 
+# AWR-262: curated pad UI surface. Allowlist (REALTIME_EFFECT_PARAM_KEYS) stays
+# wide for legacy params; the editor only shows keys that actually change
+# THIS effect's frames. BeatSyncEngine motion knobs are NOT universal — only
+# comet-motion / retrigger classes consume them (FABLE-3 A7).
+_COMET_MOTION_KEYS: tuple[str, ...] = (
+    "sync_mode",
+    "beat_division",
+    "travel_beats",
+    "width",
+    "trail_beats",
+    "max_pulses",
+    "spawn_on_wrap",
+    "reverse",
+    # "heads" intentionally omitted — deprecated, no consumer.
+)
+
+# Per-effect: only keep sync knobs when the render path actually uses restart /
+# bucket behavior (FABLE-3 A7 — verify, don't blanket).
+_RETRIGGER_SYNC_BY_EFFECT: dict[str, tuple[str, ...]] = {
+    "drop_burst": ("sync_mode", "beat_division"),  # decay reads local_t
+    "sparkle": ("sync_mode", "beat_division"),  # seed^bucket on spawn
+    # beat_chase / beat_strobe / color_pulse / bar_wipe: render from beat phase
+    # only — retrigger vs continuous is visually identical on a forward grid.
+}
+
+# Class-C effects that still read selected _SYNC_PARAM_KEYS from params
+# (they ride the blanket allowlist but the renderer actually consumes them).
+_CLASS_C_EXTRA_SYNC: dict[str, tuple[str, ...]] = {
+    "groove_center_chase": ("travel_beats",),
+    "post_drop_firework_chase": ("travel_beats",),
+    "rt_post_drop_chase": ("travel_beats", "width"),
+    "rt_post_drop_nebula": ("travel_beats", "width"),
+    "rt_drop_chase": ("travel_beats", "width"),
+    "rt_drop_nebula": ("travel_beats", "width"),
+    "rt_groove_chase": ("width",),
+    "rt_groove_nebula": ("width",),
+    "rt_post_drop_center_comet": ("width",),
+    "rainbow_ordered": ("width",),
+    "palette_comet": ("width",),
+}
+
+# Allowlisted but unread / no visible frame delta for that effect.
+_CLASS_C_HIDE: dict[str, frozenset[str]] = {
+    "rt_post_drop_firework_remnants": frozenset(
+        {"sparkle_density", "sparkle_size", "sparkle_life_s"}
+    ),
+    "drop_strobe_colorway": frozenset({"duration_beats"}),
+    "rainbow_ordered": frozenset({"duration_beats"}),
+    "palette_comet": frozenset({"duration_beats"}),
+    "drop_firework_explosion": frozenset({"duration_beats"}),
+    # Short-period loops: duration wrap lands on an identical animation phase
+    # (cue 0 vs cue 8 look the same). Keep duration on ramps/builds where the
+    # pad preview actually changes.
+    "drop_center_burst_blue_cyan": frozenset({"duration_beats"}),
+    "drop_white_aggressive": frozenset({"duration_beats"}),
+    "groove_center_burst_retract": frozenset({"duration_beats"}),
+    "groove_center_chase": frozenset({"duration_beats"}),
+    "post_drop_center_comet_blue_cyan": frozenset({"duration_beats"}),
+    "post_drop_firework_chase": frozenset({"duration_beats"}),
+    "rt_drop_center_burst": frozenset({"duration_beats"}),
+    "rt_groove_heartbeat": frozenset({"duration_beats"}),
+    # color_b is allowlisted for engine multi-inject; baked probe is dominated
+    # by color_a / spark path in the short surge window.
+    "drop_firework_explosion_2": frozenset({"duration_beats", "color_b"}),
+}
+
+
+def _build_effect_visible_keys() -> dict[str, tuple[str, ...]]:
+    out: dict[str, tuple[str, ...]] = {}
+    for name in REALTIME_EFFECT_NAMES:
+        allowed = REALTIME_EFFECT_PARAM_KEYS[name]
+        if name in _OVERLAP_EFFECTS:
+            keys = [k for k in _COMET_MOTION_KEYS if k in allowed]
+            for key in sorted(allowed - _SYNC_PARAM_KEYS):
+                if key != "duration_beats":
+                    keys.append(key)
+            out[name] = tuple(keys)
+        elif name in _RETRIGGER_EFFECTS:
+            keys = [
+                k
+                for k in _RETRIGGER_SYNC_BY_EFFECT.get(name, ())
+                if k in allowed
+            ]
+            keys.extend(sorted(allowed - _SYNC_PARAM_KEYS))
+            out[name] = tuple(keys)
+        else:
+            hide = _CLASS_C_HIDE.get(name, frozenset())
+            keys = [k for k in sorted(allowed - _SYNC_PARAM_KEYS) if k not in hide]
+            for key in _CLASS_C_EXTRA_SYNC.get(name, ()):
+                if key in allowed and key not in hide and key not in keys:
+                    keys.append(key)
+            out[name] = tuple(keys)
+    return out
+
+
+EFFECT_VISIBLE_KEYS: dict[str, tuple[str, ...]] = _build_effect_visible_keys()
+
+if __debug__:
+    for _name, _keys in EFFECT_VISIBLE_KEYS.items():
+        _allowed = REALTIME_EFFECT_PARAM_KEYS[_name]
+        assert "heads" not in _keys, _name
+        assert set(_keys) <= set(_allowed), (_name, set(_keys) - set(_allowed))
+    assert set(EFFECT_VISIBLE_KEYS) == set(REALTIME_EFFECT_NAMES)
+
+
 RENDER_GROUPS: dict[str, tuple[str, ...]] = {
     "Solid & utility": ("solid", "blackout"),
     "Ambient & breakdown": (
@@ -290,16 +395,46 @@ for _name in (
 
 
 def controls_for(scene_ref: str) -> list[dict[str, Any]]:
+    """Pad-visible controls for ``scene_ref`` (AWR-262 curated surface).
+
+    Validation allowlist stays wider than this list — legacy params remain
+    tolerated; the editor only offers knobs that change this effect.
+    """
     controls: list[dict[str, Any]] = []
     overrides = PARAM_DEFAULT_OVERRIDES.get(str(scene_ref), {})
-    for key in sorted(REALTIME_EFFECT_PARAM_KEYS.get(str(scene_ref), frozenset())):
+    visible = EFFECT_VISIBLE_KEYS.get(str(scene_ref), ())
+    for key in visible:
         meta = dict(CONTROL_META[key])
         meta["key"] = key
         if key in overrides:
             meta["default"] = overrides[key]
+        # Word labels for every choice option (never bare integers).
+        if meta.get("kind") == "choice":
+            labels = dict(meta.get("choice_labels") or {})
+            choices = list(meta.get("choices") or [])
+            meta["choice_options"] = [
+                {
+                    "value": choice,
+                    "label": labels.get(choice) or labels.get(str(choice)) or f"Style {index}",
+                }
+                for index, choice in enumerate(choices, start=1)
+            ]
         controls.append(meta)
     controls.sort(key=lambda item: (bool(item.get("advanced")), str(item.get("label", ""))))
     return controls
+
+
+def visible_param_keys(scene_ref: str) -> frozenset[str]:
+    """Keys the pad editor shows for ``scene_ref``."""
+    return frozenset(EFFECT_VISIBLE_KEYS.get(str(scene_ref), ()))
+
+
+def dropped_params_on_switch(from_ref: str, to_ref: str, params: dict[str, Any]) -> list[str]:
+    """Param keys currently set that the destination effect's UI will drop."""
+    keep = visible_param_keys(to_ref)
+    dropped = [str(key) for key in params if str(key) not in keep]
+    dropped.sort()
+    return dropped
 
 
 def effective_lab_specs(param_specs: dict[str, Any]) -> tuple[dict[str, dict[str, Any]], list[str]]:

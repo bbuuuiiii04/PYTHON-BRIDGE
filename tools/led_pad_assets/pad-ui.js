@@ -211,9 +211,10 @@
     $("strobeLabel").textContent = $("strobeInput").checked ? "On" : "Off";
     $("lockedPaletteSelect").innerHTML = state.palettes.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join("");
     $("lockedPaletteSelect").value = e.locked_palette || state.palettes[0] || "";
-    $("lockedPaletteWrap").hidden = !e.locked_palette;
-    $("followColorBtn").classList.toggle("active", !e.locked_palette);
-    $("lockedPaletteBtn").classList.toggle("active", Boolean(e.locked_palette));
+    const locked = Boolean(e.locked_palette);
+    $("lockedPaletteWrap").hidden = !locked;
+    $("followColorBtn").classList.toggle("active", !locked);
+    $("lockedPaletteBtn").classList.toggle("active", locked);
     const safety = !!((state.config.config.safety || {}).allow_strobe);
     $("strobeInput").disabled = !safety;
     $("strobeWarning").textContent = !safety ? "Disabled because safety.allow_strobe is false." : (render && render.strobe && !e.look.allow_strobe ? "Strobe-class renderer requires Strobe allowed before Play." : "");
@@ -221,7 +222,8 @@
     $("slotFillSelect").value = e.slot_fill;
     $("monoChanceInput").value = e.mono_chance;
     $("monoChanceOutput").textContent = e.mono_chance;
-    $("monoChanceWrap").hidden = e.slot_fill !== "random_with_mono_chance";
+    // AWR-262 C3: Solid-chance only in Locked Palette mode.
+    $("monoChanceWrap").hidden = !(locked && e.slot_fill === "random_with_mono_chance");
     renderControls(render);
     $("loopHint").textContent = `Loop is ${$("loopToggle").checked ? "on" : "off"} (session)`;
     setDirty();
@@ -258,19 +260,34 @@
   function renderControls(render) {
     const basic = $("controlRows"), adv = $("advancedRows");
     basic.innerHTML = ""; adv.innerHTML = "";
-    if (!render) return;
+    if (!render) {
+      $("advancedDetails").hidden = true;
+      return;
+    }
     // Engine-colored looks audition with palette-injected colors: badge
-    // rgb-kind and color-signature rows.
-    const engineColored = String((state.editor.look || {}).color_source || "engine") === "engine";
+    // rgb-kind and color-signature rows. Color A/B literals only when
+    // color_source=literal actually applies (AWR-262 C3).
+    const colorSource = String((state.editor.look || {}).color_source || "engine");
+    const engineColored = colorSource === "engine";
+    const showLiteralAB = colorSource === "literal" || !(render && render.slot_based);
     for (const control of render.controls || []) {
+      // Slot looks: Color A/B only when color_source=literal. Non-slot looks
+      // keep their own rgb params (e.g. drop_strobe_colorway).
+      if ((control.key === "color_a" || control.key === "color_b") && !showLiteralAB) {
+        continue;
+      }
       const badged = engineColored && (control.kind === "rgb" || Boolean(control.color_sig));
       (control.advanced ? adv : basic).insertAdjacentHTML("beforeend", controlRow(control, badged));
     }
+    // AWR-262: Advanced motion disappears entirely when empty.
     $("advancedDetails").hidden = !adv.innerHTML;
     document.querySelectorAll("[data-param]").forEach(input => input.addEventListener("input", ev => {
       const key = ev.currentTarget.dataset.param;
       let value = ev.currentTarget.type === "checkbox" ? ev.currentTarget.checked : ev.currentTarget.value;
       if (ev.currentTarget.type === "number" || ev.currentTarget.type === "range") value = Number(value);
+      if (ev.currentTarget.tagName === "SELECT" && ev.currentTarget.dataset.kind === "int-choice") {
+        value = Number(value);
+      }
       if (ev.currentTarget.type === "color") {
         const hex = ev.currentTarget.value;
         value = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
@@ -298,7 +315,18 @@
     let outputText = isSet ? String(value) : (hasDefault ? String(c.default) : "auto");
     let input = "";
     if (c.kind === "bool") input = `<input data-param="${esc(c.key)}" type="checkbox" ${value ? "checked" : ""}>`;
-    else if (c.kind === "choice") input = `<select data-param="${esc(c.key)}">${(c.choices || []).map(v => `<option value="${esc(v)}" ${String(v)===String(value)?"selected":""}>${esc(v)}</option>`).join("")}</select>`;
+    else if (c.kind === "choice") {
+      const options = (c.choice_options && c.choice_options.length)
+        ? c.choice_options
+        : (c.choices || []).map((v, i) => ({value: v, label: `Style ${i + 1}`}));
+      const intChoices = options.every(o => typeof o.value === "number" || /^-?\d+(\.\d+)?$/.test(String(o.value)));
+      input = `<select data-param="${esc(c.key)}"${intChoices ? ' data-kind="int-choice"' : ""}>${options.map(o => {
+        const selected = String(o.value) === String(value) ? "selected" : "";
+        return `<option value="${esc(o.value)}" ${selected}>${esc(o.label)}</option>`;
+      }).join("")}</select>`;
+      const selectedOpt = options.find(o => String(o.value) === String(value));
+      if (selectedOpt) outputText = isSet ? selectedOpt.label : (hasDefault ? selectedOpt.label : "auto");
+    }
     else if (c.kind === "rgb") {
       const rgb = Array.isArray(value) && value.length === 3 ? value : [0, 0, 0];
       const hex = `#${rgb.map(v => Math.max(0, Math.min(255, Math.round(Number(v) || 0))).toString(16).padStart(2, "0")).join("")}`;
@@ -462,13 +490,53 @@
   $("saveLookBtn").addEventListener("click", async () => { try { if (!(await saveCurrentEditor())) return; await refresh(); setDirty(); } catch (err) { showError(err); } });
   $("editorPlayBtn").addEventListener("click", () => playEditor(false));
   $("editorStopBtn").addEventListener("click", () => api.stop().then(refresh).catch(showError));
-  $("rendererSelect").addEventListener("change", ev => { const render = state.renderMap.get(ev.target.value); const allowed = new Set((render.controls || []).map(c => c.key)); state.editor.look.scene_ref = ev.target.value; state.editor.params = Object.fromEntries(Object.entries(state.editor.params).filter(([k]) => allowed.has(k))); renderEditor(); liveUpdate(); });
+  $("rendererSelect").addEventListener("change", ev => {
+    const select = ev.target;
+    const previous = state.editor.look.scene_ref;
+    const next = select.value;
+    const render = state.renderMap.get(next);
+    if (!render) return;
+    const allowed = new Set((render.controls || []).map(c => c.key));
+    const dropped = Object.keys(state.editor.params).filter(k => !allowed.has(k));
+    const applySwitch = () => {
+      state.editor.look.scene_ref = next;
+      state.editor.params = Object.fromEntries(Object.entries(state.editor.params).filter(([k]) => allowed.has(k)));
+      renderEditor();
+      setDirty();
+      liveUpdate();
+    };
+    if (!dropped.length) {
+      applySwitch();
+      return;
+    }
+    const labels = dropped.map(key => {
+      const control = (state.renderMap.get(previous)?.controls || []).find(c => c.key === key);
+      return control ? control.label : key;
+    });
+    // Revert the select until the operator confirms (AWR-262 C13).
+    select.value = previous;
+    confirmModal(
+      "Switch renderer?",
+      `These settings don't apply to ${render.label} and will be dropped: ${labels.join(", ")}.`,
+      "Switch",
+      () => {
+        select.value = next;
+        applySwitch();
+      },
+    );
+  });
   $("followColorBtn").addEventListener("click", () => { state.editor.locked_palette = ""; renderEditor(); setDirty(); liveUpdate(); });
   $("lockedPaletteBtn").addEventListener("click", () => { state.editor.locked_palette = state.editor.locked_palette || state.palettes[0] || ""; renderEditor(); setDirty(); liveUpdate(); });
   $("lockedPaletteSelect").addEventListener("change", ev => { state.editor.locked_palette = ev.target.value; setDirty(); liveUpdate(); });
   $("brightnessInput").addEventListener("input", ev => { state.editor.look.brightness = Number(ev.target.value); $("brightnessOutput").textContent = `${ev.target.value}%`; setDirty(); });
   $("strobeInput").addEventListener("change", ev => { state.editor.look.allow_strobe = ev.target.checked; $("strobeLabel").textContent = ev.target.checked ? "On" : "Off"; setDirty(); });
-  $("slotFillSelect").addEventListener("change", ev => { state.editor.slot_fill = ev.target.value; $("monoChanceWrap").hidden = state.editor.slot_fill !== "random_with_mono_chance"; setDirty(); liveUpdate(); });
+  $("slotFillSelect").addEventListener("change", ev => {
+    state.editor.slot_fill = ev.target.value;
+    const locked = Boolean(state.editor.locked_palette);
+    $("monoChanceWrap").hidden = !(locked && state.editor.slot_fill === "random_with_mono_chance");
+    setDirty();
+    liveUpdate();
+  });
   $("monoChanceInput").addEventListener("input", ev => { state.editor.mono_chance = Number(ev.target.value); $("monoChanceOutput").textContent = ev.target.value; setDirty(); liveUpdate(); });
   window.addEventListener("beforeunload", (ev) => {
     if (!(state.editor && snapshotEditor() !== state.cleanSnapshot)) return;

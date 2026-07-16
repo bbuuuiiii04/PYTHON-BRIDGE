@@ -17,10 +17,13 @@ from rb_ss_bridge_v2.govee_realtime_runner import _COLOR_SIG_KEYS  # noqa: E402
 from rb_ss_bridge_v2.led_pad_controls import (  # noqa: E402
     CONTROL_META,
     EFFECT_TIMING_MODES,
+    EFFECT_VISIBLE_KEYS,
     PARAM_DEFAULT_OVERRIDES,
     controls_for,
+    dropped_params_on_switch,
     effective_lab_specs,
     render_catalog,
+    visible_param_keys,
 )
 
 
@@ -36,9 +39,41 @@ class LedPadControlsTests(unittest.TestCase):
 
         self.assertTrue(keys)
         self.assertEqual(keys, set(CONTROL_META))
+
+    def test_visible_controls_are_curated_subset_of_allowlist(self) -> None:
+        """AWR-262: pad UI ≠ full allowlist; heads never shown."""
+        self.assertEqual(set(EFFECT_VISIBLE_KEYS), set(REALTIME_EFFECT_NAMES))
         for scene_ref, allowed in REALTIME_EFFECT_PARAM_KEYS.items():
             control_keys = {item["key"] for item in controls_for(scene_ref)}
-            self.assertEqual(control_keys, set(allowed))
+            self.assertEqual(control_keys, set(EFFECT_VISIBLE_KEYS[scene_ref]))
+            self.assertTrue(control_keys <= set(allowed), scene_ref)
+            self.assertNotIn("heads", control_keys)
+
+        # Solid / Drop Strobe: no comet-motion knobs.
+        self.assertEqual(visible_param_keys("solid"), frozenset({"color"}))
+        self.assertFalse({"travel_beats", "width", "max_pulses", "heads"} & visible_param_keys("beat_strobe"))
+        self.assertFalse({"travel_beats", "width", "max_pulses", "heads"} & visible_param_keys("drop_strobe_colorway"))
+        # Comet-motion look: motion params present, heads absent.
+        comet = visible_param_keys("groove_chase_blue")
+        self.assertTrue({"sync_mode", "beat_division", "travel_beats", "width", "trail_beats"} <= comet)
+        self.assertNotIn("heads", comet)
+
+    def test_choice_controls_ship_word_labels(self) -> None:
+        controls = {item["key"]: item for item in controls_for("rt_groove_heartbeat")}
+        mode = controls["color_mode"]
+        self.assertEqual(mode["kind"], "choice")
+        labels = {opt["value"]: opt["label"] for opt in mode["choice_options"]}
+        self.assertEqual(labels[2], "Head1 → slot 1, Head2 → slot 3")
+        for opt in mode["choice_options"]:
+            self.assertFalse(str(opt["label"]).isdigit(), opt)
+
+    def test_dropped_params_on_renderer_switch(self) -> None:
+        dropped = dropped_params_on_switch(
+            "groove_chase_blue",
+            "solid",
+            {"travel_beats": 2.0, "color": [1, 2, 3], "heads": 1},
+        )
+        self.assertEqual(dropped, ["heads", "travel_beats"])
 
     def test_strobe_and_slot_flags_match_renderer_sets(self) -> None:
         catalog = {item["name"]: item for item in render_catalog()}
@@ -214,11 +249,14 @@ class LedPadControlDefaultsTests(unittest.TestCase):
         for null_key in ("travel_beats", "width", "trail_beats", "sync_mode"):
             self.assertIsNone(CONTROL_META[null_key]["default"], null_key)
 
-        # Confirmed dead keys: never consumed by any params.get in this file.
+        # Confirmed dead in the renderer source (no params.get). heads stays
+        # UI-hidden (AWR-262). max_pulses/spawn_on_wrap/reverse are consumed by
+        # BeatSyncEngine for comet-motion looks — still no renderer params.get.
         for dead_key in ("heads", "max_pulses", "spawn_on_wrap", "reverse"):
             self.assertIsNone(CONTROL_META[dead_key]["default"], dead_key)
             self.assertNotIn(f'params.get("{dead_key}"', source, dead_key)
             self.assertNotIn(f"params.get('{dead_key}'", source, dead_key)
+        self.assertNotIn("heads", visible_param_keys("groove_chase_blue"))
 
     def test_travel_beats_and_width_overrides_match_source_literals(self) -> None:
         expected = {

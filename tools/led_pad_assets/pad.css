@@ -135,6 +135,9 @@ main { padding: var(--pad); }
 .editor-form { padding: var(--pad); overflow-y: auto; display: flex; flex-direction: column; gap: var(--pad); }
 .editor-form section { border-bottom: 1px solid var(--border); padding-bottom: var(--pad); }
 .editor-form label:not(.control-row) { min-height: 40px; display: grid; grid-template-columns: minmax(120px, 1fr) 1.5fr auto; align-items: center; gap: 10px; margin: 8px 0; }
+/* AWR-262 C3: label display:grid above must not defeat the hidden attribute. */
+.editor-form label[hidden],
+.editor-form [hidden] { display: none !important; }
 .control-row { min-height: 40px; display: grid; grid-template-columns: minmax(120px, 1fr) 1.5fr auto auto; align-items: center; gap: 10px; margin: 8px 0; }
 .control-row output { display: flex; align-items: center; gap: 6px; justify-content: flex-end; }
 .default-tag { border: 1px solid var(--text-dim); color: var(--text-dim); border-radius: 999px; font-size: 10px; line-height: 1.6; padding: 1px 7px; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }

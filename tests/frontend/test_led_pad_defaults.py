@@ -121,5 +121,52 @@ def test_close_with_unsaved_edits_shows_discard_modal(page: Page, led_pad_server
     expect(page.locator("#editorDrawer")).to_be_hidden()
 
 
+def _open_named_look(page: Page, led_pad_server, look_name: str) -> None:
+    page.goto(led_pad_server.base_url)
+    expect(page.locator(".look-grid")).to_be_visible()
+    payload = page.evaluate("() => fetch('/api/config').then((r) => r.json())")
+    bank = next(bank for bank, names in payload["banks"].items() if look_name in names)
+    page.locator(f'[data-bank="{bank}"]').click()
+    page.locator(f'[data-action="edit"][data-name="{look_name}"]').click()
+    expect(page.locator("#editorDrawer")).to_be_visible()
+
+
+def test_awr262_solid_and_drop_strobe_hide_motion_params(page: Page, led_pad_server) -> None:
+    """AWR-262: continuous/strobe looks show zero comet-motion knobs."""
+    _open_named_look(page, led_pad_server, "rt_drop_strobe_blue")
+    for key in ("travel_beats", "width", "trail_beats", "max_pulses", "heads", "sync_mode"):
+        expect(page.locator(f'[data-param="{key}"]')).to_have_count(0)
+    expect(page.locator("#advancedDetails")).to_be_hidden()
+
+    # Switch renderer to solid — still no motion knobs; honesty modal if params drop.
+    page.locator("#rendererSelect").select_option("solid")
+    modal = page.locator("#modal")
+    if modal.is_visible():
+        page.locator('#modalActions button:has-text("Switch")').click()
+    expect(page.locator('[data-param="travel_beats"]')).to_have_count(0)
+    expect(page.locator('[data-param="heads"]')).to_have_count(0)
+    expect(page.locator("#advancedDetails")).to_be_hidden()
+
+
+def test_awr262_comet_motion_look_shows_motion_params(page: Page, led_pad_server) -> None:
+    """AWR-262: comet-motion look shows motion knobs; never Comet Count/heads."""
+    _open_named_look(page, led_pad_server, "rt_groove_chase_blue")
+    expect(page.locator('[data-param="travel_beats"]')).to_be_visible()
+    expect(page.locator('[data-param="width"]')).to_be_visible()
+    expect(page.locator("#advancedDetails")).to_be_visible()
+    expect(page.locator('[data-param="heads"]')).to_have_count(0)
+    expect(page.get_by_text("Comet Count")).to_have_count(0)
+
+
+def test_awr262_color_mode_is_word_dropdown(page: Page, led_pad_server) -> None:
+    """AWR-262 C4: Color Mode is a select with word labels, not bare integers."""
+    _open_named_look(page, led_pad_server, "rt_groove_heartbeat")
+    select = page.locator('select[data-param="color_mode"]')
+    expect(select).to_be_visible()
+    labels = select.locator("option").all_text_contents()
+    assert any("slot" in label.lower() for label in labels)
+    assert not any(label.strip().isdigit() for label in labels)
+
+
 if __name__ == "__main__":
     unittest.main()
