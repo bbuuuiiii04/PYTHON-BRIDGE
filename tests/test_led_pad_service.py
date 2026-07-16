@@ -520,6 +520,86 @@ class LedPadServiceTests(unittest.TestCase):
             # What actually played DID carry the injected palette colors.
             self.assertIn("slot_colors", playback.play_calls[0]["spec"]["params"])
 
+    def test_lab_accept_persists_editor_phrase_without_prior_play(self) -> None:
+        """AWR-251 M-1: Accept with dirty phrase writes phrase + accepted status."""
+        with tempfile.TemporaryDirectory() as td:
+            service, _playback = self._lab_service(td)
+            service.lab_save({
+                "name": "pulse", "kind": "slot", "fn": "pulse",
+                "params": {"level": 0.3}, "cue_beats": 8,
+                "target_role": "", "timing_mode": "unknown", "brief": "old",
+            })
+            result = service.lab_accept({
+                "name": "pulse",
+                "params": {"level": 0.3},
+                "target_role": "drop",
+                "timing_mode": "beat",
+                "brief": "walkthrough phrase",
+                "notes": "kept",
+                "cue_beats": 16,
+            })
+            entry = service._lab.get("pulse")
+            disk = json.loads((Path(td) / "led_lab" / "drafts.json").read_text(encoding="utf-8"))
+            disk_entry = next(e for e in disk["entries"] if e["name"] == "pulse")
+
+            self.assertTrue(result["ok"])
+            self.assertFalse(result["snapshotted"])
+            self.assertEqual(entry["status"], "accepted")
+            self.assertEqual(entry["target_role"], "drop")
+            self.assertEqual(entry["timing_mode"], "beat")
+            self.assertEqual(entry["brief"], "walkthrough phrase")
+            self.assertEqual(entry["notes"], "kept")
+            self.assertEqual(entry["cue_beats"], 16.0)
+            self.assertEqual(disk_entry["status"], "accepted")
+            self.assertEqual(disk_entry["target_role"], "drop")
+            self.assertEqual(disk_entry["brief"], "walkthrough phrase")
+
+    def test_lab_reject_persists_editor_fields(self) -> None:
+        """AWR-251 M-1: Reject also saves what the editor shows."""
+        with tempfile.TemporaryDirectory() as td:
+            service, _playback = self._lab_service(td)
+            service.lab_save({
+                "name": "pulse", "kind": "slot", "fn": "pulse",
+                "params": {"level": 0.2}, "cue_beats": 8, "brief": "a",
+            })
+            result = service.lab_reject({
+                "name": "pulse",
+                "params": {"level": 0.7},
+                "brief": "rejected look",
+                "notes": "nope",
+                "target_role": "groove",
+                "timing_mode": "time",
+                "cue_beats": 32,
+            })
+            entry = service._lab.get("pulse")
+            self.assertTrue(result["ok"])
+            self.assertEqual(entry["status"], "rejected")
+            self.assertEqual(entry["params"], {"level": 0.7})
+            self.assertEqual(entry["brief"], "rejected look")
+            self.assertEqual(entry["target_role"], "groove")
+
+    def test_lab_update_does_not_mutate_drafts_json(self) -> None:
+        """AWR-251 M-2: /api/lab/update is runtime-apply only."""
+        with tempfile.TemporaryDirectory() as td:
+            service, playback = self._lab_service(td)
+            service.lab_save({
+                "name": "pulse", "kind": "slot", "fn": "pulse",
+                "params": {"level": 0.3}, "cue_beats": 8,
+            })
+            drafts_path = Path(td) / "led_lab" / "drafts.json"
+            before = drafts_path.read_text(encoding="utf-8")
+            service.lab_play({"name": "pulse", "params": {"level": 0.3}})
+            playback.update_calls.clear()
+
+            result = service.lab_update({"name": "pulse", "params": {"level": 0.95}})
+            after = drafts_path.read_text(encoding="utf-8")
+
+            self.assertTrue(result["ok"])
+            self.assertTrue(result["applied"])
+            self.assertEqual(before, after)
+            self.assertEqual(service._lab.get("pulse")["params"], {"level": 0.3})
+            self.assertEqual(len(playback.update_calls), 1)
+
     def test_lab_accept_without_play_reports_not_snapshotted(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             service, _playback = self._lab_service(td)
@@ -836,6 +916,27 @@ class SimRoomHookupRouteTests(unittest.TestCase):
         self.assertIn("ensureRoomView({refresh: true})", lab_js)
         self.assertIn("ensureRoomProfile({force:", lab_js)
         self.assertNotIn("fetched once per page load", lab_js)
+
+    def test_awr251_lab_save_contract_wiring(self) -> None:
+        """AWR-251: Accept saves editor; auto-apply never labSave; search is name/brief/notes."""
+        root = Path(__file__).resolve().parents[1]
+        lab_js = (root / "tools" / "led_pad_assets" / "lab.js").read_text(encoding="utf-8")
+        lab_html = (root / "tools" / "led_pad_assets" / "lab.html").read_text(encoding="utf-8")
+        pad_core = (root / "tools" / "led_pad_assets" / "pad-core.js").read_text(encoding="utf-8")
+        self.assertIn("async function acceptDraft(", lab_js)
+        self.assertIn('api.labAccept({...currentPayload(), status: "accepted"})', lab_js)
+        self.assertIn('api.labReject({...currentPayload(), status: "rejected"})', lab_js)
+        self.assertIn("editorMemory", lab_js)
+        self.assertIn("stashEditor()", lab_js)
+        self.assertIn("api.labUpdate({name: state.current.name, params})", lab_js)
+        self.assertNotIn("api.labSave(currentPayload())", lab_js.split("function queueAutoApply")[1].split("function hexByte")[0])
+        self.assertIn('String(e.brief || "").toLowerCase()', lab_js)
+        self.assertIn('String(e.notes || "").toLowerCase()', lab_js)
+        self.assertIn("exactName", lab_js)
+        self.assertIn("⇄ Switch live lights", lab_js)
+        self.assertIn("scrollIntoView", lab_js)
+        self.assertIn("Live apply paused", lab_html)
+        self.assertIn('typeof body === "string" ? {name: body} : body', pad_core)
 
 
 if __name__ == "__main__":

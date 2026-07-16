@@ -383,16 +383,74 @@ class LedSimServiceTests(unittest.TestCase):
         self.assertNotEqual(on_disk["gamma"], local_gamma_edit)
 
     def test_use_action_wires_persist_helper_and_hint(self) -> None:
-        """AWR-250: Use calls useSelectedLayout; hint copy present when picker ≠ active."""
+        """AWR-250/251: Use calls useSelectedLayout; picker preview hint when ≠ active."""
         root = Path(__file__).resolve().parents[1]
         js = (root / "tools" / "led_sim_assets" / "sim-app.js").read_text(encoding="utf-8")
         html = (root / "tools" / "led_sim_assets" / "index.html").read_text(encoding="utf-8")
         self.assertIn("async function useSelectedLayout(", js)
-        self.assertIn('api("GET", "/api/profile")', js)
-        self.assertIn("diskProfile.active_layout = name", js)
+        self.assertIn("async function persistLibraryMutation(", js)
+        self.assertIn("disk.active_layout = name", js)
         self.assertIn("useSelectedLayout()", js)
         self.assertIn('id="layout-active-hint"', html)
-        self.assertIn("Press Use to make this the active layout", js)
+        self.assertIn("previewing — press Use to activate & edit", js)
+        self.assertIn("function isPreviewingLayout(", js)
+        self.assertIn("function displayProfile(", js)
+        self.assertIn("Save changes", html)
+        self.assertIn("persistLibraryMutation((disk) =>", js)
+
+    def test_save_as_persists_layout_to_disk_immediately(self) -> None:
+        """AWR-251 M-3: Save-as must land on disk without a separate Save changes click."""
+        example = json.loads(
+            (Path(__file__).resolve().parents[1] / "config" / "led_sim_profile.example.json").read_text()
+        )
+        example["layouts"] = {"Home": dict(example["layouts"]["Home"])}
+        example["active_layout"] = "Home"
+        with _server(self.profile_path) as port:
+            status, seeded = _request(port, "POST", "/api/profile", example)
+            self.assertEqual(status, 200, seeded)
+
+            # Mimic Save as: GET fresh → add copy → set active → POST.
+            status, fresh = _request(port, "GET", "/api/profile")
+            self.assertEqual(status, 200)
+            disk = json.loads(json.dumps(fresh["profile"]))
+            disk["layouts"]["Copy of Home"] = dict(disk["layouts"]["Home"])
+            disk["active_layout"] = "Copy of Home"
+            status, after = _request(port, "POST", "/api/profile", disk)
+            self.assertEqual(status, 200, after)
+            self.assertTrue(after["ok"])
+            self.assertIn("Copy of Home", after["profile"]["layouts"])
+
+            status, fetched = _request(port, "GET", "/api/profile")
+            self.assertEqual(status, 200)
+            self.assertIn("Copy of Home", fetched["profile"]["layouts"])
+            self.assertEqual(fetched["profile"]["active_layout"], "Copy of Home")
+
+        on_disk = json.loads(self.profile_path.read_text(encoding="utf-8"))
+        self.assertIn("Copy of Home", on_disk["layouts"])
+        self.assertEqual(on_disk["active_layout"], "Copy of Home")
+
+    def test_delete_persists_without_extra_save(self) -> None:
+        """AWR-251 M-3: Delete removes the layout from disk in the same action."""
+        example = json.loads(
+            (Path(__file__).resolve().parents[1] / "config" / "led_sim_profile.example.json").read_text()
+        )
+        home = dict(example["layouts"]["Home"])
+        example["layouts"] = {"Home": home, "Venue": dict(home)}
+        example["active_layout"] = "Home"
+        with _server(self.profile_path) as port:
+            status, seeded = _request(port, "POST", "/api/profile", example)
+            self.assertEqual(status, 200, seeded)
+
+            status, fresh = _request(port, "GET", "/api/profile")
+            disk = json.loads(json.dumps(fresh["profile"]))
+            del disk["layouts"]["Venue"]
+            status, after = _request(port, "POST", "/api/profile", disk)
+            self.assertEqual(status, 200, after)
+            self.assertEqual(set(after["profile"]["layouts"]), {"Home"})
+
+        on_disk = json.loads(self.profile_path.read_text(encoding="utf-8"))
+        self.assertEqual(set(on_disk["layouts"]), {"Home"})
+        self.assertNotIn("Venue", on_disk["layouts"])
 
     def test_delete_ui_uses_inpage_confirm_not_window_confirm(self) -> None:
         """AWR-246 third pass: Delete must use DOM confirm — window.confirm is silent-false in e2e."""
