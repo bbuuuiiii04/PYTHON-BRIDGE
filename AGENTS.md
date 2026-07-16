@@ -179,10 +179,11 @@ If the change has no matching contract, **add/extend the contract first**, then 
 python3 tools/check_docs_metadata.py     # required docs + status headers exist
 python3 tools/check_agent_contracts.py   # routing/cards/contracts reference real files & symbols
 python3 tools/check_docs_drift.py        # runtime command surface & status strings match code
+python3 tools/check_ui_jargon.py         # LED pad/lab/sim UI copy stays musician-legible (AWR-264)
 python3 tools/check_docs_staleness.py --report   # advisory: impl changed since docs were verified
 ```
 
-The first three are hard checks (CI fails on them). Staleness is advisory — when it flags a
+The first four are hard checks (CI fails on them). Staleness is advisory — when it flags a
 contract, re-verify the listed docs against code and bump `last_verified_commit`.
 
 Optional local gate (runs the hard checks before every commit): `git config core.hooksPath tools/git-hooks`

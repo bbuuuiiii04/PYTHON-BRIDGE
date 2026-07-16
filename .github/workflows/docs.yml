@@ -21,5 +21,6 @@ jobs:
       - run: python3 tools/check_docs_metadata.py
       - run: python3 tools/check_agent_contracts.py
       - run: python3 tools/check_docs_drift.py
+      - run: python3 tools/check_ui_jargon.py
       # Advisory: surfaces docs whose implementation changed since last verification.
       - run: python3 tools/check_docs_staleness.py --report

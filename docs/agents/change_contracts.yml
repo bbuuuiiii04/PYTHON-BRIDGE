@@ -246,7 +246,7 @@ contracts:
       - python3 tools/check_docs_metadata.py
       - python3 tools/check_agent_contracts.py
       - python3 tools/check_docs_drift.py
-      - python3 tools/check_docs_drift.py
+      - python3 tools/check_ui_jargon.py
     docs_update:
       - docs/guides/led_pad.md
       - docs/subsystems/led_govee.md
@@ -270,6 +270,7 @@ contracts:
       - python3 tools/check_docs_metadata.py
       - python3 tools/check_agent_contracts.py
       - python3 tools/check_docs_drift.py
+      - python3 tools/check_ui_jargon.py
     docs_update:
       - docs/guides/led_sim.md
       - docs/architecture/doc_index.md

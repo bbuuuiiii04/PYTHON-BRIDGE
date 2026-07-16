@@ -192,6 +192,7 @@ button.action { width: 100%; min-height: 44px; font-weight: 600; }
 }
 .chip.warn, .chip-btn.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, var(--border)); }
 .chip.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 35%, var(--border)); }
+.chip.sentence { text-transform: none; letter-spacing: normal; font-weight: 600; font-size: 11px; }
 .chip.lock-chip { color: var(--warn); }
 .chip-btn[aria-pressed="true"] {
   color: var(--text); background: var(--surface-3); border-color: var(--border-strong);

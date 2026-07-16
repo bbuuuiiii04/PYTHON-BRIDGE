@@ -1,14 +1,25 @@
-"""AWR-264: UI jargon gate + pad rename slug path."""
+"""AWR-264: UI jargon gate + CONTROL_META language + pad rename."""
 
 from __future__ import annotations
 
-import copy
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
 
 from rb_ss_bridge_v2.led_pad_controls import CONTROL_META, RENDER_LABELS
 from rb_ss_bridge_v2.tools.led_pad_web import LedPadService
+
+
+_EXAMPLE_PATH = Path(__file__).resolve().parents[1] / "config" / "led_look_director.example.json"
+
+
+class _FakePlayback:
+    def ownership(self):
+        return {"state": "free"}
+
+    def status(self):
+        return {"playing": False}
 
 
 class UiJargonGateTests(unittest.TestCase):
@@ -36,47 +47,31 @@ class UiJargonGateTests(unittest.TestCase):
 
 
 class PadRenameTests(unittest.TestCase):
-    def test_rename_look_preserves_bank_and_params(self) -> None:
+    def test_rename_duplicate_preserves_params(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            live = root / "live.json"
-            draft = root / "draft.json"
-            cfg = {
-                "looks": {
-                    "old_look": {
-                        "scene_ref": "beat_strobe",
-                        "brightness": 80,
-                        "params": {"hz": 6.0, "duty": 0.3},
-                    }
-                },
-                "banks": {"default": {"drop": ["old_look"], "ambient": [], "groove": [], "buildup": [], "pre_drop": [], "post_drop": [], "breakdown": [], "utility": []}},
-                "color_engine": {
-                    "palettes": {"blue_cyan": {}},
-                    "slot_fill_strategy_by_look": {"old_look": "gradient_even"},
-                    "locked_palette_by_look": {},
-                    "slot_mono_chance_by_look": {},
-                },
-                "safety": {"allow_strobe": True},
-                "_pad_meta": {"drafts": [], "looks": {"old_look": {"cue_beats": 16}}, "ui": {}, "pad_session": {"touched": [], "moved": [], "deleted": []}},
-            }
-            live.write_text("{}", encoding="utf-8")
-            import json
-            draft.write_text(json.dumps(copy.deepcopy(cfg)), encoding="utf-8")
-            # Seed live with same looks so validation paths that compare live stay calm.
-            live.write_text(json.dumps(copy.deepcopy(cfg)), encoding="utf-8")
-            service = LedPadService(live_path=live, draft_path=draft, dry_run=True)
-            # Service may wrap/normalize — pull through get if needed.
-            res = service.rename_look({"name": "old_look", "new_name": "my_drop_strobe"})
-            self.assertTrue(res.get("ok"), res)
-            self.assertEqual(res.get("name"), "my_drop_strobe")
+            path = Path(tmp) / "led_look_director.json"
+            shutil.copy2(_EXAMPLE_PATH, path)
+            service = LedPadService(path, dry_run=True, playback=_FakePlayback())
             payload = service.get_config_payload()
-            looks = payload["config"]["looks"]
-            self.assertIn("my_drop_strobe", looks)
-            self.assertNotIn("old_look", looks)
-            self.assertEqual(looks["my_drop_strobe"]["params"]["hz"], 6.0)
-            banks = payload["banks"]
-            self.assertIn("my_drop_strobe", banks.get("drop") or [])
-            self.assertNotIn("old_look", banks.get("drop") or [])
+            # Prefer a realtime look that is not the global blackout target.
+            blackout = str(payload["config"].get("blackout") or "")
+            source = "rt_drop_chase" if "rt_drop_chase" in payload["config"]["looks"] else next(
+                name for name in payload["config"]["looks"] if name != blackout
+            )
+            if source == blackout:
+                self.skipTest("could not find a non-blackout look to rename")
+            params_before = dict((payload["config"]["looks"][source].get("params") or {}))
+            dup = service.duplicate_look({"source": source, "new_name": "awr264_dup_source"})
+            self.assertTrue(dup.get("ok"), dup)
+            res = service.rename_look({"name": "awr264_dup_source", "new_name": "renamed_awr264_look"})
+            self.assertTrue(res.get("ok"), res)
+            after = service.get_config_payload()
+            looks = after["config"]["looks"]
+            self.assertIn("renamed_awr264_look", looks)
+            self.assertNotIn("awr264_dup_source", looks)
+            self.assertIn(source, looks)  # original untouched
+            self.assertEqual(looks["renamed_awr264_look"].get("params") or {}, params_before)
+            self.assertIn("renamed_awr264_look", after["banks"].get("drafts") or [])
 
 
 if __name__ == "__main__":

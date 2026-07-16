@@ -223,7 +223,7 @@
 
   function renderSession(ui, palettes) {
     $("bpmInput").value = ui.bpm || 128;
-    $("paletteSelect").innerHTML = palettes.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join("");
+    $("paletteSelect").innerHTML = palettes.map(p => `<option value="${esc(p)}">${esc(String(p).replaceAll("_", " ").replace(/\b\w/g, c => c.toUpperCase()))}</option>`).join("");
     $("paletteSelect").value = ui.test_palette || palettes[0] || "";
     $("loopToggle").checked = ui.loop !== false;
     $("loopLabel").textContent = $("loopToggle").checked ? "On" : "Off";

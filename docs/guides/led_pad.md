@@ -537,7 +537,7 @@ printf '%s\n' '{"cmd":"led_clear_blackout"}' >> /tmp/rb_ss_bridge_v2_commands.js
 
 ## Apply Behavior
 
-The Apply button (the UI word for the draft commit; the API route stays `/api/commit`)
+The **Save to show** button (UI word for the draft commit; the API route stays `/api/commit`)
 writes the draft to the live config only after
 `load_led_look_director_config_from_dict()` accepts the full draft. A committed config affects
 the running bridge only after a bridge restart. Restarting the bridge remains a live-operation
@@ -588,11 +588,14 @@ runtime/API behavior change):
   identity mark is a cyan square before the "LED Pad" title; the Lab route keeps violet accents.
 - Vendored Archivo variable font at `tools/led_pad_assets/archivo-var.woff2`, served at
   `/static/archivo-var.woff2` (no CDN or runtime network dependency).
-- UI vocabulary: the draft-commit button now reads **Apply** (confirm dialog "Apply draft to live
-  config"); the top-bar discard control reads **Discard all changes** (confirm states it deletes
-  every unsaved-to-show edit across N dirty looks / the whole draft and reloads live; applied looks
-  untouched). The editor's look-level button stays **Save**, and `#dirtyText` reads "Draft saved" /
-  "Unsaved changes". API routes are unchanged (`/api/commit` keeps its name).
+- UI vocabulary (AWR-264): the draft-commit button reads **Save to show** (confirm "Save draft to
+  the show"; API route stays `/api/commit`). The top-bar discard control reads **Undo all changes**.
+  Editor look-level button stays **Save**; `#dirtyText` reads "Draft saved" / "Unsaved changes".
+  Musician-legible CONTROL_META labels (Flashes per second / Flash length (%) / Trigger every …
+  beats / Match the track / Use set colors). Look tiles lead with the human effect name; machine id
+  is one small mono line; `legacy_color_suffix` clones keep a colorway chip until color collapse.
+  Pad rename/duplicate accept plain display names and auto-slug. Standing gate:
+  `python3 tools/check_ui_jargon.py`.
 - **Editor close dirty check (AWR-254).** Closing the look editor compares against the last
   successful Save (or the state at open if you never saved). Save then close exits silently; only
   edits since the last save show "Discard unsaved changes?" / "You have edits since your last

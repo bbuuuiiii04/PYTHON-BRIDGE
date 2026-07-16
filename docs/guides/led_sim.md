@@ -75,7 +75,7 @@ runner fades, strobe shaping, and frame composition are therefore executed by
 the Python production classes, not copied into JavaScript. The result is labeled
 `production_runner_offline`.
 
-For a **Configured look**, the same path starts with the effect and parameters
+For a **Saved look**, the same path starts with the effect and parameters
 read from the current look config. Those parameters are labeled
 `pre_runtime_injection`: a running bridge can still inject per-frame color or
 other live state before it reaches the runner. This source is useful for
@@ -95,7 +95,7 @@ browser drawing health, not Govee hardware health.
 
 The two badges over the fixture state the frame source and timing source. The
 calibration badge describes only the saved evidence state. With the committed
-profile it reads `UNMEASURED`, so the identity transfer is visibly an assumption.
+profile it reads `Colors not calibrated yet`, so the identity transfer is visibly an assumption.
 
 ## Room layout (AWR-244 + AWR-246 library)
 
@@ -107,7 +107,7 @@ rooms differ). Schema **v2** fields:
 | `layouts` | Object of 1–24 named entries. Each name is 1–40 characters, unique. |
 | `active_layout` | Name of the layout currently on the stage. |
 | `layouts[name].preset` | `perimeter`, `snake`, or `custom` |
-| `layouts[name].points_mm` | Ordered polyline vertices in that layout's room coordinates (≥2) |
+| `layouts[name].points_mm` | Ordered polyline corners in that layout's room coordinates (≥2) |
 | `layouts[name].flip_chain` | When true, segment 0 is the other end of the path |
 | `layouts[name].room_mm` | `[width, height]` for that layout (default `[5216, 2284]`) |
 | `layouts[name].layout_locked` | Disables vertex drag / room-size / presets for that layout only |
@@ -143,7 +143,7 @@ Presets:
 the post-drop comet chase always starts on the **left** wall (operator-observed
 2026-07-15). That matches `flip_chain: false` with the default perimeter point
 order (start bottom-center → bottom-left → up the left wall → junction → right
-wall → bottom-right). Flip chain only when the physical hang is the opposite
+wall → bottom-right). Reverse direction only when the physical hang is the opposite
 way; geometry itself does not change.
 
 The Python engine function `layout_led_positions(profile)` is the tested
@@ -156,7 +156,7 @@ control-box label.
 
 The Layout tab opens with a **layout slot picker** (select + Use / Save as… /
 Rename / Delete). Selecting a slot **previews** that layout on the stage immediately
-(read-only ghost: vertices visible, drag/presets/room fields/Flip/Reset disabled,
+(read-only ghost: corners visible, drag/presets/room fields/Reverse/Reset disabled,
 hint “previewing — press Use to activate & edit”). Editing tools bind only to the
 **active** layout — Use activates and persists. **Use** writes `active_layout` to
 disk immediately (GET the saved profile → set the pointer → POST). Unsaved local
@@ -224,7 +224,7 @@ not exist, the committed example is loaded without writing anything.
 
 Choose a source and press its render button:
 
-- **Configured look (before live injection)** reads the current look config,
+- **Saved look** reads the current look config,
   including its stable seed, base effect parameters, sync mode, and beat
   division, then uses the real runner offline.
 - **Production effect** runs an effect through the same offline runner capture.
