@@ -101,10 +101,16 @@ Corpus sweep receipts (`ws3_neutral_crack_receipts.json`, 1,665 true drops):
   suite runs let non-hermetic drop-presentation test fixtures write synthetic
   "content-1" entries into local/state/laser_solo_learned.json (real runtime
   state!). Purged (file contained ONLY junk; backup kept in session
-  scratchpad). Hermeticity fix dispatched to lane `nightlane` (opus/high,
-  tag HERMETIC, test-file-only fence) — check
-  /tmp/rbss_lane_signals/nightlane.HERMETIC.* and gate the diff before
-  treating it as landed.
+  scratchpad). Hermeticity fix LANDED + EXEC-GATED 10:35: shared
+  `_HermeticLearnedStoreTestCase` base redirects state_manager's own
+  LEARNED_STORE_PATH binding for all 12 test classes + a regression guard;
+  test-file-only (rode auto-sync commit 0a09936b — content verified, only
+  that file); exec desk verification: module green ×2 sequential + 2
+  CONCURRENT runs, real store byte-identical (2-byte `{}`, sha bf21a9e8).
+  Gate catch worth knowing: the lane's own "restored the store" claim was
+  FALSE — its non-truncating write left the file corrupt ({} over 23-byte
+  junk); the exec found it at the gate and restored the true 2-byte baseline.
+  Nobody certifies their own work.
 - Bookkeeping: charter + registry rows committed 9822a80f (AWR-267/AWR-268).
 - Coexistence note: a SECOND exec (fable2, LED consumer-audit program) ran all
   night on its own lanes; its Grok fix 15de3071 cured the speed-law/f4/patch_c
