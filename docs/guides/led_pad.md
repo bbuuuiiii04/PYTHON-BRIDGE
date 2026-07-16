@@ -220,6 +220,9 @@ The `/lab` page (lab-route only — Pad markup and playwright selectors are unto
   always stays in the list** even when its status chip is off (Accept with Accepted=off no longer
   makes the row vanish); it drops out only after you select something else or change filters.
   An **exact-name** search hit also surfaces even when its status chip is off (same pin rule).
+  Search is plain case-insensitive **substring** over name + brief + notes only (never
+  subsequence/fuzzy, and never params/`fn`). A query that hits none of those three fields
+  yields an empty list — the open draft is not kept as a ghost row.
 - **Detail (top → bottom).** Header flows title → Phrase/Timing → collision banner **only when**
   `production_collision` is true → preview hero (Strip|Room toggle + strip/room canvases; AWR-245;
   64px / 48px phone strip with a dim “press Preview” placeholder until frames arrive + Preview/Play/Stop

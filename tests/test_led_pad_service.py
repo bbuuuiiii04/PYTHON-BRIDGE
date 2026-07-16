@@ -930,13 +930,56 @@ class SimRoomHookupRouteTests(unittest.TestCase):
         self.assertIn("stashEditor()", lab_js)
         self.assertIn("api.labUpdate({name: state.current.name, params})", lab_js)
         self.assertNotIn("api.labSave(currentPayload())", lab_js.split("function queueAutoApply")[1].split("function hexByte")[0])
-        self.assertIn('String(e.brief || "").toLowerCase()', lab_js)
-        self.assertIn('String(e.notes || "").toLowerCase()', lab_js)
+        self.assertIn("function labDraftSearchHit(", lab_js)
+        self.assertIn("name.includes(q) || brief.includes(q) || notes.includes(q)", lab_js)
         self.assertIn("exactName", lab_js)
         self.assertIn("⇄ Switch live lights", lab_js)
         self.assertIn("scrollIntoView", lab_js)
         self.assertIn("Live apply paused", lab_html)
         self.assertIn('typeof body === "string" ? {name: body} : body', pad_core)
+
+    def test_lab_draft_search_is_substring_not_subsequence(self) -> None:
+        """AWR-251 residue: 'walkthrough' must not hit an entry that only has those letters scattered."""
+        import subprocess
+
+        root = Path(__file__).resolve().parents[1]
+        lab_js = root / "tools" / "led_pad_assets" / "lab.js"
+        script = f"""
+const fs = require('fs');
+const src = fs.readFileSync({str(lab_js)!r}, 'utf8');
+const start = src.indexOf('function labDraftSearchHit(');
+if (start < 0) throw new Error('labDraftSearchHit missing');
+const end = src.indexOf('function matchesFilters(', start);
+const fnSrc = src.slice(start, end);
+eval(fnSrc);
+const ghost = {{
+  name: 'pair_rainbow',
+  brief: 'warm path with light accents',
+  notes: 'try the room glow when through',
+}};
+// Letters of "walkthrough" can be picked from brief+notes, but the substring is absent.
+const hay = (ghost.brief + ' ' + ghost.notes).toLowerCase();
+if (hay.includes('walkthrough')) throw new Error('fixture accidentally contains substring');
+if (labDraftSearchHit(ghost, 'walkthrough')) throw new Error('subsequence falsely matched');
+if (labDraftSearchHit(ghost, 'pair_rainbow') !== true) throw new Error('name substring failed');
+if (labDraftSearchHit(ghost, 'warm path') !== true) throw new Error('brief substring failed');
+if (labDraftSearchHit({{name:'x', brief:'', notes:'nope'}}, 'walkthrough') !== false)
+  throw new Error('absent token must return false');
+// Zero-row contract: filter a list with a token in none of the three fields.
+const entries = [ghost, {{name:'pulse', brief:'old', notes:''}}];
+const q = 'zzzz_absent_token';
+const hits = entries.filter(e => labDraftSearchHit(e, q));
+if (hits.length !== 0) throw new Error('expected zero rows, got ' + hits.length);
+console.log('ok');
+"""
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
+        self.assertIn("ok", result.stdout)
 
 
 if __name__ == "__main__":
