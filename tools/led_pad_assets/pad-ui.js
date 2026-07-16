@@ -130,7 +130,7 @@
   function renderSession() {
     const ui = currentSession();
     $("bpmInput").value = ui.bpm || 128;
-    $("paletteSelect").innerHTML = state.palettes.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join("");
+    $("paletteSelect").innerHTML = state.palettes.map(p => `<option value="${esc(p)}">${esc(titleCaseWords(p))}</option>`).join("");
     $("paletteSelect").value = ui.test_palette || state.palettes[0] || "";
     $("loopToggle").checked = ui.loop !== false;
     $("loopLabel").textContent = $("loopToggle").checked ? "On" : "Off";
@@ -168,17 +168,23 @@
     const dirty = lookDirty(name);
     const cue = (((state.config.config._pad_meta || {}).looks || {})[name] || {}).cue_beats || 16;
     const playing = state.playingLook === name;
-    const label = render ? render.label : human(look.scene_ref || look.action);
+    // AWR-264 J2: human effect name leads; machine id is one small mono line.
+    const title = render ? render.label : human(look.scene_ref || look.action || name);
+    const colorMode = render && render.slot_based
+      ? "<span class='gradient-dot'></span>Uses show colors"
+      : "<span class='fixed-dot'></span>Set colors";
+    const colorway = bank === "legacy_color_suffix" ? colorwayChip(look) : "";
     return `<article class="look-card ${esc(bank)} ${playing ? "playing" : ""}" style="--bank-color:${bankColors[bank]}">
-      <div class="card-title"><span>${esc(name)}</span>${dirty ? "<span class='dirty-dot' title='Unsaved changes'>●</span>" : ""}</div>
-      <div class="card-sub">${esc(label)} · ${render && render.slot_based ? "<span class='gradient-dot'></span>show-colored" : "<span class='fixed-dot'></span>fixed colors"}</div>
-      <div class="card-ref">${esc(look.scene_ref || look.action || "")}</div>
-      <div class="badge-row"><span class="badge">${cue} beats</span>${timingBadge(render)}${render && render.strobe ? "<span class='badge strobe'>⚡ strobe</span>" : ""}${!realtime ? "<span class='badge'>☁ cloud</span>" : ""}${playing ? "<span class='live-chip'>LIVE</span>" : ""}</div>
+      <div class="card-title"><span>${esc(title)}</span>${dirty ? "<span class='dirty-dot' title='Unsaved changes'>●</span>" : ""}</div>
+      <div class="card-id mono">${esc(name)}</div>
+      <div class="card-sub">${colorMode}${colorway ? ` · ${colorway}` : ""}</div>
+      <div class="badge-row"><span class="badge">${cue} beats</span>${timingBadge(render)}${render && render.strobe ? "<span class='badge strobe'>⚡ strobe</span>" : ""}${!realtime ? "<span class='badge'>Cloud scene</span>" : ""}${playing ? "<span class='live-chip'>LIVE</span>" : ""}</div>
       <footer class="card-footer">
         <button type="button" class="primary" data-action="play" data-name="${esc(name)}" ${!realtime ? "disabled title='Cloud scene - not previewable in the pad'" : ""}>▶ Play</button>
         <div class="icon-actions">
           <button type="button" class="icon" data-action="edit" data-name="${esc(name)}" aria-label="Edit" title="Edit">✎</button>
           <button type="button" class="icon" data-action="duplicate" data-name="${esc(name)}" aria-label="Duplicate" title="Duplicate">⧉</button>
+          <button type="button" class="icon" data-action="rename" data-name="${esc(name)}" aria-label="Rename" title="Rename">Aa</button>
           <button type="button" class="icon" data-action="move" data-name="${esc(name)}" aria-label="Move" title="Move">⇄</button>
           <button type="button" class="icon delete" data-action="delete" data-name="${esc(name)}" aria-label="Delete" title="Delete">🗑</button>
         </div>
@@ -230,9 +236,20 @@
       if (action === "play") { await switchEditor(name, true); return; }
       if (action === "edit") { await switchEditor(name, false); return; }
       if (action === "duplicate") {
-        promptModal("Duplicate look", "", {label:"Duplicate name", value:`${name}_copy`, confirmText:"Duplicate"}, async (newName) => {
-          if (!newName) return;
+        promptModal("Duplicate look", NAME_HINT, {label:"New name", value: human(name), confirmText:"Duplicate"}, async (display) => {
+          if (!display) return;
+          const newName = slugifyLookName(display, allLookNames());
           try { await api.duplicate({source:name, new_name:newName}); await refresh(); await openEditor(newName, false); }
+          catch (err) { showError(err); }
+        });
+        return;
+      }
+      if (action === "rename") {
+        promptModal("Rename look", NAME_HINT, {label:"New name", value: human(name), confirmText:"Rename"}, async (display) => {
+          if (!display) return;
+          const newName = slugifyLookName(display, allLookNames().filter(n => n !== name));
+          if (newName === name) return;
+          try { await api.rename({name, new_name:newName}); await refresh(); await openEditor(newName, false); }
           catch (err) { showError(err); }
         });
         return;
@@ -263,8 +280,8 @@
   }
   function renderEditor() {
     const e = state.editor, render = state.renderMap.get(e.look.scene_ref);
-    $("editorTitle").textContent = e.name;
-    $("editorRegistry").textContent = e.look.scene_ref || "";
+    $("editorTitle").textContent = render ? render.label : human(e.name);
+    $("editorRegistry").textContent = e.name;
     renderEditorLive();
     renderCue();
     renderRendererSelect();
@@ -273,7 +290,7 @@
     $("brightnessOutput").textContent = `${$("brightnessInput").value}%`;
     $("strobeInput").checked = Boolean(e.look.allow_strobe);
     $("strobeLabel").textContent = $("strobeInput").checked ? "On" : "Off";
-    $("lockedPaletteSelect").innerHTML = state.palettes.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join("");
+    $("lockedPaletteSelect").innerHTML = state.palettes.map(p => `<option value="${esc(p)}">${esc(titleCaseWords(p))}</option>`).join("");
     $("lockedPaletteSelect").value = e.locked_palette || state.palettes[0] || "";
     const locked = Boolean(e.locked_palette);
     $("lockedPaletteWrap").hidden = !locked;
@@ -281,7 +298,7 @@
     $("lockedPaletteBtn").classList.toggle("active", locked);
     const safety = !!((state.config.config.safety || {}).allow_strobe);
     $("strobeInput").disabled = !safety;
-    $("strobeWarning").textContent = !safety ? "Disabled because safety.allow_strobe is false." : (render && render.strobe && !e.look.allow_strobe ? "Strobe-class renderer requires Strobe allowed before Play." : "");
+    $("strobeWarning").textContent = !safety ? "Strobe effects are switched off in safety settings." : (render && render.strobe && !e.look.allow_strobe ? "This effect flashes — turn on Strobe allowed before Play." : "");
     $("slotSection").hidden = !(render && render.slot_based);
     $("slotFillSelect").value = e.slot_fill;
     $("monoChanceInput").value = e.mono_chance;
@@ -316,7 +333,7 @@
     let html = Object.entries(groups).map(([group, renders]) => `<optgroup label="${esc(group)}">${renders.map(r => `<option value="${esc(r.name)}">${esc(r.label)}</option>`).join("")}</optgroup>`).join("");
     const sceneRef = state.editor.look.scene_ref;
     if (sceneRef && !state.renderMap.has(sceneRef)) {
-      html = `<option value="${esc(sceneRef)}" selected disabled>☁ ${esc(sceneRef)} — cloud scene (not previewable)</option>` + html;
+      html = `<option value="${esc(sceneRef)}" selected disabled>☁ ${esc(human(sceneRef))} — cloud scene (not previewable)</option>` + html;
     }
     $("rendererSelect").innerHTML = html;
     $("rendererSelect").value = sceneRef;
@@ -398,7 +415,7 @@
       outputText = isSet ? hex : "auto";
     }
     else input = `<input data-param="${esc(c.key)}" type="number" min="${esc(c.min ?? "")}" max="${esc(c.max ?? "")}" step="${esc(c.step ?? 1)}" value="${esc(value)}">`;
-    const tag = isSet ? "" : `<span class="default-tag">default</span>`;
+    const tag = isSet ? "" : `<span class="default-tag">auto</span>`;
     const badge = badged ? `<span class="regime-badge">palette overrides this in the room</span>` : "";
     const resetHidden = isSet ? "" : ` style="visibility:hidden" tabindex="-1"`;
     const reset = `<button type="button" class="icon ghost reset-param" data-reset="${esc(c.key)}" aria-label="Reset to default" title="Reset to default"${resetHidden}>↺</button>`;
@@ -457,7 +474,7 @@
     $("modalActions").querySelectorAll("button").forEach((btn, i) => { btn.disabled = moveBanks[i] === current; });
   }
   function ownershipDialog() {
-    confirmModal("The bridge owns the LEDs right now. Take over?", "LEDs go dark on the bridge side until you release.", "Take over", () => playEditor(true));
+    confirmModal("The show is running the lights right now. Take control?", "The show side goes dark until you release.", "Take control", () => playEditor(true));
   }
   async function openAccessModal() {
     modal("Open on another device", "Checking network access…", [{label:"Close", className:"ghost", run:() => {}}]);
@@ -483,12 +500,26 @@
       html += `<p class="warn-text">Anyone on this Wi-Fi can edit config through this page.</p>`;
     } else if (info.loopback_only) {
       html += `<p class="dim">This pad is only reachable from this Mac right now.</p>`;
-      html += `<p class="dim">To allow access from another device on this Wi-Fi, restart the pad with <span class="mono">--host lan</span>, or edit the LaunchAgent plist at <span class="mono">~/Library/LaunchAgents/com.bbui.led-pad.plist</span> and run <span class="mono">launchctl kickstart -k gui/$UID/com.bbui.led-pad</span>.</p>`;
+      html += `<p class="dim">To open it on another device on this Wi-Fi, restart the pad in LAN mode with the command below.</p>`;
+      html += `<p class="mono" id="lanRestartCmd" style="user-select:all">python3 scripts/led_pad.py --host lan</p>`;
+      html += `<p><button type="button" class="primary" id="copyLanCmdBtn">Copy command</button></p>`;
       html += `<p class="warn-text">Doing so exposes pad control to the whole network.</p>`;
     } else {
       html += `<p class="warn-text">No LAN address detected — check Wi-Fi.</p>`;
     }
     $("modalText").innerHTML = html;
+    const copyBtn = document.getElementById("copyLanCmdBtn");
+    if (copyBtn) {
+      copyBtn.addEventListener("click", async () => {
+        const text = ($("lanRestartCmd") && $("lanRestartCmd").textContent) || "python3 scripts/led_pad.py --host lan";
+        try {
+          await navigator.clipboard.writeText(text);
+          toast("Command copied");
+        } catch (err) {
+          showError(err);
+        }
+      });
+    }
   }
   function closeEditor(force) {
     if (!force && snapshotEditor() !== state.cleanSnapshot) {
@@ -506,10 +537,10 @@
     const playing = (rt.playback || {}).playing ? (rt.playback.playing_look || rt.playing_look || "") : "";
     const changed = playing !== state.playingLook;
     state.playingLook = playing;
-    $("ownershipPill").textContent = stateName === "bridge_owned" ? "Bridge owns LEDs" : stateName === "pad_owned" ? "Pad owns LEDs" : "Free";
+    $("ownershipPill").textContent = stateName === "bridge_owned" ? "The show is running the lights" : stateName === "pad_owned" ? "This pad is running the lights" : "Lights are free";
     $("ownershipPill").className = `pill ${stateName === "bridge_owned" ? "bridge" : stateName === "pad_owned" ? "pad" : ""}`;
     $("ownershipBtn").hidden = stateName === "free";
-    $("ownershipBtn").textContent = stateName === "pad_owned" ? "Release" : "Take over";
+    $("ownershipBtn").textContent = stateName === "pad_owned" ? "Release" : "Take control";
     if (warning) {
       $("errorBanner").hidden = false;
       $("errorBanner").textContent = "Bridge reappeared - pad re-asserted control.";
@@ -532,7 +563,7 @@
   $("stopBtn").addEventListener("click", () => api.emergencyStop().then(refresh).catch(showError));
   $("ownershipBtn").addEventListener("click", async () => { try { const rt = await api.runtime(); if ((rt.ownership || {}).state === "pad_owned") await api.release(); else await api.takeover(); await updateRuntime(); } catch (err) { showError(err); } });
   $("qrBtn").addEventListener("click", openAccessModal);
-  $("commitBtn").addEventListener("click", () => confirmModal("Apply draft to live config", `Apply writes the draft to live config - ${($("commitCount").textContent || "0")} looks affected. Bridge restart required to take effect live.${(state.config || {}).live_changed ? "\nLive config changed underneath this draft (bridge or agent edit). Review before Apply — Discard all changes reloads live." : ""}`, "Apply", async () => { const res = await api.commit(); if (!res.ok) throw new Error((res.errors || []).join("\n")); toast(res.restart_note || "Applied - bridge restart required to take effect live."); await refresh(); }));
+  $("commitBtn").addEventListener("click", () => confirmModal("Save draft to the show", `Save to show writes the draft into the live show file — ${($("commitCount").textContent || "0")} looks affected. Bridge restart required to take effect live.${(state.config || {}).live_changed ? "\nThe live show file changed while you were editing. Review before Save to show — Undo all changes reloads the live file." : ""}`, "Save to show", async () => { const res = await api.commit(); if (!res.ok) throw new Error((res.errors || []).join("\n")); toast(res.restart_note || "Saved to show — bridge restart required to take effect live."); await refresh(); }));
   $("discardBtn").addEventListener("click", () => {
     // AWR-260 E: count from live dirty state at modal-open (editor + draft), not a stale DOM badge.
     const fromServer = ((state.config || {}).dirty || {}).looks || [];
@@ -542,9 +573,9 @@
     }
     const count = names.size;
     confirmModal(
-      "Discard all changes",
+      "Undo all changes",
       `This deletes EVERY unsaved-to-show edit across ${count} looks (the whole draft) and reloads the live config. Your applied looks are untouched.`,
-      "Discard all changes",
+      "Undo all changes",
       async () => { await api.discard(); await refresh(); },
     );
   });
@@ -580,7 +611,7 @@
     // Revert the select until the operator confirms (AWR-262 C13).
     select.value = previous;
     confirmModal(
-      "Switch renderer?",
+      "Switch effect?",
       `These settings don't apply to ${render.label} and will be dropped: ${labels.join(", ")}.`,
       "Switch",
       () => {

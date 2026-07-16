@@ -111,8 +111,11 @@ main { padding: var(--pad); }
 .look-card.playing { border-color: var(--ok); box-shadow: 0 0 0 1px var(--ok); animation: playing-pulse 1.4s ease-in-out infinite; }
 .look-card.drafts { border-left-style: dashed; }
 .card-title { display: flex; justify-content: space-between; gap: var(--sp-2); font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+.card-id { font-family: var(--font-data); font-size: 11px; color: var(--text-faint); overflow-wrap: anywhere; }
 .card-sub { color: var(--text-dim); font-size: 12px; }
 .card-ref { font-family: var(--font-data); font-size: 11px; color: var(--text-faint); overflow-wrap: anywhere; }
+.colorway-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-dim); }
+.colorway-swatch { width: 10px; height: 10px; border-radius: 2px; border: 1px solid var(--border); display: inline-block; }
 .dirty-dot { color: var(--warn); }
 .badge-row, .card-footer { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
 .card-footer { margin-top: auto; }

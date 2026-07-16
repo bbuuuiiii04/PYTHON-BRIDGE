@@ -268,6 +268,7 @@
     session: (body) => request("/api/session", {method: "POST", body}),
     saveLook: (body) => request("/api/look/save", {method: "POST", body}),
     duplicate: (body) => request("/api/look/duplicate", {method: "POST", body}),
+    rename: (body) => request("/api/look/rename", {method: "POST", body}),
     move: (body) => request("/api/look/move", {method: "POST", body}),
     deleteLook: (body) => request("/api/look/delete", {method: "POST", body}),
     commit: () => request("/api/commit", {method: "POST", body: {}}),
