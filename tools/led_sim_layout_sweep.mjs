@@ -28,6 +28,8 @@ const WIDTHS = [];
 for (let w = 900; w <= 1728; w += 100) WIDTHS.push(w);
 if (WIDTHS[WIDTHS.length - 1] !== 1728) WIDTHS.push(1728);
 const HEIGHTS = [700, 900];
+// AWR-251 m-7: phone header STOP vs Pad|Lab|Sim — assert at 390 as well.
+const EXTRA_VIEWPORTS = [{width: 390, height: 700}];
 
 const STUB_CATALOG = {
   profile: {
@@ -128,6 +130,7 @@ const MEASURE_JS = () => {
   }
 
   const nav = document.querySelector(".route-tabs");
+  const stop = document.querySelector("#top-stop");
   const stage = document.querySelector(".stage");
   const canvas = document.querySelector("#fixture-canvas");
   const hud = document.querySelector(".stage-hud");
@@ -137,6 +140,7 @@ const MEASURE_JS = () => {
   const appGrid = document.querySelector(".app-grid");
 
   const navR = rect(nav);
+  const stopR = rect(stop);
   const stageR = rect(stage);
   const canvasR = rect(canvas);
   const hudR = rect(hud);
@@ -144,6 +148,7 @@ const MEASURE_JS = () => {
   const provR = provenance && getComputedStyle(provenance).display !== "none" ? rect(provenance) : null;
   const topbarR = rect(topbar);
 
+  if (navR && stopR && overlap(navR, stopR)) issues.push("stop_intersects_nav");
   if (navR && stageR && overlap(navR, stageR)) issues.push("nav_intersects_stage");
   if (navR && canvasR && overlap(navR, canvasR)) issues.push("nav_intersects_canvas");
   if (topbarR && canvasR && overlap(topbarR, canvasR)) issues.push("topbar_intersects_canvas");
@@ -192,13 +197,25 @@ async function main() {
         }
       }
     }
+    for (const {width, height} of EXTRA_VIEWPORTS) {
+      await page.setViewportSize({width, height});
+      await page.goto(`http://127.0.0.1:${port}/`, {waitUntil: "networkidle", timeout: 30000});
+      await page.waitForTimeout(250);
+      const measurement = await page.evaluate(MEASURE_JS);
+      if (measurement.issues.length) {
+        failures.push({width, height, issues: measurement.issues});
+        console.log(`${width}x${height}: FAIL ${measurement.issues.join(",")}`);
+      } else {
+        console.log(`${width}x${height}: ok`);
+      }
+    }
   } finally {
     await browser.close();
     server.close();
   }
 
   console.log("---");
-  console.log(`checked ${WIDTHS.length * HEIGHTS.length} viewports; failures ${failures.length}`);
+  console.log(`checked ${WIDTHS.length * HEIGHTS.length + EXTRA_VIEWPORTS.length} viewports; failures ${failures.length}`);
   if (failures.length) {
     console.error(JSON.stringify(failures, null, 2));
     process.exit(1);

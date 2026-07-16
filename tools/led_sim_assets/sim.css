@@ -283,6 +283,28 @@ body.sidecar-collapsed .sidecar { width: var(--rail-w); }
 }
 /* U-7: only trap gestures while layout editing is unlocked + Layout tab active */
 .canvas-wrap.edit-gestures canvas { touch-action: none; }
+.canvas-wrap.previewing-layout {
+  outline: 1px dashed color-mix(in srgb, var(--cyan) 45%, transparent);
+  outline-offset: -2px;
+}
+.canvas-wrap.previewing-layout::after {
+  content: "previewing — press Use to activate & edit";
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  z-index: 5;
+  pointer-events: none;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
 
 /* HUD lives BELOW the canvas (never over the room drawing). */
 .stage-hud {
@@ -537,4 +559,22 @@ body.sidecar-collapsed .sidecar { width: var(--rail-w); }
   .brand .eyebrow { display: none; }
   #paint-health { display: none; }
   .canvas-overlay { font-size: 9px; }
+  /* m-7: STOP must not sit on top of Pad|Lab|Sim at phone widths. */
+  .topbar {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+  .brand {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .top-actions {
+    width: 100%;
+    justify-content: flex-end;
+    justify-self: stretch;
+  }
+  .top-actions .chip.ok { display: none; }
+  .route-tabs { flex: 1 1 auto; }
 }

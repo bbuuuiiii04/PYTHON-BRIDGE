@@ -420,7 +420,10 @@ function syncPresetCards() {
 }
 
 function syncLayoutForm() {
-  const entry = ensureProfileLayout();
+  // While previewing, form mirrors the picked layout (read-only via syncLockUi).
+  const entry = isPreviewingLayout()
+    ? (state.profile.layouts[selectedLayoutName()] || ensureProfileLayout())
+    : ensureProfileLayout();
   const widthMm = Number(entry.room_mm[0]);
   const heightMm = Number(entry.room_mm[1]);
   const widthFt = Math.round(mmToFeet(widthMm) * 10) / 10;
@@ -440,7 +443,7 @@ function syncLayoutForm() {
   const roomH = heightMm;
   const tol = 2;
   let outside = 0;
-  for (const point of activeEntry().points_mm || []) {
+  for (const point of entry.points_mm || []) {
     const x = Number(point[0]);
     const y = Number(point[1]);
     if (x < -tol || y < -tol || x > roomW + tol || y > roomH + tol) outside += 1;
@@ -704,6 +707,27 @@ function switchActiveLayout(name) {
 }
 
 /**
+ * AWR-251 M-3: library-structure writes go to disk immediately.
+ * Fetch fresh disk profile, apply a structural mutation, POST — keeps unsaved
+ * local geometry/calibration knobs from leaking into unrelated layouts when
+ * possible. Save-as is the exception: it copies the local active entry (what
+ * you see) into the new named slot.
+ */
+async function persistLibraryMutation(mutateDisk) {
+  const fresh = await api("GET", "/api/profile");
+  const diskProfile = clone(fresh.profile);
+  ensureLayoutLibrary(diskProfile);
+  const plan = mutateDisk(diskProfile);
+  if (plan && plan.ok === false) return plan;
+  const result = await api("POST", "/api/profile", diskProfile);
+  state.savedProfile = clone(result.profile);
+  ensureLockDefaults(state.savedProfile);
+  state.catalog.profile_warnings = result.warnings || [];
+  markDirty();
+  return {ok: true, result, diskProfile};
+}
+
+/**
  * AWR-250: Use persists only active_layout to disk.
  * Fetch the saved profile, flip the pointer, POST it back — never ship unsaved
  * local layout geometry or calibration knobs. Then reconcile the local active
@@ -723,31 +747,29 @@ async function useSelectedLayout() {
     return;
   }
 
-  const fresh = await api("GET", "/api/profile");
-  const diskProfile = clone(fresh.profile);
-  ensureLayoutLibrary(diskProfile);
-  if (!diskProfile.layouts[name]) {
-    showError(`“${name}” is not on disk yet — Save layout first, then Use`);
+  const persisted = await persistLibraryMutation((disk) => {
+    if (!disk.layouts[name]) {
+      return {ok: false, message: `“${name}” is not on disk yet — Save changes first, then Use`};
+    }
+    disk.active_layout = name;
+    return {ok: true};
+  });
+  if (!persisted.ok) {
+    showError(persisted.message || "Use failed");
     syncLayoutPicker();
     return;
   }
-  diskProfile.active_layout = name;
-  const result = await api("POST", "/api/profile", diskProfile);
 
-  // Reconcile local active pointer only — keep unsaved local edits.
+  // Reconcile local active pointer only — keep unsaved local edits on other slots.
   state.layoutSelection = name;
   state.profile.active_layout = name;
   state.layoutUndoStack = [];
   const preset = activeEntry().preset;
   if (preset === "snake" || preset === "perimeter") state.lastChosenPreset = preset;
-  state.savedProfile = clone(result.profile);
-  ensureLockDefaults(state.savedProfile);
-  state.catalog.profile_warnings = result.warnings || [];
   view?.invalidateLayout?.();
   pushProfileToView();
   syncUndoButton();
   refreshPresetThumbs();
-  markDirty();
   syncLockUi();
   syncLayoutPicker();
   syncLayoutActiveHint({flashSaved: true});
@@ -765,13 +787,25 @@ async function saveAsLayout() {
     initial: `Copy of ${current}`,
   });
   if (!name) return;
-  state.profile.layouts[name] = makeLayoutEntry(activeEntry());
+  const copy = makeLayoutEntry(activeEntry());
+  state.profile.layouts[name] = copy;
   state.profile.active_layout = name;
   state.layoutSelection = name;
   state.layoutUndoStack = [];
   showError("");
+  try {
+    await persistLibraryMutation((disk) => {
+      disk.layouts[name] = makeLayoutEntry(copy);
+      disk.active_layout = name;
+      return {ok: true};
+    });
+  } catch (err) {
+    showError(err);
+    return;
+  }
   pushProfileToView();
   syncUndoButton();
+  refreshPresetThumbs();
 }
 
 async function renameSelectedLayout() {
@@ -794,6 +828,23 @@ async function renameSelectedLayout() {
   }
   state.layoutSelection = name;
   showError("");
+  try {
+    await persistLibraryMutation((disk) => {
+      if (!disk.layouts[current]) {
+        return {ok: false, message: `“${current}” is not on disk yet`};
+      }
+      if (disk.layouts[name]) {
+        return {ok: false, message: "That name already exists on disk"};
+      }
+      disk.layouts[name] = disk.layouts[current];
+      delete disk.layouts[current];
+      if (disk.active_layout === current) disk.active_layout = name;
+      return {ok: true};
+    });
+  } catch (err) {
+    showError(err);
+    return;
+  }
   pushProfileToView();
 }
 
@@ -804,12 +855,11 @@ function deleteSelectedLayout() {
     showError(plan.message);
     return;
   }
-  // In-page confirm only — window.confirm is silent-false under browser automation.
   confirmDialog({
     title: "Delete layout",
-    message: `Delete layout “${plan.target}”? This removes it from the library immediately; Save layout writes the change to disk.`,
+    message: `Delete layout “${plan.target}”? This removes it from the library on disk immediately.`,
     okLabel: "Delete",
-  }).then((ok) => {
+  }).then(async (ok) => {
     if (!ok) return;
     const result = applyLayoutDelete(state.profile, plan.target);
     if (!result.ok) {
@@ -819,6 +869,12 @@ function deleteSelectedLayout() {
     state.layoutSelection = state.profile.active_layout;
     state.layoutUndoStack = [];
     showError("");
+    try {
+      await persistLibraryMutation((disk) => applyLayoutDelete(disk, plan.target));
+    } catch (err) {
+      showError(err);
+      return;
+    }
     view?.invalidateLayout?.();
     pushProfileToView();
     syncUndoButton();
@@ -827,11 +883,8 @@ function deleteSelectedLayout() {
 }
 
 function applyPreset(preset) {
-  // Editing always applies to the selected slot — activate it first when needed.
-  const selected = selectedLayoutName();
-  if (selected !== state.profile.active_layout) {
-    switchActiveLayout(selected);
-  }
+  // Editing binds to the ACTIVE layout only — preview mode is read-only.
+  if (isPreviewingLayout()) return;
   if (layoutLocked()) return;
   pushUndo();
   ensureProfileLayout();
@@ -995,11 +1048,11 @@ function wireLayoutEditor() {
   }
 
   $("layout-slot")?.addEventListener("change", (event) => {
-    // Picker selects a library slot for Use / Rename / Delete.
-    // Stage stays on active_layout until Use (or Save as).
+    // AWR-251 M-4: picker selection previews that layout on stage immediately.
     state.layoutSelection = event.target.value;
     showError("");
-    syncLayoutPicker();
+    view?.invalidateLayout?.();
+    pushProfileToView();
   });
   $("layout-use")?.addEventListener("click", () => {
     useSelectedLayout().catch(() => { /* api() already surfaced the error */ });
@@ -1009,10 +1062,7 @@ function wireLayoutEditor() {
   $("layout-delete")?.addEventListener("click", () => { deleteSelectedLayout(); });
 
   const onRoomSize = () => {
-    const selected = selectedLayoutName();
-    if (selected !== state.profile.active_layout) {
-      switchActiveLayout(selected);
-    }
+    if (isPreviewingLayout()) return;
     if (layoutLocked()) return;
     pushUndo();
     const widthFt = Math.max(1, Number($("room-width-ft").value) || mmToFeet(5216));
@@ -1031,10 +1081,7 @@ function wireLayoutEditor() {
   $("room-height-ft").addEventListener("change", onRoomSize);
 
   $("layout-flip").addEventListener("click", () => {
-    const selected = selectedLayoutName();
-    if (selected !== state.profile.active_layout) {
-      switchActiveLayout(selected);
-    }
+    if (isPreviewingLayout()) return;
     if (layoutLocked()) return;
     pushUndo();
     ensureProfileLayout();
@@ -1042,10 +1089,7 @@ function wireLayoutEditor() {
     pushProfileToView();
   });
   $("layout-reset").addEventListener("click", () => {
-    const selected = selectedLayoutName();
-    if (selected !== state.profile.active_layout) {
-      switchActiveLayout(selected);
-    }
+    if (isPreviewingLayout()) return;
     if (layoutLocked()) return;
     applyPreset(state.lastChosenPreset === "snake" ? "snake" : "perimeter");
   });
@@ -1075,7 +1119,8 @@ function wireLayoutEditor() {
   }
 
   function editsAllowed() {
-    return view.getViewMode() === "room" && state.activeTab === "layout" && !layoutLocked();
+    return view.getViewMode() === "room" && state.activeTab === "layout"
+      && !layoutLocked() && !isPreviewingLayout();
   }
 
   function pointerDown(event) {
