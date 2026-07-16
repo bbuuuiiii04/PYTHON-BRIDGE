@@ -2023,39 +2023,82 @@ class LEDDispatchPolicyMixin:
         engine = self._led_color_engine
         return engine.diy_eligible if (engine is not None and engine.enabled) else None
 
-    def _led_f2_drop_look_names(self) -> Any:
-        """F2 drop typing (Task 3.2): the preferred drop-look names for the CURRENT
-        drop's (family, tier), from the drop_look_routing table. None ⇒ no F2
-        routing (F2 off / no plan / empty table / unknown cell) ⇒ today's rotation
-        pick (kill-safe). Works with F1 off too (D§7 rule 4: families over v1
-        colors)."""
+    def _led_section_for_beat(self, d: DeckState, beat: float) -> Any:
+        """AWR-257: the DropSection whose [true_drop_beat, end_beat) contains
+        `beat`, else None. Pure lookup over the precomputed meta.drop_sections."""
+        sections = getattr(getattr(d, "meta", None), "drop_sections", ()) or ()
+        b = float(beat)
+        for s in sections:
+            if float(s.true_drop_beat) <= b < float(s.end_beat):
+                return s
+        return None
+
+    @staticmethod
+    def _led_f2_tier_union(routing: Any, family: str, tier: int) -> set:
+        """AWR-257: union of the routing looks for this family at every tier
+        <= the section's tier — never above it. Empty ⇒ caller falls back to
+        today's rotation pick."""
+        cell = routing.get(family) or {}
+        out: set = set()
+        for t, look_names in cell.items():
+            if t <= tier:
+                out.update(look_names)
+        return out
+
+    def _led_f2_drop_look_names(self, anchor_beat: float | None = None) -> Any:
+        """F2 drop typing (Task 3.2): the preferred drop-look names for the drop's
+        (family, tier), from the drop_look_routing table. None ⇒ no F2 routing
+        (F2 off / no plan / empty table / unknown cell) ⇒ today's rotation pick
+        (kill-safe). Works with F1 off too (D§7 rule 4: families over v1 colors).
+
+        AWR-257: `anchor_beat` (advances pass the section's true_drop_beat)
+        overrides the internal active_drop_beat resolution. Whichever anchor
+        resolves, if it sits inside a drop section the plan is looked up at the
+        section's TRUE drop, and the pool is the same-family <=-tier union — so a
+        mid-section continuation can never pull a different family or a higher
+        tier than the section's opening hit."""
         if not getattr(self, "_f2_enabled", False):
             return None
         routing = getattr(self, "_f2_drop_look_routing", None)
         if not routing:
             return None
-        sp = getattr(self, "_last_sp_state", None)
-        anchor = getattr(sp, "active_drop_beat", None) if sp is not None else None
+        if anchor_beat is not None:
+            anchor = float(anchor_beat)
+        else:
+            sp = getattr(self, "_last_sp_state", None)
+            anchor = getattr(sp, "active_drop_beat", None) if sp is not None else None
         if anchor is None:
             return None
         d = self._deck.get(getattr(self._os, "active_deck", 0))
         if d is None or getattr(d, "scripted_id", 0):
             return None    # scripted tracks: v2 stands down completely (D§7)
+        lookup_beat = float(anchor)
+        section = self._led_section_for_beat(d, anchor)
+        if section is not None:
+            lookup_beat = float(section.true_drop_beat)
         plan = getattr(getattr(d, "meta", None), "f2_plan", None)
-        entry = plan.for_drop(float(anchor)) if plan is not None else None
+        entry = plan.for_drop(lookup_beat) if plan is not None else None
         if entry is None:
             return None
-        names = routing.get(entry.decision.family, {}).get(entry.decision.tier)
-        return set(names) if names else None
+        names = self._led_f2_tier_union(
+            routing, entry.decision.family, entry.decision.tier)
+        return names if names else None
 
-    def _led_look_preference_predicate(self) -> Any:
+    def _led_look_preference_predicate(self, anchor_beat: float | None = None) -> Any:
         # Return independently fail-open narrowing terms in authority order: v2
         # dressing, F2 family×tier routing, then F4 euphoric bright preference.
         # The director applies each term to the current subset, so an empty later
         # intersection keeps the earlier routing choice instead of reopening the
         # full bank.
+        # AWR-257: anchor_beat (advances pass the section true drop) routes the
+        # F2 term to the section's pool; None keeps today's active_drop_beat path
+        # AND the exact no-arg call the default drop path has always made.
         base = self._led_v2_look_preference_predicate()
-        f2_names = self._led_f2_drop_look_names()
+        f2_names = (
+            self._led_f2_drop_look_names()
+            if anchor_beat is None
+            else self._led_f2_drop_look_names(anchor_beat)
+        )
         bright = self._led_f4_euphoric_bright()
         preds = []
         if base is not None:
