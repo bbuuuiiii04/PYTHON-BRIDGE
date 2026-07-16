@@ -109,11 +109,13 @@ class PatchCTests(unittest.TestCase):
         # AWR-156 knob #9 added a role-scoped width param. It landed in the
         # TRACKED example config first; the 2026-07-09 executive-approved live
         # mirror then carried it into the gitignored/read-only live config, so
-        # both now render with {'width': 4}. Pinned explicit per approved
+        # both now render with {'width': 4}. AWR-265 step 2 (2026-07-16,
+        # executive-gated) added travel_beats 2.0 to the base post-drop chase
+        # in example + approved live mirror. Pinned explicit per approved
         # mirror content (drift tripwire: an unapproved live change turns red).
         expected_params_by_rel = {
-            "config/led_look_director.example.json": {"width": 4},
-            "config/led_look_director.json": {"width": 4},
+            "config/led_look_director.example.json": {"width": 4, "travel_beats": 2.0},
+            "config/led_look_director.json": {"width": 4, "travel_beats": 2.0},
         }
         for rel in ("config/led_look_director.example.json", "config/led_look_director.json"):
             cfg_path = root / rel

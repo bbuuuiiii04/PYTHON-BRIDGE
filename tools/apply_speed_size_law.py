@@ -16,11 +16,12 @@ operator desk tuning of the look params):
      render output is byte-identical. The only behavior delta: looks gaining
      travel_beats=2.0 extend the beat-sync engine's paused-flight expiry from
      1.25 to 2.25 beats (pause path only).
-  2. Deletes the two DEAD legacy drop_pairs entries `rt_drop_chase` and
-     `rt_drop_nebula` (live-only leftovers of the AWR-156 remnant rename; the
-     example config deleted them then). Their drop looks are not in any bank,
-     so the pairs can never fire — and both violate the width ordering law
-     (drop width 0.8 implicit vs post_drop width 4).
+  2. Deletes the DEAD legacy drop_pairs entry `rt_drop_nebula` (live-only
+     leftover of the AWR-156 remnant rename; the example config deleted it
+     then). Its drop look is not in any bank, so the pair can never fire —
+     and it violates the width ordering law (drop width 0.8 implicit vs
+     post_drop width 4). `rt_drop_chase` was revived by AWR-265 step 2
+     (banked + paired) and is no longer dead.
 
 Safety properties (CFIX2 precedent):
   - Structural anomalies (missing look / scene_ref mismatch) abort BEFORE any
@@ -72,7 +73,8 @@ SPEED_PARAMS: dict[str, tuple[str, dict[str, float]]] = {
 # Dead legacy pairs to delete (drop side absent from every bank -> never
 # fires; width-ordering violators). Deleted only if the drop look is really
 # absent from banks.default at run time — checked, not assumed.
-DEAD_PAIRS = ("rt_drop_chase", "rt_drop_nebula")
+# AWR-265 step 2 revived rt_drop_chase (banked + paired); only nebula remains dead.
+DEAD_PAIRS = ("rt_drop_nebula",)
 
 
 def apply(data: dict) -> bool:

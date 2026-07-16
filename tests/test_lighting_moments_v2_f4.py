@@ -295,7 +295,8 @@ class TestEuphoricPreference(unittest.TestCase):
         loaded = led_config.load_led_look_director_config(_EXAMPLE)
         self.assertTrue(loaded.available, msg=loaded.errors)
         director = LEDLookDirector(replace(loaded.config, enabled=True, automation_enabled=True))
-        f2_cell = {"rt_drop_chase_blue", "rt_drop_chase_cyan"}
+        # AWR-265 step 2: color clones left banks.default.drop; use banked bases.
+        f2_cell = {"rt_drop_chase", "rt_drop_center_burst"}
         bright = {"rt_drop_strobe_red"}
         pol = FakePolicy(enabled=True, cfg=cfg_on())
         pol._led_v2_look_preference_predicate = lambda: None
