@@ -84,7 +84,17 @@ Corpus sweep receipts (`ws3_neutral_crack_receipts.json`, 1,665 true drops):
   shorter drop-adjacent growl spans sit further down the list.
 - Deep-research (festival/club laser practice across subgenres + honest
   translation to his two mirrored DMX lasers, CH8 color / CH9 speed / CH11
-  strobe, no pan-tilt/ILDA): {RESEARCH_STATUS}
+  strobe, no pan-tilt/ILDA): DELIVERED —
+  `local/spectral_night_2026_07_16/laser_research_report.md` (102 agents,
+  81 claims → 25 verified → 8 synthesized findings, 5 refuted claims listed,
+  20 sources). Headlines: pros treat laser design as music-translation;
+  bass genres = dense snare-locked cue timing, melodic = one slow look held
+  for minutes; drop release vs buildup restraint. On OUR two fixtures the
+  expressible subset is the TIMING layer (drop-synced cue/color changes,
+  strobe accents, color-speed as energy) — geometry (fans/sheets/liquid
+  sky/zones) is not, clearly marked as translation judgment. Honest gaps:
+  no genre-specific sources survived for house/tech-house/trap/DnB/
+  hardstyle/UKG. Provenance: ran unpinned on Fable (logged violation).
 - Standing laser context honored: bridge owns only the color layer over his
   SS-authored animations; yellow BANNED on lasers; drop-presentation policy
   (WHEN lasers fire) untouched.
