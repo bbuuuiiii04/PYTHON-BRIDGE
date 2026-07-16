@@ -77,8 +77,13 @@ def _is_code_identifier_context(line: str) -> bool:
     stripped = line.strip()
     if stripped.startswith("//") or stripped.startswith("*") or stripped.startswith("#"):
         return True
-    # Property / function names containing vertex are internal.
-    if re.search(r"\b(hitTestVertex|dragVertex|selectedVertex|vertexHit|Vertex)\b", line):
+    # Property / function / local names containing vertex are internal.
+    if re.search(r"\b(hitTestVertex|dragVertex|selectedVertex|vertexHit|Vertex|vertex)\b", line):
+        # Still flag if this line is assigning visible UI copy.
+        if any(token in line for token in ("textContent", "innerHTML", "innerText", "title=", "aria-label")):
+            return False
+        if re.search(r"""['"].*\bvertices?\b.*['"]""", line, re.I):
+            return False
         return True
     return False
 

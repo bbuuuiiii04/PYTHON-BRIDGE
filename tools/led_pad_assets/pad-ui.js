@@ -303,7 +303,7 @@
     $("slotFillSelect").value = e.slot_fill;
     $("monoChanceInput").value = e.mono_chance;
     $("monoChanceOutput").textContent = e.mono_chance;
-    // AWR-262 C3: Solid-chance only in Locked Palette mode.
+    // AWR-262 C3: Solid-chance only when Use set colors is active.
     $("monoChanceWrap").hidden = !(locked && e.slot_fill === "random_with_mono_chance");
     renderControls(render);
     $("loopHint").textContent = `Loop is ${$("loopToggle").checked ? "on" : "off"} (session)`;
