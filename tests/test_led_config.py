@@ -940,6 +940,8 @@ class Awr156Round2ConfigTests(unittest.TestCase):
         # AWR-156 T6.4 amendment (operator, late): a LOOK-name rename, not
         # just a bank move -- the demoted looks read as post-drop remnant
         # material now. scene_ref stays rt_drop_chase/rt_drop_nebula.
+        # AWR-265 Step 1 re-adds look name `rt_drop_chase` as the palette-fed
+        # DROP base cue (color_source=engine); remnant rename still holds.
         result = load_led_look_director_config_from_dict(_example_config())
         self.assertTrue(result.available, msg=result.errors)
         looks = result.config.looks
@@ -950,8 +952,12 @@ class Awr156Round2ConfigTests(unittest.TestCase):
         self.assertEqual(looks["rt_post_drop_remnant_nebula"].scene_ref, "rt_drop_nebula")
         self.assertIn("rt_post_drop_remnant_chase", banks.post_drop)
         self.assertIn("rt_post_drop_remnant_nebula", banks.post_drop)
-        self.assertNotIn("rt_drop_chase", looks)
+        self.assertIn("rt_drop_chase", looks)
+        self.assertEqual(looks["rt_drop_chase"].color_source, "engine")
+        self.assertEqual(looks["rt_drop_chase"].scene_ref, "rt_drop_chase")
         self.assertNotIn("rt_drop_nebula", looks)
+        # Step 1 is pure addition — banks still list colorway clones, not yet
+        # the new base look (bank rewrite is AWR-265 Step 2).
         self.assertNotIn("rt_drop_chase", banks.drop)
         self.assertNotIn("rt_drop_nebula", banks.drop)
         self.assertNotIn("rt_post_drop_remnant_chase", banks.drop)
