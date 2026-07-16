@@ -43,12 +43,45 @@ def slow(beat_pos, local_t, frame_index, params, segments, seed):
     time.sleep(0.025)
     return [(1, 2, 3)] * max(0, int(segments))
 
+def comet_trio_orbit(beat_pos, local_t, frame_index, params, segments, seed):
+    return [(40, 50, 60)] * max(0, int(segments))
+
 LAB_EFFECTS = {
     "pulse": ("frame", pulse),
     "boom": ("frame", boom),
     "slow": ("frame", slow),
+    "comet_trio_orbit": ("frame", comet_trio_orbit),
 }
 """
+
+
+def _write_drafts(path: Path, entries: list[dict]) -> None:
+    path.write_text(json.dumps({"entries": entries}), encoding="utf-8")
+
+
+def _draft_entry(
+    name: str,
+    *,
+    fn: str | None = None,
+    target_role: str = "drop",
+    params: dict | None = None,
+    status: str = "iterating",
+) -> dict:
+    return {
+        "name": name,
+        "kind": "frame",
+        "fn": fn if fn is not None else name,
+        "params": params if params is not None else {},
+        "cue_beats": 16,
+        "notes": "",
+        "brief": "",
+        "status": status,
+        "timing_mode": "beat",
+        "target_role": target_role,
+        "param_specs": {},
+        "created": "2026-07-16T00:00:00+00:00",
+        "updated": "2026-07-16T00:00:00+00:00",
+    }
 
 
 class LabAdapterHelpersTests(unittest.TestCase):
@@ -167,6 +200,95 @@ class LabAdapterFailDarkTests(unittest.TestCase):
             self.assertEqual(frame, [(10, 20, 30)] * 3)
 
 
+class LabAdapterFnAliasTests(unittest.TestCase):
+    """AWR-260 follow-up: clone/Save-as drafts where name ≠ fn must still light."""
+
+    def test_fn_neq_name_renders_lit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            lab_dir = Path(tmp)
+            module = lab_dir / "effects_lab.py"
+            _write_lab_module(module, _GOOD_LAB)
+            _write_drafts(
+                lab_dir / "drafts.json",
+                [_draft_entry("walkthrough_probe", fn="comet_trio_orbit")],
+            )
+            adapter = LabProductionAdapter(module)
+            adapter.reload()
+            frame = adapter.render(
+                "lab:walkthrough_probe",
+                beat_pos=0.0,
+                local_t=0.0,
+                frame_index=0,
+                params={},
+                segments=2,
+                seed=1,
+            )
+            self.assertEqual(frame, [(40, 50, 60), (40, 50, 60)])
+            self.assertTrue(
+                adapter.is_available("lab:walkthrough_probe"),
+                "fn≠name draft must be available for director bank picks",
+            )
+
+    def test_missing_drafts_json_name_eq_fn_still_renders(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            module = Path(tmp) / "effects_lab.py"
+            _write_lab_module(module, _GOOD_LAB)
+            # No drafts.json — name-only resolution must keep working.
+            self.assertFalse((Path(tmp) / "drafts.json").exists())
+            adapter = LabProductionAdapter(module)
+            adapter.reload()
+            self.assertEqual(adapter.draft_fn, {})
+            frame = adapter.render(
+                "lab:pulse",
+                beat_pos=0.0,
+                local_t=0.0,
+                frame_index=0,
+                params={},
+                segments=1,
+                seed=0,
+            )
+            self.assertEqual(frame, [(10, 20, 30)])
+
+    def test_reload_picks_up_newly_accepted_fn_neq_name_draft(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            lab_dir = Path(tmp)
+            module = lab_dir / "effects_lab.py"
+            _write_lab_module(module, _GOOD_LAB)
+            _write_drafts(lab_dir / "drafts.json", [_draft_entry("pulse")])
+            adapter = LabProductionAdapter(module)
+            adapter.reload()
+            # Before the rename entry exists, walkthrough_probe is unknown → black.
+            black = adapter.render(
+                "lab:walkthrough_probe",
+                beat_pos=0.0,
+                local_t=0.0,
+                frame_index=0,
+                params={},
+                segments=1,
+                seed=0,
+            )
+            self.assertEqual(black, [(0, 0, 0)])
+            # Accept / Save-as lands a new drafts.json entry; reload must see it.
+            _write_drafts(
+                lab_dir / "drafts.json",
+                [
+                    _draft_entry("pulse"),
+                    _draft_entry("walkthrough_probe", fn="comet_trio_orbit"),
+                ],
+            )
+            adapter.reload()
+            lit = adapter.render(
+                "lab:walkthrough_probe",
+                beat_pos=1.0,
+                local_t=0.5,
+                frame_index=2,
+                params={},
+                segments=1,
+                seed=0,
+            )
+            self.assertEqual(lit, [(40, 50, 60)])
+
+
 def _minimal_led_config(*, looks: dict[str, LEDLook], banks: dict[str, list[str]]) -> LEDConfig:
     bank_kwargs = {role: tuple(names) for role, names in banks.items()}
     return LEDConfig(
@@ -269,29 +391,16 @@ class LabAcceptWireInTests(unittest.TestCase):
             lab_dir = root / "led_lab"
             lab_dir.mkdir()
             _write_lab_module(lab_dir / "effects_lab.py", _GOOD_LAB)
-            (lab_dir / "drafts.json").write_text(
-                json.dumps(
-                    {
-                        "entries": [
-                            {
-                                "name": "pulse",
-                                "kind": "frame",
-                                "fn": "pulse",
-                                "params": {"width": 2},
-                                "cue_beats": 16,
-                                "notes": "",
-                                "brief": "test",
-                                "status": "iterating",
-                                "timing_mode": "beat",
-                                "target_role": "drop",
-                                "param_specs": {},
-                                "created": "2026-07-16T00:00:00+00:00",
-                                "updated": "2026-07-16T00:00:00+00:00",
-                            }
-                        ]
-                    }
-                ),
-                encoding="utf-8",
+            _write_drafts(
+                lab_dir / "drafts.json",
+                [
+                    _draft_entry(
+                        "walkthrough_probe",
+                        fn="comet_trio_orbit",
+                        target_role="drop",
+                        params={"width": 2},
+                    )
+                ],
             )
             cmds: list[dict] = []
 
@@ -338,7 +447,7 @@ class LabAcceptWireInTests(unittest.TestCase):
             service._append_bridge_command = cmds.append  # type: ignore[method-assign]
             result = service.lab_accept(
                 {
-                    "name": "pulse",
+                    "name": "walkthrough_probe",
                     "updated": "2026-07-16T00:00:00+00:00",
                     "target_role": "drop",
                     "params": {"width": 2},
@@ -349,13 +458,26 @@ class LabAcceptWireInTests(unittest.TestCase):
             self.assertEqual(result.get("bank"), "drop")
             self.assertIn("Drop", result.get("message", ""))
             live = json.loads(config_path.read_text(encoding="utf-8"))
-            look = (live.get("looks") or {}).get("pulse")
+            look = (live.get("looks") or {}).get("walkthrough_probe")
             self.assertIsNotNone(look)
-            self.assertEqual(look.get("scene_ref"), "lab:pulse")
+            self.assertEqual(look.get("scene_ref"), "lab:walkthrough_probe")
             self.assertEqual(look.get("color_source"), "engine")
             bank = ((live.get("banks") or {}).get("default") or {}).get("drop") or []
-            self.assertIn("pulse", bank)
+            self.assertIn("walkthrough_probe", bank)
             self.assertEqual(cmds, [{"cmd": "led_reload_looks"}])
+            # Gate class: production adapter must light the fn≠name accepted draft.
+            adapter = LabProductionAdapter(lab_dir / "effects_lab.py")
+            adapter.reload()
+            frame = adapter.render(
+                "lab:walkthrough_probe",
+                beat_pos=0.0,
+                local_t=0.0,
+                frame_index=0,
+                params=look.get("params") or {},
+                segments=2,
+                seed=0,
+            )
+            self.assertEqual(frame, [(40, 50, 60), (40, 50, 60)])
 
     def test_accept_untagged_goes_to_drafts_shelf(self) -> None:
         from rb_ss_bridge_v2.tools.led_pad_web import LedPadService
@@ -369,29 +491,9 @@ class LabAcceptWireInTests(unittest.TestCase):
             lab_dir = root / "led_lab"
             lab_dir.mkdir()
             _write_lab_module(lab_dir / "effects_lab.py", _GOOD_LAB)
-            (lab_dir / "drafts.json").write_text(
-                json.dumps(
-                    {
-                        "entries": [
-                            {
-                                "name": "pulse",
-                                "kind": "frame",
-                                "fn": "pulse",
-                                "params": {},
-                                "cue_beats": 8,
-                                "notes": "",
-                                "brief": "",
-                                "status": "iterating",
-                                "timing_mode": "unknown",
-                                "target_role": "",
-                                "param_specs": {},
-                                "created": "2026-07-16T00:00:00+00:00",
-                                "updated": "2026-07-16T00:00:00+00:00",
-                            }
-                        ]
-                    }
-                ),
-                encoding="utf-8",
+            _write_drafts(
+                lab_dir / "drafts.json",
+                [_draft_entry("pulse", fn="pulse", target_role="")],
             )
 
             class _FakePlayback:

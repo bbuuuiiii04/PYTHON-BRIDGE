@@ -1604,6 +1604,7 @@ def main() -> None:
             default_lab_module_path,
             is_lab_production_scene,
             lab_draft_from_scene,
+            load_draft_fn_map,
             load_lab_effects,
         )
 
@@ -1623,6 +1624,7 @@ def main() -> None:
         lab_load = load_lab_effects(lab_path)
         effects = lab_load.get("effects") or {}
         module_ok = bool(lab_load.get("ok"))
+        draft_fn = load_draft_fn_map(lab_path)
 
         def _look_available(look_name: str) -> bool:
             look = director._config.looks.get(look_name)
@@ -1634,7 +1636,10 @@ def main() -> None:
             if not module_ok:
                 return False
             draft = lab_draft_from_scene(scene, getattr(look, "params", {}) or {})
-            return bool(draft) and draft in effects
+            if not draft:
+                return False
+            fn_key = draft_fn.get(draft, draft)
+            return fn_key in effects or draft in effects
 
         director.replace_config(result.config)
         director.set_look_availability(_look_available)

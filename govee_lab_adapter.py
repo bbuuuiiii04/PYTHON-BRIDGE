@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import collections
 import importlib.util
+import json
 import logging
 import time
 import traceback as traceback_mod
@@ -86,6 +87,35 @@ def load_lab_effects(path: Path | str) -> dict[str, Any]:
         }
 
 
+def load_draft_fn_map(module_path: Path | str) -> dict[str, str]:
+    """Build draft-name → LAB_EFFECTS key from drafts.json beside the module.
+
+    Fail-soft: missing/corrupt/unreadable drafts.json returns ``{}`` (callers
+    then fall back to name-only resolution). Never raises.
+    """
+    drafts_path = Path(module_path).resolve().parent / "drafts.json"
+    try:
+        raw = json.loads(drafts_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if isinstance(raw, list):
+        entries = raw
+    elif isinstance(raw, dict) and isinstance(raw.get("entries"), list):
+        entries = raw["entries"]
+    else:
+        return {}
+    out: dict[str, str] = {}
+    for item in entries:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        fn = str(item.get("fn") or name).strip() or name
+        out[name] = fn
+    return out
+
+
 def _blank(segments: int) -> Frame:
     return [(0, 0, 0)] * max(0, int(segments))
 
@@ -137,6 +167,8 @@ class LabProductionAdapter:
         self._budget_hits_to_disable = int(budget_hits_to_disable)
         self._budget_window = max(1, int(budget_window))
         self.effects: dict[str, tuple[str, Callable[..., Any]]] = {}
+        # Draft entry name → LAB_EFFECTS key (clone/Save-as rename case).
+        self.draft_fn: dict[str, str] = {}
         self.module_ok = False
         self.last_error = ""
         self.last_traceback = ""
@@ -151,6 +183,9 @@ class LabProductionAdapter:
         self.module_ok = bool(result["ok"])
         self.last_error = str(result.get("error") or "")
         self.last_traceback = str(result.get("traceback") or "")
+        # Always refresh the name→fn map (even when the module failed) so a
+        # later successful reload / availability check stays consistent.
+        self.draft_fn = load_draft_fn_map(self.module_path)
         self._loaded = True
         # Fresh module → clear session disables so a fixed cue can recover.
         self._disabled.clear()
@@ -163,6 +198,23 @@ class LabProductionAdapter:
             self.reload()
         return self.module_ok
 
+    def _fn_key_for_draft(self, draft: str) -> str:
+        """Resolve draft entry name to LAB_EFFECTS key (fn), defaulting to name."""
+        mapped = self.draft_fn.get(draft)
+        if mapped:
+            return mapped
+        return draft
+
+    def _effect_for_draft(self, draft: str) -> tuple[str, Callable[..., Any]] | None:
+        fn_key = self._fn_key_for_draft(draft)
+        found = self.effects.get(fn_key)
+        if found is not None:
+            return found
+        # Name-only fallback when drafts.json is missing/corrupt (fn_key == draft).
+        if fn_key != draft:
+            return self.effects.get(draft)
+        return None
+
     def is_available(self, scene_ref: str, params: Mapping[str, Any] | None = None) -> bool:
         if not is_lab_production_scene(scene_ref):
             return True
@@ -171,7 +223,7 @@ class LabProductionAdapter:
         draft = lab_draft_from_scene(scene_ref, params)
         if not draft or draft in self._disabled:
             return False
-        return draft in self.effects
+        return self._effect_for_draft(draft) is not None
 
     def render(
         self,
@@ -193,7 +245,7 @@ class LabProductionAdapter:
             return _blank(seg)
         if not self.ensure_loaded():
             return _blank(seg)
-        found = self.effects.get(draft)
+        found = self._effect_for_draft(draft)
         if found is None:
             return _blank(seg)
         kind, fn = found
