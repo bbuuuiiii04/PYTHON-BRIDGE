@@ -230,6 +230,45 @@ class LedPadLabTests(unittest.TestCase):
             self.assertEqual(reloaded["level"], {"kind": "slider", "label": "Level", "min": 0.0, "max": 1.0, "step": 0.05})
             self.assertEqual(reloaded["flip"], {"kind": "toggle", "label": "Flip"})
 
+    def test_param_specs_select_round_trip_and_rejects_bad_options(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            registry = LabRegistry(Path(td) / "led_lab")
+            specs = {
+                "zone": {
+                    "kind": "select",
+                    "label": "Zone",
+                    "options": [{"value": 0, "label": "GLA"}, {"value": 1, "label": "DEEP"}],
+                },
+            }
+            registry.save({"name": "pulse", "kind": "slot", "fn": "pulse", "params": {}, "param_specs": specs})
+            reloaded = registry.get("pulse")["param_specs"]
+            self.assertEqual(reloaded["zone"]["kind"], "select")
+            self.assertEqual(reloaded["zone"]["options"][0], {"value": 0, "label": "GLA"})
+
+            base = {"name": "pulse2", "kind": "slot", "fn": "pulse2", "params": {}}
+            with self.assertRaises(ValueError):
+                registry.save({**base, "param_specs": {"zone": {"kind": "select", "options": [{"value": 0, "label": "Only"}]}}})
+            with self.assertRaises(ValueError):
+                registry.save({**base, "param_specs": {"zone": {"kind": "select", "options": "nope"}}})
+            with self.assertRaises(ValueError):
+                registry.save({
+                    **base,
+                    "param_specs": {
+                        "zone": {
+                            "kind": "select",
+                            "options": [{"value": 0, "label": "A"}, {"value": 0, "label": "B"}],
+                        }
+                    },
+                })
+
+    def test_slugify_lab_name_any_text_and_collisions(self) -> None:
+        from rb_ss_bridge_v2.tools.led_pad_lab import slugify_lab_name
+
+        self.assertEqual(slugify_lab_name("My Drop Cue"), "my_drop_cue")
+        self.assertEqual(slugify_lab_name("My Test Cue", {"my_test_cue"}), "my_test_cue_2")
+        self.assertEqual(slugify_lab_name("!!!"), "untitled")
+        self.assertEqual(slugify_lab_name(""), "untitled")
+
     def test_param_specs_validation_rejects_malformed_shapes(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             registry = LabRegistry(Path(td) / "led_lab")

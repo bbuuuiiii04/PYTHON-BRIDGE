@@ -2,8 +2,8 @@
 doc_status: current
 truth_level: software-tested
 last_verified_commit: 103ecbe
-last_verified_date: 2026-07-15
-validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (live-apply + variant switch + preview), Round 2 (param_specs sliders/toggles, slot swatches, JSON demoted to Advanced), Round 3 (rejected-drafts filter, draft delete), QR same-network access, the iOS/iPad touch pass, the editor unset-param-defaults fix, the AWR-193 pad/lab overhaul (accept snapshot, decoupled preview, archive flow, fn fallback, effective bounds, color pickers + regime badges, reconnect, freshness watchdog + live fingerprint + no-cache), the AWR-202 commit read-modify-merge with the gate fix that tracks look CONTENT (`touched`) separately from role-bank PLACEMENT (`moved`) so a params-only edit keeps the look's LIVE bank while an explicit pad move still applies, AWR-240 pad offline v2 stand-down so Test Palette still injects slot_colors, AWR-241 Template Lab beat meter + metronome click (preview exact / live server-synced), AWR-242 Template Lab UX overhaul (search/filter/group draft list, target_role phrase tags, settable timing_mode, detail restructure, health strip + self-test), AWR-243 Template Lab functional fix round (collision banner gate, selected-draft list pin, ownership takeover catch, applied:false hint, live test_palette for lab play, header/phone/preview/health/utility UX), AWR-245 Template Lab Strip|Room preview hookup (pad serves sim view JS + profile read-only; fail-soft; preview-only honesty), AWR-247 Template Lab preview length (default full cue_beats; 2/4 bars / full control), AWR-248 Pad|Lab|Sim cross-nav (plain links to :8767), AWR-250 Lab Room preview re-fetches sim profile on Preview / Room toggle so active_layout changes from Sim show without reload, AWR-254 pad look-editor close dirty check (compares against last Save, not editor-open snapshot), AWR-255 pad+lab banner when live config is newer than the running bridge, AWR-258 data-integrity (lab registry lock + optimistic concurrency, pad locked_palette save parity, beforeunload + reconnect stash, rotating lab backups), and AWR-259 pad integrity tail (same-look stale_look 409, Discard-all copy, persisted last_applied Accept snapshot, EDITOR_FIELDS parity); SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
+last_verified_date: 2026-07-16
+validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (live-apply + variant switch + preview), Round 2 (param_specs sliders/toggles/selects, slot swatches, JSON demoted to Advanced), Round 3 (rejected-drafts filter, draft delete), QR same-network access, the iOS/iPad touch pass, the editor unset-param-defaults fix, the AWR-193 pad/lab overhaul (accept snapshot, decoupled preview, archive flow, fn fallback, effective bounds, color pickers + regime badges, reconnect, freshness watchdog + live fingerprint + no-cache), the AWR-202 commit read-modify-merge with the gate fix that tracks look CONTENT (`touched`) separately from role-bank PLACEMENT (`moved`) so a params-only edit keeps the look's LIVE bank while an explicit pad move still applies, AWR-240 pad offline v2 stand-down so Test Palette still injects slot_colors, AWR-241 Template Lab beat meter + metronome click (preview exact / live server-synced), AWR-242 Template Lab UX overhaul (search/filter/group draft list, target_role phrase tags, settable timing_mode, detail restructure, health strip + self-test), AWR-243 Template Lab functional fix round (collision banner gate, selected-draft list pin, ownership takeover catch, applied:false hint, live test_palette for lab play, header/phone/preview/health/utility UX), AWR-245 Template Lab Strip|Room preview hookup (pad serves sim view JS + profile read-only; fail-soft; preview-only honesty), AWR-247 Template Lab preview length (default full cue_beats; 2/4 bars / full control), AWR-248 Pad|Lab|Sim cross-nav (plain links to :8767), AWR-250 Lab Room preview re-fetches sim profile on Preview / Room toggle so active_layout changes from Sim show without reload, AWR-254 pad look-editor close dirty check (compares against last Save, not editor-open snapshot), AWR-255 pad+lab banner when live config is newer than the running bridge, AWR-258 data-integrity (lab registry lock + optimistic concurrency, pad locked_palette save parity, beforeunload + reconnect stash, rotating lab backups), AWR-259 pad integrity tail (same-look stale_look 409, Discard-all copy, persisted last_applied Accept snapshot, EDITOR_FIELDS parity), AWR-260 lab Accept wire-in, AWR-261 status freshness, AWR-262 pad control truth, and AWR-263 lab control truth + New clone flow (select enums, firework specs, preview retune, search eclipse relax); SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # LED Pad
@@ -358,19 +358,44 @@ agent-facing content). To promote an accepted draft:
   banner. The cue row is labeled "Cue length (beats)" on both pages, and Delete sits in a
   separated danger zone below the panel instead of next to Accept.
 
-### Param controls and slot swatches (Round 2)
+### Param controls and slot swatches (Round 2 + AWR-263)
 
 A draft's saved `param_specs` (authored by the agent alongside the draft, via `/api/lab/save`) turn
-its tunable params into touch-first controls above the raw JSON: a `"slider"` spec
-(`{"kind": "slider", "label", "min", "max", "step"}`) renders a `<input type="range">` row with a
-live numeric readout, and a `"toggle"` spec renders a checkbox. Dragging a slider or flipping a
-toggle updates the underlying params object, writes it back into the Params JSON textarea, and
-routes through the same debounced auto-apply path as manual JSON edits — both surfaces call one
-`queueAutoApply()` function, so there is no divergent code path between touch and text editing.
+its tunable params into touch-first controls above the raw JSON:
+
+- `"slider"` — `{"kind":"slider","label","min","max","step"}` → range input + live readout
+- `"toggle"` — checkbox
+- `"select"` (AWR-263) — `{"kind":"select","label","options":[{"value","label"}, …]}` → worded
+  dropdown (Zone / Texture / Color Mode upgrade automatically via `effective_lab_specs` even when
+  the saved draft still has the old 0…N slider shape)
+
+Dragging a slider, flipping a toggle, or picking a select updates the underlying params object,
+writes it back into the Params JSON textarea, and routes through the same debounced auto-apply
+path as manual JSON edits — both surfaces call one `queueAutoApply()` function. While **Preview**
+is running, that path re-POSTs `/api/lab/preview` (~400 ms debounce) so the strip retunes live;
+the hint reads "Preview updates as you tune — Play sends to the real lights." Blurring the
+Advanced JSON box re-renders the controls from the JSON (JSON remains the save source of truth).
+
 `param_specs` is UI metadata only: `LabRegistry.save()` validates and persists it (`ValueError` on
-a malformed shape — non-dict, missing `min`/`max`, `max <= min`, `step <= 0`, or an unknown
-`kind`), but it never gates or filters what `lab_play`/`lab_update` accept; lab params stay
-unvalidated by design.
+a malformed shape — non-dict, missing `min`/`max`, `max <= min`, `step <= 0`, select with fewer
+than two options, or an unknown `kind`), but it never gates or filters what `lab_play` /
+`lab_update` accept; lab params stay unvalidated by design. Shared keys with `CONTROL_META` take
+CONTROL_META's min/max/step; **draft labels are preserved** (so `cycle_beats` no longer shows the
+old pad-wide "Rainbow Cycle Beats" on non-rainbow cues — CONTROL_META's label is now
+"Color cycle (beats)").
+
+**New cue (AWR-263):** the New button asks for any display name (auto-slugified to `[a-z0-9_]+`,
+collisions get `_2`) and a "start from" picker of previewable drafts (default = the selected
+draft). Create clones the starter's `fn` / `kind` / `params` / `param_specs` under the new name
+with `brief` = display name and status `iterating`, then previews immediately. An advanced
+"Empty shell — an AI agent must write its render code before it can preview" option keeps the
+old blank-draft path for agent workflows.
+
+Firework drafts whose specs still expose dead `color_b_*` / `sparkles_per_beat` knobs are
+decorated at list time with the live `spark_a` / `spark_b` family (`FIREWORK_EXPLOSION_LAB_SPECS`).
+Search that hits drafts hidden by status chips auto-shows them with a dim note
+("N hidden matches shown (status filters relaxed for this search)"); clearing search restores
+chip behavior. Changing the selected draft clears the self-test panel.
 
 Below the param controls, a row of six fixed-size color chips shows the Test Palette colors
 actually driving the draft (`slot_colors`), with the sixth chip (index 5) labeled "white" to match

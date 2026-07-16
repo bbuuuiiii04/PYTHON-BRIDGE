@@ -110,8 +110,10 @@ class EffectiveLabSpecsTests(unittest.TestCase):
         effective, conflicts = effective_lab_specs(specs)
 
         self.assertEqual(conflicts, ["floor"])
-        for field in ("min", "max", "step", "label"):
+        for field in ("min", "max", "step"):
             self.assertEqual(effective["floor"][field], CONTROL_META["floor"][field], field)
+        # AWR-263: draft label wins (CONTROL_META no longer stomps "Rainbow Cycle Beats" etc.).
+        self.assertEqual(effective["floor"]["label"], "Old Floor")
         self.assertEqual(effective["floor"]["kind"], "slider")  # kind stays from the spec
         self.assertEqual(effective["custom_level"], specs["custom_level"])  # lab-only key passes through
         # Pure function: input untouched.
@@ -124,13 +126,31 @@ class EffectiveLabSpecsTests(unittest.TestCase):
         effective, conflicts = effective_lab_specs(specs)
 
         self.assertEqual(conflicts, [])
-        self.assertEqual(effective["floor"]["label"], meta["label"])
+        self.assertEqual(effective["floor"]["label"], "Anything")
 
     def test_empty_and_lab_only_specs_pass_through(self) -> None:
         self.assertEqual(effective_lab_specs({}), ({}, []))
         specs = {"only_here": {"kind": "toggle", "label": "Flip"}}
         self.assertEqual(effective_lab_specs(specs), (specs, []))
 
+    def test_cycle_beats_meta_label_is_generic(self) -> None:
+        self.assertEqual(CONTROL_META["cycle_beats"]["label"], "Color cycle (beats)")
+
+    def test_zone_texture_color_mode_upgrade_to_select(self) -> None:
+        from rb_ss_bridge_v2.led_pad_controls import LAB_SELECT_OPTIONS
+
+        specs = {
+            "zone": {"kind": "slider", "label": "Zone (0 GLA…)", "min": 0, "max": 6, "step": 1},
+            "texture": {"kind": "slider", "label": "Texture", "min": 0, "max": 2, "step": 1},
+            "color_mode": {"kind": "slider", "label": "Color Mode", "min": 0, "max": 3, "step": 1},
+        }
+        effective, conflicts = effective_lab_specs(specs)
+        self.assertEqual(conflicts, [])
+        for key in ("zone", "texture", "color_mode"):
+            self.assertEqual(effective[key]["kind"], "select")
+            self.assertEqual(effective[key]["options"], LAB_SELECT_OPTIONS[key]["options"])
+        self.assertEqual(effective["zone"]["label"], "Zone (0 GLA…)")  # draft label kept
+        self.assertEqual(effective["texture"]["label"], "Texture")
 
 class LedPadControlDefaultsTests(unittest.TestCase):
     """Guards CONTROL_META["default"] against drift.

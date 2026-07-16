@@ -237,6 +237,20 @@
     return name.includes(q) || brief.includes(q) || notes.includes(q);
   }
 
+  function matchesPhrase(e) {
+    const role = roleOf(e);
+    if (state.filters.phrase === "untagged" && role) return false;
+    if (state.filters.phrase !== "all" && state.filters.phrase !== "untagged" && role !== state.filters.phrase) return false;
+    return true;
+  }
+
+  function matchesStatus(e) {
+    if (e.status === "iterating") return state.filters.iterating;
+    if (e.status === "accepted") return state.filters.accepted;
+    if (e.status === "rejected" || e.status === "promoted") return state.filters.rejected;
+    return false;
+  }
+
   function matchesFilters(e) {
     const q = state.filters.search.trim();
     let exactName = false;
@@ -244,17 +258,11 @@
       if (!labDraftSearchHit(e, q)) return false;
       exactName = String(e.name || "").toLowerCase() === q.toLowerCase();
     }
-    const role = roleOf(e);
-    if (state.filters.phrase === "untagged" && role) return false;
-    if (state.filters.phrase !== "all" && state.filters.phrase !== "untagged" && role !== state.filters.phrase) return false;
+    if (!matchesPhrase(e)) return false;
     // Exact-name search hit surfaces even when its status chip is off (same idea as
     // the selected-draft pin for status — search itself still must hit).
     if (exactName) return true;
-    // Status chips: rejected chip also covers promoted (old Archived semantics)
-    if (e.status === "iterating") return state.filters.iterating;
-    if (e.status === "accepted") return state.filters.accepted;
-    if (e.status === "rejected" || e.status === "promoted") return state.filters.rejected;
-    return false;
+    return matchesStatus(e);
   }
 
   function renderList() {
@@ -264,14 +272,41 @@
     state.showRejected = state.filters.rejected;
 
     const selectedName = state.current && state.current.name;
+    const q = state.filters.search.trim();
     // Selected draft stays visible across status chips, but NOT across a failed search
     // (otherwise typing a nonsense token still ghosts the open draft).
-    const visible = state.entries.filter(e => {
+    let visible = state.entries.filter(e => {
       if (matchesFilters(e)) return true;
       if (!(selectedName && e.name === selectedName)) return false;
       return labDraftSearchHit(e, state.filters.search);
     });
-    $("draftsDrawerCount").textContent = String(state.entries.filter(matchesFilters).length);
+
+    // C11: when search hits are hidden by status chips, auto-show them with a dim note.
+    let relaxedCount = 0;
+    const relaxedNames = new Set();
+    if (q) {
+      const searchHits = state.entries.filter(e => labDraftSearchHit(e, q) && matchesPhrase(e));
+      const hiddenByStatus = searchHits.filter(e => !matchesStatus(e) && !visible.some(v => v.name === e.name));
+      if (hiddenByStatus.length) {
+        relaxedCount = hiddenByStatus.length;
+        for (const e of hiddenByStatus) {
+          visible.push(e);
+          relaxedNames.add(e.name);
+        }
+      }
+    }
+    const note = $("searchRelaxNote");
+    if (note) {
+      if (relaxedCount > 0) {
+        note.hidden = false;
+        note.textContent = `${relaxedCount} hidden match${relaxedCount === 1 ? "" : "es"} shown (status filters relaxed for this search)`;
+      } else {
+        note.hidden = true;
+        note.textContent = "";
+      }
+    }
+
+    $("draftsDrawerCount").textContent = String(visible.length);
 
     const groups = [
       {key: "iterating", label: "Iterating", items: []},
@@ -293,8 +328,9 @@
       parts.push(`<div class="lab-group-head">${esc(g.label)} <span class="dim">${g.items.length}</span></div>`);
       for (const e of g.items) {
         const active = state.current && state.current.name === e.name ? " active" : "";
+        const relaxed = relaxedNames.has(e.name) ? " status-relaxed" : "";
         const prod = e.production_collision && e.status !== "promoted" ? ` <span class="prod-chip">prod</span>` : "";
-        parts.push(`<button type="button" class="lab-row${active}" data-name="${esc(e.name)}">
+        parts.push(`<button type="button" class="lab-row${active}${relaxed}" data-name="${esc(e.name)}">
           ${phraseChip(roleOf(e))}
           <span class="lab-row-name">${esc(e.name)}${prod}</span>
           ${statusDot(e.status)}
@@ -349,6 +385,9 @@
     else if (state.current && isEditorDirty()) stashEditor();
     stopPreview();
     renderSwatches(null);
+    // C10: self-test results belong to the previous draft — clear on switch.
+    const selfTest = $("selfTestPanel");
+    if (selfTest) { selfTest.hidden = true; selfTest.innerHTML = ""; }
     if (state.current && state.current.name !== name) {
       const note = $("acceptFallbackNote");
       if (note) note.hidden = true;
@@ -731,13 +770,38 @@
   }
 
   let applyTimer = 0;
-  function setAppliedHint(show) {
-    $("appliedHint").hidden = !show;
+  let previewTuneTimer = 0;
+  const PREVIEW_TUNE_HINT = "Preview updates as you tune — Play sends to the real lights.";
+  function previewTuningActive() {
+    return beatUI.mode === "preview" && preview.frames.length > 0;
+  }
+  function setAppliedHint(show, text) {
+    const el = $("appliedHint");
+    if (!el) return;
+    if (text) el.textContent = text;
+    el.hidden = !show;
+  }
+  function queuePreviewRetune() {
+    clearTimeout(previewTuneTimer);
+    previewTuneTimer = setTimeout(async () => {
+      if (!state.current || !previewTuningActive()) return;
+      try {
+        await previewDraft({keepHint: true});
+        setAppliedHint(true, PREVIEW_TUNE_HINT);
+        clearError();
+      } catch (err) { showError(err); }
+    }, 400);
   }
   function queueAutoApply() {
     // AWR-251 M-2: slider/param edits are LIVE-APPLY ONLY + editor-local.
     // Persist only on Save / Accept / Reject — never via this path.
+    // AWR-263 C12: while Preview is running, retune the preview strip instead.
     clearTimeout(applyTimer);
+    if (previewTuningActive()) {
+      setAppliedHint(true, PREVIEW_TUNE_HINT);
+      queuePreviewRetune();
+      return;
+    }
     applyTimer = setTimeout(async () => {
       if (!state.current) return;
       let params;
@@ -745,7 +809,11 @@
       stashEditor();
       try {
         const upd = await api.labUpdate({name: state.current.name, params});
-        setAppliedHint(upd && upd.applied === false);
+        if (upd && upd.applied === false) {
+          setAppliedHint(true, PREVIEW_TUNE_HINT);
+        } else {
+          setAppliedHint(false);
+        }
         clearError();
       } catch (err) { showError(err); }
     }, 400);
@@ -795,12 +863,25 @@
         rows.push(`<label class="param-row param-toggle"><span>${esc(spec.label)}</span><input type="checkbox" data-param="${esc(key)}" data-kind="toggle" ${checked ? "checked" : ""}></label>`);
         continue;
       }
+      if (spec.kind === "select") {
+        const options = Array.isArray(spec.options) ? spec.options : [];
+        const cur = params[key] === undefined ? (options[0] && options[0].value) : params[key];
+        const optsHtml = options.map(o => {
+          const selected = String(o.value) === String(cur) ? " selected" : "";
+          return `<option value="${esc(o.value)}"${selected}>${esc(o.label)}</option>`;
+        }).join("");
+        rows.push(`<label class="param-row param-select"><span>${esc(spec.label)}</span><select data-param="${esc(key)}" data-kind="select">${optsHtml}</select></label>`);
+        continue;
+      }
       const raw = params[key] === undefined ? spec.min : Number(params[key]);
       const colorish = Boolean(m); // incomplete triplet channel stays a slider
       rows.push(`<div class="param-row param-slider${slotKind && colorish ? " palette-fed" : ""}"><span class="param-label">${esc(spec.label)}${slotKind && colorish ? badge : ""}</span><div class="param-slider-col"><input type="range" data-param="${esc(key)}" data-kind="slider" min="${esc(spec.min)}" max="${esc(spec.max)}" step="${esc(spec.step)}" value="${esc(raw)}"><div class="param-range-ends"><span>${esc(spec.min)}</span><span>${esc(spec.max)}</span></div></div><output>${esc(raw)}</output></div>`);
     }
     container.innerHTML = rows.join("");
-    container.querySelectorAll("[data-param]").forEach(input => { input.oninput = () => applyParamControl(input); });
+    container.querySelectorAll("[data-param]").forEach(input => {
+      if (input.dataset.kind === "select") input.onchange = () => applyParamControl(input);
+      else input.oninput = () => applyParamControl(input);
+    });
     container.querySelectorAll("[data-color-base]").forEach(input => { input.oninput = () => applyColorControl(input, triplets[input.dataset.colorBase]); });
   }
 
@@ -824,6 +905,10 @@
     const key = input.dataset.param;
     if (input.dataset.kind === "toggle") {
       params[key] = input.checked;
+    } else if (input.dataset.kind === "select") {
+      const raw = input.value;
+      const asNum = Number(raw);
+      params[key] = (raw !== "" && Number.isFinite(asNum) && String(asNum) === raw) ? asNum : raw;
     } else {
       params[key] = parseFloat(input.value);
       const output = input.closest(".param-row").querySelector("output");
@@ -1043,10 +1128,13 @@
     setPreviewHint(true);
     if (beatUI.mode === "preview") setBeatMode("off");
   }
-  async function previewDraft() {
+  async function previewDraft(opts) {
     if (!state.current) return;
+    const keepHint = Boolean(opts && opts.keepHint);
+    const wasPreview = previewTuningActive();
+    const prevFrame = beatUI.frameIndex;
     stopPreview();
-    setPreviewHint(true);
+    if (!keepHint) setPreviewHint(true);
     // No implicit save: preview posts the current editor params directly.
     const params = JSON.parse($("paramsInput").value || "{}");
     const res = await api.labPreview({name: state.current.name, params, beats: previewBeats()});
@@ -1078,16 +1166,19 @@
     setPreviewHint(false);
     renderPreviewDimNote(res.frames);
     // m-5: room preview sits below a sticky header — bring the animating wall on screen.
-    if (roomView.mode === "room") {
+    if (roomView.mode === "room" && !keepHint) {
       const hero = document.querySelector(".lab-preview-hero");
       (hero || $("previewRoom"))?.scrollIntoView({block: "nearest", behavior: "smooth"});
     }
     const bpm = Number(res.bpm) || Number($("bpmInput").value) || 128;
-    setBeatMode("preview", {bpm, fps: preview.fps, frameIndex: 0});
+    const startFrame = (keepHint && wasPreview && preview.frames.length)
+      ? (prevFrame % preview.frames.length)
+      : 0;
+    setBeatMode("preview", {bpm, fps: preview.fps, frameIndex: startFrame});
     let start;
     const step = (ts) => {
       if (!preview.frames.length) return;
-      if (start === undefined) start = ts;
+      if (start === undefined) start = ts - (startFrame / preview.fps) * 1000;
       const frameIndex = Math.floor((ts - start) / 1000 * preview.fps) % preview.frames.length;
       beatUI.frameIndex = frameIndex;
       paintPreviewFrame(preview.frames[frameIndex]);
@@ -1190,14 +1281,100 @@
     }
   }
 
+  function slugifyLabName(display, existingNames) {
+    const raw = String(display || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+    let base = (/^[a-z0-9_]+$/.test(raw) && raw) ? raw : "untitled";
+    const taken = new Set(existingNames || []);
+    let candidate = base;
+    let n = 2;
+    while (taken.has(candidate)) {
+      candidate = `${base}_${n}`;
+      n += 1;
+    }
+    return candidate;
+  }
+
   $("newDraftBtn").onclick = () => {
-    PadModal.prompt("New draft", "", {label:"Draft name", confirmText:"Create"}, async (name) => {
-      if (!name) return;
-      await api.labSave({name, kind:"slot", fn:name, params:{}, cue_beats:16, brief:"", notes:"", status:"iterating", target_role:"", timing_mode:"unknown"});
-      await refresh();
-      selectDraft(name);
-      closeDrawer();
-    });
+    const working = state.entries.filter(e => e.previewable);
+    const defaultStarter = (state.current && state.current.previewable)
+      ? state.current.name
+      : (working[0] && working[0].name) || "";
+    const starterOptions = [
+      ...working.map(e => ({
+        value: e.name,
+        label: `${e.name}${e.brief ? " — " + String(e.brief).slice(0, 40) : ""}`,
+      })),
+      {
+        value: "__blank__",
+        label: "Empty shell — an AI agent must write its render code before it can preview",
+      },
+    ];
+    if (!starterOptions.length) {
+      starterOptions.push({
+        value: "__blank__",
+        label: "Empty shell — an AI agent must write its render code before it can preview",
+      });
+    }
+    PadModal.fields(
+      "New cue",
+      "Name it in plain words. Start from a working cue so Preview and tuning work right away.",
+      [
+        {name: "display_name", label: "Display name", type: "text", value: ""},
+        {
+          name: "starter",
+          label: "Start from",
+          type: "select",
+          value: defaultStarter || "__blank__",
+          options: starterOptions,
+        },
+      ],
+      {confirmText: "Create"},
+      async (values) => {
+        const display = String(values.display_name || "").trim();
+        if (!display) { showError("Give the cue a name"); return; }
+        const name = slugifyLabName(display, state.entries.map(e => e.name));
+        const starterName = values.starter;
+        let payload;
+        if (starterName && starterName !== "__blank__") {
+          const starter = state.entries.find(e => e.name === starterName);
+          if (!starter) { showError("Starter draft disappeared — pick again"); return; }
+          payload = {
+            name,
+            kind: starter.kind || "slot",
+            fn: starter.fn || starter.name,
+            params: JSON.parse(JSON.stringify(starter.params || {})),
+            param_specs: JSON.parse(JSON.stringify(starter.param_specs || {})),
+            cue_beats: Number(starter.cue_beats) || 16,
+            brief: display,
+            notes: "",
+            status: "iterating",
+            target_role: starter.target_role || "",
+            timing_mode: starter.timing_mode || "unknown",
+          };
+        } else {
+          payload = {
+            name,
+            kind: "slot",
+            fn: name,
+            params: {},
+            param_specs: {},
+            cue_beats: 16,
+            brief: display,
+            notes: "Empty shell — an AI agent must write its render code before it can preview.",
+            status: "iterating",
+            target_role: "",
+            timing_mode: "unknown",
+          };
+        }
+        await api.labSave(payload);
+        await refresh();
+        selectDraft(name);
+        closeDrawer();
+        if (starterName && starterName !== "__blank__") {
+          try { await previewDraft(); } catch (err) { showError(err); }
+        }
+      }
+    );
   };
   $("saveDraftBtn").onclick = () => save().catch(showError);
   $("playDraftBtn").onclick = () => play(false);
@@ -1229,7 +1406,15 @@
     state.current = null;
     await refresh();
   });
-  $("paramsInput").onblur = () => { try { JSON.parse($("paramsInput").value || "{}"); clearError(); } catch (err) { showError(err); } };
+  $("paramsInput").onblur = () => {
+    try {
+      JSON.parse($("paramsInput").value || "{}");
+      clearError();
+      // C9: JSON is the source of truth on blur — rebuild sliders/selects from it.
+      renderParamControls();
+      queueAutoApply();
+    } catch (err) { showError(err); }
+  };
   $("paramsInput").oninput = () => { setDirty(); queueAutoApply(); };
   $("briefInput").oninput = () => setDirty();
   $("notesInput").oninput = () => { $("notesSummary").textContent = notesPreview($("notesInput").value); setDirty(); };
