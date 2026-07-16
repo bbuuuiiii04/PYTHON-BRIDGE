@@ -171,6 +171,7 @@ contracts:
       - docs/status/active_work_registry.md
       - docs/architecture/palette_control_authority.md
       - docs/plans/active/streamdeck_palette_control_design_spec.md
+      - docs/plans/active/true_drop_section_cycling_spec_2026_07_15.md
       - docs/agents/task_playbooks/change_led_govee_behavior.md
     forbidden_assumptions:
       - H612D behavior does not imply all Govee devices work

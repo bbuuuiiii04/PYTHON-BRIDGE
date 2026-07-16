@@ -367,3 +367,42 @@ identity), what is provably unchanged (lasers, SoundSwitch, firing beats,
 blackouts, scripted tracks), rollback (`git revert` + menubar restart, then
 verify one bridge process), and that live behavior remains
 operator-unvalidated until his next mix.
+
+---
+
+## AWR-257-B follow-up (2026-07-16) — preference-term authority reorder
+
+**What broke live.** During "The Ceiling" (22:54 session, 2026-07-16) a NEUTRAL
+tier-1 drop fired `rt_drop_strobe_red_white` — a WALL tier-3 strobe look —
+instead of a look from its own chase family pool.
+
+**Root cause [confirmed in code].** `_led_look_preference_predicate`
+(`led_dispatch_policy.py`) returned its narrowing terms in the order
+`[v2 dressing, F2 family/tier, F4 bright]`, and the look director applies each
+term only when its intersection with the surviving set is non-empty
+(`led_look_director.py:507-510`, fail-open). When the v2 dressing preferred
+strobes and the F2 chase family pool then intersected empty, the family pool was
+silently dropped and the draw stayed on the dressing's strobe set — a look from
+the wrong pool.
+
+**Operator ruling (Brandon, 2026-07-16).** The family/tier pool is the *musical
+guarantee* and must be the HARD rule. Dressing may only refine *within* the
+pool, never replace it.
+
+**Change.** Reordered the predicate list to `[F2 family/tier, v2 dressing, F4
+bright]` — family term FIRST. The empty-intersection fail-open semantics are
+unchanged; only the order changed. Now dressing can narrow the family pool but
+can never pull the draw out of it, and F4 bright still applies last within
+whatever survives.
+
+**Tests (`tests/test_true_drop_sections.py`, class
+`TestPreferenceAuthorityOrder`).** Regression pin of the live failure (family
+pool of chases + strobe-preferring dressing → draw stays a chase); dressing
+refines within the pool when they overlap; F4 bright applies last within the
+surviving set (and fails open on a miss); and one test through the in-section
+advance entry (`_dispatch_led_section_advance`) proving the same order holds on
+that path.
+
+**Provably unchanged.** LED-only. Lasers, SoundSwitch, firing beats, blackout,
+and scripted tracks are byte-identical. No kill switch — ships on. Live LED
+behavior remains operator-unvalidated until his next mix.
