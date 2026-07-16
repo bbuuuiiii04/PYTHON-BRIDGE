@@ -27,8 +27,8 @@
     <span>41.656 mm/LED</span>
   </div>
   <div class="top-actions">
-    <span id="calibration-badge" class="chip warn" title="Saved calibration evidence state">UNMEASURED</span>
-    <span class="chip ok" title="This tool never contacts the strip">OFFLINE · NO DEVICE CONTACT</span>
+    <span id="calibration-badge" class="chip warn" title="Screen colors not yet calibrated against the real strip — Calibrate tab">UNMEASURED</span>
+    <span class="chip ok" id="offline-badge" title="This studio never opens a network path to the LEDs">Never touches the strip</span>
     <span id="paint-health" class="chip mono" title="Browser draw health, not hardware">—</span>
     <button id="top-stop" class="btn-stop" type="button" aria-label="Stop playback" title="Stop">■ STOP</button>
     <button id="help-btn" class="icon-btn" type="button" aria-label="Keyboard shortcuts" aria-expanded="false" aria-controls="help-popover">?</button>
@@ -94,8 +94,8 @@
         <span id="time-label" class="mono">0.000 s</span>
       </div>
       <div class="stage-provenance" id="stage-provenance">
-        <span id="pipeline-badge" class="chip mono">SOURCE · —</span>
-        <span id="timing-readout" class="chip mono">TIMING · —</span>
+        <span id="pipeline-badge" class="chip mono" title="">—</span>
+        <span id="timing-readout" class="chip mono" title="">—</span>
       </div>
     </div>
 

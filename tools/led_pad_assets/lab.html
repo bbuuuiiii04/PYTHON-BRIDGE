@@ -21,7 +21,7 @@
       <form id="sessionForm" class="session-controls" aria-label="Session controls">
         <span class="panel-label">Session</span>
         <label>Beat-sync BPM <button type="button" data-step="-1" aria-label="Decrease BPM">−</button><input id="bpmInput" type="number" min="60" max="200" step="1"><button type="button" data-step="1" aria-label="Increase BPM">+</button></label>
-        <span id="bpmScope" class="dim">Select a draft</span>
+        <span id="bpmScope" class="dim" title="">Select a draft</span>
         <label>Test Palette <select id="paletteSelect"></select></label>
         <label class="switch">Loop <input id="loopToggle" type="checkbox"><span id="loopLabel">On</span></label>
       </form>
@@ -30,15 +30,29 @@
           <span class="lab-health-item" id="healthServer" title="Server: green ok (&lt;3s), red stale/error"><span class="lab-health-dot" data-state="unknown"></span><span class="lab-health-label">Server</span></span>
           <span class="lab-health-item" id="healthLab" title="Lab code: amber not loaded yet, green loaded ✓, red load failed (click for traceback)" role="button" tabindex="0"><span class="lab-health-dot" data-state="unknown"></span><span class="lab-health-label">not loaded yet</span></span>
           <span class="lab-health-item" id="healthPlayback" title="Playback: green playing &lt;name&gt;, gray idle"><span class="lab-health-dot" data-state="idle"></span> <span id="healthPlaybackText">idle</span></span>
-          <button id="selfTestBtn" type="button" class="ghost lab-selftest-btn">Self-test</button>
+          <button id="selfTestBtn" type="button" class="ghost lab-selftest-btn" title="Checks the selected draft only — effect code, frames, and colors">Self-test</button>
         </div>
         <div id="selfTestPanel" class="lab-selftest-panel" hidden></div>
         <span id="ownershipPill" class="pill">Free</span>
         <button id="ownershipBtn" type="button" class="ghost">Take over</button>
         <button id="stopBtn" type="button" class="danger" aria-label="Emergency stop">■ STOP</button>
+        <button id="labHelpBtn" type="button" class="icon-btn lab-help-btn" aria-label="Lab help" aria-expanded="false" aria-controls="labHelpPopover">?</button>
       </div>
     </div>
   </header>
+  <div id="labHelpPopover" class="lab-help-popover" hidden role="dialog" aria-label="Lab help">
+    <h2 class="panel-label">Lab help</h2>
+    <dl class="lab-help-list">
+      <div><dt>Search</dt><dd>Matches name, brief, and notes (plain substring).</dd></div>
+      <div><dt>Filter chips</dt><dd>Show/hide Iterating, Accepted, Rejected. Exact-name search still finds a draft when its chip is off.</dd></div>
+      <div><dt>Phrase / Timing</dt><dd>Tag the musical moment and how the cue keeps time (beat / time / mixed / static).</dd></div>
+      <div><dt>◉ Preview</dt><dd>Renders in this page only — does not take the lights.</dd></div>
+      <div><dt>▶ Play</dt><dd>Sends the draft to the live lights (saves first).</dd></div>
+      <div><dt>⇄ Switch live lights</dt><dd>Amber when another lab scene is already live — swaps to this draft without a full stop.</dd></div>
+      <div><dt>Beat meter</dt><dd>Shows bar · beat while Preview or Play is running.</dd></div>
+      <div><dt>Room view</dt><dd>Uses the simulator layout — preview only; never contacts the strip.</dd></div>
+    </dl>
+  </div>
   <main>
     <div id="errorBanner" class="error-banner" hidden></div>
     <section class="lab-layout">
@@ -98,6 +112,7 @@
             <canvas id="previewStrip" height="64" aria-label="Draft preview strip"></canvas>
             <canvas id="previewRoom" class="lab-preview-room" height="280" hidden aria-label="Draft preview room view"></canvas>
             <div id="previewHint" class="lab-preview-hint">◉ Preview renders here — press Preview</div>
+            <div id="previewDimNote" class="lab-preview-dim-note dim" hidden></div>
           </div>
           <div class="lab-transport-row">
             <button id="previewBtn" type="button" class="ghost">◉ Preview</button>
@@ -121,7 +136,7 @@
         <!-- Z3 Tuning card -->
         <div class="lab-tuning-card">
           <div id="paramControls" class="param-controls"></div>
-          <div id="appliedHint" class="lab-applied-hint" hidden>Live apply paused — press ▶ Play to hear edits on the lights</div>
+          <div id="appliedHint" class="lab-applied-hint" hidden>Live apply paused — press ▶ Play to send them to the lights (live!)</div>
           <div class="lab-tuning-footer">
             <div class="cue-wrap"><span class="panel-label">Cue length (beats)</span><div class="cue-group" role="group" aria-label="Cue length (beats)"></div></div>
             <div class="lab-tuning-actions">
