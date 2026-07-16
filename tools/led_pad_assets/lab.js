@@ -888,9 +888,28 @@
       ctx.fillRect(i * w, 0, Math.ceil(w), canvas.height);
     });
   }
+  // P-4: near-black previews look broken — say when a cue is intentionally subtle.
+  function renderPreviewDimNote(frames) {
+    const note = $("previewDimNote");
+    if (!note) return;
+    let peak = 0;
+    for (const frame of frames || []) {
+      for (const px of frame) {
+        for (const ch of px) if (ch > peak) peak = ch;
+      }
+    }
+    if (frames && frames.length && peak < 40) {
+      note.textContent = `This cue is intentionally subtle — peak brightness ${peak}/255`;
+      note.hidden = false;
+    } else {
+      note.hidden = true;
+    }
+  }
+
   function stopPreview() {
     cancelAnimationFrame(preview.raf);
     preview.frames = [];
+    renderPreviewDimNote(null);
     const canvas = $("previewStrip");
     if (canvas) canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
     if (roomView.view) {
@@ -932,6 +951,7 @@
     preview.frames = res.frames;
     preview.fps = res.fps;
     setPreviewHint(false);
+    renderPreviewDimNote(res.frames);
     // m-5: room preview sits below a sticky header — bring the animating wall on screen.
     if (roomView.mode === "room") {
       const hero = document.querySelector(".lab-preview-hero");
@@ -1102,6 +1122,20 @@
   });
   $("draftsDrawerBtn").onclick = () => { if (state.drawerOpen) closeDrawer(); else openDrawer(); };
   $("selfTestBtn").onclick = () => runSelfTest().catch(showError);
+  // P-5: lab "?" help popover — same toggle/outside-click pattern as the sim's help-btn.
+  $("labHelpBtn").onclick = () => {
+    const pop = $("labHelpPopover");
+    const open = pop.hidden;
+    pop.hidden = !open;
+    $("labHelpBtn").setAttribute("aria-expanded", open ? "true" : "false");
+  };
+  document.addEventListener("click", (event) => {
+    const pop = $("labHelpPopover");
+    if (!pop || pop.hidden) return;
+    if (pop.contains(event.target) || $("labHelpBtn").contains(event.target)) return;
+    pop.hidden = true;
+    $("labHelpBtn").setAttribute("aria-expanded", "false");
+  });
   $("healthLab").onclick = () => {
     if (state.health.labOk === false) {
       $("tracePanel").hidden = false;

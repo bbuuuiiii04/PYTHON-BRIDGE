@@ -1494,8 +1494,12 @@ function loadFrames(frames, fps, tMs, markers = [], options = {}) {
   state.missedFrames = 0;
   $("scrub").max = String(Math.max(0, state.frames.length - 1));
   $("scrub").value = "0";
-  $("pipeline-badge").textContent = `SOURCE · ${state.provenance.toUpperCase()}`;
-  $("timing-readout").textContent = `${state.framesFps} FPS · ${state.timingSource.toUpperCase()} · ${state.durationSource.toUpperCase()}`;
+  // P-2: plain-English badges; the raw provenance/timing detail lives in the tooltip.
+  const offlineSource = state.provenance === "production_runner_offline";
+  $("pipeline-badge").textContent = offlineSource ? "Real show engine · offline" : `Source · ${state.provenance}`;
+  $("pipeline-badge").title = `SOURCE · ${state.provenance.toUpperCase()}`;
+  $("timing-readout").textContent = `${state.framesFps} FPS · exact timing grid`;
+  $("timing-readout").title = `${state.framesFps} FPS · ${state.timingSource.toUpperCase()} · ${state.durationSource.toUpperCase()}`;
   $("fps-chip").textContent = `${state.framesFps} FPS`;
   $("paint-health").textContent = "WAITING";
   startPlayback();
