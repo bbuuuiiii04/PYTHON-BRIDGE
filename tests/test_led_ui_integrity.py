@@ -48,6 +48,13 @@ class PadUiIntegrityTests(unittest.TestCase):
         self.assertIn("snapshotEditor() !== state.cleanSnapshot", src)
         self.assertIn('drafts: "Untagged"', src)
 
+    def test_legacy_bank_tab_hides_when_empty(self) -> None:
+        """AWR-265 FINAL: Legacy tab hidden when bank gone/empty — never errors."""
+        src = (_ASSETS / "pad-ui.js").read_text(encoding="utf-8")
+        self.assertIn('bank === "legacy_color_suffix"', src)
+        self.assertIn("legacy_color_suffix) || []).length > 0", src)
+        self.assertIn('state.activeBank = "drafts"', src)
+
     def test_beforeunload_guards_present_on_lab_pad_sim(self) -> None:
         lab = (_ASSETS / "lab.js").read_text(encoding="utf-8")
         pad = (_ASSETS / "pad-ui.js").read_text(encoding="utf-8")

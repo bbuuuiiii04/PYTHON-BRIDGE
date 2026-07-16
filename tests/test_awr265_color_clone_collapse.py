@@ -1,8 +1,13 @@
-"""AWR-265 Step 0 — color-clone collapse mapping + frame A/B regression harness.
+"""AWR-265 FINAL — color-level A/B gate for promoted residual colorways.
 
-Foundation for the config-only migration: every collapse-scope clone is classified,
-and mono chase/strobe colorways that can be reproduced via palette VALUE edits must
-pass base+literal frame identity on a seeded grid.
+Step 0's clone-inventory mapping tests are retired: the collapse executed
+(Steps 1–3 + FINAL). Living gate: base cue classes under blue_cyan resolve the
+exact curated pairs that the deleted residual clones used to bake.
+
+Config-only mechanism (no led_color_engine.py change): scale_stops order puts
+``ice`` between ``cyan`` and ``blue``, so blue_cyan's cyan→blue gradient keeps
+its existing multi ends (cyan, blue) while slots also contain exact ice and
+reserved white — cyan+white, blue+ice, and blue+cyan are all reachable.
 """
 from __future__ import annotations
 
@@ -14,6 +19,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from rb_ss_bridge_v2.led_config import load_led_look_director_config  # noqa: E402
+
 
 def _load_tool():
     path = Path(__file__).resolve().parents[1] / "tools" / "awr265_color_clone_collapse.py"
@@ -21,122 +28,84 @@ def _load_tool():
 
 
 _TOOL = _load_tool()
-_EXAMPLE = Path(__file__).resolve().parents[1] / "config" / "led_look_director.example.json"
+_ROOT = Path(__file__).resolve().parents[1]
+_EXAMPLE = _ROOT / "config" / "led_look_director.example.json"
 
-# Cue classes Step 1 must materialize as base looks (final list from Step 0).
-EXPECTED_BASE_LOOKS = frozenset(
-    {
-        "rt_drop_strobe",
-        "rt_drop_chase",
-        "rt_groove_chase",
-        "rt_post_drop_chase",
-        "rt_drop_center_burst",
-        "rt_post_drop_center_comet",
-        "rt_twinkle",
-    }
+# Retired residual clones → curated pairs that must surface under blue_cyan.
+_PROMOTED_PAIRS: tuple[tuple[str, str, tuple[int, int, int], tuple[int, int, int]], ...] = (
+    ("rt_drop_chase_cyan_white", "rt_drop_chase", (0, 255, 255), (255, 255, 255)),
+    ("rt_groove_chase_cyan_white", "rt_groove_chase", (0, 255, 255), (255, 255, 255)),
+    ("rt_post_drop_chase_cyan_white", "rt_post_drop_chase", (0, 255, 255), (255, 255, 255)),
+    ("rt_drop_center_burst_blue_cyan", "rt_drop_center_burst", (0, 0, 255), (0, 200, 255)),
+    ("rt_post_drop_center_comet_blue_cyan", "rt_post_drop_center_comet", (0, 0, 255), (0, 200, 255)),
+    ("rt_twinkle_blue", "rt_twinkle", (0, 0, 255), (0, 255, 255)),
 )
 
-# Mono chase suffixes that Step 0 proved byte-identical to the slot base under
-# literal slot injection (CONFIG_EDIT path for palette values).
-FRAME_IDENTICAL_MONO_CHASES = frozenset(
-    {
-        "rt_groove_chase_blue",
-        "rt_groove_chase_cyan",
-        "rt_groove_chase_red",
-        "rt_groove_chase_green",
-        "rt_drop_chase_blue",
-        "rt_drop_chase_cyan",
-        "rt_drop_chase_red",
-        "rt_drop_chase_green",
-        "rt_post_drop_chase_blue",
-        "rt_post_drop_chase_cyan",
-        "rt_post_drop_chase_red",
-        "rt_post_drop_chase_green",
-    }
-)
-
-# Residuals that must stay until engine work or live-taste deletion — never
-# delete in Step 3 without a new A/B green.
-KNOWN_IMPOSSIBLE_OR_RESIDUAL = frozenset(
-    {
-        "rt_groove_chase_cyan_white",
-        "rt_drop_chase_cyan_white",
-        "rt_post_drop_chase_cyan_white",
-        "rt_drop_center_burst_blue_cyan",
-        "rt_post_drop_center_comet_blue_cyan",
-        "rt_twinkle_blue",
-    }
-)
+_BASE_LOOKS = frozenset(base for _, base, _, _ in _PROMOTED_PAIRS)
 
 
-class Awr265Step0MappingTests(unittest.TestCase):
+def _pair_reachable(multi, slots, color_a, color_b) -> bool:
+    if multi is not None and None not in multi:
+        if frozenset(multi) == frozenset((color_a, color_b)):
+            return True
+    if slots and color_a in slots and color_b in slots:
+        return True
+    return False
+
+
+class Awr265FinalColorABTests(unittest.TestCase):
+    """Living gate replacing Step 0 inventory + byte-exact frame A/B."""
+
     @classmethod
     def setUpClass(cls) -> None:
-        cls.loaded, cls.rows = _TOOL.build_mapping_table(_EXAMPLE)
-        cls.by_name = {row.spec.look_name: row for row in cls.rows}
+        loaded = load_led_look_director_config(str(_EXAMPLE))
+        assert loaded.available and loaded.config is not None, loaded.errors
+        cls.cfg = loaded.config
+        cls.ce = loaded.config.color_engine
+        assert cls.ce is not None
 
-    def test_inventory_is_29_names(self) -> None:
-        self.assertEqual(len(self.rows), 29)
+    def test_residual_clones_are_gone(self) -> None:
+        looks = self.cfg.looks
+        for retired, *_ in _PROMOTED_PAIRS:
+            self.assertNotIn(retired, looks)
+        self.assertNotIn("legacy_color_suffix", self.cfg.banks)
 
-    def test_collapse_scope_has_expected_base_classes(self) -> None:
-        bases = {row.spec.base_look for row in self.rows if row.spec.scope == "collapse"}
-        self.assertEqual(bases, EXPECTED_BASE_LOOKS)
+    def test_base_cue_classes_remain_engine_fed(self) -> None:
+        for base in _BASE_LOOKS:
+            look = self.cfg.looks[base]
+            self.assertEqual(look.color_source, "engine", base)
 
-    def test_diy_cloud_names_are_out_of_scope(self) -> None:
-        diy = [row for row in self.rows if row.spec.cue_class == "diy_cloud"]
+    def test_blue_cyan_keeps_existing_cyan_blue_multi(self) -> None:
+        # Taste guard: promote pairs ADD to blue_cyan; do not take over multi ends.
+        multi = _TOOL._resolve_v1_multi(self.ce, "blue_cyan")
+        self.assertEqual(multi, ((0, 255, 255), (0, 0, 255)))
+
+    def test_promoted_pairs_resolve_under_blue_cyan(self) -> None:
+        multi = _TOOL._resolve_v1_multi(self.ce, "blue_cyan")
+        slots = _TOOL._resolve_v1_slots(self.ce, "blue_cyan")
+        self.assertIsNotNone(slots)
+        for retired, base, color_a, color_b in _PROMOTED_PAIRS:
+            with self.subTest(retired=retired, base=base):
+                self.assertTrue(
+                    _pair_reachable(multi, slots, color_a, color_b),
+                    msg=(
+                        f"{retired} pair {(color_a, color_b)} not reachable under "
+                        f"blue_cyan (multi={multi}, slots={slots})"
+                    ),
+                )
+
+    def test_ice_stop_sits_between_cyan_and_blue(self) -> None:
+        stops = list(self.ce.scale_stops)
+        self.assertLess(stops.index("cyan"), stops.index("ice"))
+        self.assertLess(stops.index("ice"), stops.index("blue"))
+
+    def test_collapse_tool_is_honest_on_clone_free_config(self) -> None:
+        # Runnable after FINAL: empty collapse inventory, no crash.
+        _, rows = _TOOL.build_mapping_table(_EXAMPLE)
+        collapse = [r for r in rows if r.spec.scope == "collapse"]
+        self.assertEqual(collapse, [])
+        diy = [r for r in rows if r.spec.scope == "out_of_scope"]
         self.assertEqual(len(diy), 4)
-        for row in diy:
-            self.assertEqual(row.classification, "OUT_OF_SCOPE")
-
-    def test_mono_chases_are_config_edit_with_zero_frame_mismatch(self) -> None:
-        for name in FRAME_IDENTICAL_MONO_CHASES:
-            row = self.by_name[name]
-            self.assertEqual(row.clone_vs_base_mismatches, 0, name)
-            self.assertIn(row.classification, {"CONFIG_EDIT", "EXACT_TODAY"}, name)
-            self.assertTrue(row.edit_match, msg=f"{name} edit_multi={row.edit_multi}")
-
-    def test_known_residuals_are_impossible(self) -> None:
-        for name in KNOWN_IMPOSSIBLE_OR_RESIDUAL:
-            row = self.by_name[name]
-            self.assertEqual(row.classification, "IMPOSSIBLE", name)
-            self.assertGreater(row.clone_vs_base_mismatches, 0, name)
-            self.assertTrue(row.residual, name)
-
-    def test_strobe_literals_extract_from_config_params(self) -> None:
-        blue = self.by_name["rt_drop_strobe_blue"]
-        self.assertEqual(blue.spec.color_a, (0, 0, 255))
-        self.assertIsNone(blue.spec.color_b)
-        duo = self.by_name["rt_drop_strobe_blue_cyan"]
-        self.assertEqual(duo.spec.color_a, (0, 0, 255))
-        self.assertEqual(duo.spec.color_b, (0, 135, 255))
-        self.assertTrue(duo.edit_match)
-        self.assertEqual(duo.classification, "CONFIG_EDIT")
-        cyan_white = self.by_name["rt_drop_strobe_cyan_white"]
-        self.assertEqual(cyan_white.spec.color_b, (100, 105, 255))
-        self.assertTrue(cyan_white.edit_match)
-        self.assertEqual(cyan_white.classification, "CONFIG_EDIT")
-        self.assertEqual(cyan_white.clone_vs_base_mismatches, 0)
-
-    def test_base_plus_literal_injection_is_byte_identical(self) -> None:
-        """Motion-identical-by-construction gate for every collapse-scope cue."""
-        for row in self.rows:
-            if row.spec.scope != "collapse":
-                continue
-            mism, checked = _TOOL.frame_ab_base_vs_literals(
-                base_scene=row.spec.base_scene,
-                inject=row.spec.inject,
-                literals=row.spec,
-                beats=_TOOL.GRID_BEATS[:80],
-            )
-            self.assertEqual(mism, 0, row.spec.look_name)
-            self.assertEqual(checked, 80, row.spec.look_name)
-
-    def test_mapping_table_emits_all_verdicts(self) -> None:
-        text = _TOOL.format_table(self.rows)
-        self.assertIn("CONFIG_EDIT", text)
-        self.assertIn("IMPOSSIBLE", text)
-        self.assertIn("OUT_OF_SCOPE", text)
-        self.assertIn("rt_drop_chase_blue", text)
 
 
 if __name__ == "__main__":

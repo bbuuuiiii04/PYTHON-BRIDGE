@@ -1,4 +1,4 @@
-"""Tests for M2.5 Patch F: legacy color-suffix bank cleanup."""
+"""Tests for M2.5 Patch F + AWR-265 FINAL: default-bank generics, clone-free."""
 from __future__ import annotations
 
 import sys
@@ -25,18 +25,15 @@ _ROLES = (
     "breakdown",
     "utility",
 )
-_LEGACY_COLOR_SUFFIX_BY_ROLE = {
-    "ambient": ("rt_twinkle_blue",),
-    "groove": (
+# Former color-suffix clones — must stay absent after AWR-265 FINAL.
+_RETIRED_COLOR_SUFFIX_LOOKS = frozenset(
+    {
+        "rt_twinkle_blue",
         "rt_groove_chase_blue",
         "rt_groove_chase_cyan",
         "rt_groove_chase_red",
         "rt_groove_chase_green",
         "rt_groove_chase_cyan_white",
-    ),
-    "buildup": (),
-    "pre_drop": (),
-    "drop": (
         "rt_drop_chase_blue",
         "rt_drop_chase_cyan",
         "rt_drop_chase_red",
@@ -50,44 +47,26 @@ _LEGACY_COLOR_SUFFIX_BY_ROLE = {
         "rt_drop_strobe_red_white",
         "rt_drop_strobe_blue_cyan",
         "rt_drop_strobe_cyan_white",
-    ),
-    "post_drop": (
         "rt_post_drop_chase_blue",
         "rt_post_drop_chase_cyan",
         "rt_post_drop_chase_red",
         "rt_post_drop_chase_green",
         "rt_post_drop_chase_cyan_white",
         "rt_post_drop_center_comet_blue_cyan",
-    ),
-    "breakdown": (),
-    "utility": (),
-}
-_MOVED_LEGACY_LOOKS = {
-    look_name
-    for role_looks in _LEGACY_COLOR_SUFFIX_BY_ROLE.values()
-    for look_name in role_looks
-}
+    }
+)
 _EXPECTED_DEFAULT_GENERICS = {
     "groove": "rt_groove_chase",
-    # AWR-156 bank recast (f): rt_drop_chase moved drop -> post_drop, so the
-    # "drop" role no longer has a generic chase representative.
     "post_drop": "rt_post_drop_chase",
     "ambient": "rt_twinkle",
 }
 _GENERIC_ENGINE_LOOKS = (
     "rt_groove_chase",
-    # AWR-156 T6.4: renamed rt_drop_chase -> rt_post_drop_remnant_chase
-    # (LOOK-name rename only; scene_ref stays rt_drop_chase).
     "rt_post_drop_remnant_chase",
     "rt_post_drop_chase",
     "rt_drop_center_burst",
     "rt_post_drop_center_comet",
     "rt_twinkle",
-)
-_LEGACY_EXEMPT_LOOKS = (
-    "rt_twinkle_blue",
-    "rt_drop_center_burst_blue_cyan",
-    "rt_post_drop_center_comet_blue_cyan",
 )
 
 
@@ -111,33 +90,27 @@ class PatchFBankCleanupTests(unittest.TestCase):
         self.assertEqual(result.reason, "ok")
         self.assertEqual(tuple(result.errors), ())
 
-    def test_default_bank_contains_no_moved_legacy_color_suffix_looks(self) -> None:
-        # AWR-265 Step 2: all color-suffix clones (including the former Part C
-        # gentle-drop quartet and the seven drop strobes) live only in
-        # legacy_color_suffix. Default drop rotates the palette-fed bases.
+    def test_default_bank_contains_no_retired_color_suffix_looks(self) -> None:
         result = _load()
         default_names = _bank_names(result.config.banks["default"])
-        self.assertEqual(default_names & _MOVED_LEGACY_LOOKS, set())
+        self.assertEqual(default_names & _RETIRED_COLOR_SUFFIX_LOOKS, set())
         self.assertIn("rt_drop_chase", result.config.banks["default"].drop)
         self.assertIn("rt_drop_strobe", result.config.banks["default"].drop)
 
-    def test_legacy_color_suffix_bank_contains_exactly_moved_looks(self) -> None:
+    def test_legacy_color_suffix_bank_is_gone(self) -> None:
+        # AWR-265 FINAL: storage bank deleted with the clones.
         result = _load()
-        legacy = result.config.banks.get("legacy_color_suffix")
-        self.assertIsNotNone(legacy)
-        for role in _ROLES:
-            self.assertEqual(
-                getattr(legacy, role),
-                _LEGACY_COLOR_SUFFIX_BY_ROLE[role],
-                role,
-            )
-        self.assertEqual(_bank_names(legacy), _MOVED_LEGACY_LOOKS)
+        self.assertNotIn("legacy_color_suffix", result.config.banks)
 
-    def test_default_and_legacy_bank_look_names_resolve(self) -> None:
+    def test_retired_clones_are_absent_from_looks(self) -> None:
+        result = _load()
+        for look_name in sorted(_RETIRED_COLOR_SUFFIX_LOOKS):
+            self.assertNotIn(look_name, result.config.looks)
+
+    def test_default_bank_look_names_resolve(self) -> None:
         result = _load()
         defined = set(result.config.looks)
         self.assertTrue(_bank_names(result.config.banks["default"]) <= defined)
-        self.assertTrue(_bank_names(result.config.banks["legacy_color_suffix"]) <= defined)
 
     def test_default_realtime_scene_refs_are_registered(self) -> None:
         result = _load()
@@ -154,18 +127,16 @@ class PatchFBankCleanupTests(unittest.TestCase):
             self.assertIn(look_name, getattr(default, role), role)
         self.assertIn("rt_post_drop_center_comet", default.post_drop)
 
-    def test_legacy_exempt_looks_remain_exempt_and_generics_use_engine(self) -> None:
+    def test_generics_use_engine_and_retired_exempts_cleared(self) -> None:
         result = _load()
         exempt = set(result.config.color_engine.exempt_looks)
-        for look_name in _LEGACY_EXEMPT_LOOKS:
-            self.assertIn(look_name, exempt)
+        for look_name in _RETIRED_COLOR_SUFFIX_LOOKS:
+            self.assertNotIn(look_name, exempt)
         for look_name in _GENERIC_ENGINE_LOOKS:
             self.assertNotIn(look_name, exempt)
             self.assertEqual(result.config.looks[look_name].color_source, "engine")
 
     def test_drop_pairs_resolve_and_generic_chase_pair_exists(self) -> None:
-        # AWR-265 Step 2: palette-fed rt_drop_chase is the default drop base
-        # and pairs to rt_post_drop_chase; center_burst still pairs to comet.
         result = _load()
         chase = result.config.drop_pairs.get("rt_drop_chase")
         self.assertIsNotNone(chase)
@@ -177,11 +148,6 @@ class PatchFBankCleanupTests(unittest.TestCase):
         for drop_name, drop_pair in result.config.drop_pairs.items():
             self.assertIn(drop_name, result.config.looks)
             self.assertIn(drop_pair.post_drop, result.config.looks)
-
-    def test_legacy_look_definitions_still_resolve(self) -> None:
-        result = _load()
-        for look_name in sorted(_MOVED_LEGACY_LOOKS):
-            self.assertIn(look_name, result.config.looks)
 
     def test_no_static_slot_colors_params_in_config(self) -> None:
         result = _load()

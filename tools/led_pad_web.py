@@ -469,8 +469,8 @@ def _pad_lists(config: dict[str, Any]) -> dict[str, list[str]]:
     default = _default_bank(config)
     lists = {bank: _dedupe(default.get(bank, [])) for bank in _ROLE_BANKS}
     lists["drafts"] = _dedupe(config["_pad_meta"].get("drafts", []))
-    # AWR-265: expose the storage-only legacy color-suffix bank as its own pad
-    # tab (read via payload; moves into it still go through role banks).
+    # AWR-265 FINAL: legacy_color_suffix bank is gone; still expose an empty
+    # list so older pad clients get a calm payload (UI hides the empty tab).
     legacy = (config.get("banks") or {}).get("legacy_color_suffix") or {}
     legacy_names: list[str] = []
     if isinstance(legacy, dict):

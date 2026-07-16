@@ -166,8 +166,17 @@
   }
   function renderBanks() {
     const tabs = $("bankTabs");
-    const banks = bankOrder.slice();
+    const banks = bankOrder.slice().filter(bank => {
+      // AWR-265 FINAL: hide Legacy tab when the bank is gone / empty — never error.
+      if (bank === "legacy_color_suffix") {
+        return ((state.banks && state.banks.legacy_color_suffix) || []).length > 0;
+      }
+      return true;
+    });
     if ((state.banks.other || []).length) banks.push("other");
+    if (state.activeBank === "legacy_color_suffix" && !banks.includes("legacy_color_suffix")) {
+      state.activeBank = "drafts";
+    }
     tabs.innerHTML = banks.map(bank => {
       const dirty = state.config.dirty.banks && state.config.dirty.banks[bank];
       const count = (state.banks[bank] || []).length;

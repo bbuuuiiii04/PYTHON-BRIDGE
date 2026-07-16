@@ -5,7 +5,12 @@ Read-only analysis against example (and optional live) LED config. Imports the
 color engine only inside tests/tools (allowed); does not mutate bridge runtime
 modules.
 
-Classification per clone:
+AWR-265 FINAL (2026-07-16): collapse is complete — clone-free configs yield an
+empty collapse inventory (plus any remaining DIY out-of-scope names). The living
+gate is ``tests/test_awr265_color_clone_collapse.py`` (color-level A/B under
+blue_cyan). This tool stays runnable-honest: empty results, no crash.
+
+Classification per clone (historical Step 0):
   EXACT_TODAY     — some current palette/zone already yields the target pair
   CONFIG_EDIT     — a palette/zone VALUE edit (documented) would yield exact
   IMPOSSIBLE      — cannot reproduce config-only (keep clone; report residual)

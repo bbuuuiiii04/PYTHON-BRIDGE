@@ -3,7 +3,7 @@
 Covers:
 - _slot_twinkle unit tests (shape, ambient slot use, no white-slot writes)
 - Config: rt_twinkle generic look is available in the ambient bank
-- Regression: legacy rt_twinkle_blue remains registered, stored, and exempt
+- AWR-265 FINAL: rt_twinkle_blue residual clone is absent
 """
 from __future__ import annotations
 
@@ -123,17 +123,17 @@ class PatchE3ConfigTests(unittest.TestCase):
         self.assertEqual(look.params, {})
         self.assertIn("rt_twinkle", result.config.banks["default"].ambient)
 
-    def test_legacy_twinkle_blue_still_resolves(self) -> None:
+    def test_rt_twinkle_blue_clone_is_gone(self) -> None:
+        # AWR-265 FINAL: residual colorway deleted; blue+cyan surfaces via blue_cyan.
         self.assertIn("twinkle_blue", _EFFECTS)
         self.assertIn("twinkle_blue", REALTIME_EFFECT_NAMES)
 
         result = self._load_config()
         self.assertTrue(result.available, f"config not available: {result.reason}")
-        legacy = result.config.looks["rt_twinkle_blue"]
-        self.assertEqual(legacy.scene_ref, "twinkle_blue")
-        self.assertNotIn("rt_twinkle_blue", result.config.banks["default"].ambient)
-        self.assertIn("rt_twinkle_blue", result.config.banks["legacy_color_suffix"].ambient)
-        self.assertIn("rt_twinkle_blue", result.config.color_engine.exempt_looks)
+        self.assertNotIn("rt_twinkle_blue", result.config.looks)
+        self.assertNotIn("legacy_color_suffix", result.config.banks)
+        self.assertNotIn("rt_twinkle_blue", result.config.color_engine.exempt_looks)
+        self.assertIn("rt_twinkle", result.config.banks["default"].ambient)
 
 
 class PatchE3RegistrationTests(unittest.TestCase):

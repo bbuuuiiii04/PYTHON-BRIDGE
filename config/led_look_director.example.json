@@ -358,10 +358,7 @@
       "rt_drop_chase_freestyle_nebula",
       "rt_drop_white_aggressive",
       "rt_post_drop_freestyle_nebula",
-      "rt_post_drop_white_shatter",
-      "rt_twinkle_blue",
-      "rt_drop_center_burst_blue_cyan",
-      "rt_post_drop_center_comet_blue_cyan"
+      "rt_post_drop_white_shatter"
     ],
     "diy_color_tags": {
       "groove_diy_groove": "cyan",
@@ -571,9 +568,24 @@
         255,
         255
       ],
+      "ice": [
+        0,
+        200,
+        255
+      ],
       "blue": [
         0,
         0,
+        255
+      ],
+      "white": [
+        255,
+        255,
+        255
+      ],
+      "sky": [
+        0,
+        135,
         255
       ],
       "purple": [
@@ -590,21 +602,6 @@
         255,
         0,
         0
-      ],
-      "white": [
-        255,
-        255,
-        255
-      ],
-      "sky": [
-        0,
-        135,
-        255
-      ],
-      "ice": [
-        0,
-        200,
-        255
       ],
       "periwinkle": [
         100,
@@ -631,35 +628,12 @@
       "post_drop": "rt_post_drop_chase",
       "duration_beats": 8.0
     },
-    "rt_drop_chase_blue": {
-      "post_drop": "rt_post_drop_chase_blue",
-      "duration_beats": 8.0
-    },
-    "rt_drop_chase_cyan": {
-      "post_drop": "rt_post_drop_chase_cyan",
-      "duration_beats": 8.0
-    },
-    "rt_drop_chase_red": {
-      "post_drop": "rt_post_drop_chase_red",
-      "duration_beats": 8.0
-    },
-    "rt_drop_chase_green": {
-      "post_drop": "rt_post_drop_chase_green",
-      "duration_beats": 8.0
-    },
-    "rt_drop_chase_cyan_white": {
-      "post_drop": "rt_post_drop_chase_cyan_white",
-      "duration_beats": 8.0
-    },
     "rt_drop_chase_freestyle_nebula": {
       "post_drop": "rt_post_drop_freestyle_nebula",
       "duration_beats": 8.0
     },
     "rt_drop_white_aggressive": {
       "post_drop": "rt_post_drop_white_shatter"
-    },
-    "rt_drop_center_burst_blue_cyan": {
-      "post_drop": "rt_post_drop_center_comet_blue_cyan"
     },
     "rt_drop_center_burst": {
       "post_drop": "rt_post_drop_center_comet"
@@ -812,8 +786,7 @@
     },
     "euphoric_bright_looks": [
       "rt_drop_white_aggressive",
-      "rt_drop_strobe_cyan_white",
-      "rt_drop_strobe_red_white",
+      "rt_drop_strobe",
       "drop_diy_1_red_white_chase"
     ],
     "simmer_seasoning": {
@@ -1210,71 +1183,6 @@
       "backend": "realtime_razer",
       "params": {}
     },
-    "rt_groove_chase_blue": {
-      "target": "room_perimeter",
-      "action": "realtime",
-      "scene_ref": "groove_chase_blue",
-      "fallback": "rt_blackout",
-      "safety_class": "groove",
-      "brightness": 100,
-      "allow_strobe": false,
-      "backend": "realtime_razer",
-      "params": {
-        "travel_beats": 4
-      }
-    },
-    "rt_groove_chase_cyan": {
-      "target": "room_perimeter",
-      "action": "realtime",
-      "scene_ref": "groove_chase_cyan",
-      "fallback": "rt_blackout",
-      "safety_class": "groove",
-      "brightness": 100,
-      "allow_strobe": false,
-      "backend": "realtime_razer",
-      "params": {
-        "travel_beats": 4
-      }
-    },
-    "rt_groove_chase_red": {
-      "target": "room_perimeter",
-      "action": "realtime",
-      "scene_ref": "groove_chase_red",
-      "fallback": "rt_blackout",
-      "safety_class": "groove",
-      "brightness": 100,
-      "allow_strobe": false,
-      "backend": "realtime_razer",
-      "params": {
-        "travel_beats": 4
-      }
-    },
-    "rt_groove_chase_green": {
-      "target": "room_perimeter",
-      "action": "realtime",
-      "scene_ref": "groove_chase_green",
-      "fallback": "rt_blackout",
-      "safety_class": "groove",
-      "brightness": 100,
-      "allow_strobe": false,
-      "backend": "realtime_razer",
-      "params": {
-        "travel_beats": 4
-      }
-    },
-    "rt_groove_chase_cyan_white": {
-      "target": "room_perimeter",
-      "action": "realtime",
-      "scene_ref": "groove_chase_cyan_white",
-      "fallback": "rt_blackout",
-      "safety_class": "groove",
-      "brightness": 100,
-      "allow_strobe": false,
-      "backend": "realtime_razer",
-      "params": {
-        "travel_beats": 4
-      }
-    },
     "rt_groove_chase": {
       "target": "room_perimeter",
       "action": "realtime",
@@ -1304,61 +1212,6 @@
       "params": {
         "travel_beats": 4
       }
-    },
-    "rt_drop_chase_blue": {
-      "target": "room_perimeter",
-      "action": "realtime",
-      "scene_ref": "drop_chase_blue",
-      "fallback": "rt_blackout",
-      "safety_class": "drop",
-      "brightness": 100,
-      "allow_strobe": true,
-      "backend": "realtime_razer",
-      "params": {}
-    },
-    "rt_drop_chase_cyan": {
-      "target": "room_perimeter",
-      "action": "realtime",
-      "scene_ref": "drop_chase_cyan",
-      "fallback": "rt_blackout",
-      "safety_class": "drop",
-      "brightness": 100,
-      "allow_strobe": true,
-      "backend": "realtime_razer",
-      "params": {}
-    },
-    "rt_drop_chase_red": {
-      "target": "room_perimeter",
-      "action": "realtime",
-      "scene_ref": "drop_chase_red",
-      "fallback": "rt_blackout",
-      "safety_class": "drop",
-      "brightness": 100,
-      "allow_strobe": true,
-      "backend": "realtime_razer",
-      "params": {}
-    },
-    "rt_drop_chase_green": {
-      "target": "room_perimeter",
-      "action": "realtime",
-      "scene_ref": "drop_chase_green",
-      "fallback": "rt_blackout",
-      "safety_class": "drop",
-      "brightness": 100,
-      "allow_strobe": true,
-      "backend": "realtime_razer",
-      "params": {}
-    },
-    "rt_drop_chase_cyan_white": {
-      "target": "room_perimeter",
-      "action": "realtime",
-      "scene_ref": "drop_chase_cyan_white",
-      "fallback": "rt_blackout",
-      "safety_class": "drop",
-      "brightness": 100,
-      "allow_strobe": true,
-      "backend": "realtime_razer",
-      "params": {}
     },
     "rt_post_drop_remnant_chase": {
       "target": "room_perimeter",
@@ -1394,61 +1247,6 @@
       "scene_ref": "drop_white_aggressive",
       "fallback": "rt_blackout",
       "safety_class": "drop",
-      "brightness": 100,
-      "allow_strobe": true,
-      "backend": "realtime_razer",
-      "params": {}
-    },
-    "rt_post_drop_chase_blue": {
-      "target": "room_perimeter",
-      "action": "realtime",
-      "scene_ref": "post_drop_chase_blue",
-      "fallback": "rt_blackout",
-      "safety_class": "post_drop",
-      "brightness": 100,
-      "allow_strobe": true,
-      "backend": "realtime_razer",
-      "params": {}
-    },
-    "rt_post_drop_chase_cyan": {
-      "target": "room_perimeter",
-      "action": "realtime",
-      "scene_ref": "post_drop_chase_cyan",
-      "fallback": "rt_blackout",
-      "safety_class": "post_drop",
-      "brightness": 100,
-      "allow_strobe": true,
-      "backend": "realtime_razer",
-      "params": {}
-    },
-    "rt_post_drop_chase_red": {
-      "target": "room_perimeter",
-      "action": "realtime",
-      "scene_ref": "post_drop_chase_red",
-      "fallback": "rt_blackout",
-      "safety_class": "post_drop",
-      "brightness": 100,
-      "allow_strobe": true,
-      "backend": "realtime_razer",
-      "params": {}
-    },
-    "rt_post_drop_chase_green": {
-      "target": "room_perimeter",
-      "action": "realtime",
-      "scene_ref": "post_drop_chase_green",
-      "fallback": "rt_blackout",
-      "safety_class": "post_drop",
-      "brightness": 100,
-      "allow_strobe": true,
-      "backend": "realtime_razer",
-      "params": {}
-    },
-    "rt_post_drop_chase_cyan_white": {
-      "target": "room_perimeter",
-      "action": "realtime",
-      "scene_ref": "post_drop_chase_cyan_white",
-      "fallback": "rt_blackout",
-      "safety_class": "post_drop",
       "brightness": 100,
       "allow_strobe": true,
       "backend": "realtime_razer",
@@ -1493,17 +1291,6 @@
       "backend": "realtime_razer",
       "params": {}
     },
-    "rt_twinkle_blue": {
-      "target": "room_perimeter",
-      "action": "realtime",
-      "scene_ref": "twinkle_blue",
-      "fallback": "rt_blackout",
-      "safety_class": "ambient",
-      "brightness": 100,
-      "allow_strobe": true,
-      "backend": "realtime_razer",
-      "params": {}
-    },
     "rt_twinkle": {
       "target": "room_perimeter",
       "action": "realtime",
@@ -1516,17 +1303,6 @@
       "color_source": "engine",
       "params": {}
     },
-    "rt_drop_center_burst_blue_cyan": {
-      "target": "room_perimeter",
-      "action": "realtime",
-      "scene_ref": "drop_center_burst_blue_cyan",
-      "fallback": "rt_blackout",
-      "safety_class": "drop",
-      "brightness": 100,
-      "allow_strobe": true,
-      "backend": "realtime_razer",
-      "params": {}
-    },
     "rt_drop_center_burst": {
       "target": "room_perimeter",
       "action": "realtime",
@@ -1537,17 +1313,6 @@
       "allow_strobe": true,
       "backend": "realtime_razer",
       "color_source": "engine",
-      "params": {}
-    },
-    "rt_post_drop_center_comet_blue_cyan": {
-      "target": "room_perimeter",
-      "action": "realtime",
-      "scene_ref": "post_drop_center_comet_blue_cyan",
-      "fallback": "rt_blackout",
-      "safety_class": "post_drop",
-      "brightness": 100,
-      "allow_strobe": true,
-      "backend": "realtime_razer",
       "params": {}
     },
     "rt_post_drop_center_comet": {
@@ -1847,161 +1612,6 @@
       "color_source": "engine",
       "params": {}
     },
-    "rt_drop_strobe_blue": {
-      "target": "room_perimeter",
-      "action": "realtime",
-      "scene_ref": "drop_strobe_colorway",
-      "fallback": "rt_blackout",
-      "safety_class": "drop",
-      "brightness": 100,
-      "allow_strobe": true,
-      "backend": "realtime_razer",
-      "color_source": "baked",
-      "params": {
-        "color_a": [
-          0,
-          0,
-          255
-        ],
-        "hz": 6.0,
-        "duty": 0.3
-      }
-    },
-    "rt_drop_strobe_cyan": {
-      "target": "room_perimeter",
-      "action": "realtime",
-      "scene_ref": "drop_strobe_colorway",
-      "fallback": "rt_blackout",
-      "safety_class": "drop",
-      "brightness": 100,
-      "allow_strobe": true,
-      "backend": "realtime_razer",
-      "color_source": "baked",
-      "params": {
-        "color_a": [
-          0,
-          255,
-          255
-        ],
-        "hz": 6.0,
-        "duty": 0.3
-      }
-    },
-    "rt_drop_strobe_green": {
-      "target": "room_perimeter",
-      "action": "realtime",
-      "scene_ref": "drop_strobe_colorway",
-      "fallback": "rt_blackout",
-      "safety_class": "drop",
-      "brightness": 100,
-      "allow_strobe": true,
-      "backend": "realtime_razer",
-      "color_source": "baked",
-      "params": {
-        "color_a": [
-          0,
-          255,
-          0
-        ],
-        "hz": 6.0,
-        "duty": 0.3
-      }
-    },
-    "rt_drop_strobe_red": {
-      "target": "room_perimeter",
-      "action": "realtime",
-      "scene_ref": "drop_strobe_colorway",
-      "fallback": "rt_blackout",
-      "safety_class": "drop",
-      "brightness": 100,
-      "allow_strobe": true,
-      "backend": "realtime_razer",
-      "color_source": "baked",
-      "params": {
-        "color_a": [
-          255,
-          0,
-          0
-        ],
-        "hz": 6.0,
-        "duty": 0.3
-      }
-    },
-    "rt_drop_strobe_red_white": {
-      "target": "room_perimeter",
-      "action": "realtime",
-      "scene_ref": "drop_strobe_colorway",
-      "fallback": "rt_blackout",
-      "safety_class": "drop",
-      "brightness": 100,
-      "allow_strobe": true,
-      "backend": "realtime_razer",
-      "color_source": "baked",
-      "params": {
-        "color_a": [
-          255,
-          0,
-          0
-        ],
-        "color_b": [
-          255,
-          255,
-          255
-        ],
-        "hz": 5.5,
-        "duty": 0.25
-      }
-    },
-    "rt_drop_strobe_blue_cyan": {
-      "target": "room_perimeter",
-      "action": "realtime",
-      "scene_ref": "drop_strobe_colorway",
-      "fallback": "rt_blackout",
-      "safety_class": "drop",
-      "brightness": 100,
-      "allow_strobe": true,
-      "backend": "realtime_razer",
-      "color_source": "baked",
-      "params": {
-        "color_a": [
-          0,
-          0,
-          255
-        ],
-        "color_b": [
-          0,
-          135,
-          255
-        ],
-        "hz": 5.0,
-        "duty": 0.25
-      }
-    },
-    "rt_drop_strobe_cyan_white": {
-      "target": "room_perimeter",
-      "action": "realtime",
-      "scene_ref": "drop_strobe_colorway",
-      "fallback": "rt_blackout",
-      "safety_class": "drop",
-      "brightness": 100,
-      "allow_strobe": true,
-      "backend": "realtime_razer",
-      "color_source": "baked",
-      "params": {
-        "color_a": [
-          0,
-          255,
-          255
-        ],
-        "color_b": [
-          100,
-          105,
-          255
-        ],
-        "hz": 5.0,
-        "duty": 0.25
-      }
-    },
     "rt_drop_strobe": {
       "action": "realtime",
       "allow_strobe": true,
@@ -2099,45 +1709,6 @@
       "utility": [
         "room_blackout"
       ]
-    },
-    "legacy_color_suffix": {
-      "ambient": [
-        "rt_twinkle_blue"
-      ],
-      "groove": [
-        "rt_groove_chase_blue",
-        "rt_groove_chase_cyan",
-        "rt_groove_chase_red",
-        "rt_groove_chase_green",
-        "rt_groove_chase_cyan_white"
-      ],
-      "buildup": [],
-      "pre_drop": [],
-      "drop": [
-        "rt_drop_chase_blue",
-        "rt_drop_chase_cyan",
-        "rt_drop_chase_red",
-        "rt_drop_chase_green",
-        "rt_drop_chase_cyan_white",
-        "rt_drop_center_burst_blue_cyan",
-        "rt_drop_strobe_blue",
-        "rt_drop_strobe_cyan",
-        "rt_drop_strobe_green",
-        "rt_drop_strobe_red",
-        "rt_drop_strobe_red_white",
-        "rt_drop_strobe_blue_cyan",
-        "rt_drop_strobe_cyan_white"
-      ],
-      "post_drop": [
-        "rt_post_drop_chase_blue",
-        "rt_post_drop_chase_cyan",
-        "rt_post_drop_chase_red",
-        "rt_post_drop_chase_green",
-        "rt_post_drop_chase_cyan_white",
-        "rt_post_drop_center_comet_blue_cyan"
-      ],
-      "breakdown": [],
-      "utility": []
     }
   },
   "safe_default": "room_blackout",

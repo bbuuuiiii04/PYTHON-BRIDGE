@@ -617,14 +617,12 @@ runtime/API behavior change):
   Editor look-level button stays **Save**; `#dirtyText` reads "Draft saved" / "Unsaved changes".
   Musician-legible CONTROL_META labels (Flashes per second / Flash length (%) / Trigger every …
   beats / Match the track / Use set colors). Look tiles lead with the human effect name; machine id
-  is one small mono line; `legacy_color_suffix` clones keep a colorway chip until
-  color collapse completes. AWR-265 Step 2: the pad shows a **Legacy** bank tab
-  labeled "Legacy — replaced by palette-driven cues, removed after live verify"
-  listing those clones; default Drop/Groove/Ambient/Post-Drop banks rotate the
-  palette-fed bases (`rt_drop_strobe`, `rt_drop_chase`, `rt_groove_chase`,
-  `rt_post_drop_chase`, `rt_drop_center_burst`, `rt_post_drop_center_comet`,
-  `rt_twinkle`). Clone deletion is gated on the operator's next live mix
-  (`tools/awr265_step3_delete_clones.py`).
+  is one small mono line. AWR-265 FINAL: RT color-suffix clones and the
+  `legacy_color_suffix` bank are gone; the pad **Legacy** tab hides when empty.
+  Default Drop/Groove/Ambient/Post-Drop banks rotate the palette-fed bases
+  (`rt_drop_strobe`, `rt_drop_chase`, `rt_groove_chase`, `rt_post_drop_chase`,
+  `rt_drop_center_burst`, `rt_post_drop_center_comet`, `rt_twinkle`); cyan-white /
+  blue-ice / blue-twinkle pairs surface under `blue_cyan` via scale_stops order.
   Pad rename/duplicate accept plain display names and auto-slug. Standing gate:
   `python3 tools/check_ui_jargon.py`.
 - **Editor close dirty check (AWR-254).** Closing the look editor compares against the last

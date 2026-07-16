@@ -1,25 +1,23 @@
 #!/usr/bin/env python3
-"""AWR-265 Step 3 follow-up — delete color-suffix clones AFTER live-mix verify.
-
-DO NOT RUN until the operator confirms the next live mix looks right with the
-palette-fed base cues. This script is the single-command cleanup.
+"""AWR-265 Step 3 — delete color-suffix clones (idempotent on clone-free configs).
 
 What it does (example + live configs):
-  1. Backs up each config to *.pre_awr265_step3.bak
+  1. Backs up each config to *.pre_awr265_step3.bak (on --apply only)
   2. Removes every look listed in banks.legacy_color_suffix (the clones)
   3. Removes the legacy_color_suffix bank itself
-  4. Strips those names from drop_pairs / locked_palette_by_look / exempt_looks /
+  4. With --include-residuals, also deletes residual looks still parked in
+     ``looks`` even when the legacy bank is already gone
+  5. Strips those names from drop_pairs / locked_palette_by_look / exempt_looks /
      pad drafts / f2 plan name lists when present
-  5. Re-runs load_led_look_director_config and refuses to write if available!=True
+  6. Re-runs load_led_look_director_config and refuses to write if available!=True
 
-Residuals that MUST stay (frame A/B never went green — Step 0):
-  Leave these out of --include-residuals unless a later engine round lands:
-    rt_groove_chase_cyan_white, rt_drop_chase_cyan_white, rt_post_drop_chase_cyan_white,
-    rt_drop_center_burst_blue_cyan, rt_post_drop_center_comet_blue_cyan, rt_twinkle_blue
+AWR-265 FINAL (2026-07-16): residual colorways were promoted into blue_cyan
+slots (ice between cyan/blue on the scale). --include-residuals is the
+authorized cleanup for the last six.
 
-Usage (from repo root, after operator verdict):
+Usage (from repo root):
   python3 tools/awr265_step3_delete_clones.py --dry-run
-  python3 tools/awr265_step3_delete_clones.py --apply
+  python3 tools/awr265_step3_delete_clones.py --apply --include-residuals
 """
 from __future__ import annotations
 
@@ -55,6 +53,16 @@ def _legacy_names(cfg: dict) -> list[str]:
             if isinstance(values, list):
                 names.extend(str(v) for v in values)
     return sorted(set(names))
+
+
+def _delete_set(cfg: dict, *, include_residuals: bool) -> set[str]:
+    names = set(_legacy_names(cfg))
+    looks = cfg.get("looks") or {}
+    if include_residuals:
+        names |= {n for n in RESIDUALS if n in looks}
+    else:
+        names -= RESIDUALS
+    return names
 
 
 def _scrub(cfg: dict, delete: set[str]) -> None:
@@ -95,32 +103,44 @@ def _scrub(cfg: dict, delete: set[str]) -> None:
                 for name in list(mapping):
                     if name in delete:
                         mapping.pop(name, None)
-    # f2 family plan name lists
-    f2 = cfg.get("f2") or {}
-    plans = f2.get("plans") if isinstance(f2, dict) else None
-    if isinstance(plans, dict):
-        for family, tiers in plans.items():
-            if not isinstance(tiers, dict):
-                continue
-            for tier, names in list(tiers.items()):
-                if isinstance(names, list):
-                    tiers[tier] = [n for n in names if n not in delete]
+    # f2/f4 name lists (plans, euphoric_bright_looks, …)
+    for block_name in ("f2", "f4"):
+        block = cfg.get(block_name) or {}
+        if not isinstance(block, dict):
+            continue
+        plans = block.get("plans")
+        if isinstance(plans, dict):
+            for family, tiers in plans.items():
+                if not isinstance(tiers, dict):
+                    continue
+                for tier, names in list(tiers.items()):
+                    if isinstance(names, list):
+                        tiers[tier] = [n for n in names if n not in delete]
+        for key, value in list(block.items()):
+            if isinstance(value, list) and value and all(isinstance(x, str) for x in value):
+                block[key] = [n for n in value if n not in delete]
 
 
 def process(path: Path, *, apply: bool, include_residuals: bool) -> int:
     cfg = json.loads(path.read_text())
-    names = set(_legacy_names(cfg))
-    if not include_residuals:
-        names -= RESIDUALS
-    if not names:
-        print(f"{path}: nothing to delete")
+    names = _delete_set(cfg, include_residuals=include_residuals)
+    bank_present = (cfg.get("banks") or {}).get("legacy_color_suffix") is not None
+    if not names and not bank_present:
+        print(f"{path}: nothing to delete (already clone-free)")
         return 0
-    print(f"{path}: would delete {len(names)} looks:")
-    for name in sorted(names):
-        print(f"  - {name}")
+    if names:
+        print(f"{path}: would delete {len(names)} looks:")
+        for name in sorted(names):
+            print(f"  - {name}")
+    elif bank_present:
+        print(f"{path}: would remove empty legacy_color_suffix bank only")
     if RESIDUALS & set(_legacy_names(cfg)) and not include_residuals:
         kept = sorted(RESIDUALS & set(_legacy_names(cfg)))
-        print(f"{path}: keeping residuals (IMPOSSIBLE A/B): {', '.join(kept)}")
+        print(f"{path}: keeping residuals (pass --include-residuals to delete): {', '.join(kept)}")
+    # Also catch unbanked residuals when not including them
+    unbanked = sorted(n for n in RESIDUALS if n in (cfg.get("looks") or {}) and n not in names)
+    if unbanked and not include_residuals:
+        print(f"{path}: keeping unbanked residuals: {', '.join(unbanked)}")
     candidate = json.loads(json.dumps(cfg))
     _scrub(candidate, names)
     # Write to temp path for loader gate
@@ -156,7 +176,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--include-residuals",
         action="store_true",
-        help="Also delete IMPOSSIBLE A/B residuals (dangerous; default keep)",
+        help="Also delete promoted residual colorways (AWR-265 FINAL)",
     )
     parser.add_argument(
         "--config",

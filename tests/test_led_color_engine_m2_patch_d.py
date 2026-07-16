@@ -219,13 +219,8 @@ class PatchDTests(unittest.TestCase):
             "config/led_look_director.json": {
                 "rt_drop_chase_freestyle_nebula": ("drop_chase_freestyle_nebula", "engine", {}, "drop", "drop"),
                 "rt_drop_center_burst": ("rt_drop_center_burst", "engine", {}, "drop", "drop"),
-                "rt_drop_strobe_blue": ("drop_strobe_colorway", "baked", {"color_a": [0, 0, 255], "hz": 6.0, "duty": 0.3}, None, "drop"),
-                "rt_drop_strobe_cyan": ("drop_strobe_colorway", "baked", {"color_a": [0, 255, 255], "hz": 6.0, "duty": 0.3}, None, "drop"),
-                "rt_drop_strobe_green": ("drop_strobe_colorway", "baked", {"color_a": [0, 255, 0], "hz": 6.0, "duty": 0.3}, None, "drop"),
-                "rt_drop_strobe_red": ("drop_strobe_colorway", "baked", {"color_a": [255, 0, 0], "hz": 6.0, "duty": 0.3}, None, "drop"),
-                "rt_drop_strobe_red_white": ("drop_strobe_colorway", "baked", {"color_a": [255, 0, 0], "color_b": [255, 255, 255], "hz": 5.5, "duty": 0.25}, None, "drop"),
-                "rt_drop_strobe_blue_cyan": ("drop_strobe_colorway", "baked", {"color_a": [0, 0, 255], "color_b": [0, 135, 255], "hz": 5.0, "duty": 0.25}, None, "drop"),
-                "rt_drop_strobe_cyan_white": ("drop_strobe_colorway", "baked", {"color_a": [0, 255, 255], "color_b": [100, 105, 255], "hz": 5.0, "duty": 0.25}, None, "drop"),
+                # AWR-265 FINAL: baked colorway strobes deleted; palette-fed base remains.
+                "rt_drop_strobe": ("drop_strobe_colorway", "engine", {"hz": 6.0, "duty": 0.3}, "drop", "drop"),
                 # Approved rainbow pull: the look def stands, the bank row is gone.
                 "rt_rainbow_drop": ("rainbow_ordered", "baked", {"width": 6, "cycle_beats": 1, "travel_per_beat": 30}, None, "drop"),
                 # AWR-188 Part G palette-comet banking (drop + post_drop).
@@ -235,6 +230,15 @@ class PatchDTests(unittest.TestCase):
                 "rt_drop_firework_explosion": ("drop_firework_explosion_2", "engine", {"color_a": [255, 240, 220], "color_b": [255, 170, 60], "spark_a": [255, 170, 60], "spark_b": [255, 240, 220], "surge_beats": 0.25, "bg_hold": 0.0, "sparkle_density": 0.5, "sparkle_size": 1.0, "sparkle_life_s": 0.15, "hz": 6.0, "duty": 0.3}, "drop", "drop"),
             },
         }
+        retired_strobes = (
+            "rt_drop_strobe_blue",
+            "rt_drop_strobe_cyan",
+            "rt_drop_strobe_green",
+            "rt_drop_strobe_red",
+            "rt_drop_strobe_red_white",
+            "rt_drop_strobe_blue_cyan",
+            "rt_drop_strobe_cyan_white",
+        )
         for rel in ("config/led_look_director.example.json", "config/led_look_director.json"):
             cfg_path = root / rel
             if not cfg_path.exists():
@@ -243,6 +247,8 @@ class PatchDTests(unittest.TestCase):
                 continue
             result = load_led_look_director_config(str(cfg_path))
             self.assertEqual(tuple(result.errors), (), f"{rel}: {result.errors}")
+            for name in retired_strobes:
+                self.assertNotIn(name, result.config.looks, msg=f"{rel}:{name}")
             for name, (scene_ref, color_source, params, role, safety_class) in expected_by_rel[rel].items():
                 self.assertIn(name, result.config.looks)
                 look = result.config.looks[name]

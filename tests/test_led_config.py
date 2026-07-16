@@ -196,7 +196,8 @@ class ExampleConfigTests(unittest.TestCase):
             result.config.banks["default"].ambient,
             ("ambient_pb_halves", "rt_twinkle")
         )
-        self.assertIn("rt_twinkle_blue", result.config.banks["legacy_color_suffix"].ambient)
+        self.assertNotIn("legacy_color_suffix", result.config.banks)
+        self.assertNotIn("rt_twinkle_blue", result.config.looks)
         self.assertEqual(result.config.looks["rt_twinkle"].color_source, "engine")
         self.assertEqual(result.config.safe_default, "room_blackout")
         self.assertNotIn("groove_meteor", result.config.looks)
@@ -878,9 +879,9 @@ class SlotFiveWhiteKnobTests(unittest.TestCase):
 
 
 class Awr156Round2ConfigTests(unittest.TestCase):
-    """AWR-156 Task 7.6: colorway/promotion looks, knob #9 widths, bank recast."""
+    """AWR-156 Task 7.6 + AWR-265 FINAL: promotions kept; colorway clones gone."""
 
-    _COLORWAY_LOOKS = (
+    _RETIRED_COLORWAY_LOOKS = (
         "rt_drop_strobe_blue", "rt_drop_strobe_cyan", "rt_drop_strobe_green",
         "rt_drop_strobe_red", "rt_drop_strobe_red_white",
         "rt_drop_strobe_blue_cyan", "rt_drop_strobe_cyan_white",
@@ -891,27 +892,26 @@ class Awr156Round2ConfigTests(unittest.TestCase):
         self.assertTrue(result.available, msg=result.errors)
         self.assertEqual(result.errors, ())
 
-    def test_seven_colorway_looks_validate(self) -> None:
+    def test_seven_colorway_looks_are_gone(self) -> None:
+        # AWR-265 FINAL: baked colorway strobes deleted; palette-fed base remains.
         result = load_led_look_director_config_from_dict(_example_config())
         self.assertTrue(result.available, msg=result.errors)
-        for name in self._COLORWAY_LOOKS:
+        for name in self._RETIRED_COLORWAY_LOOKS:
             with self.subTest(name=name):
-                look = result.config.looks[name]
-                self.assertEqual(look.scene_ref, "drop_strobe_colorway")
-                self.assertTrue(look.allow_strobe)
-                self.assertIn(look.scene_ref, REALTIME_STROBE_EFFECTS)
-                self.assertIn(look.scene_ref, REALTIME_EFFECT_NAMES)
-                self.assertEqual(look.color_source, "baked")
+                self.assertNotIn(name, result.config.looks)
+        look = result.config.looks["rt_drop_strobe"]
+        self.assertEqual(look.scene_ref, "drop_strobe_colorway")
+        self.assertTrue(look.allow_strobe)
+        self.assertIn(look.scene_ref, REALTIME_STROBE_EFFECTS)
+        self.assertIn(look.scene_ref, REALTIME_EFFECT_NAMES)
+        self.assertEqual(look.color_source, "engine")
 
-    def test_strobe_red_white_side_b_restored_to_white(self) -> None:
-        cfg = _example_config()
-        params = cfg["looks"]["rt_drop_strobe_red_white"]["params"]
-        self.assertEqual(params["color_b"], [255, 255, 255])
-
-    def test_strobe_cyan_white_keeps_his_periwinkle_dial(self) -> None:
-        cfg = _example_config()
-        params = cfg["looks"]["rt_drop_strobe_cyan_white"]["params"]
-        self.assertEqual(params["color_b"], [100, 105, 255])
+    def test_scale_stops_keep_white_and_periwinkle_dials(self) -> None:
+        # Former baked strobe dials live on the shared scale (not deleted looks).
+        result = load_led_look_director_config_from_dict(_example_config())
+        stops = result.config.color_engine.scale_stops
+        self.assertEqual(stops["white"], (255, 255, 255))
+        self.assertEqual(stops["periwinkle"], (100, 105, 255))
 
     def test_promoted_looks_present_with_accepted_params(self) -> None:
         result = load_led_look_director_config_from_dict(_example_config())
@@ -926,16 +926,14 @@ class Awr156Round2ConfigTests(unittest.TestCase):
         self.assertFalse(looks["rt_post_drop_firework_remnants"].allow_strobe)
         self.assertEqual(looks["rt_buildup_balloon_comet"].color_source, "baked")
 
-    def test_bank_membership_colorways_and_promotions_present(self) -> None:
+    def test_bank_membership_bases_and_promotions_present(self) -> None:
         result = load_led_look_director_config_from_dict(_example_config())
         self.assertTrue(result.available, msg=result.errors)
         banks = result.config.banks["default"]
-        legacy = result.config.banks["legacy_color_suffix"]
-        # AWR-265 Step 2: colorway strobes moved to legacy_color_suffix; default
-        # drop rotates the single palette-fed rt_drop_strobe base instead.
-        for name in self._COLORWAY_LOOKS:
-            self.assertIn(name, legacy.drop)
+        self.assertNotIn("legacy_color_suffix", result.config.banks)
+        for name in self._RETIRED_COLORWAY_LOOKS:
             self.assertNotIn(name, banks.drop)
+            self.assertNotIn(name, result.config.looks)
         self.assertIn("rt_drop_strobe", banks.drop)
         self.assertIn("rt_drop_chase", banks.drop)
         self.assertIn("rt_buildup_balloon_comet", banks.buildup)

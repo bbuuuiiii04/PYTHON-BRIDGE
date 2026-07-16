@@ -85,11 +85,9 @@ Config:
   role lands on the configured blackout look (e.g. via `scripted_mode`'s `utility` mapping); the
   room holds its current look instead. `false` restores the pre-AWR-157 blackout-on-blank
   behavior byte-for-byte.
-- M2.5 slotized generic LED looks such as `rt_groove_chase`, `rt_post_drop_chase`, Patch E1 nebula looks, Patch E2 `rt_post_drop_center_comet`, and Patch E3 `rt_twinkle` are additive config entries. Patch F moves legacy color-suffix looks out of the tracked example `default` bank into `legacy_color_suffix` storage while keeping their look definitions intact.
-- Local ignored `config/led_look_director.json` can legitimately lag the tracked example; mirror Patch F to live config only with explicit operator approval and a loader check.
-- AWR-156 (2026-07-08) adds to the tracked example: 7 colorway strobe looks (`rt_drop_strobe_blue`/
-  `_cyan`/`_green`/`_red`/`_red_white`/`_blue_cyan`/`_cyan_white`, `scene_ref: drop_strobe_colorway`,
-  `color_source: baked`), and 3 promoted looks (`rt_buildup_balloon_comet`, `rt_groove_heartbeat`,
+- M2.5 slotized generic LED looks such as `rt_groove_chase`, `rt_post_drop_chase`, Patch E1 nebula looks, Patch E2 `rt_post_drop_center_comet`, and Patch E3 `rt_twinkle` are additive config entries. AWR-265 FINAL deleted RT color-suffix clones and the temporary `legacy_color_suffix` bank; default banks keep the palette-fed bases only.
+- Local ignored `config/led_look_director.json` can legitimately lag the tracked example; mirror AWR-265 scale_stops / clone-free state to live config only with explicit operator approval and a loader check.
+- AWR-156 (2026-07-08) originally added 7 baked colorway strobe looks; AWR-265 FINAL deleted those clones. The palette-fed base `rt_drop_strobe` (`scene_ref: drop_strobe_colorway`, `color_source: engine`) remains, plus promoted looks (`rt_buildup_balloon_comet`, `rt_groove_heartbeat`,
   `rt_post_drop_firework_remnants`). `width` is now a genuinely-read renderer param on
   `rt_groove_chase`/`rt_groove_nebula`/`rt_post_drop_center_comet` (previously allowlisted via
   `_SYNC_PARAM_KEYS` but silently ignored by the renderer; a config `width` value on those three had

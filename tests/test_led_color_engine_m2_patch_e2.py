@@ -176,19 +176,20 @@ class PatchE2RegistrationTests(unittest.TestCase):
         self.assertNotIn("slot_colors", keys)
         self.assertNotIn("slot_colors", all_keys)
 
-    def test_legacy_center_comet_still_resolves(self) -> None:
+    def test_center_comet_blue_cyan_clone_is_gone(self) -> None:
+        # AWR-265 FINAL: residual deleted; blue+ice surfaces under blue_cyan slots.
         self.assertIn("post_drop_center_comet_blue_cyan", _EFFECTS)
         self.assertIn("post_drop_center_comet_blue_cyan", REALTIME_EFFECT_NAMES)
 
         root = Path(__file__).resolve().parents[1]
         result = load_led_look_director_config(str(root / "config/led_look_director.example.json"))
         self.assertTrue(result.available, f"config not available: {result.reason}")
-        legacy = result.config.looks["rt_post_drop_center_comet_blue_cyan"]
-        self.assertEqual(legacy.scene_ref, "post_drop_center_comet_blue_cyan")
-        self.assertIn(
+        self.assertNotIn("rt_post_drop_center_comet_blue_cyan", result.config.looks)
+        self.assertNotIn(
             "rt_post_drop_center_comet_blue_cyan",
             result.config.color_engine.exempt_looks,
         )
+        self.assertIn("rt_post_drop_center_comet", result.config.looks)
 
     def test_slot_effects_has_current_entries(self) -> None:
         expected = {
