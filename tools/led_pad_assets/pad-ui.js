@@ -630,7 +630,23 @@
   $("ownershipBtn").addEventListener("click", async () => { try { const rt = await api.runtime(); if ((rt.ownership || {}).state === "pad_owned") await api.release(); else await api.takeover(); await updateRuntime(); if (window.LabEditor && window.LabEditor.updateRuntime) await window.LabEditor.updateRuntime(); } catch (err) { showError(err); } });
 
   $("qrBtn").addEventListener("click", openAccessModal);
-  $("commitBtn").addEventListener("click", () => confirmModal("Save draft to the show", `Save to show writes the draft into the live show file — ${($("commitCount").textContent || "0")} looks affected. Bridge restart required to take effect live.${(state.config || {}).live_changed ? "\nThe live show file changed while you were editing. Review before Save to show — Undo all changes reloads the live file." : ""}`, "Save to show", async () => { const res = await api.commit(); if (!res.ok) throw new Error((res.errors || []).join("\n")); toast(res.restart_note || "Saved to show — bridge restart required to take effect live."); await refresh(); }));
+  $("commitBtn").addEventListener("click", () => {
+    const n = $("commitCount").textContent || "0";
+    const staleNote = (state.config || {}).live_changed
+      ? "\nSomeone changed the lighting file while you were editing — review before pushing, or use Undo all changes to reload."
+      : "";
+    confirmModal(
+      "Push Pad look edits?",
+      `This writes ${n} Pad look edit(s) into your lighting file. Your lights will use them at the next bridge start. Lab drafts are not touched.${staleNote}`,
+      "Push pad edits",
+      async () => {
+        const res = await api.commit();
+        if (!res.ok) throw new Error((res.errors || []).join("\n"));
+        toast(res.restart_note || "Pad edits saved — your lights will use them at the next bridge start.");
+        await refresh();
+      },
+    );
+  });
   $("discardBtn").addEventListener("click", () => {
     // AWR-260 E: count from live dirty state at modal-open (editor + draft), not a stale DOM badge.
     const fromServer = ((state.config || {}).dirty || {}).looks || [];
@@ -640,8 +656,8 @@
     }
     const count = names.size;
     confirmModal(
-      "Undo all changes",
-      `This deletes EVERY unsaved-to-show edit across ${count} looks (the whole draft) and reloads the live config. Your applied looks are untouched.`,
+      "Undo all Pad look edits?",
+      `This throws away every unsaved Pad look edit across ${count} look(s) and reloads the lighting file. Looks already in the show stay as they are. Lab drafts are not touched.`,
       "Undo all changes",
       async () => { await api.discard(); await refresh(); },
     );

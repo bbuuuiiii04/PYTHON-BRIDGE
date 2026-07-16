@@ -43,10 +43,14 @@ class PadUiIntegrityTests(unittest.TestCase):
             src,
         )
         self.assertIn("Undo all changes", src)
-        self.assertIn("EVERY unsaved-to-show edit across", src)
+        self.assertIn("unsaved Pad look edit across", src)
         # AWR-260 E: dirty count from live editor+draft state at modal-open.
         self.assertIn("snapshotEditor() !== state.cleanSnapshot", src)
         self.assertIn('drafts: "Untagged"', src)
+        # AWR-272: scary Save-to-show primary path is gone.
+        self.assertNotIn("Save to show", src)
+        self.assertNotIn("Bridge restart required", src)
+        self.assertIn("Push pad edits", src)
 
     def test_legacy_bank_tab_hides_when_empty(self) -> None:
         """AWR-265 FINAL: Legacy tab hidden when bank gone/empty — never errors."""
@@ -80,8 +84,8 @@ class PadUiIntegrityTests(unittest.TestCase):
             html,
         )
         self.assertIn('id="acceptFallbackNote"', html)
-        # AWR-260: Accept wires into production; Reject stays out of the show.
-        self.assertIn("Live —", lab)
+        # AWR-260/272: Accept wires into production; Reject stays out of the show.
+        self.assertIn("Added to your show", lab)
         self.assertIn("Rejected — stays out of the show", lab)
 
     def test_look_groups_shelf_references_real_looks(self) -> None:
@@ -590,10 +594,13 @@ class Awr271LabInShellTests(unittest.TestCase):
         self.assertIn("locked_palette", pad)
         self.assertIn('error === "stale_look"', pad)
         self.assertIn("Undo all changes", pad)
-        # Accept still present in UI + JS (AWR-260 wire-in).
+        # Accept still present in UI + JS (AWR-260 wire-in); AWR-272 verb pair copy.
         self.assertIn('id="acceptBtn"', html)
         self.assertIn("labAccept", lab)
-        self.assertIn("Live —", lab)
+        self.assertIn("Added to your show", lab)
+        self.assertIn("Save draft", html)
+        self.assertIn("Accept — adds it to your show", html)
+        self.assertNotIn("Save to show", html)
         self.assertIn("snapshot_fallback", lab)
         for label, src in (("lab.js", lab), ("pad-ui.js", pad)):
             self.assertIn("beforeunload", src, f"{label} missing beforeunload")
@@ -645,3 +652,63 @@ class Awr271LabInShellTests(unittest.TestCase):
         self.assertIn('id="view-lab"', root)
         self.assertIn('id="acceptBtn"', root)
         self.assertIn("/static/shell.js", root)
+
+
+class Awr272VerbPairTests(unittest.TestCase):
+    """R9b: Save draft + Accept are the operator pair; retired primary verbs gone."""
+
+    def test_primary_verb_pair_and_retired_primary_copy(self) -> None:
+        html = (_ASSETS / "index.html").read_text(encoding="utf-8")
+        pad = (_ASSETS / "pad-ui.js").read_text(encoding="utf-8")
+        lab = (_ASSETS / "lab.js").read_text(encoding="utf-8")
+
+        # Primary Lab pair (musician-legible).
+        self.assertIn(">Save draft<", html)
+        self.assertIn("Accept — adds it to your show", html)
+        self.assertIn("Reject — keep out of show", html)
+        self.assertIn('id="saveDraftBtn"', html)
+        self.assertIn('id="acceptBtn"', html)
+        self.assertIn("api.labSave", lab)
+        self.assertIn("api.labAccept", lab)
+        self.assertIn("Rejected — stays out of the show", lab)
+
+        # Status chips survive.
+        for chip in ("Work in progress", "Accepted", "Rejected"):
+            self.assertIn(chip, html)
+
+        # Retired scary primary path.
+        for banned in (
+            "Save to show",
+            "Save draft to the show",
+            "live show file",
+            "Bridge restart required",
+            "bridge restart required",
+        ):
+            self.assertNotIn(banned, html)
+            self.assertNotIn(banned, pad)
+
+        # Pad push demoted to secondary menu (not a headline primary).
+        self.assertIn('id="padMoreActions"', html)
+        self.assertIn("Push pad edits", html)
+        # commitBtn must not be class=primary anymore.
+        commit_line = [ln for ln in html.splitlines() if 'id="commitBtn"' in ln][0]
+        self.assertNotIn("primary", commit_line)
+        self.assertIn("ghost", commit_line)
+
+        # Reload stays secondary/dev-ish with plain words.
+        self.assertIn("Reload effect code", html)
+        self.assertNotIn("Reload code</button>", html)
+
+        # Integrity wiring untouched.
+        self.assertIn('error === "stale_entry"', lab)
+        self.assertIn('error === "stale_look"', pad)
+        self.assertIn("locked_palette", pad)
+
+    def test_accept_messages_plain_english(self) -> None:
+        from rb_ss_bridge_v2.tools import led_pad_web as web
+
+        src = Path(web.__file__).read_text(encoding="utf-8")
+        self.assertIn("In your show —", src)
+        self.assertIn("your lights will use them at the next bridge start", src)
+        self.assertNotIn("Bridge restart required", src)
+        self.assertNotIn("Committed - bridge restart required", src)

@@ -1229,11 +1229,11 @@ class LedPadService:
 
         self._append_bridge_command({"cmd": "led_reload_looks"})
         if bank == "drafts":
-            message = "Live — untagged shelf; tag a phrase to join rotation"
+            message = "In your show — Untagged shelf for now. Tag a phrase to join rotation."
             bank_label = "Untagged"
         else:
             bank_label = bank.replace("_", " ").title()
-            message = f"Live — added to {bank_label} bank"
+            message = f"In your show — added to the {bank_label} phrase bank."
         return {
             "ok": True,
             "wired": True,
@@ -1528,7 +1528,7 @@ class LedPadService:
         return {
             "ok": True,
             "backup_path": str(backup) if backup else "",
-            "restart_note": "Committed - bridge restart required to take effect live.",
+            "restart_note": "Pad edits saved — your lights will use them at the next bridge start.",
         }
 
     def discard(self, _payload: dict[str, Any] | None = None) -> dict[str, Any]:

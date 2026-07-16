@@ -57,6 +57,17 @@ h2.panel-label, h3.panel-label { margin: 0 0 10px; }
 }
 .lab-route .brand .eyebrow { color: var(--lab); }
 .route-tabs, .transport, .session-controls, .commit-actions { display: flex; align-items: center; gap: var(--gap); }
+.pad-more-actions { position: relative; }
+.pad-more-actions > summary { list-style: none; cursor: pointer; }
+.pad-more-actions > summary::-webkit-details-marker { display: none; }
+.pad-more-actions-body {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 40;
+  min-width: 240px; padding: var(--sp-3); border-radius: 8px;
+  background: var(--surface-2, #1a1f2a); border: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: var(--sp-2);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+}
+.pad-more-hint { margin: 0; font-size: 12px; line-height: 1.35; }
 .brand h1 { font-size: 15px; letter-spacing: -.01em; }
 .brand h1::before { content: ""; width: 8px; height: 8px; border-radius: 2px; background: var(--identity); display: inline-block; margin-right: var(--sp-2); vertical-align: middle; }
 .lab-route .brand h1::before { background: var(--lab); }
@@ -312,8 +323,9 @@ main { padding: var(--pad); }
 .lab-route .param-slider input[type="range"]::-moz-range-thumb { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); border: 2px solid var(--surface); cursor: pointer; }
 
 .lab-route .lab-verdict-bar { display: flex; gap: var(--sp-3); padding: var(--sp-3) 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
-.lab-route .lab-accept { flex: 1; min-height: 48px; background: var(--ok); border-color: var(--ok); color: #062015; font-weight: 700; font-size: 15px; }
+.lab-route .lab-accept { flex: 1; min-height: 48px; background: var(--ok); border-color: var(--ok); color: #062015; font-weight: 700; font-size: 14px; white-space: normal; line-height: 1.25; padding: 8px 12px; }
 .lab-route .lab-accept:hover:not(:disabled) { filter: brightness(1.05); }
+.lab-route .lab-reject { flex: 0 1 auto; min-width: 9.5rem; white-space: normal; line-height: 1.25; font-size: 13px; }
 .lab-route .lab-reject { flex: 1; min-height: 48px; background: transparent; border: 2px solid var(--danger); color: var(--danger); font-weight: 700; font-size: 15px; }
 .lab-route .lab-brief-label textarea { min-height: 2.8em; }
 .lab-route .lab-notes-details { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--sp-2) var(--sp-3); }

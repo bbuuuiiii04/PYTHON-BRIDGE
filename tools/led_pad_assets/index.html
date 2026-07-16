@@ -44,8 +44,15 @@
     <div class="topbar-row bank-row" id="padBankRow">
       <nav id="bankTabs" class="bank-tabs" aria-label="Banks"></nav>
       <div class="commit-actions">
-        <button id="commitBtn" type="button" class="primary">Save to show <span id="commitCount" class="badge">0</span></button>
-        <button id="discardBtn" type="button" class="ghost">Undo all changes</button>
+        <!-- AWR-272: pad push is secondary — Lab Save draft + Accept is the promotion path -->
+        <details class="pad-more-actions" id="padMoreActions">
+          <summary class="ghost pad-more-summary">Pad look edits <span id="commitCount" class="badge">0</span></summary>
+          <div class="pad-more-actions-body">
+            <p class="dim pad-more-hint">For looks you already edited on Pad. New cues: Save draft, then Accept in Lab.</p>
+            <button id="commitBtn" type="button" class="ghost">Push pad edits</button>
+            <button id="discardBtn" type="button" class="ghost">Undo all changes</button>
+          </div>
+        </details>
       </div>
     </div>
   </header>
@@ -56,6 +63,9 @@
       <div><dt>Filter chips</dt><dd>Show/hide Iterating, Accepted, Rejected. Exact-name search still finds a draft when its chip is off.</dd></div>
       <div><dt>Phrase / Timing</dt><dd>Tag the musical moment and how the cue keeps time (beat / time / mixed / static).</dd></div>
       <div><dt>◉ Preview</dt><dd>Renders in this page only — does not take the lights.</dd></div>
+      <div><dt>Save draft</dt><dd>Keeps your unpublished look on disk. Never adds it to the show.</dd></div>
+      <div><dt>Accept</dt><dd>Adds this cue to your show (phrase bank or Untagged). The only promotion step.</dd></div>
+      <div><dt>Reject</dt><dd>Keeps the cue out of the show. You can reopen it anytime.</dd></div>
       <div><dt>▶ Play</dt><dd>Sends the draft to the live lights (saves first).</dd></div>
       <div><dt>⇄ Switch live lights</dt><dd>Amber when another lab scene is already live — swaps to this draft without a full stop.</dd></div>
       <div><dt>Beat meter</dt><dd>Shows bar · beat while Preview or Play is running.</dd></div>
@@ -67,7 +77,7 @@
     <div id="configStaleBanner" class="config-stale-banner" hidden role="status" aria-live="polite"></div>
     <div id="errorBanner" class="error-banner" hidden></div>
     <section id="view-pad" data-shell-panel="pad">
-      <div id="liveChangedBanner" class="error-banner warn-banner" hidden>The live show file changed while you were editing. Review before Save to show — Undo all changes reloads the live file.</div>
+      <div id="liveChangedBanner" class="error-banner warn-banner" hidden>Someone changed the lighting file while you were editing. Review your Pad look edits, or use Undo all changes to reload.</div>
       <section id="lookGrid" class="look-grid" aria-live="polite"></section>
     </section>
     <section id="view-lab" data-shell-panel="lab" hidden>
@@ -158,16 +168,16 @@
           <div class="lab-tuning-footer">
             <div class="cue-wrap"><span class="panel-label">Cue length (beats)</span><div class="cue-group" role="group" aria-label="Cue length (beats)"></div></div>
             <div class="lab-tuning-actions">
-              <button id="saveDraftBtn" type="button" class="primary">Save</button>
+              <button id="saveDraftBtn" type="button" class="primary">Save draft</button>
               <span id="labDirtyChip" class="dim" aria-live="polite"></span>
             </div>
           </div>
         </div>
 
-        <!-- Z4 Verdict bar -->
+        <!-- Z4 Verdict bar — AWR-272: Accept is the only promotion -->
         <div class="lab-verdict-bar">
-          <button id="acceptBtn" type="button" class="lab-accept">Accept</button>
-          <button id="rejectBtn" type="button" class="lab-reject">Reject</button>
+          <button id="acceptBtn" type="button" class="lab-accept">Accept — adds it to your show</button>
+          <button id="rejectBtn" type="button" class="lab-reject">Reject — keep out of show</button>
         </div>
         <div id="acceptFallbackNote" class="lab-applied-hint warn-text" hidden role="status" aria-live="polite">Accepted saved values — your last live-tuned values weren't available</div>
 
@@ -188,9 +198,9 @@
 
         <!-- Z6 Footer utility -->
         <div class="lab-footer-utils">
-          <button id="reloadBtn" type="button" class="ghost">⟳ Reload code</button>
+          <button id="reloadBtn" type="button" class="ghost">⟳ Reload effect code</button>
           <span id="reloadConfirm" class="lab-reload-confirm" aria-live="polite" hidden></span>
-          <button id="archiveUtilBtn" type="button" class="ghost">Archive</button>
+          <button id="archiveUtilBtn" type="button" class="ghost">Archive draft</button>
           <button id="deleteBtn" type="button" class="danger ghost">Delete</button>
         </div>
       </section>

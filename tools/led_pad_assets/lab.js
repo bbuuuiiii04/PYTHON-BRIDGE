@@ -586,7 +586,7 @@
           note.hidden = true;
         }
       }
-      flashReloadConfirm(true, (res && res.message) || "Live — wired into the show");
+      flashReloadConfirm(true, (res && res.message) || "Added to your show");
     } catch (err) {
       if (err && err.payload && err.payload.error === "stale_entry") {
         PadModal.show(
@@ -617,7 +617,7 @@
                   note.hidden = true;
                 }
               }
-              flashReloadConfirm(true, (res && res.message) || "Live — wired into the show");
+              flashReloadConfirm(true, (res && res.message) || "Added to your show");
             }},
           ],
         );
@@ -1335,7 +1335,7 @@
     try {
       const res = await reloadCode();
       reloadOk = Boolean(res.ok);
-      add(reloadOk, reloadOk ? "Reload code ok" : `Reload failed: ${String(res.error || "").split("\n")[0] || "error"}`);
+      add(reloadOk, reloadOk ? "Reload effect code ok" : `Reload failed: ${String(res.error || "").split("\n")[0] || "error"}`);
       if (!reloadOk) allOk = false;
     } catch (err) {
       add(false, `Reload failed: ${(err && err.message) || err}`);
