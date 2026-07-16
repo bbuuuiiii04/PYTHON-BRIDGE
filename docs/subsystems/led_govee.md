@@ -1,7 +1,7 @@
 ---
 doc_status: current
 truth_level: code-verified
-last_verified_commit: bb26475
+last_verified_commit: 103ecbe
 last_verified_date: 2026-07-15
 validation_scope: software-only; existing LED/Govee behavior plus the 2026-07-13 split-local-UUID classifier correction reverified: local Rekordbox 7 loads regain the early phrase worker, real `/Volumes` loads keep the resolved-time-only rule; AWR-241 Template Lab beat meter status field documented; AWR-242 Template Lab UX (`target_role` + lab-route UI) documented; AWR-243 Template Lab functional fixes (live test_palette for lab play + ownership payload on request errors) documented; AWR-245 Template Lab Strip|Room preview hookup (pad serves sim view + profile read-only; fail-soft; preview-only) documented; AWR-247 Template Lab preview length (default full cue_beats) documented; AWR-248 Pad|Lab|Sim cross-nav documented; AWR-254 pad look-editor close dirty check documented; AWR-255 pad+lab stale-config banner (config mtime vs bridge process start; no bridge runtime change) documented; AWR-256 remnants ember_hold/decay wired (dim_beats removed as dead); AWR-258 data-integrity (lab lock+CAS, pad locked_palette, sim stale-mtime/bak/profile_error block); AWR-259 pad integrity tail (stale_look CAS, Discard-all copy, persisted last_applied, EDITOR_FIELDS); no LED rendering/output hardware validation
 ---
