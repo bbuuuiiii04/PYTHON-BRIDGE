@@ -57,6 +57,8 @@ from .smart_phrasing import (
     build_phrase_segments_from_markers,
     select_smart_drops,
     select_smart_breakdowns,
+    select_true_drops,
+    drop_sections,
     find_restore_beat,
 )
 from .models import (
@@ -1569,6 +1571,33 @@ class StateManager(LEDDispatchPolicyMixin):
                         meta.smart_breakdowns = next_smart_breakdowns
                         meta.anlz_buildups = raw_buildups
                         meta.anlz_mood = raw_mood
+                        # AWR-257: LED true-drop sections, computed from the SAME
+                        # phrase segments _build_phrase_segments feeds the tick.
+                        # Rides the markers_changed guard so an unchanged marker
+                        # set keeps its previous sections, exactly like smart_drops.
+                        _sections_segments = build_phrase_segments_from_markers(
+                            anlz_buildups=raw_buildups,
+                            anlz_drops=raw_drops,
+                            anlz_breakdowns=raw_breakdowns,
+                            smart_drops=next_smart_drops,
+                            total_beats=total_beats,
+                        )
+                        _true_drops = select_true_drops(
+                            next_smart_drops, _sections_segments)
+                        meta.drop_sections = drop_sections(
+                            _true_drops,
+                            next_drops,
+                            _sections_segments,
+                            total_beats=total_beats,
+                        )
+                        log.info(
+                            "[SM] true-drop-sections deck=%d smart=%d true=%d sections=%d advances=%d",
+                            ev.deck,
+                            len(next_smart_drops),
+                            len(_true_drops),
+                            len(meta.drop_sections),
+                            sum(len(s.advance_beats) for s in meta.drop_sections),
+                        )
                     # F2 plan rides only the spectral-aware re-read, whose markers
                     # usually match the earlier fast read — attach it regardless of
                     # markers_changed or the plan is silently dropped every track.

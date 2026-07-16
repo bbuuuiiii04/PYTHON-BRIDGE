@@ -54,6 +54,8 @@ class TrackMetadata:
     cue_positions: list[int] = field(default_factory=list)
     anlz_drops: list[int] = field(default_factory=list)
     smart_drops: list[int] = field(default_factory=list)
+    # AWR-257: LED true-drop sections; computed beside smart_drops, reset with it.
+    drop_sections: tuple["DropSection", ...] = ()
     anlz_breakdowns: list[int] = field(default_factory=list)
     smart_breakdowns: list[int] = field(default_factory=list)
     anlz_buildups: list[int] = field(default_factory=list)
@@ -76,6 +78,7 @@ class TrackMetadata:
         self.cue_positions = []
         self.anlz_drops = []
         self.smart_drops = []
+        self.drop_sections = ()
         self.anlz_breakdowns = []
         self.smart_breakdowns = []
         self.anlz_buildups = []
