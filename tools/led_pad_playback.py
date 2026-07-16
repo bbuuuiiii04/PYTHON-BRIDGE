@@ -20,6 +20,7 @@ from ..govee_realtime_runner import EffectSpec, GoveeRealtimeRunner
 from ..govee_realtime_transport import GoveeRealtimeDryRunTransport, GoveeRealtimeTransport
 from ..led_models import BeatAnchor, LEDConfig
 from ..runtime_status import COMMANDS_PATH, STATUS_PATH
+from .led_pad_mirror import FrameMirrorRing, TeeTransport
 
 log = logging.getLogger("led_pad_playback")
 
@@ -214,7 +215,9 @@ class PadPlayback:
         self._last_error = ""
         self._lock = threading.RLock()
         self._ownership = ownership_gate or OwnershipGate(sleep_fn=self._sleep_fn)
-        self._runner = GoveeRealtimeRunner(
+        # AWR-269: tee at the transport boundary — runner thread only O(1)-appends.
+        self._mirror = FrameMirrorRing(time_fn=self._time_fn)
+        inner = (
             GoveeRealtimeDryRunTransport(ip=rt.ip, port=rt.port, segments=rt.segments)
             if dry_run
             else GoveeRealtimeTransport(
@@ -225,7 +228,10 @@ class PadPlayback:
                 stretch=rt.stretch,
                 activate_pt=rt.activate_pt,
                 deactivate_pt=rt.deactivate_pt,
-            ),
+            )
+        )
+        self._runner = GoveeRealtimeRunner(
+            TeeTransport(inner, self._mirror),
             renderer or GoveeFrameRenderer(),
             segments=rt.segments,
             fps=rt.fps,
@@ -242,6 +248,11 @@ class PadPlayback:
     @property
     def clock(self) -> SyntheticClock:
         return self._clock
+
+    @property
+    def mirror(self) -> FrameMirrorRing:
+        """Pad-process send ring for the live-play mirror (read-only for clients)."""
+        return self._mirror
 
     @staticmethod
     def build_spec(spec: dict[str, Any], now: float) -> EffectSpec:

@@ -34,8 +34,11 @@ from ..led_pad_controls import (
 )
 from ..runtime_status import COMMANDS_PATH, STATUS_PATH
 from .led_pad_lab import LabRegistry, LabRenderer, StaleLabEntry, load_lab_effects, render_preview_frames
+from .led_pad_mirror import FrameMirrorRing
 from .led_pad_playback import PadPlayback, stable_seed
 from .pad_access import _is_loopback_host, access_payload
+
+_MIRROR_SSE_INTERVAL_S = 1.0 / 30.0
 
 
 def _lab_firework_specs_dead(specs: Any, fn: str) -> bool:
@@ -181,6 +184,7 @@ _FRESHNESS_WATCHED: tuple[Path, ...] = (
     _REPO_ROOT / "tools" / "led_pad_web.py",
     _REPO_ROOT / "tools" / "led_pad_lab.py",
     _REPO_ROOT / "tools" / "led_pad_playback.py",
+    _REPO_ROOT / "tools" / "led_pad_mirror.py",
     _REPO_ROOT / "tools" / "pad_access.py",
 )
 
@@ -555,6 +559,8 @@ class LedPadService:
         # AWR-255: wall time of last successful /api/commit in this pad process
         # (weaker stale signal when bridge process start cannot be resolved).
         self._last_commit_at: float | None = None
+        # AWR-269: SSE handlers exit when the pad service shuts down.
+        self._shutdown = threading.Event()
 
     def _load_last_lab_applied(self) -> dict[str, dict[str, Any]]:
         path = self._last_lab_applied_path
@@ -584,9 +590,18 @@ class LedPadService:
         return self._config_path
 
     def shutdown(self) -> None:
+        self._shutdown.set()
         shutdown = getattr(self._playback, "shutdown", None)
         if callable(shutdown):
             shutdown()
+
+    def mirror_ring(self) -> FrameMirrorRing | None:
+        """Pad-process send ring, or None when playback has no tee (fake/test)."""
+        mirror = getattr(self._playback, "mirror", None)
+        return mirror if isinstance(mirror, FrameMirrorRing) else None
+
+    def shutting_down(self) -> bool:
+        return self._shutdown.is_set()
 
     def _lab_fn_for(self, name: str) -> str:
         # Non-throwing resolver for LabRenderer's name-first/fn-fallback lookup:
@@ -1691,6 +1706,59 @@ def build_handler(service: LedPadService) -> type[BaseHTTPRequestHandler]:
                 raise ValueError("request body must be a JSON object")
             return payload
 
+        def _stream_mirror(self) -> None:
+            """SSE fan-out of the pad send ring — never runs on the runner thread."""
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            last_ts: float | None = None
+            last_playing: bool | None = None
+            ring = service.mirror_ring()
+            while not service.shutting_down():
+                playing = False
+                look = ""
+                try:
+                    st = service._playback.status()
+                    playing = bool(st.get("playing"))
+                    look = str(st.get("playing_look") or "")
+                except Exception:
+                    playing = False
+                    look = ""
+                entry = ring.latest() if ring is not None else None
+                payload: dict[str, Any] | None = None
+                if entry is not None:
+                    ts, frame = entry
+                    if last_ts is None or ts != last_ts or playing != last_playing:
+                        last_ts = ts
+                        last_playing = playing
+                        payload = {
+                            "ts": ts,
+                            "rgb": [list(px) for px in frame],
+                            "playing": playing,
+                            "playing_look": look,
+                        }
+                elif last_ts is None or playing != last_playing:
+                    last_playing = playing
+                    if last_ts is None:
+                        last_ts = -1.0
+                    payload = {
+                        "ts": None,
+                        "rgb": None,
+                        "playing": playing,
+                        "playing_look": look,
+                    }
+                if payload is not None:
+                    raw = f"data: {json.dumps(payload, separators=(',', ':'))}\n\n".encode("utf-8")
+                    try:
+                        self.wfile.write(raw)
+                        self.wfile.flush()
+                    except (BrokenPipeError, ConnectionResetError, OSError):
+                        return
+                time.sleep(_MIRROR_SSE_INTERVAL_S)
+
         def do_GET(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
             path = parsed.path
@@ -1705,6 +1773,10 @@ def build_handler(service: LedPadService) -> type[BaseHTTPRequestHandler]:
                     self._send_json(
                         access_payload(self.server.server_address[0], self.server.server_address[1])
                     )
+                    return
+                # AWR-269: live-play mirror SSE (handler thread only; never the runner).
+                if path == "/api/mirror/stream":
+                    self._stream_mirror()
                     return
                 # AWR-245/AWR-266: sim modules served read-only from disk (not under pad assets).
                 if path == "/static/sim/ledsim-view.js":

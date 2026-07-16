@@ -1,9 +1,9 @@
 ---
 doc_status: current
 truth_level: software-tested
-last_verified_commit: 7c1e67e
+last_verified_commit: 096e155c
 last_verified_date: 2026-07-16
-validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (live-apply + variant switch + preview), Round 2 (param_specs sliders/toggles/selects, slot swatches, JSON demoted to Advanced), Round 3 (rejected-drafts filter, draft delete), QR same-network access, the iOS/iPad touch pass, the editor unset-param-defaults fix, the AWR-193 pad/lab overhaul (accept snapshot, decoupled preview, archive flow, fn fallback, effective bounds, color pickers + regime badges, reconnect, freshness watchdog + live fingerprint + no-cache), the AWR-202 commit read-modify-merge with the gate fix that tracks look CONTENT (`touched`) separately from role-bank PLACEMENT (`moved`) so a params-only edit keeps the look's LIVE bank while an explicit pad move still applies, AWR-240 pad offline v2 stand-down so Test Palette still injects slot_colors, AWR-241 Template Lab beat meter + metronome click (preview exact / live server-synced), AWR-242 Template Lab UX overhaul (search/filter/group draft list, target_role phrase tags, settable timing_mode, detail restructure, health strip + self-test), AWR-243 Template Lab functional fix round (collision banner gate, selected-draft list pin, ownership takeover catch, applied:false hint, live test_palette for lab play, header/phone/preview/health/utility UX), AWR-245 Template Lab Strip|Room preview hookup (pad serves sim view JS + profile read-only; fail-soft; preview-only honesty), AWR-247 Template Lab preview length (default full cue_beats; 2/4 bars / full control), AWR-248 Pad|Lab|Sim cross-nav (plain links to :8767), AWR-250 Lab Room preview re-fetches sim profile on Preview / Room toggle so active_layout changes from Sim show without reload, AWR-254 pad look-editor close dirty check (compares against last Save, not editor-open snapshot), AWR-255 pad+lab banner when live config is newer than the running bridge, AWR-258 data-integrity (lab registry lock + optimistic concurrency, pad locked_palette save parity, beforeunload + reconnect stash, rotating lab backups), AWR-259 pad integrity tail (same-look stale_look 409, Discard-all copy, persisted last_applied Accept snapshot, EDITOR_FIELDS parity), AWR-260 lab Accept wire-in, AWR-261 status freshness, AWR-262 pad control truth, AWR-263 lab control truth + New clone flow, and AWR-264 language+hierarchy rename-only (musician labels, human-name tiles, jargon gate); SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
+validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (live-apply + variant switch + preview), Round 2 (param_specs sliders/toggles/selects, slot swatches, JSON demoted to Advanced), Round 3 (rejected-drafts filter, draft delete), QR same-network access, the iOS/iPad touch pass, the editor unset-param-defaults fix, the AWR-193 pad/lab overhaul (accept snapshot, decoupled preview, archive flow, fn fallback, effective bounds, color pickers + regime badges, reconnect, freshness watchdog + live fingerprint + no-cache), the AWR-202 commit read-modify-merge with the gate fix that tracks look CONTENT (`touched`) separately from role-bank PLACEMENT (`moved`) so a params-only edit keeps the look's LIVE bank while an explicit pad move still applies, AWR-240 pad offline v2 stand-down so Test Palette still injects slot_colors, AWR-241 Template Lab beat meter + metronome click (preview exact / live server-synced), AWR-242 Template Lab UX overhaul (search/filter/group draft list, target_role phrase tags, settable timing_mode, detail restructure, health strip + self-test), AWR-243 Template Lab functional fix round (collision banner gate, selected-draft list pin, ownership takeover catch, applied:false hint, live test_palette for lab play, header/phone/preview/health/utility UX), AWR-245 Template Lab Strip|Room preview hookup (pad serves sim view JS + profile read-only; fail-soft; preview-only honesty), AWR-247 Template Lab preview length (default full cue_beats; 2/4 bars / full control), AWR-248 Pad|Lab|Sim cross-nav (plain links to :8767), AWR-250 Lab Room preview re-fetches sim profile on Preview / Room toggle so active_layout changes from Sim show without reload, AWR-254 pad look-editor close dirty check (compares against last Save, not editor-open snapshot), AWR-255 pad+lab banner when live config is newer than the running bridge, AWR-258 data-integrity (lab registry lock + optimistic concurrency, pad locked_palette save parity, beforeunload + reconnect stash, rotating lab backups), AWR-259 pad integrity tail (same-look stale_look 409, Discard-all copy, persisted last_applied Accept snapshot, EDITOR_FIELDS parity), AWR-260 lab Accept wire-in, AWR-261 status freshness, AWR-262 pad control truth, AWR-263 lab control truth + New clone flow, AWR-264 language+hierarchy rename-only (musician labels, human-name tiles, jargon gate), and AWR-269 pad-process live-play mirror (TeeTransport + SSE `/api/mirror/stream` + Lab Watch live playback; not bridge show output); SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # LED Pad
@@ -77,7 +77,7 @@ The pad now restarts itself for code freshness. A watchdog thread in `run_server
 (`tools/led_pad_web.py`) samples the mtimes of an explicit watched-module list every 5 s:
 `govee_frame_renderer.py`, `led_pad_controls.py`, `govee_realtime_runner.py`,
 `led_color_engine.py`, `led_config.py`, `tools/led_pad_web.py`, `tools/led_pad_lab.py`,
-`tools/led_pad_playback.py`, `tools/pad_access.py`. When any watched file changes (or goes
+`tools/led_pad_playback.py`, `tools/led_pad_mirror.py`, `tools/pad_access.py`. When any watched file changes (or goes
 missing) and the change has been stable for >= 3 s, the pad logs
 "source changed on disk — restarting for freshness" and exits with code 3; launchd
 (`KeepAlive.SuccessfulExit=false`) relaunches it. The restart decision is the pure function
@@ -473,14 +473,36 @@ not fork the simulator:
   failures still fall back to Strip with the dim note.
 - **Fail-soft.** If the module import or profile fetch fails, Lab stays in Strip with a dim note:
   “Room view unavailable — simulator assets not found.”
-- **Honesty.** Room mode shows “Room view · simulator layout · preview only.” Live on-strip play is
-  not frame-streamed to the browser; the room canvas shows the last offline preview. The LIVE chip
-  logic is untouched.
+- **Honesty.** Room mode shows “Room view · simulator layout · preview only.” Offline Preview is
+  still a local render. **Watch live playback** (AWR-269) is the separate mirror of what this pad
+  process is sending right now — it does not change the lights, and it is not a mirror of the
+  bridge show output.
 - **Editor chrome hidden — presentation mode (AWR-253 + AWR-266).** Lab creates the view with
   `createLedSimView(canvas, profile, {presentation: true})`. The Sim Play stage uses the same
   mode by default. Editor chrome stays off: segment ticks, room-size/measurement text, vertex
   handles, unplaced warnings. What remains: walls, path, LEDs, junction, start/end. Sim Layout
   tab calls `setPresentation(false)` so handles/ticks return for editing.
+
+### Watch live playback (AWR-269)
+
+While the pad/lab is **Playing** to the real lights (or dry-run transport), Template Lab can
+**Watch live playback** on the same stage. This is a read-only mirror of frames this pad process
+is sending — not the bridge's show output (that remains a separate future decision).
+
+- **Tee at the transport boundary.** `tools/led_pad_mirror.py` wraps dry-run and real transports
+  inside `PadPlayback` with `TeeTransport`. Each `send_frame` still goes to the wrapped transport
+  unchanged; the runner thread only O(1)-appends `(monotonic_ts, immutable RGB list)` into a
+  bounded `collections.deque`. No shared lock with readers, no I/O on the runner thread. A stalled
+  browser client must not change playback cadence.
+- **SSE fan-out.** `GET /api/mirror/stream` on the pad web server (ThreadingHTTPServer — one handler
+  thread per client) snapshots the newest ring entry at ~30 fps and emits plain SSE JSON
+  (`ts`, `rgb`, `playing`, `playing_look`). No websocket dependency. Handlers exit when the pad
+  service shuts down.
+- **UI.** Lab stage button **Watch live playback** subscribes via `EventSource` and paints through
+  the same `paintPreviewFrame` / ledsim-view path as Preview. Calm copy when nothing is playing.
+- **Gates (software).** Cadence with a stalled client, ring maxlen without clients + clean SSE
+  shutdown, and dry-run byte-equal ordered frames — `tests/test_led_pad_playback_mirror.py`.
+  HARDWARE-UNVALIDATED.
 
 ### Beat meter + metronome click (AWR-241)
 

@@ -240,6 +240,7 @@ contracts:
       - docs/subsystems/led_govee.md
       - docs/architecture/doc_index.md
       - docs/status/active_work_registry.md
+      - docs/validation/software_test_inventory.md
     tests:
       - python3 -m unittest tests.test_filepath_resolver_usb_twin tests.test_filepath_resolver_beatgrid tests.test_filepath_resolver_hotcue_tags tests.test_smart_transitions
       - python3 -m unittest discover tests
@@ -252,9 +253,12 @@ contracts:
       - docs/subsystems/led_govee.md
       - docs/architecture/doc_index.md
       - docs/status/active_work_registry.md
+      - docs/validation/software_test_inventory.md
     forbidden_assumptions:
       - LED Pad dry-run or software playback does not prove visual hardware behavior
       - output ownership must stay explicit when the bridge is live
+      - pad live-play mirror (AWR-269) is pad-process-only; it does not mirror bridge show output
+      - a stalled SSE mirror client must not change runner frame cadence (tee is O(1) append only)
 
   led_sim:
     code_globs:

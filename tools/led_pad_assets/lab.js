@@ -948,6 +948,11 @@
     view: null,
     unavailable: false,
   };
+  // AWR-269: read-only mirror of pad send frames via SSE (same paint path as preview).
+  const watchLive = {
+    on: false,
+    source: null,
+  };
   function layoutFingerprint(profile) {
     if (!profile || typeof profile !== "object") return "";
     const name = profile.active_layout;
@@ -968,22 +973,29 @@
     const hero = $("labPreviewHero");
     const stripBtn = $("previewModeStrip");
     const roomBtn = $("previewModeRoom");
+    const watchBtn = $("watchLiveBtn");
     const caption = $("roomViewCaption");
+    const watchCaption = $("watchLiveCaption");
     const note = $("roomViewNote");
     const stripCanvas = $("previewStrip");
     const roomCanvas = $("previewRoom");
     const isRoom = roomView.mode === "room" && !roomView.unavailable;
     if (hero) hero.classList.toggle("room-mode", isRoom);
     if (stripBtn) {
-      stripBtn.classList.toggle("on", !isRoom);
-      stripBtn.setAttribute("aria-pressed", isRoom ? "false" : "true");
+      stripBtn.classList.toggle("on", !isRoom && !watchLive.on);
+      stripBtn.setAttribute("aria-pressed", (!isRoom && !watchLive.on) ? "true" : "false");
     }
     if (roomBtn) {
-      roomBtn.classList.toggle("on", isRoom);
-      roomBtn.setAttribute("aria-pressed", isRoom ? "true" : "false");
+      roomBtn.classList.toggle("on", isRoom && !watchLive.on);
+      roomBtn.setAttribute("aria-pressed", (isRoom && !watchLive.on) ? "true" : "false");
       roomBtn.disabled = roomView.unavailable;
     }
-    if (caption) caption.hidden = !isRoom;
+    if (watchBtn) {
+      watchBtn.classList.toggle("on", watchLive.on);
+      watchBtn.setAttribute("aria-pressed", watchLive.on ? "true" : "false");
+    }
+    if (caption) caption.hidden = !isRoom || watchLive.on;
+    if (watchCaption) watchCaption.hidden = !watchLive.on;
     if (note) note.hidden = !roomView.unavailable;
     if (stripCanvas) stripCanvas.hidden = isRoom;
     if (roomCanvas) roomCanvas.hidden = !isRoom;
@@ -1064,6 +1076,67 @@
     roomView.layoutFingerprint = fp;
     return roomView.view;
   }
+  function stopWatchLive() {
+    if (watchLive.source) {
+      try { watchLive.source.close(); } catch (_) { /* fail-soft */ }
+      watchLive.source = null;
+    }
+    watchLive.on = false;
+    const hint = $("previewHint");
+    if (hint && !preview.frames.length) {
+      hint.textContent = "◉ Preview renders here — press Preview";
+      hint.hidden = false;
+    }
+    syncPreviewModeChrome();
+  }
+  function startWatchLive() {
+    stopPreview();
+    stopWatchLive();
+    watchLive.on = true;
+    syncPreviewModeChrome();
+    const hint = $("previewHint");
+    if (hint) {
+      hint.textContent = "Nothing playing right now — press Play on a look to mirror it here";
+      hint.hidden = false;
+    }
+    // Prefer Room canvas when available so the mirror uses the same ledsim-view path.
+    if (roomView.mode !== "room" && !roomView.unavailable) {
+      setPreviewMode("room").catch(() => { /* keep strip */ });
+    }
+    const es = new EventSource("/api/mirror/stream");
+    watchLive.source = es;
+    es.onmessage = (ev) => {
+      if (!watchLive.on) return;
+      let data;
+      try { data = JSON.parse(ev.data); } catch (_) { return; }
+      const playing = Boolean(data && data.playing);
+      const frame = data && Array.isArray(data.rgb) ? data.rgb : null;
+      if (hint) {
+        if (!playing || !frame) {
+          hint.textContent = "Nothing playing right now — press Play on a look to mirror it here";
+          hint.hidden = false;
+        } else {
+          const name = String(data.playing_look || "").replace(/^lab_/, "") || "look";
+          hint.textContent = `Watching live · ${name}`;
+          hint.hidden = false;
+        }
+      }
+      if (playing && frame && frame.length) {
+        paintPreviewFrame(frame);
+      }
+    };
+    es.onerror = () => {
+      // EventSource auto-reconnects; keep calm copy if the stream drops briefly.
+      if (hint && watchLive.on) {
+        hint.textContent = "Live mirror reconnecting…";
+        hint.hidden = false;
+      }
+    };
+  }
+  function toggleWatchLive() {
+    if (watchLive.on) stopWatchLive();
+    else startWatchLive();
+  }
   async function setPreviewMode(mode) {
     let next = mode === "room" ? "room" : "strip";
     if (next === "room" && !roomView.unavailable) {
@@ -1129,7 +1202,7 @@
     if (roomView.view) {
       try { roomView.view.renderFrame([]); } catch (_) { /* fail-soft */ }
     }
-    setPreviewHint(true);
+    if (!watchLive.on) setPreviewHint(true);
     if (beatUI.mode === "preview") setBeatMode("off");
   }
   async function ensurePreviewPlayer() {
@@ -1200,11 +1273,14 @@
     player.play({fromFrame: startFrame});
   }
   $("previewBtn").onclick = async () => {
+    if (watchLive.on) stopWatchLive();
     $("previewBtn").disabled = true;
     try { await previewDraft(); } catch (err) { showError(err); } finally { $("previewBtn").disabled = false; }
   };
-  $("previewModeStrip").onclick = () => { setPreviewMode("strip"); };
-  $("previewModeRoom").onclick = () => { setPreviewMode("room"); };
+  $("previewModeStrip").onclick = () => { if (watchLive.on) stopWatchLive(); setPreviewMode("strip"); };
+  $("previewModeRoom").onclick = () => { if (watchLive.on) stopWatchLive(); setPreviewMode("room"); };
+  const watchLiveBtn = $("watchLiveBtn");
+  if (watchLiveBtn) watchLiveBtn.onclick = () => { toggleWatchLive(); };
   for (const btn of document.querySelectorAll("[data-preview-len]")) {
     btn.onclick = () => { setPreviewLengthMode(btn.dataset.previewLen); };
   }

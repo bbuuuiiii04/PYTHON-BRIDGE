@@ -51,6 +51,7 @@
       <div><dt>⇄ Switch live lights</dt><dd>Amber when another lab scene is already live — swaps to this draft without a full stop.</dd></div>
       <div><dt>Beat meter</dt><dd>Shows bar · beat while Preview or Play is running.</dd></div>
       <div><dt>Room view</dt><dd>Uses the simulator layout — preview only; never touches the lights.</dd></div>
+      <div><dt>Watch live playback</dt><dd>Shows the same frames this pad is sending to the lights right now. If nothing is playing, it says so. Does not change what the lights do.</dd></div>
     </dl>
   </div>
   <main>
@@ -105,9 +106,11 @@
             <div class="lab-preview-mode" role="group" aria-label="Preview mode">
               <button id="previewModeStrip" type="button" class="ghost lab-mode-btn on" aria-pressed="true">Strip</button>
               <button id="previewModeRoom" type="button" class="ghost lab-mode-btn" aria-pressed="false">Room</button>
+              <button id="watchLiveBtn" type="button" class="ghost lab-mode-btn" aria-pressed="false" title="Mirror what this pad is sending to the lights right now">Watch live playback</button>
             </div>
             <span id="roomViewCaption" class="lab-room-caption dim" hidden>Room view · simulator layout · preview only</span>
             <span id="roomViewNote" class="lab-room-note dim" hidden>Room view unavailable — simulator assets not found</span>
+            <span id="watchLiveCaption" class="lab-room-caption dim" hidden>Mirror of what this pad is sending right now</span>
           </div>
           <div class="lab-preview-wrap">
             <canvas id="previewStrip" height="64" aria-label="Draft preview strip"></canvas>
