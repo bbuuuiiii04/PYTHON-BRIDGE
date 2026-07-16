@@ -52,6 +52,12 @@ class SyntheticClock:
         bpm = float(bpm)
         if bpm <= 0:
             raise ValueError("bpm must be > 0")
+        if bpm == self._bpm:
+            return
+        # AWR-275: re-anchor at the CURRENT beat before changing rate so the
+        # animation only changes speed — there is no phase jump. beat() right
+        # after this call equals beat() right before it (continuity), then the
+        # beat count advances at the new bpm.
         self._anchor_beat = self.beat()
         self._anchor_time = self._time_fn()
         self._bpm = bpm
@@ -148,13 +154,24 @@ class OwnershipGate:
             return None
         return data
 
-    def _fresh_status(self) -> dict[str, Any] | None:
+    def read_fresh_status(self) -> dict[str, Any] | None:
+        """Fresh bridge status dict (AWR-261 5s window) with NO ownership side effect.
+
+        Returns the raw status dict when it exists and its ``written_at`` is
+        younger than 5s, else None. Used by the tempo-follow path (AWR-275),
+        which must read the heartbeat bpm without mutating ownership state.
+        """
         data = self._status_reader()
         if not data:
-            self.state = "free" if self.state != "pad_owned" else self.state
             return None
         written_at = float(data.get("written_at", 0.0) or 0.0)
         if not written_at or self._time_fn() - written_at > 5.0:
+            return None
+        return data
+
+    def _fresh_status(self) -> dict[str, Any] | None:
+        data = self.read_fresh_status()
+        if data is None:
             self.state = "free" if self.state != "pad_owned" else self.state
             return None
         return data
@@ -192,6 +209,11 @@ class OwnershipGate:
 
 
 class PadPlayback:
+    # AWR-275: how much the live bpm must move before we re-anchor the clock.
+    # The live tap wobbles by a fraction of a bpm; anything at or below this is
+    # ignored so the animation does not micro-jitter.
+    _FOLLOW_DEBOUNCE_BPM = 0.3
+
     def __init__(
         self,
         config: LEDConfig,
@@ -210,6 +232,13 @@ class PadPlayback:
         self._sleep_fn = sleep_fn or time.sleep
         self._clock = SyntheticClock(time_fn=self._time_fn)
         self._timer = CueTimer(time_fn=self._time_fn)
+        # AWR-275 tempo-follow: the operator's manual Preview tempo is remembered
+        # so we can fall back to it the moment the live music stops. While the
+        # bridge heartbeat is fresh with a valid bpm, the clock follows the music
+        # instead of the manual value.
+        self._manual_bpm = float(self._clock.bpm)
+        self._following = False
+        self._follow_bpm: float | None = None
         self._loop = True
         self._playing_look = ""
         self._last_error = ""
@@ -287,6 +316,10 @@ class PadPlayback:
 
     def _poll_once(self, counter: int) -> int:
         self.tick()
+        # AWR-275: reuse this existing 0.25s poll (no new loop). Every other tick
+        # (~0.5s, the heartbeat write cadence) pull the live bpm and follow it.
+        if counter % 2 == 0:
+            self._follow_tempo_from_status()
         if counter % 8 == 7:
             self._ownership.poll_owned()
             # Yield to the bridge: an already-running pad playback checks ownership
@@ -329,9 +362,62 @@ class PadPlayback:
             self._last_error = ""
 
     def set_bpm(self, bpm: float) -> None:
+        # Manual Preview tempo. Remember it always, but only drive the clock when
+        # we are NOT following the live music (AWR-275) — otherwise a manual set
+        # would fight the heartbeat.
         with self._lock:
-            self._clock.set_bpm(float(bpm))
-            self._timer.set_bpm(float(bpm))
+            self._manual_bpm = float(bpm)
+            if not self._following:
+                self._clock.set_bpm(float(bpm))
+                self._timer.set_bpm(float(bpm))
+
+    @staticmethod
+    def _extract_status_bpm(status: dict[str, Any] | None) -> float | None:
+        """Parse a usable bpm from a bridge status dict, or None.
+
+        The heartbeat writes bpm as a formatted string (runtime_status). Reject
+        missing/blank/garbage values and anything outside a sane musical range so
+        a bad read never yanks the animation to a nonsense tempo.
+        """
+        if not isinstance(status, dict):
+            return None
+        raw = status.get("bpm")
+        if raw is None or raw == "":
+            return None
+        try:
+            bpm = float(raw)
+        except (TypeError, ValueError):
+            return None
+        if bpm <= 0.0 or bpm > 400.0:
+            return None
+        return bpm
+
+    def apply_tempo_follow(self, status: dict[str, Any] | None) -> None:
+        """AWR-275: follow the live music's bpm from the bridge status heartbeat.
+
+        ``status`` is a FRESH bridge status dict (caller applies the AWR-261 5s
+        freshness window) or None when the bridge is stale/absent. Fresh + valid
+        bpm → the clock and cue timer follow that tempo, debounced so sub-0.3-bpm
+        wobble is ignored. Stale/absent → release follow and revert to the
+        operator's manual Preview tempo. Beat continuity is preserved by
+        SyntheticClock.set_bpm (re-anchor, no phase jump).
+        """
+        bpm = self._extract_status_bpm(status)
+        with self._lock:
+            if bpm is not None:
+                self._follow_bpm = bpm
+                self._following = True
+                if abs(bpm - self._clock.bpm) > self._FOLLOW_DEBOUNCE_BPM:
+                    self._clock.set_bpm(bpm)
+                    self._timer.set_bpm(bpm)
+            elif self._following:
+                self._following = False
+                self._follow_bpm = None
+                self._clock.set_bpm(self._manual_bpm)
+                self._timer.set_bpm(self._manual_bpm)
+
+    def _follow_tempo_from_status(self) -> None:
+        self.apply_tempo_follow(self._ownership.read_fresh_status())
 
     def set_loop(self, loop: bool) -> None:
         with self._lock:
@@ -382,6 +468,11 @@ class PadPlayback:
                 "beat": float(self._clock.beat()),
                 "loop": self._loop,
                 "last_error": self._last_error,
+                # AWR-275 tempo-follow surface for the pad/lab UI mode chip.
+                "tempo_source": "following" if self._following else "manual",
+                "following": self._following,
+                "follow_bpm": self._follow_bpm,
+                "manual_bpm": self._manual_bpm,
             }
         )
         return st

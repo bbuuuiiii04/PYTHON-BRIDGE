@@ -759,6 +759,10 @@
       renderLive();
       renderHealth();
       if (window.PadConfigStale) window.PadConfigStale.render($("configStaleBanner"), rt.config_stale);
+      // AWR-275: while the live music plays, the tempo follows it (read-only);
+      // when it stops, restore this draft's own BPM rule (timing-mode gated).
+      const following = window.PadTempoMode ? window.PadTempoMode.render(pb) : false;
+      if (!following) renderBpmScope();
     } catch (err) {
       state.health.serverFailAt = performance.now();
       renderHealth();

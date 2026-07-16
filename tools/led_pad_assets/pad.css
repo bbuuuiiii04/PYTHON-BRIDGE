@@ -89,6 +89,12 @@ input[type="number"] { width: 78px; }
 .primary .badge { color: inherit; border-color: rgb(6 24 43 / .35); }
 .pill.bridge { border-color: var(--warn); color: var(--warn); }
 .pill.pad { border-color: var(--ok); color: var(--ok); }
+/* AWR-275: tempo-follow chip — read-only "Following your music" state. */
+.tempo-follow-chip {
+  border: 1px solid var(--ok); border-radius: 999px; padding: 3px 9px;
+  font-size: 11px; font-weight: 600; letter-spacing: .02em; color: var(--ok);
+}
+.tempo-follow-chip[hidden] { display: none; }
 .primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
 .primary:hover:not(:disabled) { background: var(--accent); }
 .lab-route .primary { background: var(--lab); border-color: var(--lab); color: #160b27; }

@@ -277,6 +277,36 @@
     return {formatLag, render};
   }());
 
+  // AWR-275: shared tempo-mode chip for pad + lab. When the bridge heartbeat is
+  // fresh, pad/lab playback follows the live music's bpm — the manual Preview
+  // tempo is read-only while that lasts. render() shows the chip and disables the
+  // tempo controls when following; each page re-enables per its own rule when not.
+  // Returns true when following, false otherwise.
+  window.PadTempoMode = (function () {
+    function render(playback) {
+      const chip = document.getElementById("tempoModeChip");
+      const input = document.getElementById("bpmInput");
+      const steps = document.querySelectorAll("[data-step]");
+      const following = !!(playback && playback.following);
+      if (following) {
+        const raw = playback.follow_bpm != null ? playback.follow_bpm : playback.bpm;
+        const bpm = Math.round(Number(raw) || 0);
+        const shown = bpm > 0 ? bpm : "—";
+        if (chip) {
+          chip.hidden = false;
+          chip.textContent = `Following your music · ${shown} · tempo set by the live mix`;
+        }
+        if (input) input.disabled = true;
+        steps.forEach(btn => { btn.disabled = true; });
+      } else if (chip) {
+        chip.hidden = true;
+        chip.textContent = "";
+      }
+      return following;
+    }
+    return {render};
+  }());
+
   window.LedPadApi = {
     config: () => request("/api/config"),
     renders: () => request("/api/renders"),

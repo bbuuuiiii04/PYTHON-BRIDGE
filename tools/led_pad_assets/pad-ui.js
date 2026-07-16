@@ -607,6 +607,13 @@
     }
     if (changed) { renderCards(); renderEditorLive(); }
     if (window.PadConfigStale) window.PadConfigStale.render($("configStaleBanner"), rt.config_stale);
+    // AWR-275: follow the live music's tempo when the bridge is fresh; when it
+    // stops, the pad's manual Preview tempo is always editable again.
+    const following = window.PadTempoMode ? window.PadTempoMode.render((rt || {}).playback) : false;
+    if (!following) {
+      $("bpmInput").disabled = false;
+      document.querySelectorAll("[data-step]").forEach(btn => { btn.disabled = false; });
+    }
   }
   document.addEventListener("keydown", ev => {
     if (ev.key !== "Escape") return;
