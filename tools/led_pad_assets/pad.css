@@ -308,6 +308,17 @@ main { padding: var(--pad); }
   background: color-mix(in srgb, var(--warn) 82%, #fff);
   border-color: var(--warn);
 }
+.lab-route #playDraftBtn.lab-play-once {
+  border-color: color-mix(in srgb, var(--warn) 55%, var(--border));
+  color: var(--text);
+}
+.lab-route #stopDraftBtn.lab-stop-armed {
+  border-color: var(--danger);
+  color: var(--danger);
+  font-weight: 700;
+}
+.lab-route .lab-play-once-hint { font-size: 11px; max-width: 14rem; line-height: 1.25; }
+.lab-route .lab-play-once-hint[hidden] { display: none; }
 .lab-route .lab-preview-hero.room-mode {
   scroll-margin-top: 72px; /* clear sticky topbar when Preview scrolls room into view */
 }

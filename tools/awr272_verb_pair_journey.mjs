@@ -181,7 +181,7 @@ httpd.serve_forever()
 
   try {
     const page = await browser.newPage();
-    await page.goto(`http://127.0.0.1:${padPort}/lab`, {waitUntil: "networkidle"});
+    await page.goto(`http://127.0.0.1:${padPort}/?view=lab`, {waitUntil: "networkidle"});
 
     // —— (0) primary verb copy on merged shell ——
     const verbs = await page.evaluate(() => {

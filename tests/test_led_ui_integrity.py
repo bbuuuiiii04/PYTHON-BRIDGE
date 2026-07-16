@@ -413,13 +413,13 @@ class Awr270OneShellTests(unittest.TestCase):
         lab_tabs = _route_tab_hrefs(lab)
         sim_tabs = _route_tab_hrefs(sim)
 
-        self.assertEqual(pad_tabs, {"Pad": "/", "Lab": "/lab", "Sim": "http://127.0.0.1:8767/"})
-        self.assertEqual(lab_tabs, {"Pad": "/", "Lab": "/lab", "Sim": "http://127.0.0.1:8767/"})
+        self.assertEqual(pad_tabs, {"Pad": "/", "Lab": "/?view=lab", "Sim": "http://127.0.0.1:8767/"})
+        self.assertEqual(lab_tabs, {"Pad": "/", "Lab": "/?view=lab", "Sim": "http://127.0.0.1:8767/"})
         self.assertEqual(
             sim_tabs,
             {
                 "Pad": "http://127.0.0.1:8766/",
-                "Lab": "http://127.0.0.1:8766/lab",
+                "Lab": "http://127.0.0.1:8766/?view=lab",
                 "Sim": "http://127.0.0.1:8767/",
             },
         )
@@ -505,37 +505,44 @@ class Awr270OneShellTests(unittest.TestCase):
                     server.server_close()
                     thread.join(timeout=2.0)
 
-        def _get(port: int, path: str) -> str:
+        def _get(port: int, path: str, *, allow_redirect: bool = False) -> tuple[int, str, str | None]:
             conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
             conn.request("GET", path)
             res = conn.getresponse()
             body = res.read().decode("utf-8")
             status = res.status
+            location = res.getheader("Location")
             conn.close()
-            self.assertEqual(status, 200, path)
-            return body
+            if not allow_redirect:
+                self.assertEqual(status, 200, path)
+            return status, body, location
 
         with _pad() as port:
-            pad_html = _get(port, "/")
-            lab_html = _get(port, "/lab")
+            _st, pad_html, _loc = _get(port, "/")
+            st_lab, _lab_body, lab_loc = _get(port, "/lab", allow_redirect=True)
+            _st2, lab_view, _loc2 = _get(port, "/?view=lab")
         with _sim() as port:
-            sim_html = _get(port, "/")
+            _st3, sim_html, _loc3 = _get(port, "/")
 
+        self.assertEqual(st_lab, 302)
+        self.assertEqual(lab_loc, "/?view=lab")
         self.assertEqual(_route_tab_hrefs(pad_html)["Sim"], "http://127.0.0.1:8767/")
-        self.assertEqual(_route_tab_hrefs(lab_html)["Pad"], "/")
+        self.assertEqual(_route_tab_hrefs(lab_view)["Pad"], "/")
+        self.assertEqual(_route_tab_hrefs(lab_view)["Lab"], "/?view=lab")
         self.assertEqual(_route_tab_hrefs(sim_html)["Pad"], "http://127.0.0.1:8766/")
+        self.assertEqual(_route_tab_hrefs(sim_html)["Lab"], "http://127.0.0.1:8766/?view=lab")
         _id_not_hidden(pad_html, "lookGrid")
-        _id_not_hidden(lab_html, "draftList")
+        _id_not_hidden(lab_view, "draftList")
         _id_not_hidden(sim_html, "stage")
-        # AWR-271: / and /lab serve the same shell document (not a redirect).
+        # AWR-273: shell document is on / (+ /?view=lab); /lab is redirect-only.
         self.assertIn('data-shell="lighting"', pad_html)
-        self.assertIn('data-shell="lighting"', lab_html)
+        self.assertIn('data-shell="lighting"', lab_view)
         self.assertIn('id="view-lab"', pad_html)
-        self.assertIn('id="view-pad"', lab_html)
+        self.assertIn('id="view-pad"', lab_view)
 
 
 class Awr271LabInShellTests(unittest.TestCase):
-    """R9a: Lab editor mounts inside Pad shell; /lab still serves the same component."""
+    """R9a: Lab editor mounts inside Pad shell; R9c redirects /lab → /?view=lab."""
 
     def test_shared_shell_markup_and_scripts(self) -> None:
         html = (_ASSETS / "index.html").read_text(encoding="utf-8")
@@ -551,6 +558,7 @@ class Awr271LabInShellTests(unittest.TestCase):
         self.assertIn('id="view-lab"', html)
         self.assertIn('data-shell-view="pad"', html)
         self.assertIn('data-shell-view="lab"', html)
+        self.assertIn('href="/?view=lab"', html)
         self.assertIn("/static/shell.js", html)
         self.assertIn("/static/lab.js", html)
         self.assertIn("/static/pad-ui.js", html)
@@ -563,6 +571,7 @@ class Awr271LabInShellTests(unittest.TestCase):
         self.assertIn("history.pushState", shell)
         self.assertIn("data-shell-view", shell)
         self.assertIn("lab-route", shell)
+        self.assertIn("/?view=lab", shell)
         self.assertNotIn("iframe", shell)
 
         # One Lab store export; Accept path untouched (still labAccept).
@@ -605,7 +614,7 @@ class Awr271LabInShellTests(unittest.TestCase):
         for label, src in (("lab.js", lab), ("pad-ui.js", pad)):
             self.assertIn("beforeunload", src, f"{label} missing beforeunload")
 
-    def test_lab_and_root_serve_identical_shell(self) -> None:
+    def test_root_serves_shell_and_lab_path_redirects(self) -> None:
         import http.client
         import tempfile
         import threading
@@ -632,22 +641,25 @@ class Awr271LabInShellTests(unittest.TestCase):
                     server.server_close()
                     thread.join(timeout=2.0)
 
-        def _get(port: int, path: str) -> tuple[int, str]:
+        def _get(port: int, path: str) -> tuple[int, str, str | None]:
             conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
             conn.request("GET", path)
             res = conn.getresponse()
             body = res.read().decode("utf-8")
             status = res.status
+            location = res.getheader("Location")
             conn.close()
-            return status, body
+            return status, body, location
 
         with _pad() as port:
-            st_root, root = _get(port, "/")
-            st_lab, lab = _get(port, "/lab")
+            st_root, root, _ = _get(port, "/")
+            st_lab, _lab, lab_loc = _get(port, "/lab")
+            st_view, view, _ = _get(port, "/?view=lab")
         self.assertEqual(st_root, 200)
-        self.assertEqual(st_lab, 200)
-        # Not a redirect — same shell body (R9c is when /lab becomes redirect-only).
-        self.assertEqual(root, lab)
+        self.assertEqual(st_lab, 302)
+        self.assertEqual(lab_loc, "/?view=lab")
+        self.assertEqual(st_view, 200)
+        self.assertEqual(root, view)
         self.assertIn('data-shell="lighting"', root)
         self.assertIn('id="view-lab"', root)
         self.assertIn('id="acceptBtn"', root)
@@ -712,3 +724,86 @@ class Awr272VerbPairTests(unittest.TestCase):
         self.assertIn("your lights will use them at the next bridge start", src)
         self.assertNotIn("Bridge restart required", src)
         self.assertNotIn("Committed - bridge restart required", src)
+
+
+class Awr273SingleLiveFireTests(unittest.TestCase):
+    """R9c: lab Play-once (loop off) + /lab 302 → /?view=lab; pad tile Play stays primary live-fire."""
+
+    def test_lab_play_once_ui_and_shell_redirect_wiring(self) -> None:
+        html = (_ASSETS / "index.html").read_text(encoding="utf-8")
+        lab = (_ASSETS / "lab.js").read_text(encoding="utf-8")
+        shell = (_ASSETS / "shell.js").read_text(encoding="utf-8")
+        web = Path(__file__).resolve().parents[1] / "tools" / "led_pad_web.py"
+        web_src = web.read_text(encoding="utf-8")
+        sim = (_SIM / "index.html").read_text(encoding="utf-8")
+
+        # Preview is the headline verb; Play-once is secondary + clearly labeled.
+        preview_line = [ln for ln in html.splitlines() if 'id="previewBtn"' in ln][0]
+        play_line = [ln for ln in html.splitlines() if 'id="playDraftBtn"' in ln][0]
+        self.assertIn("primary", preview_line)
+        self.assertNotIn("primary", play_line)
+        self.assertIn("Play once on lights", html)
+        self.assertIn("Play once sends to the real lights", html)
+        self.assertIn('id="stopDraftBtn"', html)
+        self.assertIn("Play once on lights", lab)
+        self.assertIn("lab-stop-armed", lab)
+
+        # Shell + sim land on /?view=lab (no double-hop for sim).
+        self.assertIn("/?view=lab", shell)
+        self.assertIn('href="/?view=lab"', html)
+        self.assertIn("http://127.0.0.1:8766/?view=lab", sim)
+        self.assertNotIn("http://127.0.0.1:8766/lab\"", sim)
+        self.assertIn('HTTPStatus.FOUND', web_src)
+        self.assertIn('"/?view=lab"', web_src)
+        # Lab play forces one-shot; does not mutate session via set_loop for this path.
+        self.assertIn("loop=False", web_src)
+        self.assertIn("lab live-fire is always one-shot", web_src)
+
+    def test_lab_redirect_http_302(self) -> None:
+        import http.client
+        import tempfile
+        import threading
+        from contextlib import contextmanager
+        from http.server import ThreadingHTTPServer
+
+        from rb_ss_bridge_v2.tools.led_pad_web import LedPadService, build_handler as pad_handler
+
+        example = Path(__file__).resolve().parents[1] / "config" / "led_look_director.example.json"
+
+        @contextmanager
+        def _pad():
+            with tempfile.TemporaryDirectory() as td:
+                cfg = Path(td) / "led_look_director.json"
+                cfg.write_text(example.read_text(encoding="utf-8"), encoding="utf-8")
+                service = LedPadService(cfg, dry_run=True)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), pad_handler(service))
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    yield server.server_port
+                finally:
+                    server.shutdown()
+                    server.server_close()
+                    thread.join(timeout=2.0)
+
+        with _pad() as port:
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            conn.request("GET", "/lab")
+            res = conn.getresponse()
+            body = res.read()
+            status = res.status
+            location = res.getheader("Location")
+            conn.close()
+            self.assertEqual(status, 302)
+            self.assertEqual(location, "/?view=lab")
+            self.assertEqual(body, b"")
+            # Destination must be the shell (never 404).
+            conn2 = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            conn2.request("GET", "/?view=lab")
+            res2 = conn2.getresponse()
+            html = res2.read().decode("utf-8")
+            self.assertEqual(res2.status, 200)
+            conn2.close()
+            self.assertIn('data-shell="lighting"', html)
+            self.assertIn('id="view-lab"', html)
+            self.assertIn("Play once on lights", html)

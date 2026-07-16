@@ -3,7 +3,7 @@
  * AWR-271 R9a shell journey (headless).
  *
  * 1) Pad shell → Lab tab switches in-place (no full document swap)
- * 2) /lab serves the same shared shell (not a redirect)
+ * 2) /lab 302-redirects to /?view=lab (R9c) and lands on the lab view
  * 3) Draft select → Preview paints
  * 4) Accept still wires (phrase survives reopen) on the merged component
  *
@@ -188,24 +188,25 @@ httpd.serve_forever()
     await page.waitForSelector("#view-lab:not([hidden])");
     const afterClick = await page.evaluate(() => ({
       alive: Boolean(window.__awr271 && window.__awr271.alive),
-      path: location.pathname,
+      path: location.pathname + location.search,
       labHidden: document.getElementById("view-lab").hidden,
       padHidden: document.getElementById("view-pad").hidden,
       labRoute: document.body.classList.contains("lab-route"),
       hasEditor: Boolean(window.LabEditor),
     }));
     if (!afterClick.alive) failures.push("(1) full page swap — window marker lost");
-    if (afterClick.path !== "/lab") failures.push(`(1) path not /lab: ${afterClick.path}`);
+    if (afterClick.path !== "/?view=lab") failures.push(`(1) path not /?view=lab: ${afterClick.path}`);
     if (afterClick.labHidden || !afterClick.padHidden) failures.push("(1) view panels wrong after Lab tab");
     if (!afterClick.labRoute) failures.push("(1) body.lab-route not set");
     if (!afterClick.hasEditor) failures.push("(1) LabEditor export missing");
     if (!failures.find((f) => f.startsWith("(1)"))) console.log("(1) pad→Lab in-place shell switch: ok");
 
-    // (2) Direct /lab is same shell (200, not redirect-only)
+    // (2) Direct /lab redirects then lands on lab view
     const page2 = await browser.newPage();
     const resp = await page2.goto(`http://127.0.0.1:${padPort}/lab`, {waitUntil: "networkidle"});
-    if (!resp || resp.status() !== 200) failures.push(`(2) /lab status ${resp && resp.status()}`);
-    if (resp && resp.request().redirectedFrom()) failures.push("(2) /lab redirected (R9c not yet)");
+    if (!resp || resp.status() !== 200) failures.push(`(2) /lab follow status ${resp && resp.status()}`);
+    const landPath = await page2.evaluate(() => location.pathname + location.search);
+    if (landPath !== "/?view=lab") failures.push(`(2) land path ${landPath}`);
     const shell2 = await page2.evaluate(() => ({
       shell: document.body.dataset.shell,
       view: document.body.dataset.shellView,
@@ -216,7 +217,7 @@ httpd.serve_forever()
     if (shell2.shell !== "lighting" || shell2.view !== "lab" || !shell2.hasPad || !shell2.hasLab || !shell2.hasAccept) {
       failures.push(`(2) /lab shell shape: ${JSON.stringify(shell2)}`);
     } else {
-      console.log("(2) /lab serves shared shell (no redirect): ok");
+      console.log("(2) /lab 302 → /?view=lab shared shell: ok");
     }
 
     // (3) draft → preview on merged component

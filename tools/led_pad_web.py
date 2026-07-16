@@ -1306,10 +1306,18 @@ class LedPadService:
             self._playback.request_takeover()
         spec, cue_beats = self._lab_play_spec(config, entry, payload)
         self._playback.set_bpm(float(session.get("bpm") or 128))
-        self._playback.play(spec, cue_beats=cue_beats, loop=bool(session.get("loop", True)))
+        # AWR-273 / D5: lab live-fire is always one-shot. Session Loop still applies to
+        # Pad tile Play only — do not mutate session loop here.
+        self._playback.play(spec, cue_beats=cue_beats, loop=False)
         self._playing_name = str(spec["look_name"])
         self._last_play_editor = None
-        return {"ok": True, "spec": spec, "cue_beats": cue_beats, "playback": self._playback.status()}
+        return {
+            "ok": True,
+            "spec": spec,
+            "cue_beats": cue_beats,
+            "loop": False,
+            "playback": self._playback.status(),
+        }
 
     def lab_update(self, payload: dict[str, Any]) -> dict[str, Any]:
         name = str(payload.get("name", "")).strip()
@@ -1768,8 +1776,11 @@ def build_handler(service: LedPadService) -> type[BaseHTTPRequestHandler]:
                     self._send_file(_ASSETS_DIR / "index.html")
                     return
                 if path == "/lab":
-                    # Same shared component as / — not a redirect (R9c). /lab stays a real URL.
-                    self._send_file(_ASSETS_DIR / "index.html")
+                    # AWR-273 / N8: /lab bookmarks → shell lab view (never 404).
+                    self.send_response(HTTPStatus.FOUND)  # 302
+                    self.send_header("Location", "/?view=lab")
+                    self.send_header("Cache-Control", "no-cache")
+                    self.end_headers()
                     return
 
                 if path == "/api/access":

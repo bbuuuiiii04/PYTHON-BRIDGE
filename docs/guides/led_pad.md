@@ -3,7 +3,7 @@ doc_status: current
 truth_level: software-tested
 last_verified_commit: 22490a06
 last_verified_date: 2026-07-16
-validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (live-apply + variant switch + preview), Round 2 (param_specs sliders/toggles/selects, slot swatches, JSON demoted to Advanced), Round 3 (rejected-drafts filter, draft delete), QR same-network access, the iOS/iPad touch pass, the editor unset-param-defaults fix, the AWR-193 pad/lab overhaul (accept snapshot, decoupled preview, archive flow, fn fallback, effective bounds, color pickers + regime badges, reconnect, freshness watchdog + live fingerprint + no-cache), the AWR-202 commit read-modify-merge with the gate fix that tracks look CONTENT (`touched`) separately from role-bank PLACEMENT (`moved`) so a params-only edit keeps the look's LIVE bank while an explicit pad move still applies, AWR-240 pad offline v2 stand-down so Test Palette still injects slot_colors, AWR-241 Template Lab beat meter + metronome click (preview exact / live server-synced), AWR-242 Template Lab UX overhaul (search/filter/group draft list, target_role phrase tags, settable timing_mode, detail restructure, health strip + self-test), AWR-243 Template Lab functional fix round (collision banner gate, selected-draft list pin, ownership takeover catch, applied:false hint, live test_palette for lab play, header/phone/preview/health/utility UX), AWR-245 Template Lab Strip|Room preview hookup (pad serves sim view JS + profile read-only; fail-soft; preview-only honesty), AWR-247 Template Lab preview length (default full cue_beats; 2/4 bars / full control), AWR-248 Pad|Lab|Sim cross-nav (plain links to :8767), AWR-250 Lab Room preview re-fetches sim profile on Preview / Room toggle so active_layout changes from Sim show without reload, AWR-254 pad look-editor close dirty check (compares against last Save, not editor-open snapshot), AWR-255 pad+lab banner when live config is newer than the running bridge, AWR-258 data-integrity (lab registry lock + optimistic concurrency, pad locked_palette save parity, beforeunload + reconnect stash, rotating lab backups), AWR-259 pad integrity tail (same-look stale_look 409, Discard-all copy, persisted last_applied Accept snapshot, EDITOR_FIELDS parity), AWR-260 lab Accept wire-in, AWR-261 status freshness, AWR-262 pad control truth, AWR-263 lab control truth + New clone flow, AWR-264 language+hierarchy rename-only (musician labels, human-name tiles, jargon gate), AWR-269 pad-process live-play mirror (TeeTransport + SSE `/api/mirror/stream` + Lab Watch live playback; not bridge show output), AWR-270 R8 one-shell chrome (shared LIGHTING CONSOLE header + Pad|Lab|Sim nav with N9 relative pad↔lab / absolute sim links, pad lands on first non-empty phrase shelf, honest empty copy; zero playback/save/engine change), AWR-271 R9a Lab editor mounts inside Pad shell (shared `index.html` + `shell.js` view switch; `/` and `/lab` serve the same document; one `lab.js` store; Accept pipeline untouched; `/lab` not yet a redirect), and AWR-272 R9b one verb pair (Save draft = unpublished look; Accept = only promotion; Reject keeps out of show; Pad push demoted under Pad look edits; scary Save-to-show modal removed); SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
+validation_scope: LED Pad Phases 1-3, Template Lab Phase 2, Template Lab Round 1 (live-apply + variant switch + preview), Round 2 (param_specs sliders/toggles/selects, slot swatches, JSON demoted to Advanced), Round 3 (rejected-drafts filter, draft delete), QR same-network access, the iOS/iPad touch pass, the editor unset-param-defaults fix, the AWR-193 pad/lab overhaul (accept snapshot, decoupled preview, archive flow, fn fallback, effective bounds, color pickers + regime badges, reconnect, freshness watchdog + live fingerprint + no-cache), the AWR-202 commit read-modify-merge with the gate fix that tracks look CONTENT (`touched`) separately from role-bank PLACEMENT (`moved`) so a params-only edit keeps the look's LIVE bank while an explicit pad move still applies, AWR-240 pad offline v2 stand-down so Test Palette still injects slot_colors, AWR-241 Template Lab beat meter + metronome click (preview exact / live server-synced), AWR-242 Template Lab UX overhaul (search/filter/group draft list, target_role phrase tags, settable timing_mode, detail restructure, health strip + self-test), AWR-243 Template Lab functional fix round (collision banner gate, selected-draft list pin, ownership takeover catch, applied:false hint, live test_palette for lab play, header/phone/preview/health/utility UX), AWR-245 Template Lab Strip|Room preview hookup (pad serves sim view JS + profile read-only; fail-soft; preview-only honesty), AWR-247 Template Lab preview length (default full cue_beats; 2/4 bars / full control), AWR-248 Pad|Lab|Sim cross-nav (plain links to :8767), AWR-250 Lab Room preview re-fetches sim profile on Preview / Room toggle so active_layout changes from Sim show without reload, AWR-254 pad look-editor close dirty check (compares against last Save, not editor-open snapshot), AWR-255 pad+lab banner when live config is newer than the running bridge, AWR-258 data-integrity (lab registry lock + optimistic concurrency, pad locked_palette save parity, beforeunload + reconnect stash, rotating lab backups), AWR-259 pad integrity tail (same-look stale_look 409, Discard-all copy, persisted last_applied Accept snapshot, EDITOR_FIELDS parity), AWR-260 lab Accept wire-in, AWR-261 status freshness, AWR-262 pad control truth, AWR-263 lab control truth + New clone flow, AWR-264 language+hierarchy rename-only (musician labels, human-name tiles, jargon gate), AWR-269 pad-process live-play mirror (TeeTransport + SSE `/api/mirror/stream` + Lab Watch live playback; not bridge show output), AWR-270 R8 one-shell chrome (shared LIGHTING CONSOLE header + Pad|Lab|Sim nav with N9 relative pad↔lab / absolute sim links, pad lands on first non-empty phrase shelf, honest empty copy; zero playback/save/engine change), AWR-271 R9a Lab editor mounts inside Pad shell (shared `index.html` + `shell.js` view switch; one `lab.js` store; Accept pipeline untouched), AWR-272 R9b one verb pair (Save draft = unpublished look; Accept = only promotion; Reject keeps out of show; Pad push demoted under Pad look edits; scary Save-to-show modal removed), and AWR-273 R9c single live-fire + `/lab` redirect (Pad tile Play = primary looping live-fire; Lab **Play once on lights** = guarded one-shot `loop=false` on existing `/api/lab/play`; `/lab` 302 → `/?view=lab`; Preview is the Lab headline verb); SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED
 ---
 
 # LED Pad
@@ -21,16 +21,18 @@ python3 -m rb_ss_bridge_v2.scripts.led_pad --host 127.0.0.1 --port 8766 --dry-ru
 
 Open `http://127.0.0.1:8766/`.
 
-Template Lab is at `http://127.0.0.1:8766/lab`.
+Template Lab is at `http://127.0.0.1:8766/?view=lab`
+(bookmarks to `/lab` 302-redirect there — never 404).
 
 The top-bar **Pad | Lab | Sim** route tabs jump between the pad (:8766),
-Template Lab (`/lab`), and the H612D LED Studio sim (`http://127.0.0.1:8767/`,
+Template Lab (`/?view=lab`), and the H612D LED Studio sim (`http://127.0.0.1:8767/`,
 canonical default). **AWR-270 / N9:** Pad↔Lab links are relative (same server);
 links to/from Sim stay absolute on `:8767` / `:8766` until a later round mounts
-Sim under one server. **AWR-271 / R9a:** Pad and Lab are one shell document —
-clicking Pad|Lab switches the view in-place (same header, same session controls,
-same `lab.js` editor store). `/` and `/lab` both serve that shell (not a
-redirect yet — R9c). All three pages share the **LIGHTING CONSOLE** eyebrow and
+Sim under one server. **AWR-271 / R9a + AWR-273 / R9c:** Pad and Lab are one shell
+document — clicking Pad|Lab switches the view in-place (same header, same session
+controls, same `lab.js` editor store). `/` serves the shell; `/lab` 302-redirects
+to `/?view=lab`. Sim’s Lab tab points at `http://127.0.0.1:8766/?view=lab` (no
+double-hop). All three pages share the **LIGHTING CONSOLE** eyebrow and
 matched route-tab chrome. Pad’s first paint opens the first phrase shelf that
 already has looks (not an empty Untagged tab); true empties say what to do next
 in plain words. Sim is a plain same-tab link; the sim page mirrors the same
@@ -222,7 +224,7 @@ writes it on Save; list rows show a 3-letter phrase chip so you can see which mo
 
 ### Lab UI layout (AWR-242 / AWR-243)
 
-The `/lab` page (and the in-shell Lab view on `/` after AWR-271) is reorganized:
+The Lab view (`/?view=lab`, and `/lab` bookmarks that 302 there) is reorganized:
 
 - **Draft list.** Sticky search (name / brief / notes substring only — never params or `fn`),
   status chips (Iterating on by default; Accepted /
@@ -239,16 +241,21 @@ The `/lab` page (and the in-shell Lab view on `/` after AWR-271) is reorganized:
   yields an empty list — the open draft is not kept as a ghost row.
 - **Detail (top → bottom).** Header flows title → Phrase/Timing → collision banner **only when**
   `production_collision` is true → preview hero (Strip|Room toggle + strip/room canvases; AWR-245;
-  64px / 48px phone strip with a dim “press Preview” placeholder until frames arrive + Preview/Play/Stop
-  + AWR-241 beat meter IDs unchanged; Room mode scrolls the hero into view after Preview)
+  64px / 48px phone strip with a dim “press Preview” placeholder until frames arrive +
+  **◉ Preview** (headline / primary) / **▶ Play once on lights** (secondary guarded one-shot) /
+  **■ Stop** + AWR-241 beat meter IDs unchanged; Room mode scrolls the hero into view after Preview)
   → tuning card (labeled sliders; on phone, label+value on one line and full-width track below with
   ≥32px thumbs; cue segmented control; **Save draft** + dirty; dim hint when `/api/lab/update` returns
-  `applied:false`: “Live apply paused — press ▶ Play to hear edits on the lights”) → **Accept — adds it
+  `applied:false`: “Preview updates as you tune — Play once sends to the real lights (one cue, no loop)”) → **Accept — adds it
   to your show** (solid green) / **Reject — keep out of show** (outline red) verdict bar → Brief (2 rows)
   + Notes in a collapsed details →
   Advanced JSON / Traceback → footer **Reload effect code** (transient “Loaded N effects ✓”) · Archive draft · Delete
   (Archive/Delete/Save draft/Accept/Reject disabled with no selection). When another lab scene is already
-  live, Play becomes amber **⇄ Switch live lights**.
+  live, Play-once becomes amber **⇄ Switch live lights**.
+- **Live-fire (AWR-273 / D5).** Pad look-tile **▶ Play** is the primary looping live-fire (honors
+  session Loop). Lab **Play once on lights** always calls `/api/lab/play` with `loop=false` (one cue
+  length, then idle) — same ownership gate, same dry-run path, same AWR-269 mirror tee. No second
+  save path and no duplicate playback state.
 - **Save contract (AWR-251 + AWR-272).** What you see is what's saved; anything named is persisted; slider
   tweaks are live-apply + editor-local until Save draft / Accept / Reject. **Save draft** writes the
   unpublished look only (never the show). **Accept** is the only promotion (AWR-260 wire-in). Reject
@@ -385,7 +392,7 @@ Dragging a slider, flipping a toggle, or picking a select updates the underlying
 writes it back into the Params JSON textarea, and routes through the same debounced auto-apply
 path as manual JSON edits — both surfaces call one `queueAutoApply()` function. While **Preview**
 is running, that path re-POSTs `/api/lab/preview` (~400 ms debounce) so the strip retunes live;
-the hint reads "Preview updates as you tune — Play sends to the real lights." Blurring the
+the hint reads "Preview updates as you tune — Play once sends to the real lights (one cue, no loop)." Blurring the
 Advanced JSON box re-renders the controls from the JSON (JSON remains the save source of truth).
 
 `param_specs` is UI metadata only: `LabRegistry.save()` validates and persists it (`ValueError` on

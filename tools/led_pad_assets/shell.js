@@ -1,18 +1,20 @@
 /**
  * AWR-271 R9a — one lighting shell: Pad|Lab view switch without a full page reload.
- * Same header instance, same session/ownership controls, shared lab editor component.
- * /lab still serves this document (not a redirect — that is R9c).
+ * AWR-273 R9c — /lab is a 302 to /?view=lab; in-shell nav uses ?view= (never /lab as a page).
  */
 (function () {
   const TITLE = {pad: "LED Pad", lab: "Template Lab"};
-  const PATH = {pad: "/", lab: "/lab"};
+  const PATH = {pad: "/", lab: "/?view=lab"};
 
   function $(id) {
     return document.getElementById(id);
   }
 
   function pathView() {
+    const params = new URLSearchParams(location.search || "");
+    if ((params.get("view") || "").toLowerCase() === "lab") return "lab";
     const path = (location.pathname || "/").replace(/\/+$/, "") || "/";
+    // Legacy path only matters if a stale client somehow lands here before redirect.
     return path === "/lab" ? "lab" : "pad";
   }
 
@@ -72,10 +74,11 @@
       else link.removeAttribute("aria-current");
     });
 
-    if (options.push !== false && location.pathname !== PATH[next]) {
-      history.pushState({shellView: next}, TITLE[next], PATH[next]);
+    const targetUrl = PATH[next];
+    if (options.push !== false && pathView() !== next) {
+      history.pushState({shellView: next}, TITLE[next], targetUrl);
     } else if (options.replace) {
-      history.replaceState({shellView: next}, TITLE[next], PATH[next]);
+      history.replaceState({shellView: next}, TITLE[next], targetUrl);
     }
 
     window.LightingShell.view = next;

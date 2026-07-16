@@ -84,7 +84,13 @@ class _FakePlayback:
 
     def status(self) -> dict:
         self.frame_index += 1
-        return {"playing_look": self.playing, "frame_index": self.frame_index, "playing": bool(self.playing)}
+        return {
+            "playing_look": self.playing,
+            "frame_index": self.frame_index,
+            "playing": bool(self.playing),
+            "loop": self.loop,
+            "bpm": self.bpm,
+        }
 
 
 class LedPadServiceTests(unittest.TestCase):
@@ -741,6 +747,74 @@ class LedPadServiceTests(unittest.TestCase):
             self.assertEqual(after[5], (255, 255, 255))
             self.assertNotEqual(after, before)
 
+    def test_lab_play_is_always_one_shot_pad_play_keeps_session_loop(self) -> None:
+        """AWR-273 / D5: lab Play-once ignores session Loop; pad tile Play still uses it."""
+        with tempfile.TemporaryDirectory() as td:
+            service, playback = self._lab_service(td)
+            service.session({"loop": True, "bpm": 128})
+            service.lab_save({"name": "pulse", "kind": "slot", "fn": "pulse", "params": {"level": 0.5}, "cue_beats": 4})
+
+            lab = service.lab_play({"name": "pulse", "cue_beats": 4})
+            self.assertTrue(lab["ok"])
+            self.assertFalse(lab["loop"])
+            self.assertFalse(playback.play_calls[-1]["loop"])
+            self.assertFalse(playback.status()["loop"])
+            # Session Loop toggle unchanged (pad still owns looping live-fire).
+            ui = service.get_config_payload()["config"]["_pad_meta"]["ui"]
+            self.assertTrue(ui["loop"])
+
+            pad = service.play({"name": "rt_groove_chase"})
+            self.assertTrue(pad["ok"])
+            self.assertTrue(playback.play_calls[-1]["loop"])
+            self.assertTrue(playback.status()["loop"])
+
+    def test_lab_play_one_shot_stops_after_cue_beats_fake_clock(self) -> None:
+        """Dry-run assert: one cue length then idle; Stop mid-cue also clears."""
+        from rb_ss_bridge_v2.led_config import load_led_look_director_config
+        from rb_ss_bridge_v2.tools.led_pad_playback import PadPlayback
+
+        with tempfile.TemporaryDirectory() as td:
+            path = self._copy_config(td)
+            lab_dir = Path(td) / "led_lab"
+            lab_dir.mkdir(parents=True, exist_ok=True)
+            (lab_dir / "effects_lab.py").write_text(
+                "def pulse(beat_pos, local_t, frame_index, params, segments, seed):\n"
+                "    return [[1, 0, 0, 0, 0, 0] for _ in range(segments)]\n"
+                "LAB_EFFECTS = {'pulse': ('slot', pulse)}\n",
+                encoding="utf-8",
+            )
+            now = [0.0]
+            cfg = load_led_look_director_config(path).config
+            playback = PadPlayback(
+                cfg,
+                dry_run=True,
+                time_fn=lambda: now[0],
+                sleep_fn=lambda _s: None,
+            )
+            try:
+                service = LedPadService(path, dry_run=True, playback=playback, lab_dir=lab_dir)
+                service.lab_save({"name": "pulse", "kind": "slot", "fn": "pulse", "params": {}, "cue_beats": 4})
+                service.session({"bpm": 120, "loop": True})
+
+                play = service.lab_play({"name": "pulse", "cue_beats": 4})
+                self.assertTrue(play["ok"])
+                self.assertFalse(play["playback"]["loop"])
+                self.assertTrue(playback.status()["playing"])
+
+                # Mid-cue Stop.
+                service.stop({})
+                self.assertFalse(playback.status()["playing"])
+
+                # Full cue then auto-stop (4 beats @ 120 BPM = 2.0 s).
+                service.lab_play({"name": "pulse", "cue_beats": 4})
+                self.assertTrue(playback.status()["playing"])
+                now[0] += 1.9
+                self.assertTrue(playback.status()["playing"])
+                now[0] += 0.2
+                self.assertFalse(playback.status()["playing"])
+            finally:
+                playback.shutdown()
+
     def test_lab_preview_honors_posted_params_without_prior_save(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             service, _playback = self._lab_service(td)
@@ -1269,7 +1343,7 @@ class SimRoomHookupRouteTests(unittest.TestCase):
         self.assertIn("exactName", lab_js)
         self.assertIn("⇄ Switch live lights", lab_js)
         self.assertIn("scrollIntoView", lab_js)
-        self.assertIn("Preview updates as you tune — Play sends to the real lights.", lab_html)
+        self.assertIn("Preview updates as you tune — Play once sends to the real lights (one cue, no loop).", lab_html)
         self.assertIn("queuePreviewRetune", lab_js)
         self.assertIn("slugifyLabName", lab_js)
         self.assertIn("__blank__", lab_js)

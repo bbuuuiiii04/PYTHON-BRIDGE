@@ -14,7 +14,7 @@
         <h1 id="shellTitle">LED Pad</h1>
         <nav class="route-tabs" aria-label="Routes">
           <a href="/" data-shell-view="pad" class="active" aria-current="page">Pad</a>
-          <a href="/lab" data-shell-view="lab">Lab</a>
+          <a href="/?view=lab" data-shell-view="lab">Lab</a>
           <!-- N9: pad↔lab relative; sim stays absolute (:8767) until one-server mount -->
           <a href="http://127.0.0.1:8767/">Sim</a>
         </nav>
@@ -62,13 +62,14 @@
       <div><dt>Search</dt><dd>Matches name, brief, and notes (plain substring).</dd></div>
       <div><dt>Filter chips</dt><dd>Show/hide Iterating, Accepted, Rejected. Exact-name search still finds a draft when its chip is off.</dd></div>
       <div><dt>Phrase / Timing</dt><dd>Tag the musical moment and how the cue keeps time (beat / time / mixed / static).</dd></div>
-      <div><dt>◉ Preview</dt><dd>Renders in this page only — does not take the lights.</dd></div>
+      <div><dt>◉ Preview</dt><dd>Headline check — renders in this page only; does not take the lights.</dd></div>
       <div><dt>Save draft</dt><dd>Keeps your unpublished look on disk. Never adds it to the show.</dd></div>
       <div><dt>Accept</dt><dd>Adds this cue to your show (phrase bank or Untagged). The only promotion step.</dd></div>
       <div><dt>Reject</dt><dd>Keeps the cue out of the show. You can reopen it anytime.</dd></div>
-      <div><dt>▶ Play</dt><dd>Sends the draft to the live lights (saves first).</dd></div>
+      <div><dt>▶ Play once on lights</dt><dd>Guarded one-shot: saves first, then sends this draft to the real lights for one cue length (does not loop). Use Pad tile Play for looping live fire.</dd></div>
+      <div><dt>■ Stop</dt><dd>Cuts the one-shot early — lights go idle.</dd></div>
       <div><dt>⇄ Switch live lights</dt><dd>Amber when another lab scene is already live — swaps to this draft without a full stop.</dd></div>
-      <div><dt>Beat meter</dt><dd>Shows bar · beat while Preview or Play is running.</dd></div>
+      <div><dt>Beat meter</dt><dd>Shows bar · beat while Preview or Play-once is running.</dd></div>
       <div><dt>Room view</dt><dd>Uses the simulator layout — preview only; never touches the lights.</dd></div>
       <div><dt>Watch live playback</dt><dd>Shows the same frames this pad is sending to the lights right now. If nothing is playing, it says so. Does not change what the lights do.</dd></div>
     </dl>
@@ -143,14 +144,15 @@
             <div id="previewDimNote" class="lab-preview-dim-note dim" hidden></div>
           </div>
           <div class="lab-transport-row">
-            <button id="previewBtn" type="button" class="ghost">◉ Preview</button>
+            <button id="previewBtn" type="button" class="primary">◉ Preview</button>
             <div class="lab-preview-length" role="group" aria-label="Preview length">
               <button id="previewLen2" type="button" class="ghost lab-mode-btn" data-preview-len="8" aria-pressed="false">2 bars</button>
               <button id="previewLen4" type="button" class="ghost lab-mode-btn" data-preview-len="16" aria-pressed="false">4 bars</button>
               <button id="previewLenFull" type="button" class="ghost lab-mode-btn on" data-preview-len="full" aria-pressed="true">Full cue</button>
             </div>
-            <button id="playDraftBtn" type="button" class="primary">▶ Play</button>
-            <button id="stopDraftBtn" type="button" class="ghost">■ Stop</button>
+            <button id="playDraftBtn" type="button" class="ghost lab-play-once" title="Sends this draft to the real lights once (one cue length, no loop)">▶ Play once on lights</button>
+            <button id="stopDraftBtn" type="button" class="ghost lab-stop-once" title="Stop the one-shot on the real lights">■ Stop</button>
+            <span id="playOnceHint" class="lab-play-once-hint dim">Play once sends to the real lights · one cue · no loop</span>
             <div id="beatMeter" class="beat-meter" hidden>
               <button id="clickToggle" type="button" class="ghost" aria-pressed="false" title="Metronome click (off by default)">🔊 off</button>
               <span id="beatDot" class="beat-dot" aria-hidden="true"></span>
@@ -164,7 +166,7 @@
         <!-- Z3 Tuning card -->
         <div class="lab-tuning-card">
           <div id="paramControls" class="param-controls"></div>
-          <div id="appliedHint" class="lab-applied-hint" hidden>Preview updates as you tune — Play sends to the real lights.</div>
+          <div id="appliedHint" class="lab-applied-hint" hidden>Preview updates as you tune — Play once sends to the real lights (one cue, no loop).</div>
           <div class="lab-tuning-footer">
             <div class="cue-wrap"><span class="panel-label">Cue length (beats)</span><div class="cue-group" role="group" aria-label="Cue length (beats)"></div></div>
             <div class="lab-tuning-actions">

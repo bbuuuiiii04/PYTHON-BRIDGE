@@ -53,7 +53,8 @@ Round 4 polishes the lockers (persist + stage padlock chip), the phone bottom
 sheet (zero page scroll), tablist semantics, and contrast.
 
 **AWR-248** adds the shared **Pad | Lab | Sim** route tabs in the top bar
-(plain links: pad `:8766`, lab `:8766/lab`, sim `:8767` — canonical defaults)
+(plain links: pad `:8766`, lab `:8766/?view=lab`, sim `:8767` — canonical defaults;
+`/lab` on the pad server 302-redirects to `/?view=lab`)
 and a stage **room-size** label near the bottom wall of the room drawing
 (e.g. `17.1 × 7.5 ft`, lowest label priority). Clicking it opens the Layout
 tab and focuses Room width. **AWR-270 / N9** keeps sim↔pad/lab links absolute

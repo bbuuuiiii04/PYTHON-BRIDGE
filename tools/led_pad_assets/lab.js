@@ -771,14 +771,18 @@
       state.current && state.playingLook && state.playingLook.startsWith("lab_") &&
       state.playingLook !== labScene(state.current.name)
     );
-    $("labLive").hidden = !(state.current && state.playingLook === labScene(state.current.name));
-    $("playDraftBtn").textContent = switching ? "⇄ Switch live lights" : "▶ Play";
+    const liveHere = Boolean(state.current && state.playingLook === labScene(state.current.name));
+    $("labLive").hidden = !liveHere;
+    $("playDraftBtn").textContent = switching ? "⇄ Switch live lights" : "▶ Play once on lights";
     $("playDraftBtn").classList.toggle("lab-switch-live", switching);
+    $("stopDraftBtn").classList.toggle("lab-stop-armed", Boolean(state.playingLook));
+    const hint = $("playOnceHint");
+    if (hint) hint.hidden = Boolean(state.playingLook);
   }
 
   let applyTimer = 0;
   let previewTuneTimer = 0;
-  const PREVIEW_TUNE_HINT = "Preview updates as you tune — Play sends to the real lights.";
+  const PREVIEW_TUNE_HINT = "Preview updates as you tune — Play once sends to the real lights (one cue, no loop).";
   function previewTuningActive() {
     return beatUI.mode === "preview" && preview.frames.length > 0;
   }
