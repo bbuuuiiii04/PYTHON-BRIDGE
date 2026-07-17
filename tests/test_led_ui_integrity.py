@@ -1073,6 +1073,116 @@ class Awr278AuditFixIntegrityTests(unittest.TestCase):
         self.assertRegex(css, r"\.topbar-row\[hidden\]\s*\{\s*display:\s*none")
 
 
+def _phone_media_block(css: str) -> str:
+    """Return the body of the AWR-280 `@media (max-width: 700px)` block."""
+    start = css.index("@media (max-width: 700px)")
+    # Walk braces from the block's opening `{` to its matching close.
+    open_idx = css.index("{", start)
+    depth = 0
+    for i in range(open_idx, len(css)):
+        if css[i] == "{":
+            depth += 1
+        elif css[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return css[open_idx + 1 : i]
+    raise AssertionError("unterminated @media (max-width: 700px) block")
+
+
+class Awr280PhoneShellTests(unittest.TestCase):
+    """AWR-280: phone-first pad shell — compact header, session fold, touch spacing.
+
+    Static checks (no browser). The layout gate screenshot-verifies the 25%
+    first-tile rule and the STOP-with-drawer-open hit-test at 390/430 px.
+    """
+
+    def test_session_controls_are_a_responsive_disclosure(self) -> None:
+        html = (_ASSETS / "index.html").read_text(encoding="utf-8")
+        # The session block is a <details> that ships `open` (desktop stays correct
+        # even if the shell JS never runs) with a tap-to-open summary.
+        self.assertRegex(html, r'<details id="sessionFold" class="session-fold" open>')
+        self.assertIn('class="session-fold-summary"', html)
+        self.assertIn('id="sessionFoldTempo"', html)
+        # #sessionForm and every session control still live inside the disclosure.
+        wrap = re.search(
+            r'<details id="sessionFold".*?<form id="sessionForm".*?</form>\s*</details>',
+            html,
+            flags=re.S,
+        )
+        self.assertIsNotNone(wrap, "sessionForm must be nested inside #sessionFold")
+        for ctl in (
+            'id="bpmInput"', 'id="paletteSelect"', 'id="loopToggle"',
+            'id="tempoModeChip"', 'id="bpmScope"',
+        ):
+            self.assertIn(ctl, wrap.group(0))
+
+    def test_desktop_header_is_untouched_contract(self) -> None:
+        """Base CSS renders the fold as display:contents with the summary hidden,
+        so the desktop header lays out as the same three main-row boxes as before."""
+        css = (_ASSETS / "pad.css").read_text(encoding="utf-8")
+        self.assertRegex(css, r"\.session-fold\s*\{\s*display:\s*contents")
+        self.assertRegex(css, r"\.session-fold-summary\s*\{\s*display:\s*none")
+
+    def test_phone_media_collapses_header(self) -> None:
+        css = (_ASSETS / "pad.css").read_text(encoding="utf-8")
+        block = _phone_media_block(css)
+        # Session fold becomes a real tap-to-open row.
+        self.assertRegex(block, r"\.session-fold\s*\{[^}]*display:\s*block")
+        self.assertIn(".session-fold-summary {", block)
+        # Transport dissolves so ownership · 📱 · STOP order on the identity row.
+        self.assertRegex(block, r"\.transport\s*\{\s*display:\s*contents")
+        # STOP stays ≥44px on the phone (AWR-279 reachability extended to phone width).
+        self.assertRegex(block, r"#stopBtn\s*\{[^}]*min-height:\s*44px")
+        # Phrase pills scroll (base rule) and never stack into a second row here.
+        self.assertRegex(block, r"\.bank-row\s*\{[^}]*flex-direction:\s*row")
+        # Banners truncate to one line with a tap-to-expand escape hatch.
+        self.assertRegex(
+            block,
+            r"\.error-banner,\s*\.config-stale-banner\s*\{[^}]*white-space:\s*nowrap",
+        )
+        self.assertRegex(block, r"\.banner-open[^{]*\{[^}]*white-space:\s*normal")
+        # Pending pad edits hide when zero, stay visible when nonzero.
+        self.assertRegex(
+            block, r'\.pad-more-actions\[data-count="0"\]\s*\{[^}]*display:\s*none'
+        )
+
+    def test_base_phrase_row_scrolls_horizontally(self) -> None:
+        css = (_ASSETS / "pad.css").read_text(encoding="utf-8")
+        self.assertRegex(css, r"\.bank-tabs\s*\{[^}]*overflow-x:\s*auto")
+
+    def test_shell_manages_fold_sim_note_and_banner(self) -> None:
+        shell = (_ASSETS / "shell.js").read_text(encoding="utf-8")
+        # Fold is forced open on desktop, collapsed on the phone.
+        self.assertIn("function trackSessionFold()", shell)
+        self.assertIn("fold.open = !phone.matches", shell)
+        # Sim tap on the phone shows a note instead of a dead localhost hop.
+        self.assertIn("a[data-sim-tab]", shell)
+        self.assertIn("Sim runs on the Mac for now", shell)
+        # Banner tap-to-expand toggle.
+        self.assertIn("banner-open", shell)
+        self.assertIn("wireBannerExpand", shell)
+
+    def test_sim_tab_href_preserved_and_tagged(self) -> None:
+        html = (_ASSETS / "index.html").read_text(encoding="utf-8")
+        # The href must stay exactly the sim server (desktop nav) while carrying
+        # the phone-note tag; the N9 nav contract still holds.
+        self.assertIn('href="http://127.0.0.1:8767/" data-sim-tab', html)
+        self.assertEqual(
+            _route_tab_hrefs(html)["Sim"], "http://127.0.0.1:8767/"
+        )
+
+    def test_pending_count_mirrored_onto_disclosure(self) -> None:
+        pad = (_ASSETS / "pad-ui.js").read_text(encoding="utf-8")
+        # renderSession mirrors the dirty-look count so CSS can hide the control
+        # when there is nothing pending (integrity: nonzero work is never hidden).
+        self.assertIn("more.dataset.count", pad)
+
+    def test_tempo_follow_essence_wired_into_summary(self) -> None:
+        core = (_ASSETS / "pad-core.js").read_text(encoding="utf-8")
+        # The collapsed summary shows the live-follow tempo essence.
+        self.assertIn("sessionFoldTempo", core)
+
+
 if __name__ == "__main__":
     unittest.main()
 

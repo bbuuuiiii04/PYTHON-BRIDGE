@@ -64,6 +64,13 @@ h2.panel-label, h3.panel-label { margin: 0 0 10px; }
 }
 .lab-route .brand .eyebrow { color: var(--lab); }
 .route-tabs, .transport, .session-controls, .commit-actions { display: flex; align-items: center; gap: var(--gap); }
+/* AWR-280: the session block is a responsive disclosure. On desktop it renders as
+   display:contents (generates no box) with its <summary> hidden, so #sessionForm
+   stays a direct flex item of .main-row and the desktop header is byte-for-byte
+   unchanged. The ≤700px media query below turns it into a real tap-to-open row. */
+.session-fold { display: contents; }
+.session-fold-summary { display: none; }
+.session-fold-tempo[hidden] { display: none; }
 .pad-more-actions { position: relative; }
 .pad-more-actions > summary { list-style: none; cursor: pointer; }
 .pad-more-actions > summary::-webkit-details-marker { display: none; }
@@ -440,6 +447,100 @@ main { padding: var(--pad); }
 }
 @media (max-width: 720px) { .drawer { width: 100%; } .editor-form label, .control-row { grid-template-columns: 1fr; } }
 @media (pointer: coarse) { button, select, input[type="number"] { min-height: 44px; } .icon, .danger-outline, .danger { min-width: 44px; } .route-tabs a { min-height: 40px; } }
+
+/* ————————————————————————————————————————————————————————————————————
+   AWR-280 — phone-first pad shell (≤700px). The operator drives the pad from
+   his phone via the QR flow; the stacked desktop header used to eat ~half the
+   screen. Everything below is scoped to ≤700px so the desktop layout above
+   700px is untouched. Goal: look tiles start in the top quarter of the screen.
+   ———————————————————————————————————————————————————————————————————— */
+@media (max-width: 700px) {
+  /* Tighter rhythm than the desktop paddings the phone used to inherit. */
+  main { padding: var(--sp-2) var(--sp-3); }
+  .topbar-row { padding: 5px var(--sp-3); gap: var(--sp-2); }
+  .main-row { flex-wrap: wrap; align-items: center; row-gap: var(--sp-1); }
+  /* Width-based touch targets (mirrors the pointer:coarse rule so the phone flow
+     is ≥44px even on the fine-pointer browser the layout gate drives). */
+  button, select, input[type="number"], .route-tabs a { min-height: 44px; }
+
+  /* Row 1 identity = the compact Pad|Lab|Sim switcher (drop the eyebrow + long
+     title so the row stays one line with ownership · 📱 · STOP). */
+  .brand { order: 1; flex: 0 0 auto; gap: 0; min-width: 0; }
+  .brand .eyebrow, .brand h1 { display: none; }
+  .route-tabs { flex: 0 0 auto; }
+  .route-tabs a { min-height: 44px; padding: 0 6px; font-size: 12px; }
+
+  /* Dissolve the transport box on the phone (display:contents) so its controls
+     become direct items of the identity row and can be ordered individually:
+     tabs · ownership · 📱 · STOP on one line, the session fold wrapping below.
+     STOP is always ≥44px and, per AWR-279, stacks above the editor drawer so it
+     stays hit-testable. Ownership shrinks/truncates so the row never wraps. */
+  .transport { display: contents; }
+  #ownershipPill { order: 2; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #ownershipBtn { order: 2; flex: 0 0 auto; min-height: 44px; }
+  #qrBtn { order: 3; flex: 0 0 auto; min-width: 44px; min-height: 44px; }
+  #stopBtn { order: 4; flex: 0 0 auto; min-height: 44px; padding: 0 var(--sp-3); }
+  #labHelpBtn { order: 4; min-height: 44px; }
+  /* Lab's Diagnostics corner is a low-priority dev tool — drop it below the fold so
+     it never pushes STOP off the identity row on the phone. */
+  #diagnostics { order: 6; }
+
+  /* Session controls collapse into one tap-to-open row (shell.js manages `open`:
+     forced open on desktop, closed by default here). */
+  .session-fold { display: block; order: 5; width: 100%; }
+  .session-fold-summary {
+    display: flex; align-items: center; gap: var(--sp-2);
+    min-height: 44px; padding: 0 var(--sp-3); cursor: pointer; list-style: none;
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    background: var(--surface-2); color: var(--text-dim);
+  }
+  .session-fold-summary::-webkit-details-marker { display: none; }
+  .session-fold-title { font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+  .session-fold-tempo { color: var(--ok); font-weight: 600; font-size: 12px; white-space: nowrap; }
+  .session-fold-caret { margin-left: auto; transition: transform 120ms; color: var(--text-faint); }
+  .session-fold[open] .session-fold-caret { transform: rotate(180deg); }
+  .session-fold .session-controls {
+    width: 100%; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3);
+    margin-top: var(--sp-2); padding: var(--sp-3);
+    border: 1px solid var(--border); border-top: 0;
+    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  }
+  /* Summary already says "Session" — drop the duplicate label inside the form. */
+  .session-fold .session-controls > .panel-label { display: none; }
+  .session-controls label { min-height: 44px; }
+
+  /* Phrase tabs: one horizontally scrollable pill row (never wraps), counts kept.
+     Overrides the ≤900 column stack so the bank row stays a single line. */
+  .bank-row { flex-direction: row; align-items: center; gap: var(--sp-2); padding: 0 var(--sp-3); }
+  .bank-tabs { width: auto; min-width: 0; flex: 1 1 auto; }
+  .bank-tabs button { min-height: 44px; padding: 0 var(--sp-3); }
+  .commit-actions { flex: 0 0 auto; }
+  /* No pending pad edits → no clutter. A nonzero count stays visible (data-count
+     is set by pad-ui.js renderSession), so unsaved work is never hidden. */
+  .pad-more-actions[data-count="0"] { display: none; }
+  .pad-more-summary { min-height: 40px; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+
+  /* Banners: one line by default, tap to expand (shell.js toggles .banner-open). */
+  .error-banner, .config-stale-banner {
+    padding: 7px var(--sp-3); margin-bottom: var(--sp-1);
+    font-size: 13px; line-height: 1.3; cursor: pointer;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .error-banner.banner-open, .config-stale-banner.banner-open {
+    white-space: normal; overflow: visible; text-overflow: clip;
+  }
+
+  /* Content: full-width tiles, tighter vertical rhythm, comfortable touch. */
+  .look-grid { grid-template-columns: 1fr; gap: var(--sp-2); }
+  .look-card { min-height: 0; padding: var(--sp-3); }
+  .icon, .icon-actions button { min-width: 44px; min-height: 44px; }
+
+  /* Lab at phone width: keep the header compact too; the drafts drawer toggle and
+     editor already exist — just give them room and stop the diagnostics corner
+     from forcing the identity row wide. */
+  .lab-route .diagnostics-corner.lab-diagnostics { max-width: 42vw; }
+  .lab-route .lab-list-panel { padding-top: calc(var(--sp-3) + env(safe-area-inset-top)); }
+}
 /* AWR-252: lab help popover + dim-cue note (lab route only) */
 .lab-route .lab-help-popover { position: fixed; top: 64px; right: 16px; z-index: 60; max-width: 420px; max-height: min(70vh, 560px); overflow-y: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--pad); box-shadow: 0 12px 32px rgba(0,0,0,.5); }
 .lab-route .lab-help-popover[hidden] { display: none; }

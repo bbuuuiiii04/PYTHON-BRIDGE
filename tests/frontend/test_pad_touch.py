@@ -71,3 +71,68 @@ def test_led_pad_loads_at_iphone_width_without_console_errors(page: Page, led_pa
 
     assert console_errors == []
     assert _no_horizontal_scroll(page)
+
+
+# --------------------------------------------------------------------------- #
+# AWR-280 — phone-first pad shell: first tile high, STOP reachable, fold folds.
+# --------------------------------------------------------------------------- #
+def test_led_pad_first_tile_in_top_quarter_at_phone_width(page: Page, led_pad_server) -> None:
+    """The compact header must put the first look tile in the top 25% of the phone."""
+    page.set_viewport_size(IPHONE_VIEWPORT)
+    page.goto(led_pad_server.base_url)
+    expect(page.locator("#lookGrid .look-card").first).to_be_visible()
+    frac = page.evaluate(
+        "() => { const t = document.querySelector('#lookGrid .look-card');"
+        " const r = t.getBoundingClientRect(); return r.top / window.innerHeight; }"
+    )
+    assert frac <= 0.25, f"first tile at {frac:.3f} of viewport (want <= 0.25)"
+    assert _no_horizontal_scroll(page)
+
+
+def test_led_pad_stop_hit_testable_with_editor_drawer_open_at_phone_width(
+    page: Page, led_pad_server
+) -> None:
+    """AWR-279 STOP reachability, verified at phone width with the drawer open."""
+    page.set_viewport_size(IPHONE_VIEWPORT)
+    page.goto(led_pad_server.base_url)
+    expect(page.locator("#lookGrid .look-card").first).to_be_visible()
+    page.locator('#lookGrid .look-card [data-action="edit"]').first.click()
+    expect(page.locator("#editorDrawer")).to_be_visible()
+
+    hit = page.evaluate(
+        "() => { const s = document.getElementById('stopBtn');"
+        " const r = s.getBoundingClientRect();"
+        " const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);"
+        " return { h: r.height, hit: s.contains(el) || el === s }; }"
+    )
+    assert hit["hit"], f"STOP occluded with drawer open: {hit}"
+    assert hit["h"] >= 44, f"STOP under 44px: {hit}"
+
+
+def test_led_pad_session_fold_collapsed_by_default_at_phone_width(
+    page: Page, led_pad_server
+) -> None:
+    """The session controls collapse into one tap-to-open row on the phone."""
+    page.set_viewport_size(IPHONE_VIEWPORT)
+    page.goto(led_pad_server.base_url)
+    expect(page.locator("#lookGrid .look-card").first).to_be_visible()
+
+    fold = page.locator("#sessionFold")
+    assert page.evaluate("() => document.getElementById('sessionFold').open") is False
+    page.locator(".session-fold-summary").click()
+    assert page.evaluate("() => document.getElementById('sessionFold').open") is True
+    expect(page.locator("#bpmInput")).to_be_visible()
+
+
+def test_led_pad_desktop_session_fold_is_open_inline(page: Page, led_pad_server) -> None:
+    """Above 700px the fold renders inline (open) — the desktop header is unchanged."""
+    page.set_viewport_size({"width": 1440, "height": 900})
+    page.goto(led_pad_server.base_url)
+    expect(page.locator(".look-grid")).to_be_visible()
+    assert page.evaluate("() => document.getElementById('sessionFold').open") is True
+    expect(page.locator("#bpmInput")).to_be_visible()
+    # The summary is display:none on desktop.
+    summary_display = page.evaluate(
+        "() => getComputedStyle(document.querySelector('.session-fold-summary')).display"
+    )
+    assert summary_display == "none", summary_display

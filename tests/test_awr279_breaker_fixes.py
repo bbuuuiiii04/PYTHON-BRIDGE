@@ -170,6 +170,22 @@ class Awr279StopButtonReachable(unittest.TestCase):
         self.assertIn("ResizeObserver", shell)
         self.assertIn(".topbar", shell)
 
+    def test_stop_stays_reachable_at_phone_width(self) -> None:
+        """AWR-280: the phone shell must not regress AWR-279's STOP reachability.
+
+        The topbar (which hosts ■ STOP) keeps its stack win over the drawer, and
+        the ≤700px shell keeps STOP a ≥44px target that stays in the topbar rather
+        than being dissolved with the rest of the transport."""
+        css = (_ASSETS / "pad.css").read_text(encoding="utf-8")
+        # Occlusion invariant is width-independent (base CSS) and still holds.
+        self.assertGreater(self._z(css, ".topbar"), self._z(css, ".drawer"))
+        # The ≤700px block dissolves the transport box but keeps STOP a real,
+        # ordered, ≥44px control on the identity row.
+        start = css.index("@media (max-width: 700px)")
+        phone = css[start:]
+        self.assertRegex(phone, r"#stopBtn\s*\{[^}]*min-height:\s*44px")
+        self.assertRegex(phone, r"#stopBtn\s*\{[^}]*order:")
+
 
 # --------------------------------------------------------------------------- #
 # Priority 2 — conflict / failure honesty

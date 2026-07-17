@@ -106,14 +106,66 @@
     if (fn) fn(ev);
   }
 
+  function isPhone() {
+    return window.matchMedia("(max-width: 700px)").matches;
+  }
+
   function onNavClick(ev) {
+    if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey || ev.button !== 0) return;
+    // AWR-280: the Sim is localhost-bound (:8767). On the phone the device can't
+    // reach its own localhost, so a tap on Sim is a dead hop — show a one-line
+    // note instead of navigating. Remove this when the sim goes LAN.
+    const simLink = ev.target.closest("a[data-sim-tab]");
+    if (simLink && isPhone()) {
+      ev.preventDefault();
+      showPhoneNote("Sim runs on the Mac for now");
+      return;
+    }
     const link = ev.target.closest("a[data-shell-view]");
-    if (!link || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey || ev.button !== 0) return;
+    if (!link) return;
     const view = link.getAttribute("data-shell-view");
     if (view !== "pad" && view !== "lab") return;
     ev.preventDefault();
     if (window.LightingShell.view === view) return;
     setView(view, {push: true});
+  }
+
+  // AWR-280: one-line note on the shared #toast surface. Uses its own timer so it
+  // never fights pad-ui.js's toast state.
+  let phoneNoteTimer = null;
+  function showPhoneNote(text) {
+    const el = document.getElementById("toast");
+    if (!el) return;
+    el.textContent = text;
+    el.hidden = false;
+    clearTimeout(phoneNoteTimer);
+    phoneNoteTimer = setTimeout(() => { el.hidden = true; }, 3200);
+  }
+
+  // AWR-280: the session controls fold into a tap-to-open row on the phone. The
+  // markup ships `open` so desktop is correct even if this never runs (there the
+  // summary is display:none and the fold renders inline). Here we collapse it on
+  // the phone and re-open it if the viewport crosses back to desktop width.
+  function trackSessionFold() {
+    const fold = document.getElementById("sessionFold");
+    if (!fold) return;
+    const phone = window.matchMedia("(max-width: 700px)");
+    const apply = () => { fold.open = !phone.matches; };
+    apply();
+    if (phone.addEventListener) phone.addEventListener("change", apply);
+    else if (phone.addListener) phone.addListener(apply);
+  }
+
+  // AWR-280: on the phone, banners show as one truncated line; a tap expands the
+  // full message. Presentation only — banner text/visibility stays owned by
+  // pad-ui.js / PadConfigStale.
+  function wireBannerExpand() {
+    document.addEventListener("click", (ev) => {
+      if (!isPhone()) return;
+      const banner = ev.target.closest(".error-banner, .config-stale-banner");
+      if (!banner) return;
+      banner.classList.toggle("banner-open");
+    });
   }
 
   function init() {
@@ -124,6 +176,8 @@
     if (nav) nav.addEventListener("click", onNavClick);
     document.addEventListener("keydown", onEscape);
     trackTopbarHeight();
+    trackSessionFold();
+    wireBannerExpand();
     window.addEventListener("popstate", () => {
       setView(pathView(), {push: false});
     });

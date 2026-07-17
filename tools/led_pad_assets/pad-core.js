@@ -309,6 +309,9 @@
       const chip = document.getElementById("tempoModeChip");
       const input = document.getElementById("bpmInput");
       const steps = document.querySelectorAll("[data-step]");
+      // AWR-280: the phone folds the session controls closed; this essence keeps
+      // the tempo-follow truth visible on the collapsed "Session" summary row.
+      const foldEssence = document.getElementById("sessionFoldTempo");
       const following = !!(playback && playback.following);
       if (following) {
         const raw = playback.follow_bpm != null ? playback.follow_bpm : playback.bpm;
@@ -318,11 +321,21 @@
           chip.hidden = false;
           chip.textContent = `Following your music · ${shown} · tempo set by the live mix`;
         }
+        if (foldEssence) {
+          foldEssence.hidden = false;
+          foldEssence.textContent = `♪ ${shown}`;
+        }
         if (input) input.disabled = true;
         steps.forEach(btn => { btn.disabled = true; });
-      } else if (chip) {
-        chip.hidden = true;
-        chip.textContent = "";
+      } else {
+        if (chip) {
+          chip.hidden = true;
+          chip.textContent = "";
+        }
+        if (foldEssence) {
+          foldEssence.hidden = true;
+          foldEssence.textContent = "";
+        }
       }
       return following;
     }

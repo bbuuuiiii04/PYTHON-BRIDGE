@@ -182,7 +182,13 @@
     $("paletteSelect").value = ui.test_palette || state.palettes[0] || "";
     $("loopToggle").checked = ui.loop !== false;
     $("loopLabel").textContent = $("loopToggle").checked ? "On" : "Off";
-    $("commitCount").textContent = (state.config.dirty.looks || []).length;
+    const pendingLooks = (state.config.dirty.looks || []).length;
+    $("commitCount").textContent = pendingLooks;
+    // AWR-280: mirror the count onto the disclosure so the phone can hide the
+    // "Pad look edits" control when there is nothing pending, yet keep it (and the
+    // count) visible the moment there is unsaved work. Presentation only.
+    const more = $("padMoreActions");
+    if (more) more.dataset.count = String(pendingLooks);
   }
   function renderBanks() {
     const tabs = $("bankTabs");

@@ -16,17 +16,28 @@
           <a href="/" data-shell-view="pad" class="active" aria-current="page">Pad</a>
           <a href="/?view=lab" data-shell-view="lab">Lab</a>
           <!-- N9: pad↔lab relative; sim stays absolute (:8767) until one-server mount -->
-          <a href="http://127.0.0.1:8767/">Sim</a>
+          <!-- AWR-280: phone can't reach its own localhost:8767; shell.js shows a note instead of a dead hop -->
+          <a href="http://127.0.0.1:8767/" data-sim-tab>Sim</a>
         </nav>
       </div>
-      <form id="sessionForm" class="session-controls" aria-label="Session controls">
-        <span class="panel-label">Session</span>
-        <label>Preview tempo <button type="button" data-step="-1" aria-label="Decrease BPM">−</button><input id="bpmInput" type="number" min="60" max="200" step="1"><button type="button" data-step="1" aria-label="Increase BPM">+</button></label>
-        <span id="tempoModeChip" class="tempo-follow-chip" role="status" hidden></span>
-        <span id="bpmScope" class="dim" title="" hidden>Select a draft</span>
-        <label>Test Palette <select id="paletteSelect"></select></label>
-        <label class="switch">Loop <input id="loopToggle" type="checkbox"><span id="loopLabel">On</span></label>
-      </form>
+      <!-- AWR-280: on the phone the whole session block folds into one tap-to-open row.
+           On desktop (>700px) the <details> renders as display:contents with the summary
+           hidden, so the form lays out exactly as before (three main-row boxes). -->
+      <details id="sessionFold" class="session-fold" open>
+        <summary class="session-fold-summary">
+          <span class="session-fold-title">Session</span>
+          <span id="sessionFoldTempo" class="session-fold-tempo" hidden></span>
+          <span class="session-fold-caret" aria-hidden="true">▾</span>
+        </summary>
+        <form id="sessionForm" class="session-controls" aria-label="Session controls">
+          <span class="panel-label">Session</span>
+          <label>Preview tempo <button type="button" data-step="-1" aria-label="Decrease BPM">−</button><input id="bpmInput" type="number" min="60" max="200" step="1"><button type="button" data-step="1" aria-label="Increase BPM">+</button></label>
+          <span id="tempoModeChip" class="tempo-follow-chip" role="status" hidden></span>
+          <span id="bpmScope" class="dim" title="" hidden>Select a draft</span>
+          <label>Test Palette <select id="paletteSelect"></select></label>
+          <label class="switch">Loop <input id="loopToggle" type="checkbox"><span id="loopLabel">On</span></label>
+        </form>
+      </details>
       <div class="transport" id="shellTransport">
         <details id="diagnostics" class="diagnostics-corner lab-diagnostics" hidden>
           <summary>Diagnostics</summary>
