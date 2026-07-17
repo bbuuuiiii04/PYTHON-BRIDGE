@@ -47,6 +47,10 @@
     state.toastTimer = setTimeout(() => { $("toast").hidden = true; }, 4000);
   }
   function human(name) { return String(name).replace(/^rt_/, "").replaceAll("_", " ").replace("post drop", "post-drop").replace(/\b\w/g, c => c.toUpperCase()); }
+  // Accepted Template Lab cues store scene_ref "lab:<draft>". They are real,
+  // playable looks — not "cloud scenes" — so the pad names them honestly.
+  function isLabScene(sceneRef) { return String(sceneRef || "").startsWith("lab:"); }
+  function labCueName(sceneRef) { return human(String(sceneRef || "").slice(4)); }
   function titleCaseWords(value) {
     return String(value || "").replaceAll("_", " ").replace(/\b\w/g, c => c.toUpperCase()).trim();
   }
@@ -220,24 +224,31 @@
   function cardHtml(name) {
     const look = state.config.config.looks[name] || {};
     const render = state.renderMap.get(look.scene_ref);
+    const labScene = isLabScene(look.scene_ref);
     const bank = lookBank(name);
     const realtime = Boolean(render);
+    // Lab cues play in the pad through the same renderer as the Lab live-fire.
+    const playable = realtime || labScene;
+    const engineColored = String(look.color_source || "engine") === "engine";
     const dirty = lookDirty(name);
     const cue = (((state.config.config._pad_meta || {}).looks || {})[name] || {}).cue_beats || 16;
     const playing = state.playingLook === name;
     // AWR-264 J2: human effect name leads; machine id is one small mono line.
-    const title = render ? render.label : human(look.scene_ref || look.action || name);
-    const colorMode = render && render.slot_based
+    const title = render ? render.label : (labScene ? labCueName(look.scene_ref) : human(look.scene_ref || look.action || name));
+    const colorMode = (render && render.slot_based) || (labScene && engineColored)
       ? "<span class='gradient-dot'></span>Uses show colors"
       : "<span class='fixed-dot'></span>Set colors";
     const colorway = inLegacyColorSuffixBank(name) ? colorwayChip(look) : "";
+    const classBadge = labScene
+      ? "<span class='badge'>Lab cue</span>"
+      : (!realtime ? "<span class='badge'>Cloud scene</span>" : "");
     return `<article class="look-card ${esc(bank)} ${playing ? "playing" : ""}" style="--bank-color:${bankColors[bank]}">
       <div class="card-title"><span>${esc(title)}</span>${dirty ? "<span class='dirty-dot' title='Unsaved changes'>●</span>" : ""}</div>
       <div class="card-id mono">${esc(name)}</div>
       <div class="card-sub">${colorMode}${colorway ? ` · ${colorway}` : ""}</div>
-      <div class="badge-row"><span class="badge">${cue} beats</span>${timingBadge(render)}${render && render.strobe ? "<span class='badge strobe'>⚡ strobe</span>" : ""}${!realtime ? "<span class='badge'>Cloud scene</span>" : ""}${playing ? "<span class='live-chip'>LIVE</span>" : ""}</div>
+      <div class="badge-row"><span class="badge">${cue} beats</span>${timingBadge(render)}${render && render.strobe ? "<span class='badge strobe'>⚡ strobe</span>" : ""}${classBadge}${playing ? "<span class='live-chip'>LIVE</span>" : ""}</div>
       <footer class="card-footer">
-        <button type="button" class="primary" data-action="play" data-name="${esc(name)}" ${!realtime ? "disabled title='Cloud scene - not previewable in the pad'" : ""}>▶ Play</button>
+        <button type="button" class="primary" data-action="play" data-name="${esc(name)}" ${!playable ? "disabled title='Cloud scene - not previewable in the pad'" : ""}>▶ Play</button>
         <div class="icon-actions">
           <button type="button" class="icon" data-action="edit" data-name="${esc(name)}" aria-label="Edit" title="Edit">✎</button>
           <button type="button" class="icon" data-action="duplicate" data-name="${esc(name)}" aria-label="Duplicate" title="Duplicate">⧉</button>
@@ -337,12 +348,15 @@
   }
   function renderEditor() {
     const e = state.editor, render = state.renderMap.get(e.look.scene_ref);
-    $("editorTitle").textContent = render ? render.label : human(e.name);
+    const labScene = isLabScene(e.look.scene_ref);
+    $("editorTitle").textContent = render ? render.label : (labScene ? labCueName(e.look.scene_ref) : human(e.name));
     $("editorRegistry").textContent = e.name;
     renderEditorLive();
     renderCue();
     renderRendererSelect();
-    $("rendererDescription").textContent = render ? render.description || "" : "";
+    $("rendererDescription").textContent = render
+      ? (render.description || "")
+      : (labScene ? "Lab cue — built in Template Lab. Change how it moves and its own colors in the Lab view; the pad plays it and sets its show colors." : "");
     $("brightnessInput").value = e.look.brightness ?? 100;
     $("brightnessOutput").textContent = `${$("brightnessInput").value}%`;
     $("strobeInput").checked = Boolean(e.look.allow_strobe);
@@ -362,9 +376,24 @@
     $("monoChanceOutput").textContent = e.mono_chance;
     // AWR-262 C3: Solid-chance only when Use set colors is active.
     $("monoChanceWrap").hidden = !(locked && e.slot_fill === "random_with_mono_chance");
-    renderControls(render);
+    if (labScene) renderLabCueControls();
+    else renderControls(render);
     $("loopHint").textContent = `Loop is ${$("loopToggle").checked ? "on" : "off"} (session)`;
     setDirty();
+  }
+  // Lab cues have no pad-editable motion controls (their motion + colors are
+  // authored in Template Lab). Show the saved settings read-only and point edits
+  // at the Lab view — no new editing pipeline in the pad.
+  function renderLabCueControls() {
+    const basic = $("controlRows"), adv = $("advancedRows");
+    adv.innerHTML = "";
+    $("advancedDetails").hidden = true;
+    const params = state.editor.params || {};
+    const keys = Object.keys(params);
+    const rows = keys.length
+      ? keys.map(k => `<div class="control-row"><span class="control-label">${esc(titleCaseWords(k))}</span><span class="mono dim">${esc(JSON.stringify(params[k]))}</span></div>`).join("")
+      : "<p class='dim'>No saved settings.</p>";
+    basic.innerHTML = `<p class="dim">Change this cue's motion and colors in the <a href="/?view=lab">Lab view</a>. Brightness, strobe, and palette above still apply here.</p>${rows}`;
   }
   function renderEditorLive() {
     $("editorLive").hidden = !(state.editor && state.playingLook === state.editor.name);
@@ -390,7 +419,10 @@
     let html = Object.entries(groups).map(([group, renders]) => `<optgroup label="${esc(group)}">${renders.map(r => `<option value="${esc(r.name)}">${esc(r.label)}</option>`).join("")}</optgroup>`).join("");
     const sceneRef = state.editor.look.scene_ref;
     if (sceneRef && !state.renderMap.has(sceneRef)) {
-      html = `<option value="${esc(sceneRef)}" selected disabled>☁ ${esc(human(sceneRef))} — cloud scene (not previewable)</option>` + html;
+      const label = isLabScene(sceneRef)
+        ? `Lab cue — ${esc(labCueName(sceneRef))}`
+        : `☁ ${esc(human(sceneRef))} — cloud scene (not previewable)`;
+      html = `<option value="${esc(sceneRef)}" selected disabled>${label}</option>` + html;
     }
     $("rendererSelect").innerHTML = html;
     $("rendererSelect").value = sceneRef;

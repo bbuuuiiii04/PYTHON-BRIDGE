@@ -65,7 +65,7 @@
     <dl class="lab-help-list">
       <div><dt>Search</dt><dd>Matches name, brief, and notes (plain substring).</dd></div>
       <div><dt>Filter chips</dt><dd>Show/hide Iterating, Accepted, Rejected. Exact-name search still finds a draft when its chip is off.</dd></div>
-      <div><dt>Phrase / Timing</dt><dd>Tag the musical moment and how the cue keeps time (beat / time / mixed / static).</dd></div>
+      <div><dt>Phrase</dt><dd>Tag the musical moment the cue belongs to. <b>Timing</b> beside it is a read-only note on how the cue was designed (beat / time / mixed / static) — it doesn't change how the cue plays.</dd></div>
       <div><dt>◉ Preview</dt><dd>Headline check — renders in this page only; does not take the lights.</dd></div>
       <div><dt>Save draft</dt><dd>Keeps your unpublished look on disk. Never adds it to the show.</dd></div>
       <div><dt>Accept</dt><dd>Adds this cue to your show (phrase bank or Untagged). The only promotion step.</dd></div>
@@ -111,18 +111,13 @@
                 <option value="utility">utility</option>
               </select>
             </label>
-            <label>Timing
-              <select id="timingModeSelect" aria-label="Timing mode">
-                <option value="unknown">— unset —</option>
-                <option value="beat">Locks to beat</option>
-                <option value="mixed">Beat + clock</option>
-                <option value="time">Clock</option>
-                <option value="static">Still</option>
-              </select>
-            </label>
+            <div class="lab-timing-note">
+              <span class="panel-label">Timing</span>
+              <span id="timingText" class="badge"></span>
+              <p class="dim">A note on how this cue was designed. It doesn't change how the cue plays.</p>
+            </div>
           </div>
           <div id="draftFn" class="mono dim" hidden></div>
-          <span id="timingText" class="badge" hidden></span>
         </div>
         <div id="collisionBanner" class="collision-banner" hidden>
           <span>This name is now a production effect — archive the draft.</span>

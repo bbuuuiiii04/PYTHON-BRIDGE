@@ -282,6 +282,9 @@ main { padding: var(--pad); }
 .lab-route .lab-z1-selects { display: flex; gap: var(--gap); flex-wrap: wrap; }
 .lab-route .lab-z1-selects label { flex: 1 1 140px; }
 .lab-route .lab-z1-selects select { min-height: 36px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.lab-route .lab-z1-selects .lab-timing-note { flex: 1 1 140px; display: flex; flex-direction: column; gap: 4px; }
+.lab-route .lab-z1-selects .lab-timing-note .badge { align-self: flex-start; }
+.lab-route .lab-z1-selects .lab-timing-note p { margin: 0; font-size: 11px; }
 .lab-route .lab-z1 [hidden] { display: none !important; }
 
 .lab-route .lab-preview-hero { display: flex; flex-direction: column; gap: var(--sp-2); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--sp-3); }

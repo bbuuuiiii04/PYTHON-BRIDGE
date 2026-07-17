@@ -24,6 +24,7 @@ from typing import Any, Callable
 from urllib.parse import urlparse
 
 from ..govee_frame_renderer import REALTIME_EFFECT_NAMES, REALTIME_EFFECT_PARAM_KEYS, SLOT_EFFECTS
+from ..govee_lab_adapter import is_lab_production_scene, lab_draft_from_scene
 from ..led_color_engine import LedColorEngine
 from ..led_config import LEDConfigResult, _resolve_path, load_led_look_director_config_from_dict
 from ..led_pad_controls import (
@@ -1052,6 +1053,10 @@ class LedPadService:
         config = self._overlay_editor_slot_config(config, name, editor)
         look, params, cue_beats = self._look_state(config, name, editor)
         scene_ref = str(look.get("scene_ref", ""))
+        # Accepted Template Lab cues (scene_ref "lab:<draft>") are first-class in
+        # the pad: play them through the same LabRenderer the Lab live-fire uses.
+        if is_lab_production_scene(scene_ref):
+            return self._lab_production_play_spec(config, name, look, params, cue_beats)
         if scene_ref not in REALTIME_EFFECT_NAMES:
             raise ValueError("cloud scene - not previewable in the pad")
         allowed = REALTIME_EFFECT_PARAM_KEYS.get(scene_ref, frozenset())
@@ -1062,6 +1067,48 @@ class LedPadService:
         return {
             "look_name": name,
             "scene_ref": scene_ref,
+            "params": params,
+            "allow_strobe": bool(look.get("allow_strobe")),
+            "safety_allow_strobe": bool((config.get("safety") or {}).get("allow_strobe")),
+        }, cue_beats
+
+    def _lab_production_play_spec(
+        self,
+        config: dict[str, Any],
+        name: str,
+        look: dict[str, Any],
+        params: dict[str, Any],
+        cue_beats: float,
+    ) -> tuple[dict[str, Any], float]:
+        """Build a pad-tile Play spec for an accepted Template Lab cue.
+
+        The accepted look stores ``scene_ref = "lab:<draft>"``, but the pad's
+        renderer is a ``LabRenderer`` that lights ``lab_<draft>`` names. We
+        resolve the draft, confirm its effect is registered, inject show colors
+        from the engine (exactly like the Lab live-fire path), and hand the
+        renderer the ``lab_<draft>`` scene it already knows how to draw.
+        """
+        scene_ref = str(look.get("scene_ref", ""))
+        draft = lab_draft_from_scene(scene_ref, params)
+        if not draft:
+            raise ValueError("lab cue - no draft name in scene_ref")
+        reload_result = self._lab_renderer.reload()
+        if not reload_result["ok"]:
+            raise RuntimeError(reload_result["traceback"] or reload_result["error"])
+        effects = reload_result["effects"]
+        fn = self._lab_fn_for(draft)
+        if draft not in effects and fn not in effects:
+            raise ValueError(f"lab cue not registered: {draft}")
+        try:
+            kind = str(self._lab.get(draft).get("kind") or "frame")
+        except Exception:
+            kind = "frame"
+        self._inject_engine_colors(config, name, look, params, force_slot=(kind == "slot"))
+        return {
+            "look_name": name,
+            # lab_<draft>: the underscore name the LabRenderer lights (colon is
+            # the stored production form; only the frame-engine child renders that).
+            "scene_ref": LabRegistry.scene_ref(draft),
             "params": params,
             "allow_strobe": bool(look.get("allow_strobe")),
             "safety_allow_strobe": bool((config.get("safety") or {}).get("allow_strobe")),

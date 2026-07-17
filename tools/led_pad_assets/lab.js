@@ -376,7 +376,9 @@
         notes: $("notesInput").value,
         cue_beats: cue(),
         target_role: $("targetRoleSelect").value,
-        timing_mode: $("timingModeSelect").value,
+        // Timing is a read-only design note (not operator-editable); carry the
+        // stored value so drafts never lose it.
+        timing_mode: (state.current || {}).timing_mode || "unknown",
       };
     } catch (_) { /* invalid JSON — leave prior stash */ }
   }
@@ -412,7 +414,7 @@
   function renderDetail() {
     const e = state.current;
     const disabled = !e;
-    for (const id of ["briefInput", "notesInput", "paramsInput", "saveDraftBtn", "playDraftBtn", "acceptBtn", "rejectBtn", "previewBtn", "deleteBtn", "targetRoleSelect", "timingModeSelect", "archiveUtilBtn"]) {
+    for (const id of ["briefInput", "notesInput", "paramsInput", "saveDraftBtn", "playDraftBtn", "acceptBtn", "rejectBtn", "previewBtn", "deleteBtn", "targetRoleSelect", "archiveUtilBtn"]) {
       if ($(id)) $(id).disabled = disabled;
     }
     if (!e) {
@@ -438,7 +440,6 @@
     $("statusText").textContent = ({iterating: "Work in progress", accepted: "Accepted", rejected: "Rejected", promoted: "Promoted"})[e.status] || e.status;
     $("statusText").className = `status-pill ${e.status}`;
     $("targetRoleSelect").value = mem ? mem.target_role : roleOf(e);
-    $("timingModeSelect").value = (mem ? mem.timing_mode : e.timing_mode) || "unknown";
     $("paramsInput").value = JSON.stringify(mem ? mem.params : (e.params || {}), null, 2);
     renderParamControls();
     renderCue();
@@ -456,15 +457,19 @@
   }
 
   function renderBpmScope() {
+    // Timing is a read-only design note; it only tells us whether tempo shapes
+    // this cue's motion. beat/mixed → tempo drives it; time/static ignore it;
+    // unknown → let the operator set the preview tempo anyway.
     const mode = (state.current || {}).timing_mode || "unknown";
-    const enabled = mode === "beat" || mode === "mixed";
+    const enabled = mode !== "time" && mode !== "static";
     $("bpmInput").disabled = !enabled;
     document.querySelectorAll("[data-step]").forEach(btn => { btn.disabled = !enabled; });
-    $("bpmScope").textContent = enabled
-      ? (mode === "mixed" ? "Only affects beat-locked cues" : "Changes this draft")
-      : (mode === "time" ? "This draft follows seconds; BPM has no effect"
-        : mode === "static" ? "This draft does not animate"
-        : "Set timing (header) to enable BPM");
+    $("bpmScope").textContent =
+      mode === "beat" ? "Changes this draft"
+      : mode === "mixed" ? "Only affects beat-locked cues"
+      : mode === "time" ? "This draft follows seconds; BPM has no effect"
+      : mode === "static" ? "This draft does not animate"
+      : "Sets the preview tempo";
   }
 
   function isEditorDirty() {
@@ -472,12 +477,11 @@
     let params;
     try { params = JSON.parse($("paramsInput").value || "{}"); } catch { return true; }
     const roleDirty = $("targetRoleSelect").value !== roleOf(state.current);
-    const timingDirty = $("timingModeSelect").value !== (state.current.timing_mode || "unknown");
     const cueDirty = cue() !== Number(state.current.cue_beats || 16);
     const briefDirty = $("briefInput").value !== (state.current.brief || "");
     const notesDirty = $("notesInput").value !== (state.current.notes || "");
     return JSON.stringify(params) !== JSON.stringify(state.current.params || {})
-      || roleDirty || timingDirty || cueDirty || briefDirty || notesDirty;
+      || roleDirty || cueDirty || briefDirty || notesDirty;
   }
 
   // Dirty chip (pad-ui.js setDirty pattern): editor params vs saved entry params.
@@ -522,7 +526,8 @@
       params,
       cue_beats: cue(),
       target_role: $("targetRoleSelect").value,
-      timing_mode: $("timingModeSelect").value,
+      // Read-only design note: preserve the stored value so a Save never strands it.
+      timing_mode: (state.current || {}).timing_mode || "unknown",
     };
   }
 
@@ -1521,7 +1526,6 @@
   $("briefInput").oninput = () => setDirty();
   $("notesInput").oninput = () => { $("notesSummary").textContent = notesPreview($("notesInput").value); setDirty(); };
   $("targetRoleSelect").onchange = () => setDirty();
-  $("timingModeSelect").onchange = () => { renderBpmScope(); setDirty(); };
   $("draftSearch").oninput = (ev) => { state.filters.search = ev.target.value; renderList(); };
   $("phraseFilter").onchange = (ev) => { state.filters.phrase = ev.target.value; renderList(); };
   document.querySelectorAll("[data-status-filter]").forEach(btn => {
