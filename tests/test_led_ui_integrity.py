@@ -1022,6 +1022,57 @@ class Awr274SetupDiagnosticsTests(unittest.TestCase):
         self.assertLess(html.index('id="knob-gamma"'), html.index('id="profile-save"'))
 
 
+class Awr278AuditFixIntegrityTests(unittest.TestCase):
+    """AWR-278 static checks for the pad/lab/CSS audit fixes (no browser)."""
+
+    def test_pad_lab_titles_track_look_name_not_scene_ref(self) -> None:
+        """A3: accepted lab cue title follows the look name (rename-safe)."""
+        src = (_ASSETS / "pad-ui.js").read_text(encoding="utf-8")
+        # Card + editor titles use human(name)/human(e.name) for lab cues, and
+        # no longer read labCueName(...scene_ref) for the title.
+        self.assertIn("labScene ? human(name)", src)
+        self.assertIn("render ? render.label : human(e.name)", src)
+        self.assertNotIn("labScene ? labCueName(e.look.scene_ref)", src)
+        self.assertNotIn("labScene ? labCueName(look.scene_ref)", src)
+
+    def test_cue_beats_client_clamps_to_min_one(self) -> None:
+        """B3: the custom cue input rejects 0 / blank / negative on the client."""
+        src = (_ASSETS / "pad-ui.js").read_text(encoding="utf-8")
+        self.assertIn("Number.isFinite(typed) && typed >= 1", src)
+        # Card shows stored truth, not `|| 16` masking a stored 0.
+        self.assertIn("cueMeta.cue_beats != null ? cueMeta.cue_beats : 16", src)
+
+    def test_duplicate_and_rename_check_res_ok(self) -> None:
+        """B4: duplicate/rename callers guard res.ok before opening an editor."""
+        src = (_ASSETS / "pad-ui.js").read_text(encoding="utf-8")
+        self.assertIn(
+            'const res = await api.duplicate({source:name, new_name:newName}); '
+            'if (!res.ok) throw new Error((res.errors || []).join("\\n"));',
+            src,
+        )
+        self.assertIn(
+            'const res = await api.rename({name, new_name:newName}); '
+            'if (!res.ok) throw new Error((res.errors || []).join("\\n"));',
+            src,
+        )
+
+    def test_lab_bpm_scope_is_view_aware(self) -> None:
+        """B2: renderBpmScope only enables/disables the shared tempo box in Lab view."""
+        src = (_ASSETS / "lab.js").read_text(encoding="utf-8")
+        self.assertIn("function labViewActive()", src)
+        self.assertIn('return shell.view === "lab"', src)
+        # Guard sits before the disable toggles; the view-switch listener re-runs it.
+        guard = src.index("if (!labViewActive()) return;")
+        disable = src.index('$("bpmInput").disabled = !enabled;')
+        self.assertLess(guard, disable)
+        self.assertIn('window.addEventListener("lighting-shell-view"', src)
+
+    def test_topbar_row_hidden_guard_exists(self) -> None:
+        """C/S2: a [hidden] guard beats .topbar-row{display:flex} so the bank row hides in Lab."""
+        css = (_ASSETS / "pad.css").read_text(encoding="utf-8")
+        self.assertRegex(css, r"\.topbar-row\[hidden\]\s*\{\s*display:\s*none")
+
+
 if __name__ == "__main__":
     unittest.main()
 

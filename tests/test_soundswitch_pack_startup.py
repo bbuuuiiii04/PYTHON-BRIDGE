@@ -280,7 +280,12 @@ class StartupMatrixTests(unittest.TestCase):
         self.assertTrue(bundle.midi_input.status()["has_error"])
 
     def test_missing_enttec_preserves_legacy_midi(self):
-        bundle, events, _ = self._build(_result(enttec_port=""))
+        # Hermetic no-device case: force the resolver to find nothing. Production
+        # auto-detect (resolve_enttec_port) is correct and unchanged, but it
+        # would find the maintainer's real attached Enttec and make this test
+        # non-deterministic per machine.
+        with mock.patch.object(bridge_main, "resolve_enttec_port", return_value=""):
+            bundle, events, _ = self._build(_result(enttec_port=""))
         self.assertIsNone(bundle.laser_backend)
         self.assertEqual(events, [])
 
@@ -301,18 +306,22 @@ class StartupMatrixTests(unittest.TestCase):
             captured["truth"] = kwargs
             return truth_sink
 
-        bundle = bridge_main._build_soundswitch_pack_startup(
-            _result(enttec_port=""),
-            pack_loader=lambda _path: _pack(),
-            player_factory=lambda pack, **_kw: ("player", pack),
-            frame_sender_factory=sender_factory,
-            midi_input_factory=input_factory,
-            truth_sink_factory=truth_factory,
-            truth_env_loader=lambda: TruthCheckEnv(
-                True, "artnet_truth_check", 1, ("127.0.0.1",), "/tmp/fake.jsonl", 8,
-            ),
-        )
-        bundle = bridge_main._start_soundswitch_pack_workers(bundle)
+        # Hermetic: the truth-check branch returns before resolve_enttec_port,
+        # but pin the resolver to "" anyway so an attached Enttec can never make
+        # this no-serial-sender case flaky. Production auto-detect is unchanged.
+        with mock.patch.object(bridge_main, "resolve_enttec_port", return_value=""):
+            bundle = bridge_main._build_soundswitch_pack_startup(
+                _result(enttec_port=""),
+                pack_loader=lambda _path: _pack(),
+                player_factory=lambda pack, **_kw: ("player", pack),
+                frame_sender_factory=sender_factory,
+                midi_input_factory=input_factory,
+                truth_sink_factory=truth_factory,
+                truth_env_loader=lambda: TruthCheckEnv(
+                    True, "artnet_truth_check", 1, ("127.0.0.1",), "/tmp/fake.jsonl", 8,
+                ),
+            )
+            bundle = bridge_main._start_soundswitch_pack_workers(bundle)
 
         self.assertIsInstance(bundle.laser_backend, PackOutputBackend)
         self.assertIsNone(bundle.frame_sender)

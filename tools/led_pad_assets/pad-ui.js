@@ -231,10 +231,15 @@
     const playable = realtime || labScene;
     const engineColored = String(look.color_source || "engine") === "engine";
     const dirty = lookDirty(name);
-    const cue = (((state.config.config._pad_meta || {}).looks || {})[name] || {}).cue_beats || 16;
+    // AWR-278 B3: show the stored cue length as-is (server clamps it to >=1);
+    // only fall back to 16 when a look has no cue length saved at all.
+    const cueMeta = ((state.config.config._pad_meta || {}).looks || {})[name] || {};
+    const cue = cueMeta.cue_beats != null ? cueMeta.cue_beats : 16;
     const playing = state.playingLook === name;
     // AWR-264 J2: human effect name leads; machine id is one small mono line.
-    const title = render ? render.label : (labScene ? labCueName(look.scene_ref) : human(look.scene_ref || look.action || name));
+    // AWR-278 A3: a lab cue's title follows its LOOK name (survives rename),
+    // not the scene_ref draft id which stays frozen at accept time.
+    const title = render ? render.label : (labScene ? human(name) : human(look.scene_ref || look.action || name));
     const colorMode = (render && render.slot_based) || (labScene && engineColored)
       ? "<span class='gradient-dot'></span>Uses show colors"
       : "<span class='fixed-dot'></span>Set colors";
@@ -307,7 +312,10 @@
         promptModal("Duplicate look", NAME_HINT, {label:"New name", value: human(name), confirmText:"Duplicate"}, async (display) => {
           if (!display) return;
           const newName = slugifyLookName(display, allLookNames());
-          try { await api.duplicate({source:name, new_name:newName}); await refresh(); await openEditor(newName, false); }
+          // AWR-278 B4: a config-validation failure returns {ok:false, errors:[…]}
+          // with no `error` key, so pad-core doesn't throw — check res.ok before
+          // opening an editor for a look that never got created.
+          try { const res = await api.duplicate({source:name, new_name:newName}); if (!res.ok) throw new Error((res.errors || []).join("\n")); await refresh(); await openEditor(newName, false); }
           catch (err) { showError(err); }
         });
         return;
@@ -317,7 +325,9 @@
           if (!display) return;
           const newName = slugifyLookName(display, allLookNames().filter(n => n !== name));
           if (newName === name) return;
-          try { await api.rename({name, new_name:newName}); await refresh(); await openEditor(newName, false); }
+          // AWR-278 B4: same res.ok guard as duplicate — {ok:false, errors:[…]}
+          // won't throw on its own, so don't openEditor a look that wasn't renamed.
+          try { const res = await api.rename({name, new_name:newName}); if (!res.ok) throw new Error((res.errors || []).join("\n")); await refresh(); await openEditor(newName, false); }
           catch (err) { showError(err); }
         });
         return;
@@ -349,7 +359,8 @@
   function renderEditor() {
     const e = state.editor, render = state.renderMap.get(e.look.scene_ref);
     const labScene = isLabScene(e.look.scene_ref);
-    $("editorTitle").textContent = render ? render.label : (labScene ? labCueName(e.look.scene_ref) : human(e.name));
+    // AWR-278 A3: lab cue editor title tracks the look name (rename-safe).
+    $("editorTitle").textContent = render ? render.label : human(e.name);
     $("editorRegistry").textContent = e.name;
     renderEditorLive();
     renderCue();
@@ -409,7 +420,12 @@
       renderCue(); setDirty(); liveUpdate();
     }));
     $("customCueInput").addEventListener("change", ev => {
-      state.editor.cue_beats = Number(ev.target.value || state.editor.cue_beats);
+      // AWR-278 B3: respect the min=1. A typed 0 / blank / negative is not a real
+      // cue length (it would never auto-stop) — fall back to the last good value.
+      const typed = Number(ev.target.value);
+      state.editor.cue_beats = Number.isFinite(typed) && typed >= 1
+        ? typed
+        : Math.max(1, Number(state.editor.cue_beats) || 16);
       renderCue(); setDirty(); liveUpdate();
     });
   }

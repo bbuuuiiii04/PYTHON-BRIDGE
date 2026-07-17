@@ -48,6 +48,10 @@ h2.panel-label, h3.panel-label { margin: 0 0 10px; }
 .mono { font-family: var(--mono); }
 .topbar { position: sticky; top: 0; z-index: 20; background: var(--surface); border-bottom: 1px solid var(--border); padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
 .topbar-row { display: flex; align-items: center; gap: var(--gap); padding: 10px var(--pad); }
+/* AWR-278 S2: shell.js hides the pad bank row in Lab view via [hidden], but the
+   .topbar-row display:flex above out-specifies the UA [hidden] rule and kept it
+   visible. This targeted guard lets hidden win without touching other rows. */
+.topbar-row[hidden] { display: none; }
 .main-row { justify-content: space-between; }
 .brand { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-width: 0; }
 .brand .eyebrow {

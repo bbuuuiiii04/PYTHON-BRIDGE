@@ -456,20 +456,33 @@
     canvas.height = phone ? 48 : 64;
   }
 
+  // AWR-278 B2: pad and lab share one shell and one #bpmInput. Only the ACTIVE
+  // lab view may enable/disable that tempo box — in pad view, pad-ui.js owns it,
+  // so a time/static lab draft selected in the background must not freeze the
+  // pad's tempo control.
+  function labViewActive() {
+    const shell = window.LightingShell;
+    if (shell && typeof shell.view === "string") return shell.view === "lab";
+    // Standalone lab page (no shell): behave as the lab view.
+    return true;
+  }
+
   function renderBpmScope() {
     // Timing is a read-only design note; it only tells us whether tempo shapes
     // this cue's motion. beat/mixed → tempo drives it; time/static ignore it;
     // unknown → let the operator set the preview tempo anyway.
     const mode = (state.current || {}).timing_mode || "unknown";
-    const enabled = mode !== "time" && mode !== "static";
-    $("bpmInput").disabled = !enabled;
-    document.querySelectorAll("[data-step]").forEach(btn => { btn.disabled = !enabled; });
     $("bpmScope").textContent =
       mode === "beat" ? "Changes this draft"
       : mode === "mixed" ? "Only affects beat-locked cues"
       : mode === "time" ? "This draft follows seconds; BPM has no effect"
       : mode === "static" ? "This draft does not animate"
       : "Sets the preview tempo";
+    // Pad view: leave the tempo control to pad-ui.js (do not disable it here).
+    if (!labViewActive()) return;
+    const enabled = mode !== "time" && mode !== "static";
+    $("bpmInput").disabled = !enabled;
+    document.querySelectorAll("[data-step]").forEach(btn => { btn.disabled = !enabled; });
   }
 
   function isEditorDirty() {
@@ -1582,6 +1595,21 @@
     ev.returnValue = "";
   });
   window.addEventListener("resize", sizePreviewCanvas);
+  // AWR-278 B2: on a shell view switch, re-run the winner's tempo-control logic
+  // once so the #bpmInput isn't stranded between the ~1s runtime polls.
+  window.addEventListener("lighting-shell-view", (ev) => {
+    const view = (ev.detail || {}).view;
+    if (view === "lab") {
+      renderBpmScope();
+    } else {
+      // Leaving lab hands the tempo box back to pad-ui. Re-enable it now so a
+      // lab time/static disable doesn't linger; pad-ui re-disables on its next
+      // runtime tick if the live music is driving the tempo.
+      const input = $("bpmInput");
+      if (input) input.disabled = false;
+      document.querySelectorAll("[data-step]").forEach(btn => { btn.disabled = false; });
+    }
+  });
   $("tracePanel").hidden = !DEV;
   const RECONNECT_TEXT = "Pad server unreachable — reconnecting…";
   PadHealth.start({

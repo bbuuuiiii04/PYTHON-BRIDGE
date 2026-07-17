@@ -801,7 +801,10 @@ class LedPadService:
         meta = candidate.setdefault("_pad_meta", {}).setdefault("looks", {})
         look_meta = meta.setdefault(name, {})
         if "cue_beats" in payload:
-            look_meta["cue_beats"] = float(payload.get("cue_beats") or 0)
+            # Cue length is beats-until-auto-stop. 0 / negatives would make a
+            # loop-off cue never end (CueTimer.start(0) leaves the timer inactive)
+            # and the card would then lie "16 beats". Clamp to a real >=1 length.
+            look_meta["cue_beats"] = max(1.0, float(payload.get("cue_beats") or 0))
         look_meta["updated"] = _now_iso()
         _mark_touched(candidate, name)
         self._ensure_unique_bank_locked(candidate)
@@ -889,6 +892,13 @@ class LedPadService:
             _add_to_bank(candidate, new_name, bank)
             _mark_touched(candidate, new_name)
             _mark_moved(candidate, new_name)
+            # AWR-278 A4: if the OLD name was already committed to live, the
+            # merge-commit keeps every live look the pad didn't delete — so a
+            # rename would leave the stale old-named look behind (a duplicate,
+            # and for lab cues a second look sharing the same scene_ref). Mark
+            # the old name deleted so commit drops it. Harmless when the old
+            # name was never in live (pop is a no-op there).
+            _mark_deleted(candidate, name)
             self._ensure_unique_bank_locked(candidate)
             errors, warnings = self._validate(candidate)
             if errors:
@@ -926,6 +936,7 @@ class LedPadService:
             if name not in (candidate.get("looks") or {}):
                 raise ValueError(f"unknown look: {name}")
             self._guard_mutable(candidate, name, delete=True)
+            removed_scene_ref = str((candidate["looks"].get(name) or {}).get("scene_ref") or "")
             candidate["looks"].pop(name, None)
             _remove_from_pad_banks(candidate, name)
             engine = candidate.setdefault("color_engine", {})
@@ -941,6 +952,10 @@ class LedPadService:
             self._draft = candidate
             self._persist_draft_locked()
             config = copy.deepcopy(self._draft)
+            # AWR-278 A2: a wired Template Lab cue just left the show — put its
+            # draft back to "work in progress" so the Lab ledger stops claiming
+            # it is still Accepted / in the show.
+            self._reconcile_lab_unwire(removed_scene_ref)
         return {"ok": True, "errors": [], "warnings": warnings, "dirty": self._dirty_for(config)}
 
     def _session(self, config: dict[str, Any]) -> dict[str, Any]:
@@ -977,7 +992,16 @@ class LedPadService:
         if update_after and self._last_play_editor:
             self.update({"name": self._playing_name, "editor": self._last_play_editor})
         elif lab_palette_name:
-            self.lab_update({"name": lab_palette_name})
+            # Re-resolve colors for the new palette WITHOUT throwing away the live
+            # tweaks the operator dialed in. Feed the last-applied params so
+            # lab_update rebuilds on top of them (and re-stores that same snapshot
+            # instead of clobbering the accept-what-you-hear memory with the saved
+            # draft params).
+            lab_payload: dict[str, Any] = {"name": lab_palette_name}
+            snapshot = self._last_lab_applied.get(lab_palette_name)
+            if snapshot is not None:
+                lab_payload["params"] = copy.deepcopy(snapshot)
+            self.lab_update(lab_payload)
         return {"ok": True, "session": out}
 
     def _look_state(self, config: dict[str, Any], name: str, editor: dict[str, Any] | None) -> tuple[dict[str, Any], dict[str, Any], float]:
@@ -1210,81 +1234,233 @@ class LedPadService:
 
     def lab_reject(self, payload: dict[str, Any]) -> dict[str, Any]:
         # AWR-251: Reject also persists the current editor state (named = saved).
+        # AWR-278 A1: if this draft was Accepted into the show, Reject must also
+        # pull its wired look back out — otherwise "stays out of the show" lies.
         result = self._lab_persist_editor(payload, status="rejected")
-        result["message"] = "Rejected — stays out of the show. You can reopen it anytime."
+        entry = result.get("entry") or {}
+        try:
+            reconcile = self._reconcile_reject_unwire(str(entry.get("name") or "").strip(), entry)
+        except Exception as exc:
+            result["unwired"] = False
+            result["message"] = (
+                "Marked rejected, but I couldn't pull its look out of the show "
+                f"automatically ({exc}). Delete that look on the Pad to remove it."
+            )
+            return result
+        result.update(reconcile)
         return result
 
+    def _reconcile_reject_unwire(self, draft: str, entry: dict[str, Any]) -> dict[str, Any]:
+        """Pull a rejected draft's wired look out of the show (AWR-278 A1).
+
+        Safe by construction:
+        - never wired  → nothing to remove; honest default message.
+        - pad-edited (look params drift from the draft) or shared (drop pair /
+          stop look) → keep the look, say so, never silently destroy operator
+          work.
+        - untouched wired look → remove it + its bank memberships through the
+          same commit + led_reload_looks pipeline Accept uses.
+        """
+        default_msg = "Rejected — stays out of the show. You can reopen it anytime."
+        if not draft:
+            return {"message": default_msg, "unwired": False}
+        remove_name = ""
+        with self._lock:
+            wired_name = self._wired_look_name_locked(self._draft, draft)
+            if not wired_name:
+                return {"message": default_msg, "unwired": False}
+            look = (self._draft.get("looks") or {}).get(wired_name) or {}
+            edited = _normalized(look.get("params") or {}) != _normalized(entry.get("params") or {})
+            protected = (
+                wired_name in {str(self._draft.get(key, "")) for key in _STOP_LOOKS}
+                or bool(_drop_pair_refs(self._draft, wired_name))
+            )
+            if edited or protected:
+                reason = (
+                    "you changed it on the Pad since accepting"
+                    if edited
+                    else "it's used elsewhere in your show"
+                )
+                return {
+                    "message": (
+                        f'Draft marked rejected. I kept "{wired_name}" in your show '
+                        f"because {reason} — delete it on the Pad if you want it gone."
+                    ),
+                    "unwired": False,
+                    "kept_look": wired_name,
+                }
+            candidate = copy.deepcopy(self._draft)
+            candidate["looks"].pop(wired_name, None)
+            _remove_from_pad_banks(candidate, wired_name)
+            engine = candidate.setdefault("color_engine", {})
+            for key in ("slot_fill_strategy_by_look", "slot_mono_chance_by_look", "locked_palette_by_look"):
+                if isinstance(engine.get(key), dict):
+                    engine[key].pop(wired_name, None)
+            candidate.setdefault("_pad_meta", {}).setdefault("looks", {}).pop(wired_name, None)
+            _mark_deleted(candidate, wired_name)
+            errors, _warnings = self._validate(candidate)
+            if errors:
+                raise ValueError("; ".join(errors))
+            self._draft = candidate
+            self._persist_draft_locked()
+            remove_name = wired_name
+        # Push the removal to the live show + tell the bridge to reload — the
+        # mirror of Accept's wire-in. Done OUTSIDE the lock (commit re-locks).
+        commit_result = self.commit({})
+        if not commit_result.get("ok"):
+            raise ValueError("; ".join(commit_result.get("errors") or ["commit failed"]))
+        self._append_bridge_command({"cmd": "led_reload_looks"})
+        return {
+            "message": (
+                f'Rejected — removed "{remove_name}" from your show. '
+                "You can reopen the draft anytime."
+            ),
+            "unwired": True,
+            "removed_look": remove_name,
+        }
+
+    def _wired_look_name_locked(self, config: dict[str, Any], draft: str) -> str:
+        """Config look wired to this lab draft, or "" if none.
+
+        The durable link is the look's ``scene_ref`` (``lab:<draft>``), NOT the
+        look name — so this scan still finds the wired look after the operator
+        renamed it on the Pad. Call while holding ``self._lock``.
+        """
+        target = f"lab:{draft}"
+        for look_name, look in (config.get("looks") or {}).items():
+            if isinstance(look, dict) and str(look.get("scene_ref") or "") == target:
+                return str(look_name)
+        return ""
+
+    def _reconcile_lab_unwire(self, scene_ref: str) -> None:
+        """A wired lab cue left the show: flip its draft back to work-in-progress.
+
+        Best-effort Lab-ledger repair (AWR-278 A2) — a lab-registry hiccup never
+        fails the pad edit that triggered it. No-op for non-lab looks, an absent
+        draft, or a draft that is not currently marked Accepted.
+        """
+        if not is_lab_production_scene(scene_ref):
+            return
+        draft = lab_draft_from_scene(scene_ref, {})
+        if not draft:
+            return
+        try:
+            entry = self._lab.get(draft)
+        except Exception:
+            return
+        if entry.get("status") != "accepted":
+            return
+        entry["status"] = "iterating"
+        try:
+            self._lab.save(entry)
+        except Exception:
+            pass
+
     def _lab_wire_into_production(self, entry: dict[str, Any]) -> dict[str, Any]:
-        """Write look → bank → commit live → append led_reload_looks (AWR-260)."""
+        """Write look → bank → commit live → append led_reload_looks (AWR-260).
+
+        AWR-278 A4: if this draft is already wired into the show (its scene_ref
+        ``lab:<draft>`` is present, even under a renamed look), UPDATE that look
+        in place — refresh its params, keep the operator's look-level tweaks and
+        bank — instead of creating a second look with the same scene_ref.
+        """
         name = str(entry.get("name") or "").strip()
         if not name:
             raise ValueError("lab accept requires a draft name")
         role = str(entry.get("target_role") or "").strip()
-        bank = role if role in _ROLE_BANKS else "drafts"
+        target_bank = role if role in _ROLE_BANKS else "drafts"
         params = copy.deepcopy(entry.get("params") or {})
         if not isinstance(params, dict):
             params = {}
         cue_beats = float(entry.get("cue_beats") or 16)
         scene_ref = f"lab:{name}"
         with self._lock:
-            # Prefer a same-backend realtime blackout for lab looks.
-            looks = self._draft.get("looks") or {}
-            configured_blackout = str(self._draft.get("blackout") or "")
-            blackout_look = looks.get(configured_blackout) if configured_blackout else None
-            if (
-                isinstance(blackout_look, dict)
-                and blackout_look.get("backend") == "realtime_razer"
-            ):
-                blackout = configured_blackout
-            elif "rt_blackout" in looks:
-                blackout = "rt_blackout"
+            existing_wired = self._wired_look_name_locked(self._draft, name)
+            look_name = existing_wired or name
+            if existing_wired:
+                # Re-accept: refresh params + scene pointer only, keeping the
+                # operator's look-level tweaks (brightness/strobe) and current
+                # bank placement. No _add_to_bank / _mark_moved → no duplicate.
+                save_payload = {
+                    "name": look_name,
+                    "look": {"scene_ref": scene_ref},
+                    "params": params,
+                    "cue_beats": cue_beats,
+                }
+                disk_meta = ((self._draft.get("_pad_meta") or {}).get("looks") or {}).get(look_name) or {}
+                if disk_meta.get("updated"):
+                    save_payload["updated"] = disk_meta["updated"]
+                candidate = self._candidate_save_look(save_payload)
             else:
-                blackout = ""
-            look = {
-                "target": "room_perimeter",
-                "action": "realtime",
-                "scene_ref": scene_ref,
-                "fallback": blackout,
-                "safety_class": role or "lab",
-                "brightness": 100,
-                "allow_strobe": False,
-                "backend": "realtime_razer",
-                "color_source": "engine",
-            }
-            save_payload = {
-                "name": name,
-                "look": look,
-                "params": params,
-                "cue_beats": cue_beats,
-            }
-            # Match draft stamp when the look already exists so CAS does not 409.
-            disk_meta = ((self._draft.get("_pad_meta") or {}).get("looks") or {}).get(name) or {}
-            if disk_meta.get("updated"):
-                save_payload["updated"] = disk_meta["updated"]
-            candidate = self._candidate_save_look(save_payload)
-            _add_to_bank(candidate, name, bank)
-            _mark_moved(candidate, name)
+                # First accept: prefer a same-backend realtime blackout for lab looks.
+                looks = self._draft.get("looks") or {}
+                configured_blackout = str(self._draft.get("blackout") or "")
+                blackout_look = looks.get(configured_blackout) if configured_blackout else None
+                if (
+                    isinstance(blackout_look, dict)
+                    and blackout_look.get("backend") == "realtime_razer"
+                ):
+                    blackout = configured_blackout
+                elif "rt_blackout" in looks:
+                    blackout = "rt_blackout"
+                else:
+                    blackout = ""
+                look = {
+                    "target": "room_perimeter",
+                    "action": "realtime",
+                    "scene_ref": scene_ref,
+                    "fallback": blackout,
+                    "safety_class": role or "lab",
+                    "brightness": 100,
+                    "allow_strobe": False,
+                    "backend": "realtime_razer",
+                    "color_source": "engine",
+                }
+                save_payload = {
+                    "name": look_name,
+                    "look": look,
+                    "params": params,
+                    "cue_beats": cue_beats,
+                }
+                # Match draft stamp when the look already exists so CAS does not 409.
+                disk_meta = ((self._draft.get("_pad_meta") or {}).get("looks") or {}).get(look_name) or {}
+                if disk_meta.get("updated"):
+                    save_payload["updated"] = disk_meta["updated"]
+                candidate = self._candidate_save_look(save_payload)
+                _add_to_bank(candidate, look_name, target_bank)
+                _mark_moved(candidate, look_name)
             errors, warnings = self._validate(candidate)
             if errors:
                 raise ValueError("; ".join(errors))
             self._draft = candidate
             self._persist_draft_locked()
+            bank = _bank_for(candidate, look_name)
 
         commit_result = self.commit({})
         if not commit_result.get("ok"):
             raise ValueError("; ".join(commit_result.get("errors") or ["commit failed"]))
 
         self._append_bridge_command({"cmd": "led_reload_looks"})
-        if bank == "drafts":
-            message = "In your show — Untagged shelf for now. Tag a phrase to join rotation."
+        updated = bool(existing_wired)
+        if bank in ("drafts", "other"):
             bank_label = "Untagged"
+            message = (
+                f'Updated "{look_name}" in your show — still on the Untagged shelf.'
+                if updated
+                else "In your show — Untagged shelf for now. Tag a phrase to join rotation."
+            )
         else:
             bank_label = bank.replace("_", " ").title()
-            message = f"In your show — added to the {bank_label} phrase bank."
+            message = (
+                f'Updated "{look_name}" in your show — {bank_label} phrase bank.'
+                if updated
+                else f"In your show — added to the {bank_label} phrase bank."
+            )
         return {
             "ok": True,
             "wired": True,
-            "look_name": name,
+            "updated": updated,
+            "look_name": look_name,
             "scene_ref": scene_ref,
             "bank": bank,
             "bank_label": bank_label,
