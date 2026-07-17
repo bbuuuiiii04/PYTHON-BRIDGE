@@ -8,6 +8,7 @@
     entries: [],
     current: null,
     editorMemory: {}, // per-draft unsaved editor fields (session-local; never auto-written)
+    liveApplied: new Set(), // AWR-279 #14: drafts the operator actually live-played/tuned this session
     playingLook: "",
     showRejected: false, // kept for archived semantics; driven by Rejected chip
     filters: {search: "", iterating: true, accepted: false, rejected: false, phrase: "all"},
@@ -23,6 +24,10 @@
   };
   // Raw tracebacks are agent-facing: render the panel only with ?dev=1.
   const DEV = new URLSearchParams(location.search).get("dev") === "1";
+  // AWR-279 #3: while a conflict "Reload" (or discard) is landing disk state,
+  // suppress the stash-on-rebuild paths so the dirty DOM is NOT written back over
+  // the version we just pulled. Reset in a finally by the Reload handlers.
+  let suppressStash = false;
 
   function showError(err) {
     $("errorBanner").hidden = false;
@@ -368,6 +373,7 @@
   }
 
   function stashEditor() {
+    if (suppressStash) return; // AWR-279 #3: a Reload/discard must not re-stash the dirty DOM
     if (!state.current) return;
     try {
       state.editorMemory[state.current.name] = {
@@ -544,8 +550,21 @@
     };
   }
 
+  async function reloadFromDisk() {
+    // AWR-279 #3: land the other tab's saved version. Clear this draft's stash and
+    // suppress the stash-on-rebuild paths so the dirty DOM is NOT written back over
+    // the disk state we just pulled (the old code re-stashed it and defeated Reload).
+    suppressStash = true;
+    try {
+      clearEditorMemory(state.current && state.current.name);
+      await refresh();
+    } finally {
+      suppressStash = false;
+    }
+  }
+
   async function save(overwrite = false) {
-    if (!state.current) return;
+    if (!state.current) return false;
     const payload = currentPayload();
     if (overwrite) payload.overwrite = true;
     try {
@@ -553,20 +572,20 @@
       clearEditorMemory(state.current.name);
       state.current = res.entry;
       await refresh();
+      return true;
     } catch (err) {
       if (err && err.payload && err.payload.error === "stale_entry") {
+        // AWR-279 #4: return FALSE so callers (play-once) abort instead of falling
+        // through and firing unsaved params at the real lights while this modal opens.
         PadModal.show(
           "Draft changed elsewhere",
           "Someone else (or another tab) saved this draft since you opened it. Reload their version, or overwrite with what you see now.",
           [
-            {label: "Reload", className: "ghost", run: async () => {
-              clearEditorMemory(state.current && state.current.name);
-              await refresh();
-            }},
+            {label: "Reload", className: "ghost", run: reloadFromDisk},
             {label: "Overwrite", className: "danger-outline", run: async () => { await save(true); }},
           ],
         );
-        return;
+        return false;
       }
       throw err;
     }
@@ -584,7 +603,13 @@
     } catch (_) {
       paramsDirty = true;
     }
-    if (!paramsDirty) delete payload.params;
+    if (!paramsDirty) {
+      delete payload.params;
+      // AWR-279 #14: only claim a live snapshot (and risk the "weren't available"
+      // warning) when the operator actually live-played/tuned this draft. A plain
+      // preview→Accept keeps the saved params calmly.
+      if (state.liveApplied.has(state.current.name)) payload.expect_live_snapshot = true;
+    }
     try {
       const res = await api.labAccept(payload);
       const showFallback = !!(res && res.snapshot_fallback);
@@ -611,10 +636,7 @@
           "Draft changed elsewhere",
           "Reload before Accept, or overwrite with what you see now.",
           [
-            {label: "Reload", className: "ghost", run: async () => {
-              clearEditorMemory(state.current && state.current.name);
-              await refresh();
-            }},
+            {label: "Reload", className: "ghost", run: reloadFromDisk},
             {label: "Overwrite & Accept", className: "danger-outline", run: async () => {
               const over = {...payload, overwrite: true};
               const res = await api.labAccept(over);
@@ -658,10 +680,7 @@
           "Draft changed elsewhere",
           "Reload before Reject, or overwrite with what you see now.",
           [
-            {label: "Reload", className: "ghost", run: async () => {
-              clearEditorMemory(state.current && state.current.name);
-              await refresh();
-            }},
+            {label: "Reload", className: "ghost", run: reloadFromDisk},
             {label: "Overwrite & Reject", className: "danger-outline", run: async () => {
               const res = await api.labReject({...currentPayload(), status: "rejected", overwrite: true});
               clearEditorMemory(state.current.name);
@@ -678,18 +697,23 @@
 
   async function play(takeover) {
     if (!state.current) return;
+    let saved;
     try {
-      await save();
+      saved = await save();
     } catch (err) {
       showError(`Save failed: ${(err && err.message) || err}`);
       return;
     }
+    // AWR-279 #4: a stale-conflict Save returns false and leaves its modal open —
+    // abort here so we never fire unsaved params at the real lights behind it.
+    if (!saved) return;
     try {
       const mine = labScene(state.current.name);
       if (state.playingLook && state.playingLook.startsWith("lab_") && state.playingLook !== mine) {
         try {
           const sw = await api.labSwitch({name: state.current.name, params: JSON.parse($("paramsInput").value || "{}")});
           if (sw.ok) {
+            state.liveApplied.add(state.current.name);
             state.health.labOk = true;
             setAppliedHint(false);
             renderSwatches(sw.spec && sw.spec.params && sw.spec.params.slot_colors);
@@ -705,6 +729,7 @@
         }
       }
       const res = await api.labPlay({name: state.current.name, params: JSON.parse($("paramsInput").value || "{}"), cue_beats:cue(), takeover});
+      state.liveApplied.add(state.current.name);
       state.health.labOk = true;
       setAppliedHint(false);
       renderSwatches(res.spec && res.spec.params && res.spec.params.slot_colors);
@@ -729,7 +754,16 @@
   }
 
   async function reloadCode() {
-    const res = await api.labReload();
+    let res;
+    try {
+      res = await api.labReload();
+    } catch (err) {
+      // AWR-279 #5: a failed reload returns {ok:false,error,traceback}, and
+      // pad-core's request() THROWS on that shape — so the real failure UI below
+      // was dead (only a transient banner showed). Recover the payload here so the
+      // red Lab health dot + traceback affordance actually render.
+      res = (err && err.payload) || {ok: false, error: (err && err.message) || String(err), effects: []};
+    }
     $("traceText").textContent = res.traceback || res.error || `Loaded: ${(res.effects || []).join(", ")}`;
     state.health.labOk = Boolean(res.ok);
     state.health.labTrace = res.traceback || res.error || "";
@@ -737,7 +771,9 @@
     if (!res.ok) {
       flashReloadConfirm(false, "Reload failed");
       showError(`Your effect code failed to load: ${String(res.error || "").split("\n")[0]}`);
-      if (DEV) $("tracePanel").open = true;
+      // Reveal the traceback affordance so the failure is inspectable, not just a banner.
+      $("tracePanel").hidden = false;
+      $("tracePanel").open = true;
     } else {
       flashReloadConfirm(true, `Loaded ${(res.effects || []).length} effects ✓`);
       $("tracePanel").open = false;
@@ -845,6 +881,7 @@
         if (upd && upd.applied === false) {
           setAppliedHint(true, PREVIEW_TUNE_HINT);
         } else {
+          state.liveApplied.add(state.current.name); // AWR-279 #14: real live tune
           setAppliedHint(false);
         }
         clearError();
@@ -1404,6 +1441,7 @@
   function slugifyLabName(display, existingNames) {
     const raw = String(display || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
     let base = (/^[a-z0-9_]+$/.test(raw) && raw) ? raw : "untitled";
+    base = base.slice(0, 57); // AWR-279 #8: keep ids bounded (room for _N suffix)
     const taken = new Set(existingNames || []);
     let candidate = base;
     let n = 2;
@@ -1439,7 +1477,7 @@
       "New cue",
       "Name it in plain words. Letters/numbers/spaces fine — we'll format it automatically. Start from a working cue so Preview and tuning work right away.",
       [
-        {name: "display_name", label: "Display name", type: "text", value: ""},
+        {name: "display_name", label: "Display name", type: "text", value: "", maxlength: 60},
         {
           name: "starter",
           label: "Start from",
@@ -1448,7 +1486,9 @@
           options: starterOptions,
         },
       ],
-      {confirmText: "Create"},
+      // AWR-279 #8: validate the name BEFORE the dialog closes so an empty name
+      // doesn't discard the starter pick.
+      {confirmText: "Create", validate: (v) => String(v.display_name || "").trim() ? null : "Give the cue a name"},
       async (values) => {
         const display = String(values.display_name || "").trim();
         if (!display) { showError("Give the cue a name"); return; }
@@ -1510,7 +1550,13 @@
   function archiveCurrent() {
     if (!state.current) return;
     PadModal.confirm(`Archive draft ${state.current.name}?`, "Marks it promoted and files it under Rejected (archived). The drafts.json entry stays for the record.", "Archive", async () => {
-      await api.labArchive({name: state.current.name});
+      try {
+        await api.labArchive({name: state.current.name});
+      } catch (err) {
+        // AWR-279 #9: server refuses to archive a draft that's live on the lights.
+        if ((err && err.message) === "stop_playback_first") { showError("Stop playback first — this draft is live on the lights."); return; }
+        throw err;
+      }
       await refresh();
     });
   }
@@ -1533,7 +1579,7 @@
       // C9: JSON is the source of truth on blur — rebuild sliders/selects from it.
       renderParamControls();
       queueAutoApply();
-    } catch (err) { showError(err); }
+    } catch (_err) { showError("Params JSON is invalid — fix it to apply changes."); } // AWR-279 copy note: no raw SyntaxError
   };
   $("paramsInput").oninput = () => { setDirty(); queueAutoApply(); };
   $("briefInput").oninput = () => setDirty();
@@ -1575,20 +1621,32 @@
   // AWR-271: shared shell owns session/ownership/STOP — pad-ui binds those once.
   const shellShared = Boolean(document.body && document.body.dataset.shell === "lighting");
   if (!shellShared) {
-    $("bpmInput").onchange = ev => api.session({bpm:Number(ev.target.value)}).catch(showError);
-    document.querySelectorAll("[data-step]").forEach(btn => btn.onclick = () => { $("bpmInput").value = Number($("bpmInput").value || 128) + Number(btn.dataset.step); $("bpmInput").dispatchEvent(new Event("change")); });
+    $("bpmInput").onchange = ev => api.session({bpm:Number(ev.target.value)}).then(res => {
+      if (res && res.session && res.session.bpm != null) $("bpmInput").value = res.session.bpm; // AWR-279 #10 sync clamp
+      clearError();
+    }).catch(showError);
+    document.querySelectorAll("[data-step]").forEach(btn => btn.onclick = () => { $("bpmInput").value = Math.max(60, Math.min(200, Number($("bpmInput").value || 128) + Number(btn.dataset.step))); $("bpmInput").dispatchEvent(new Event("change")); });
     $("paletteSelect").onchange = ev => api.session({test_palette:ev.target.value}).catch(showError);
     $("loopToggle").onchange = ev => { $("loopLabel").textContent = ev.target.checked ? "On" : "Off"; api.session({loop:ev.target.checked}).catch(showError); };
     $("stopBtn").onclick = () => api.emergencyStop().then(() => { setBeatMode("off"); return updateRuntime(); }).catch(showError);
     $("ownershipBtn").onclick = async () => { const rt = await api.runtime(); if ((rt.ownership || {}).state === "pad_owned") await api.release(); else await api.takeover(); await updateRuntime(); };
   }
-  document.addEventListener("keydown", ev => {
-    if (ev.key === "Escape") {
+  // AWR-279 #7: one shell-level Escape owner (shell.js) closes any modal first, so
+  // this handler never touches PadModal — it only handles the lab view's own
+  // overlays. Standalone (no shell) falls back to a local handler.
+  function labEscape() {
+    if (state.drawerOpen) closeDrawer();
+    else if (!$("selfTestPanel").hidden) $("selfTestPanel").hidden = true;
+  }
+  if (shellShared && window.LightingShell && typeof window.LightingShell.registerEscape === "function") {
+    window.LightingShell.registerEscape("lab", labEscape);
+  } else {
+    document.addEventListener("keydown", ev => {
+      if (ev.key !== "Escape") return;
       if (PadModal.isOpen()) PadModal.close();
-      else if (state.drawerOpen) closeDrawer();
-      else if (!$("selfTestPanel").hidden) $("selfTestPanel").hidden = true;
-    }
-  });
+      else labEscape();
+    });
+  }
   window.addEventListener("beforeunload", (ev) => {
     if (!isEditorDirty()) return;
     ev.preventDefault();

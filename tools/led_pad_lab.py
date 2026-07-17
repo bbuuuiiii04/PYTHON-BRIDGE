@@ -36,6 +36,10 @@ class StaleLabEntry(ValueError):
 
 _IDENT_RE = re.compile(r"^[a-z0-9_]+$")
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
+# AWR-279 #8: cap draft-id length so the editor header stays legible and its ✕
+# stays reachable. Slug bases are truncated with room to spare for a _N suffix.
+_MAX_NAME_LEN = 60
+_SLUG_BASE_LEN = 57
 _KINDS = {"slot", "frame"}
 _STATUSES = {"iterating", "accepted", "rejected", "promoted"}
 _TIMING_MODES = {"beat", "time", "mixed", "static", "unknown"}
@@ -44,6 +48,24 @@ _TARGET_ROLES = {"", "ambient", "groove", "buildup", "pre_drop", "drop", "post_d
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="microseconds")
+
+
+def clamp_cue_beats(raw: Any, *, default: float = 16.0) -> float:
+    """Beats-until-auto-stop, floored so a one-shot always has a real runway.
+
+    AWR-279 #2: THE shared cue-length validator. Every server intake (lab save,
+    lab play, pad save) funnels through here. 0 / negative / blank / non-numeric
+    fall back to ``default`` then floor at 1 — a loop-off "Play once" with a
+    nonpositive length would leave ``CueTimer`` unable to auto-stop and stream
+    forever, and the card would lie about the stored length.
+    """
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        value = default
+    if not (value > 0):  # also catches NaN
+        value = default
+    return max(1.0, value)
 
 
 def slugify_lab_name(display: str, existing: set[str] | None = None) -> str:
@@ -55,6 +77,7 @@ def slugify_lab_name(display: str, existing: set[str] | None = None) -> str:
     """
     raw = _SLUG_RE.sub("_", str(display or "").strip().lower()).strip("_")
     base = raw if raw and _IDENT_RE.fullmatch(raw) else "untitled"
+    base = base[:_SLUG_BASE_LEN]  # AWR-279 #8: keep ids bounded (room for _N suffix)
     taken = set(existing or ())
     candidate = base
     n = 2
@@ -155,7 +178,7 @@ class LabRegistry:
                 "kind": str(payload.get("kind", current.get("kind", "slot"))),
                 "fn": str(payload.get("fn", current.get("fn", name))),
                 "params": payload.get("params", current.get("params", {})) if isinstance(payload.get("params", current.get("params", {})), dict) else {},
-                "cue_beats": float(payload.get("cue_beats", current.get("cue_beats", 16)) or 16),
+                "cue_beats": clamp_cue_beats(payload.get("cue_beats", current.get("cue_beats"))),
                 "notes": str(payload.get("notes", current.get("notes", ""))),
                 "brief": str(payload.get("brief", current.get("brief", ""))),
                 "status": str(payload.get("status", current.get("status", "iterating"))),
@@ -251,6 +274,8 @@ class LabRegistry:
     def _validate_name(name: str, *, check_collision: bool = True) -> None:
         if not name or not _IDENT_RE.fullmatch(name):
             raise ValueError("lab name must match [a-z0-9_]+")
+        if len(name) > _MAX_NAME_LEN:
+            raise ValueError(f"lab name is too long (max {_MAX_NAME_LEN} characters)")
         if check_collision and (name in REALTIME_EFFECT_NAMES or f"lab_{name}" in REALTIME_EFFECT_NAMES):
             raise ValueError(f"lab name collides with production renderer: {name}")
 

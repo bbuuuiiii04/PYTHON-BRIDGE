@@ -614,7 +614,10 @@ class LedPadServiceTests(unittest.TestCase):
             self.assertEqual(service._lab.get("pulse")["params"], {"level": 0.3})
             self.assertEqual(len(playback.update_calls), 1)
 
-    def test_lab_accept_without_play_reports_not_snapshotted(self) -> None:
+    def test_lab_accept_without_play_is_calm_not_snapshot_fallback(self) -> None:
+        """AWR-279 #14: a plain preview→Accept (no live tuning ever) keeps the saved
+        params CALMLY — no "your last live-tuned values weren't available" warning.
+        The fallback only fires when the client actually expected a live snapshot."""
         with tempfile.TemporaryDirectory() as td:
             service, _playback = self._lab_service(td)
             service.lab_save({"name": "pulse", "kind": "slot", "fn": "pulse", "params": {"level": 0.3}, "cue_beats": 8})
@@ -624,9 +627,22 @@ class LedPadServiceTests(unittest.TestCase):
 
             self.assertTrue(result["ok"])
             self.assertFalse(result["snapshotted"])
-            self.assertTrue(result["snapshot_fallback"])
+            self.assertFalse(result["snapshot_fallback"])  # calm: nothing was lost
             self.assertEqual(entry["status"], "accepted")
             self.assertEqual(entry["params"], {"level": 0.3})
+
+    def test_lab_accept_warns_only_when_expected_live_snapshot_missing(self) -> None:
+        """AWR-279 #14: the fallback warning fires only when the operator relied on a
+        live-tuned snapshot (expect_live_snapshot) that isn't there."""
+        with tempfile.TemporaryDirectory() as td:
+            service, _playback = self._lab_service(td)
+            service.lab_save({"name": "pulse", "kind": "slot", "fn": "pulse", "params": {"level": 0.3}, "cue_beats": 8})
+
+            result = service.lab_accept({"name": "pulse", "expect_live_snapshot": True})
+
+            self.assertTrue(result["ok"])
+            self.assertFalse(result["snapshotted"])
+            self.assertTrue(result["snapshot_fallback"])  # genuine loss → warn
 
     def test_lab_accept_uses_persisted_snapshot_after_restart(self) -> None:
         """AWR-259 L8: last-applied survives pad restart (new LedPadService)."""

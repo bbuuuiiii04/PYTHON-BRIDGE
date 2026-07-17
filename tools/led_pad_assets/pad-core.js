@@ -34,6 +34,7 @@
         <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
           <h2 id="modalTitle"></h2>
           <div id="modalText"></div>
+          <p id="modalError" class="modal-error" hidden role="alert"></p>
           <form id="modalForm" class="modal-fields" hidden></form>
           <div id="modalActions" class="modal-actions"></div>
         </div>`;
@@ -42,6 +43,7 @@
         backdrop,
         title: backdrop.querySelector("#modalTitle"),
         text: backdrop.querySelector("#modalText"),
+        error: backdrop.querySelector("#modalError"),
         form: backdrop.querySelector("#modalForm"),
         actions: backdrop.querySelector("#modalActions"),
       };
@@ -52,11 +54,21 @@
     function reportError(err) { if (state.errorHandler) state.errorHandler(err); else console.error(err); }
     function isOpen() { return state.open; }
 
+    function clearFieldError() {
+      if (state.dom && state.dom.error) { state.dom.error.hidden = true; state.dom.error.textContent = ""; }
+    }
+    function showFieldError(text) {
+      if (!state.dom || !state.dom.error) return;
+      state.dom.error.textContent = String(text || "");
+      state.dom.error.hidden = !text;
+    }
+
     function close() {
       if (!state.dom) return;
       state.dom.backdrop.hidden = true;
       state.dom.form.hidden = true;
       state.dom.form.innerHTML = "";
+      clearFieldError();
       state.open = false;
       const focusTarget = state.lastFocus;
       state.lastFocus = null;
@@ -71,6 +83,7 @@
       state.lastFocus = document.activeElement;
       dom.title.textContent = title;
       dom.text.textContent = text;
+      clearFieldError();
       dom.form.hidden = true;
       dom.form.innerHTML = "";
       dom.actions.innerHTML = actions.map((a, i) => `<button type="button" class="${esc(a.className || "ghost")}" data-modal-action="${i}" ${a.disabled ? "disabled" : ""}>${esc(a.label)}</button>`).join("");
@@ -100,7 +113,7 @@
     function prompt(title, message, options, onConfirm) {
       const opts = options || {};
       fields(title, message, [
-        {name: "value", label: opts.label || "", type: "text", value: opts.value ?? ""},
+        {name: "value", label: opts.label || "", type: "text", value: opts.value ?? "", maxlength: opts.maxlength},
       ], opts, (values) => onConfirm(values.value));
     }
 
@@ -114,11 +127,13 @@
       state.lastFocus = document.activeElement;
       dom.title.textContent = title;
       dom.text.textContent = message || "";
+      clearFieldError();
       dom.form.hidden = false;
       dom.form.innerHTML = specs.map((f, i) => {
         const id = `modalField_${i}`;
         const label = esc(f.label || f.name || "");
         const help = f.help ? `<div class="dim" style="font-size:11px;margin-top:4px">${esc(f.help)}</div>` : "";
+        const maxlen = Number(f.maxlength) > 0 ? ` maxlength="${Math.floor(Number(f.maxlength))}"` : "";
         if (f.type === "select") {
           const optionsHtml = (f.options || []).map(o => {
             const selected = String(o.value) === String(f.value ?? "") ? " selected" : "";
@@ -129,7 +144,7 @@
         if (f.type === "checkbox") {
           return `<label class="modal-check"><span>${label}</span><input id="${id}" name="${esc(f.name)}" type="checkbox" data-field-type="checkbox" ${f.value ? "checked" : ""}>${help}</label>`;
         }
-        return `<label>${label}<input id="${id}" name="${esc(f.name)}" type="text" data-field-type="text" value="${esc(f.value ?? "")}">${help}</label>`;
+        return `<label>${label}<input id="${id}" name="${esc(f.name)}" type="text" data-field-type="text" value="${esc(f.value ?? "")}"${maxlen}>${help}</label>`;
       }).join("");
       dom.actions.innerHTML = `
         <button type="button" class="ghost" data-modal-cancel>${esc(opts.cancelText || "Cancel")}</button>
@@ -148,6 +163,13 @@
       };
       const submit = async () => {
         const values = readValues();
+        // AWR-279 #8: validate BEFORE closing so an invalid entry (e.g. an empty
+        // name) shows an inline error and keeps the dialog — and its other picks
+        // (like a starter selection) — open, instead of closing then erroring.
+        if (typeof opts.validate === "function") {
+          const problem = opts.validate(values);
+          if (problem) { showFieldError(problem); return; }
+        }
         close();
         try { await onConfirm(values); } catch (err) { reportError(err); }
       };

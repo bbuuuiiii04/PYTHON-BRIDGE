@@ -99,7 +99,12 @@ class CueTimer:
         self._start_bpm = max(1e-6, float(bpm))
         self._cue_beats = max(0.0, float(cue_beats))
         self.loop = bool(loop)
-        self.active = self._cue_beats > 0
+        # A non-loop ("Play once") cue always arms the auto-stop guard — even when
+        # the requested length is nonpositive. In that case should_stop() fires
+        # immediately (see below) so a one-shot can NEVER stream forever if a bad
+        # cue length ever slips past the server clamp (AWR-279 #2 belt). Looping
+        # playback never auto-stops regardless of length.
+        self.active = (not self.loop) or (self._cue_beats > 0)
 
     def set_bpm(self, bpm: float) -> None:
         if not self.active:
@@ -112,6 +117,9 @@ class CueTimer:
     def should_stop(self) -> bool:
         if not self.active or self.loop:
             return False
+        if self._cue_beats <= 0:
+            # One-shot armed with no runway → stop now, never stream forever.
+            return True
         elapsed_beats = max(0.0, self._time_fn() - self._start_time) * self._start_bpm / 60.0
         return elapsed_beats >= self._cue_beats
 
@@ -193,6 +201,8 @@ class OwnershipGate:
             self._appender({"cmd": "led_blackout", "reason": "led_pad"})
             self._sleep_fn(1.5)
         self.state = "pad_owned"
+        # AWR-279 #6: a fresh, deliberate takeover supersedes any stale warning.
+        self.last_warning = ""
 
     def poll_owned(self) -> None:
         if self.state != "pad_owned":
@@ -201,11 +211,19 @@ class OwnershipGate:
         if data is not None and not self._blackout_latched(data):
             self._appender({"cmd": "led_blackout", "reason": "led_pad"})
             self.last_warning = "bridge_reasserted_takeover"
+        else:
+            # AWR-279 #6: healthy pad-owned tick (bridge is down, or our blackout is
+            # still latched). A prior "bridge reasserted" warning has done its job —
+            # let it expire on this next healthy state so it stops masking newer
+            # errors instead of sticking forever.
+            self.last_warning = ""
 
     def release(self) -> None:
         if self.state == "pad_owned":
             self._appender({"cmd": "led_clear_blackout", "reason": "led_pad"})
         self.state = "free"
+        # AWR-279 #6: releasing back to the bridge clears any stale warning.
+        self.last_warning = ""
 
 
 class PadPlayback:

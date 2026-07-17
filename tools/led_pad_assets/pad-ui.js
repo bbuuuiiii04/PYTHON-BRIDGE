@@ -108,6 +108,7 @@
   function slugifyLookName(display, existingNames) {
     const raw = String(display || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
     let base = (/^[a-z0-9_]+$/.test(raw) && raw) ? raw : "untitled";
+    base = base.slice(0, 57); // AWR-279 #8: keep ids bounded (room for _N suffix)
     const taken = new Set(existingNames || []);
     let candidate = base;
     let n = 2;
@@ -309,8 +310,8 @@
       if (action === "play") { await switchEditor(name, true); return; }
       if (action === "edit") { await switchEditor(name, false); return; }
       if (action === "duplicate") {
-        promptModal("Duplicate look", NAME_HINT, {label:"New name", value: human(name), confirmText:"Duplicate"}, async (display) => {
-          if (!display) return;
+        promptModal("Duplicate look", NAME_HINT, {label:"New name", value: human(name), confirmText:"Duplicate", maxlength: 60, validate: (v) => String(v.value || "").trim() ? null : "Give the look a name"}, async (display) => {
+          if (!display) { showError("Give the look a name"); return; }
           const newName = slugifyLookName(display, allLookNames());
           // AWR-278 B4: a config-validation failure returns {ok:false, errors:[…]}
           // with no `error` key, so pad-core doesn't throw — check res.ok before
@@ -321,8 +322,8 @@
         return;
       }
       if (action === "rename") {
-        promptModal("Rename look", NAME_HINT, {label:"New name", value: human(name), confirmText:"Rename"}, async (display) => {
-          if (!display) return;
+        promptModal("Rename look", NAME_HINT, {label:"New name", value: human(name), confirmText:"Rename", maxlength: 60, validate: (v) => String(v.value || "").trim() ? null : "Give the look a name"}, async (display) => {
+          if (!display) { showError("Give the look a name"); return; }
           const newName = slugifyLookName(display, allLookNames().filter(n => n !== name));
           if (newName === name) return;
           // AWR-278 B4: same res.ok guard as duplicate — {ok:false, errors:[…]}
@@ -663,13 +664,35 @@
       document.querySelectorAll("[data-step]").forEach(btn => { btn.disabled = false; });
     }
   }
-  document.addEventListener("keydown", ev => {
-    if (ev.key !== "Escape") return;
-    if (PadModal.isOpen()) closeModal();
-    else if (!$("editorDrawer").hidden) closeEditor(false);
-  });
-  $("bpmInput").addEventListener("change", ev => api.session({bpm:Number(ev.target.value)}).catch(showError));
-  document.querySelectorAll("[data-step]").forEach(btn => btn.addEventListener("click", () => { $("bpmInput").value = Number($("bpmInput").value || 128) + Number(btn.dataset.step); $("bpmInput").dispatchEvent(new Event("change")); }));
+  // AWR-279 #7: the shell owns Escape (closes a modal FIRST, else calls the active
+  // view's handler) so a dirty-editor "Discard?" confirm can't be instantly
+  // re-closed by a sibling view's handler. Register the pad view's behavior; fall
+  // back to a local handler only when there is no shell.
+  function padEscape() {
+    if (!$("editorDrawer").hidden) closeEditor(false);
+  }
+  if (document.body && document.body.dataset.shell === "lighting"
+      && window.LightingShell && typeof window.LightingShell.registerEscape === "function") {
+    window.LightingShell.registerEscape("pad", padEscape);
+  } else {
+    document.addEventListener("keydown", ev => {
+      if (ev.key !== "Escape") return;
+      if (PadModal.isOpen()) closeModal();
+      else padEscape();
+    });
+  }
+  $("bpmInput").addEventListener("change", ev => api.session({bpm:Number(ev.target.value)}).then(res => {
+    // AWR-279 #10: reflect the server-clamped tempo and clear a stale invalid-bpm
+    // banner once a valid value lands (leave the reconnect / ownership banners be).
+    if (res && res.session && res.session.bpm != null) $("bpmInput").value = res.session.bpm;
+    const banner = $("errorBanner");
+    if (!banner.hidden && banner.textContent !== RECONNECT_TEXT && !banner.classList.contains("warn-banner")) clearError();
+  }).catch(showError));
+  document.querySelectorAll("[data-step]").forEach(btn => btn.addEventListener("click", () => {
+    // Floor/cap client-side so the − button can't walk below the declared range.
+    $("bpmInput").value = Math.max(60, Math.min(200, Number($("bpmInput").value || 128) + Number(btn.dataset.step)));
+    $("bpmInput").dispatchEvent(new Event("change"));
+  }));
   $("paletteSelect").addEventListener("change", ev => api.session({test_palette:ev.target.value}).catch(showError));
   $("loopToggle").addEventListener("change", ev => { $("loopLabel").textContent = ev.target.checked ? "On" : "Off"; api.session({loop:ev.target.checked}).catch(showError); });
   $("stopBtn").addEventListener("click", () => api.emergencyStop().then(async () => {

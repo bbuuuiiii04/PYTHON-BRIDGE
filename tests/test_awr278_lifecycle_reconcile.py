@@ -216,16 +216,19 @@ class CueBeatsClampTests(_ServiceHarness):
         self.assertIsNotNone(stored)
         self.assertGreaterEqual(float(stored), 1.0)
 
-    def test_cue_timer_zero_never_stops_but_one_does(self) -> None:
-        """B3 root: CueTimer.start(0) is inactive (never auto-stops); >=1 stops."""
+    def test_cue_timer_zero_stops_immediately_awr279_belt(self) -> None:
+        """B3 + AWR-279 #2 belt: a loop-off cue_beats=0 no longer streams forever.
+
+        AWR-278 clamped cue length server-side; AWR-279 adds the CueTimer belt so a
+        nonpositive length that ever slips past the clamp ARMS the guard and stops
+        immediately (a "Play once" can never stay live). A cue_beats>=1 still runs."""
         from rb_ss_bridge_v2.tools.led_pad_playback import CueTimer
 
         clock = {"t": 0.0}
         timer = CueTimer(time_fn=lambda: clock["t"])
         timer.start(cue_beats=0, bpm=120.0, loop=False)
-        self.assertFalse(timer.active)
-        clock["t"] = 100.0
-        self.assertFalse(timer.should_stop(), "cue_beats=0 loop-off never auto-stops")
+        self.assertTrue(timer.active, "non-loop cue arms the auto-stop guard")
+        self.assertTrue(timer.should_stop(), "cue_beats=0 loop-off stops immediately")
 
         clock["t"] = 0.0
         timer.start(cue_beats=1, bpm=120.0, loop=False)

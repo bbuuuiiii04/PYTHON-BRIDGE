@@ -25,7 +25,11 @@ validation_scope: >
   from sim; stage remains the initial landing; ? help what-is intact), and
   AWR-274 R11 Setup demotion (Layout+Calibrate behind one Setup entry; gamma/gains
   behind closed Advanced with plain caution; FPS/provenance/frame/health telemetry
-  in a collapsed Diagnostics corner; cold main screens zero banned telemetry strings)
+  in a collapsed Diagnostics corner; cold main screens zero banned telemetry strings),
+  and AWR-279 breaker-audit fixes (the error banner prefers the server's friendly
+  message over the raw error code; the name + confirm dialogs bind Enter/Escape at
+  the dialog level so they survive tabbing to a button, with an outside-click focus
+  trap; a rail tab now expands a collapsed sidecar instead of doing nothing)
   are software-tested.
   Optics (glow/bleed/gamma) remain uncalibrated assumptions. Generated timing
   uses an ideal grid. Device color, PWM, latency, physical response, packet

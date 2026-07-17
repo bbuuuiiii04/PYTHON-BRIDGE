@@ -189,7 +189,9 @@ async function api(method, path, body, frameToken = null) {
   }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const detail = data.errors ? data.errors.join("; ") : (data.error || response.statusText);
+    // AWR-279 #11: prefer the server's friendly `message` over the raw `error`
+    // code (e.g. show the "reload, then re-apply" sentence, not "stale_profile").
+    const detail = data.errors ? data.errors.join("; ") : (data.message || data.error || response.statusText);
     if (current()) showError(detail);
     throw new Error(detail);
   }
@@ -763,7 +765,8 @@ function promptLayoutName({title, initial, allowName = null}) {
       dialog.hidden = true;
       $("name-dialog-ok").onclick = null;
       $("name-dialog-cancel").onclick = null;
-      input.onkeydown = null;
+      dialog.onkeydown = null;
+      document.removeEventListener("mousedown", onOutside, true);
       resolve(value);
     };
     const submit = () => {
@@ -778,7 +781,9 @@ function promptLayoutName({title, initial, allowName = null}) {
     };
     $("name-dialog-ok").onclick = submit;
     $("name-dialog-cancel").onclick = () => cleanup(null);
-    input.onkeydown = (event) => {
+    // AWR-279 #12: bind keys on the DIALOG (not the input) so Enter/Escape still
+    // work after Tab moves focus to OK/Cancel.
+    dialog.onkeydown = (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
         submit();
@@ -787,6 +792,9 @@ function promptLayoutName({title, initial, allowName = null}) {
         cleanup(null);
       }
     };
+    // Outside-click keeps focus in the dialog instead of stranding keyboard control.
+    const onOutside = (event) => { if (!dialog.contains(event.target)) { event.preventDefault(); input.focus(); } };
+    document.addEventListener("mousedown", onOutside, true);
   });
 }
 
@@ -809,6 +817,7 @@ function confirmDialog({title, message, okLabel = "OK"}) {
       okBtn.onclick = null;
       cancelBtn.onclick = null;
       dialog.onkeydown = null;
+      document.removeEventListener("mousedown", onOutside, true);
       resolve(value);
     };
     okBtn.onclick = () => cleanup(true);
@@ -822,6 +831,10 @@ function confirmDialog({title, message, okLabel = "OK"}) {
         cleanup(true);
       }
     };
+    // AWR-279 #12: outside-click refocuses the dialog rather than silently
+    // stranding keyboard control behind an invisible modal.
+    const onOutside = (event) => { if (!dialog.contains(event.target)) { event.preventDefault(); okBtn.focus(); } };
+    document.addEventListener("mousedown", onOutside, true);
   });
 }
 
@@ -1131,7 +1144,19 @@ function wireShell() {
   }
   for (const btn of document.querySelectorAll(".rail-btn[data-tab]")) {
     btn.addEventListener("click", () => {
-      if (btn.dataset.tab) setActiveTab(btn.dataset.tab);
+      if (!btn.dataset.tab) return;
+      // AWR-279 #13: a rail tab is a request to SEE that panel. While the sidecar is
+      // collapsed, .sidecar-main is display:none, so the click would light the button
+      // but reveal nothing — expand first, and sync the collapse toggle's label.
+      if (document.body.classList.contains("sidecar-collapsed")) {
+        document.body.classList.remove("sidecar-collapsed");
+        const collapseBtn = $("sidecar-collapse");
+        if (collapseBtn) {
+          collapseBtn.textContent = "‹";
+          collapseBtn.setAttribute("aria-label", "Collapse sidecar");
+        }
+      }
+      setActiveTab(btn.dataset.tab);
     });
   }
   // P-3: Left/Right arrow navigation within the top-level tablist.

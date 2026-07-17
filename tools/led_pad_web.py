@@ -34,7 +34,14 @@ from ..led_pad_controls import (
     render_catalog,
 )
 from ..runtime_status import COMMANDS_PATH, STATUS_PATH
-from .led_pad_lab import LabRegistry, LabRenderer, StaleLabEntry, load_lab_effects, render_preview_frames
+from .led_pad_lab import (
+    LabRegistry,
+    LabRenderer,
+    StaleLabEntry,
+    clamp_cue_beats as _clamp_cue_beats,
+    load_lab_effects,
+    render_preview_frames,
+)
 from .led_pad_mirror import FrameMirrorRing
 from .led_pad_playback import PadPlayback, stable_seed
 from .pad_access import _is_loopback_host, access_payload
@@ -83,7 +90,18 @@ _SIM_EXAMPLE_PROFILE = _REPO_ROOT / "config" / "led_sim_profile.example.json"
 _SIM_DEFAULT_PROFILE = _REPO_ROOT / "config" / "led_sim_profile.json"
 _SIM_DEFAULT_ROOM_MM = [5216.0, 2284.0]
 _IDENT_RE = re.compile(r"^[a-z0-9_]+$")
+# AWR-279 #8: look/draft ids are unbounded identifiers ([a-z0-9_]+) — a 500-char
+# name breaks the editor header and pushes the ✕ off-screen. Cap the id length so
+# the header stays legible and the close control stays reachable.
+_MAX_NAME_LEN = 60
+# AWR-279 #10: the Preview tempo box declares min=60 max=200; enforce the same
+# range server-side so a typed value or a stepper walk-below can't stick a
+# nonsense tempo (or a sticky error banner) into the session.
+_PREVIEW_BPM_MIN = 60.0
+_PREVIEW_BPM_MAX = 200.0
 _ROLE_BANKS = ("ambient", "groove", "buildup", "pre_drop", "drop", "post_drop", "breakdown", "utility")
+# AWR-279 #2: _clamp_cue_beats is imported from led_pad_lab so lab + pad share ONE
+# cue-length validator (see the import block above).
 _VISIBLE_BANKS = (
     "drafts",
     "ambient",
@@ -751,6 +769,8 @@ class LedPadService:
     def _validate_name(self, name: str, *, new: bool = False, config: dict[str, Any]) -> None:
         if not name or not _IDENT_RE.fullmatch(name):
             raise ValueError("look name must match [a-z0-9_]+")
+        if len(name) > _MAX_NAME_LEN:
+            raise ValueError(f"look name is too long (max {_MAX_NAME_LEN} characters)")
         if new and name in (config.get("looks") or {}):
             raise ValueError(f"look already exists: {name}")
 
@@ -802,9 +822,9 @@ class LedPadService:
         look_meta = meta.setdefault(name, {})
         if "cue_beats" in payload:
             # Cue length is beats-until-auto-stop. 0 / negatives would make a
-            # loop-off cue never end (CueTimer.start(0) leaves the timer inactive)
-            # and the card would then lie "16 beats". Clamp to a real >=1 length.
-            look_meta["cue_beats"] = max(1.0, float(payload.get("cue_beats") or 0))
+            # loop-off cue never end (CueTimer can't auto-stop) and the card would
+            # then lie "16 beats". Clamp to a real >=1 length (AWR-279 #2).
+            look_meta["cue_beats"] = _clamp_cue_beats(payload.get("cue_beats"), default=1.0)
         look_meta["updated"] = _now_iso()
         _mark_touched(candidate, name)
         self._ensure_unique_bank_locked(candidate)
@@ -969,8 +989,13 @@ class LedPadService:
             session = self._session(self._draft)
             if "bpm" in payload:
                 bpm = float(payload["bpm"])
-                if bpm <= 0:
+                if not (bpm > 0):  # also rejects NaN
                     raise ValueError("bpm must be > 0")
+                # AWR-279 #10: enforce the declared Preview tempo range so a typed
+                # value or a stepper walk-below can't stick a nonsense tempo. Clamp
+                # (don't reject) so the − button just floors at the minimum, and the
+                # returned session carries the clamped value for the UI to sync.
+                bpm = max(_PREVIEW_BPM_MIN, min(_PREVIEW_BPM_MAX, bpm))
                 session["bpm"] = bpm
                 self._playback.set_bpm(bpm)
             if "test_palette" in payload:
@@ -1118,7 +1143,9 @@ class LedPadService:
             raise ValueError("lab cue - no draft name in scene_ref")
         reload_result = self._lab_renderer.reload()
         if not reload_result["ok"]:
-            raise RuntimeError(reload_result["traceback"] or reload_result["error"])
+            # AWR-279 copy note: plain operator sentence in the banner, not a raw
+            # Python traceback. Fix the details in Template Lab (Reload effect code).
+            raise RuntimeError("This cue's effect code has an error, so it can't play. Fix it in Template Lab.")
         effects = reload_result["effects"]
         fn = self._lab_fn_for(draft)
         if draft not in effects and fn not in effects:
@@ -1178,9 +1205,14 @@ class LedPadService:
         leave entry params alone.
 
         Returns (snapshotted, snapshot_fallback):
-        - snapshotted: params came from the last-applied snapshot
-        - snapshot_fallback: param-less Accept/Reject with no snapshot available
-          (kept entry params; UI should warn)
+        - snapshotted: params came from the last-applied live snapshot
+        - snapshot_fallback: the client omitted params EXPECTING a live-tuned
+          snapshot (``expect_live_snapshot``) but none existed — a genuine loss the
+          UI should warn about. AWR-279 #14: the ordinary preview→Accept flow (the
+          operator only previewed, never live-tuned) omits params with no live
+          expectation, so it keeps the saved entry params calmly with NO warning
+          instead of always flashing "your last live-tuned values weren't
+          available".
         """
         snapshotted = False
         snapshot_fallback = False
@@ -1191,13 +1223,16 @@ class LedPadService:
             if snapshot is not None:
                 entry["params"] = copy.deepcopy(snapshot)
                 snapshotted = True
-            else:
+            elif bool(payload.get("expect_live_snapshot")):
+                # Operator relied on live-tuned values that aren't here → warn.
                 snapshot_fallback = True
+            # else: no live tuning ever happened for this draft — the saved entry
+            # params are exactly what the operator wants; keep them, stay calm.
         for key in ("brief", "notes", "target_role", "timing_mode"):
             if key in payload:
                 entry[key] = str(payload.get(key) or "")
         if "cue_beats" in payload:
-            entry["cue_beats"] = float(payload.get("cue_beats") or 16)
+            entry["cue_beats"] = _clamp_cue_beats(payload.get("cue_beats"))
         return snapshotted, snapshot_fallback
 
     def _lab_persist_editor(self, payload: dict[str, Any], *, status: str) -> dict[str, Any]:
@@ -1372,7 +1407,7 @@ class LedPadService:
         params = copy.deepcopy(entry.get("params") or {})
         if not isinstance(params, dict):
             params = {}
-        cue_beats = float(entry.get("cue_beats") or 16)
+        cue_beats = _clamp_cue_beats(entry.get("cue_beats"))
         scene_ref = f"lab:{name}"
         with self._lock:
             existing_wired = self._wired_look_name_locked(self._draft, name)
@@ -1481,8 +1516,13 @@ class LedPadService:
             fp.write(raw)
 
     def lab_archive(self, payload: dict[str, Any]) -> dict[str, Any]:
+        name = str(payload.get("name", "")).strip()
         with self._lock:
-            return self._lab.archive(str(payload.get("name", "")).strip())
+            # AWR-279 #9: same guard lab_delete has — don't archive a draft whose
+            # scene is live on the lights; make the operator stop it first.
+            if self._playing_name == LabRegistry.scene_ref(name):
+                return {"ok": False, "error": "stop_playback_first"}
+            return self._lab.archive(name)
 
     def lab_delete(self, payload: dict[str, Any]) -> dict[str, Any]:
         name = str(payload.get("name", "")).strip()
@@ -1494,7 +1534,10 @@ class LedPadService:
     def _lab_play_spec(self, config: dict[str, Any], entry: dict[str, Any], payload: dict[str, Any]) -> tuple[dict[str, Any], float]:
         reload_result = self._lab_renderer.reload()
         if not reload_result["ok"]:
-            raise RuntimeError(reload_result["traceback"] or reload_result["error"])
+            # AWR-279 copy note: the operator banner gets a plain sentence, not a raw
+            # Python traceback. The details live behind "Reload effect code" (red Lab
+            # health dot → traceback), which surfaces the same failure inspectably.
+            raise RuntimeError('Your effect code has an error, so this cue can\'t play. Press "Reload effect code" to see the details.')
         name = str(entry["name"])
         kind = str(entry["kind"])
         fn = str(entry.get("fn") or name)
@@ -1514,7 +1557,7 @@ class LedPadService:
             "params": params,
             "allow_strobe": False,
             "safety_allow_strobe": bool((config.get("safety") or {}).get("allow_strobe")),
-        }, float(payload.get("cue_beats", entry.get("cue_beats", 16)) or 16)
+        }, _clamp_cue_beats(payload.get("cue_beats", entry.get("cue_beats")))
 
     def lab_play(self, payload: dict[str, Any]) -> dict[str, Any]:
         name = str(payload.get("name", "")).strip()
