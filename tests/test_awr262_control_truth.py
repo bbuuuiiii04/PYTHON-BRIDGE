@@ -188,7 +188,7 @@ def _compose_frames(effect: str, params: dict[str, Any]) -> list[tuple[tuple[int
         return frames
 
     # Class B effects that need engine restart/bucket behavior.
-    if effect in ("drop_burst", "sparkle"):
+    if effect in ("drop_burst",):
         engine = BeatSyncEngine()
         mode = str(params.get("sync_mode") or default_sync_mode(effect))
         division = float(params.get("beat_division") or default_beat_division(effect))

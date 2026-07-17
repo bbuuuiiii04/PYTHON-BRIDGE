@@ -178,7 +178,7 @@ class LedPadServiceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "protected"):
                 service.delete_look({"name": "room_blackout"})
             with self.assertRaisesRegex(ValueError, "drop pair"):
-                service.delete_look({"name": "rt_drop_chase"})
+                service.delete_look({"name": "rt_drop_center_burst"})
 
     def test_unknown_param_rejected_before_merge(self) -> None:
         with tempfile.TemporaryDirectory() as td:

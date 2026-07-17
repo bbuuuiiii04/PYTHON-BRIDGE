@@ -432,7 +432,7 @@ def _director():
 class TestAdvanceCursorCycling(unittest.TestCase):
     def test_commit_role_cycles_section_pool_without_repeat_then_wraps(self):
         director = _director()
-        pool = {"rt_drop_strobe", "rt_drop_chase", "rt_drop_center_burst"}
+        pool = {"rt_drop_strobe", "rt_drop_white_aggressive", "rt_drop_center_burst"}
         pred = (lambda name, s=pool: name in s,)
         draws = [director.commit_role("drop", look_preference=pred).look
                  for _ in range(len(pool) * 2)]

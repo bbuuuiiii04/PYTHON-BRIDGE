@@ -85,29 +85,42 @@ Config:
   role lands on the configured blackout look (e.g. via `scripted_mode`'s `utility` mapping); the
   room holds its current look instead. `false` restores the pre-AWR-157 blackout-on-blank
   behavior byte-for-byte.
-- M2.5 slotized generic LED looks such as `rt_groove_chase`, `rt_post_drop_chase`, Patch E1 nebula looks, Patch E2 `rt_post_drop_center_comet`, and Patch E3 `rt_twinkle` are additive config entries. AWR-265 FINAL deleted RT color-suffix clones and the temporary `legacy_color_suffix` bank; default banks keep the palette-fed bases only.
+- M2.5 slotized generic LED looks such as `rt_groove_chase`, the surviving Patch E1 nebula look `rt_groove_nebula`, Patch E2 `rt_post_drop_center_comet`, and Patch E3 `rt_twinkle` are additive config entries. AWR-265 FINAL deleted RT color-suffix clones and the temporary `legacy_color_suffix` bank; default banks keep the palette-fed bases only.
+- LED cue dedup (2026-07-17) deletes 7 looks from both configs — `rt_post_drop_chase`,
+  `rt_post_drop_nebula`, `rt_post_drop_freestyle_nebula`, `rt_post_drop_remnant_chase`,
+  `rt_post_drop_remnant_nebula`, `rt_drop_nebula`, `rt_drop_chase_freestyle_nebula` (plus the
+  example-only `rt_drop_chase`) — with their bank rows, `drop_pairs`, `f2.drop_look_routing` tier
+  entries, and `color_engine.exempt_looks` members. Two `scene_ref` re-keys: the post-drop sparkle
+  look now points at `sparkle` (was `rt_post_drop_firework_remnants`) and
+  `rt_drop_firework_explosion` at `firework_burst` (was `drop_firework_explosion_2`). A config still
+  naming any deleted effect fails the loader with `scene_ref references unknown realtime effect`.
+  The three dead sparkle params (`sparkle_density`/`sparkle_life_s`/`sparkle_size`) deliberately
+  STAY allowlisted on `sparkle`: the live look carries them, and an un-allowlisted static param
+  trips the C5 fail-safe that disables all LED.
 - Local ignored `config/led_look_director.json` can legitimately lag the tracked example; mirror AWR-265 scale_stops / clone-free state to live config only with explicit operator approval and a loader check.
 - AWR-156 (2026-07-08) originally added 7 baked colorway strobe looks; AWR-265 FINAL deleted those clones. The palette-fed base `rt_drop_strobe` (`scene_ref: drop_strobe_colorway`, `color_source: engine`) remains, plus promoted looks (`rt_buildup_balloon_comet`, `rt_groove_heartbeat`,
-  `rt_post_drop_firework_remnants`). `width` is now a genuinely-read renderer param on
+  the remnants tail — renamed `sparkle` 2026-07-17). `width` is now a genuinely-read renderer param on
   `rt_groove_chase`/`rt_groove_nebula`/`rt_post_drop_center_comet` (previously allowlisted via
   `_SYNC_PARAM_KEYS` but silently ignored by the renderer; a config `width` value on those three had
-  no effect before this round). `rt_drop_chase`/`rt_drop_nebula` were renamed to
-  `rt_post_drop_remnant_chase`/`rt_post_drop_remnant_nebula` and moved from `banks.default.drop` to
-  `banks.default.post_drop` (their `drop_pairs` entries deleted); renderer `scene_ref` for both is
-  unchanged. Local ignored `config/led_look_director.json` was not touched by this round — mirror
+  no effect before this round). Superseded 2026-07-17, kept for history: "`rt_drop_chase`/`rt_drop_nebula`
+  were renamed to `rt_post_drop_remnant_chase`/`rt_post_drop_remnant_nebula` and moved from
+  `banks.default.drop` to `banks.default.post_drop` (their `drop_pairs` entries deleted)" — the cue
+  dedup deleted those looks and their scene_refs outright. Local ignored `config/led_look_director.json` was not touched by this round — mirror
   with explicit operator approval, same as Patch F.
-- AWR-215 (2026-07-11) rebuilds `rt_post_drop_firework_remnants` as the sparse first-eight-beat
-  sparkle half of `rt_drop_chase`. Its tracked-example `params` are empty (defaults apply).
+- AWR-215 (2026-07-11) rebuilds the remnants tail (effect renamed `sparkle` 2026-07-17) as the
+  sparse first-eight-beat sparkle field the retired drop chase also drew from. Its tracked-example
+  `params` are empty (defaults apply).
 - AWR-256 (2026-07-15) wires `ember_hold_beats` / `ember_decay_beats` for that look and removes
   dead `dim_beats` from the allowlist (it was never read by the sparse sparkle path). Tracked
   example params stay empty; a live file that still carried `dim_beats` must drop that key to
   validate.
-- AWR-161 (2026-07-09) adds `hz`/`duty` to `REALTIME_EFFECT_PARAM_KEYS` for 18 migrated strobe
-  effect names (the last remaining BPM-tied gates, now on the AWR-156 `_hz_strobe_on` gate), and two
+- AWR-161 (2026-07-09) adds `hz`/`duty` to `REALTIME_EFFECT_PARAM_KEYS` for the migrated strobe
+  effect names (18 at the time; the 2026-07-17 cue dedup deleted six of them) (the last remaining BPM-tied gates, now on the AWR-156 `_hz_strobe_on` gate), and two
   new looks to the tracked example: `rt_rainbow_drop`/`rt_rainbow_post_drop` (`scene_ref:
   rainbow_ordered`, `color_source: baked`, paired via `drop_pairs`) and
-  `rt_drop_firework_explosion` (`scene_ref: drop_firework_explosion`, `color_source: baked`, paired
-  via `drop_pairs` to the existing `rt_post_drop_firework_remnants`). Local ignored
+  `rt_drop_firework_explosion` (paired via `drop_pairs` to the post-drop sparkle look; as of
+  2026-07-17 its `scene_ref` is `firework_burst` with `color_source: engine` — the AWR-187 redesign
+  superseded the baked v1 `drop_firework_explosion`, which is now deleted). Local ignored
   `config/led_look_director.json` was not touched by this round — mirror with explicit operator
   approval, same as Patch F/AWR-156.
 - LIGHTING ENGINE v2 top-level blocks, both example-ON / absent-OFF so an un-mirrored live config

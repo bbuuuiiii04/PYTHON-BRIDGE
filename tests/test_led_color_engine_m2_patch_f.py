@@ -57,13 +57,13 @@ _RETIRED_COLOR_SUFFIX_LOOKS = frozenset(
 )
 _EXPECTED_DEFAULT_GENERICS = {
     "groove": "rt_groove_chase",
-    "post_drop": "rt_post_drop_chase",
+    # 2026-07-17 dedup: the generic post-drop chase retired; the center comet
+    # is the surviving engine-fed post-drop generic.
+    "post_drop": "rt_post_drop_center_comet",
     "ambient": "rt_twinkle",
 }
 _GENERIC_ENGINE_LOOKS = (
     "rt_groove_chase",
-    "rt_post_drop_remnant_chase",
-    "rt_post_drop_chase",
     "rt_drop_center_burst",
     "rt_post_drop_center_comet",
     "rt_twinkle",
@@ -94,7 +94,6 @@ class PatchFBankCleanupTests(unittest.TestCase):
         result = _load()
         default_names = _bank_names(result.config.banks["default"])
         self.assertEqual(default_names & _RETIRED_COLOR_SUFFIX_LOOKS, set())
-        self.assertIn("rt_drop_chase", result.config.banks["default"].drop)
         self.assertIn("rt_drop_strobe", result.config.banks["default"].drop)
 
     def test_legacy_color_suffix_bank_is_gone(self) -> None:
@@ -136,11 +135,10 @@ class PatchFBankCleanupTests(unittest.TestCase):
             self.assertNotIn(look_name, exempt)
             self.assertEqual(result.config.looks[look_name].color_source, "engine")
 
-    def test_drop_pairs_resolve_and_generic_chase_pair_exists(self) -> None:
+    def test_drop_pairs_resolve_and_generic_pair_exists(self) -> None:
         result = _load()
-        chase = result.config.drop_pairs.get("rt_drop_chase")
-        self.assertIsNotNone(chase)
-        self.assertEqual(chase.post_drop, "rt_post_drop_chase")
+        # 2026-07-17 dedup: the generic chase pair retired with its two looks.
+        self.assertIsNone(result.config.drop_pairs.get("rt_drop_chase"))
         self.assertIsNone(result.config.drop_pairs.get("rt_post_drop_remnant_chase"))
         pair = result.config.drop_pairs.get("rt_drop_center_burst")
         self.assertIsNotNone(pair)

@@ -71,9 +71,17 @@ class Awr265FinalColorABTests(unittest.TestCase):
         self.assertNotIn("legacy_color_suffix", self.cfg.banks)
 
     def test_base_cue_classes_remain_engine_fed(self) -> None:
+        checked = 0
         for base in _BASE_LOOKS:
-            look = self.cfg.looks[base]
+            look = self.cfg.looks.get(base)
+            if look is None:
+                # rt_drop_chase / rt_post_drop_chase were retired by the
+                # 2026-07-17 cue dedup; their clones stay retired either way
+                # (test_residual_clones_are_gone).
+                continue
+            checked += 1
             self.assertEqual(look.color_source, "engine", base)
+        self.assertGreater(checked, 0, "no AWR-265 base looks survive")
 
     def test_blue_cyan_keeps_existing_cyan_blue_multi(self) -> None:
         # Taste guard: promote pairs ADD to blue_cyan; do not take over multi ends.

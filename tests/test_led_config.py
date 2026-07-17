@@ -814,11 +814,9 @@ class RealtimeConfigTests(unittest.TestCase):
             self.skipTest("live config not present in this checkout")
         result = load_led_look_director_config(str(live_path))
         self.assertTrue(result.available, msg=result.errors)
-        self.assertEqual(
-            result.config.drop_pairs["rt_drop_chase_freestyle_nebula"].post_drop,
-            "rt_post_drop_freestyle_nebula",
-        )
-        self.assertIn(
+        # 2026-07-17 dedup: the freestyle-nebula drop/post-drop pair is retired.
+        self.assertNotIn("rt_drop_chase_freestyle_nebula", result.config.drop_pairs)
+        self.assertNotIn(
             "rt_post_drop_freestyle_nebula",
             result.config.banks["default"].post_drop,
         )
@@ -935,48 +933,35 @@ class Awr156Round2ConfigTests(unittest.TestCase):
             self.assertNotIn(name, banks.drop)
             self.assertNotIn(name, result.config.looks)
         self.assertIn("rt_drop_strobe", banks.drop)
-        self.assertIn("rt_drop_chase", banks.drop)
         self.assertIn("rt_buildup_balloon_comet", banks.buildup)
         self.assertIn("rt_groove_heartbeat", banks.groove)
         self.assertIn("rt_post_drop_firework_remnants", banks.post_drop)
 
-    def test_bank_recast_drop_chase_and_nebula_renamed_and_moved_to_post_drop(self) -> None:
-        # AWR-156 T6.4 amendment (operator, late): a LOOK-name rename, not
-        # just a bank move -- the demoted looks read as post-drop remnant
-        # material now. scene_ref stays rt_drop_chase/rt_drop_nebula.
-        # AWR-265 Step 1 re-adds look name `rt_drop_chase` as the palette-fed
-        # DROP base cue (color_source=engine); remnant rename still holds.
+    def test_comet_train_looks_and_their_remnant_twins_are_gone(self) -> None:
+        # 2026-07-17 dedup: the whole comet-train family (chase + nebula, drop
+        # and post-drop, plus the AWR-156 remnant renames and the AWR-265
+        # palette-fed base chase) was retired as indistinguishable repeats.
         result = load_led_look_director_config_from_dict(_example_config())
         self.assertTrue(result.available, msg=result.errors)
         looks = result.config.looks
         banks = result.config.banks["default"]
-        self.assertIn("rt_post_drop_remnant_chase", looks)
-        self.assertIn("rt_post_drop_remnant_nebula", looks)
-        self.assertEqual(looks["rt_post_drop_remnant_chase"].scene_ref, "rt_drop_chase")
-        self.assertEqual(looks["rt_post_drop_remnant_nebula"].scene_ref, "rt_drop_nebula")
-        self.assertIn("rt_post_drop_remnant_chase", banks.post_drop)
-        self.assertIn("rt_post_drop_remnant_nebula", banks.post_drop)
-        self.assertIn("rt_drop_chase", looks)
-        self.assertEqual(looks["rt_drop_chase"].color_source, "engine")
-        self.assertEqual(looks["rt_drop_chase"].scene_ref, "rt_drop_chase")
-        self.assertNotIn("rt_drop_nebula", looks)
-        # AWR-265 Step 2: palette-fed rt_drop_chase IS the default drop base.
-        self.assertIn("rt_drop_chase", banks.drop)
+        for name in ("rt_drop_chase", "rt_drop_nebula", "rt_post_drop_chase",
+                     "rt_post_drop_nebula", "rt_post_drop_remnant_chase",
+                     "rt_post_drop_remnant_nebula",
+                     "rt_drop_chase_freestyle_nebula",
+                     "rt_post_drop_freestyle_nebula"):
+            self.assertNotIn(name, looks, name)
+            self.assertNotIn(name, banks.drop, name)
+            self.assertNotIn(name, banks.post_drop, name)
         self.assertIn("rt_drop_strobe", banks.drop)
-        self.assertNotIn("rt_drop_nebula", banks.drop)
-        self.assertNotIn("rt_post_drop_remnant_chase", banks.drop)
-        self.assertNotIn("rt_post_drop_remnant_nebula", banks.drop)
 
     def test_bank_recast_drop_pairs_entries_removed(self) -> None:
         result = load_led_look_director_config_from_dict(_example_config())
         self.assertTrue(result.available, msg=result.errors)
-        # AWR-265 Step 2: palette-fed base chase is paired again.
-        pair = result.config.drop_pairs.get("rt_drop_chase")
-        self.assertIsNotNone(pair)
-        self.assertEqual(pair.post_drop, "rt_post_drop_chase")
-        self.assertNotIn("rt_drop_nebula", result.config.drop_pairs)
-        self.assertNotIn("rt_post_drop_remnant_chase", result.config.drop_pairs)
-        self.assertNotIn("rt_post_drop_remnant_nebula", result.config.drop_pairs)
+        # 2026-07-17 dedup: no comet-train look is left to pair.
+        for name in ("rt_drop_chase", "rt_drop_nebula", "rt_post_drop_remnant_chase",
+                     "rt_post_drop_remnant_nebula", "rt_drop_chase_freestyle_nebula"):
+            self.assertNotIn(name, result.config.drop_pairs, name)
 
     def test_knob_five_no_op_step_within_section_groove_still_true(self) -> None:
         cfg = _example_config()
@@ -985,8 +970,7 @@ class Awr156Round2ConfigTests(unittest.TestCase):
     def test_knob_nine_widths_present(self) -> None:
         cfg = _example_config()
         looks = cfg["looks"]
-        for name in ("rt_post_drop_remnant_chase", "rt_post_drop_remnant_nebula",
-                     "rt_post_drop_chase", "rt_post_drop_nebula", "rt_post_drop_center_comet"):
+        for name in ("rt_post_drop_center_comet",):
             self.assertEqual(looks[name]["params"]["width"], 4)
         for name in ("rt_groove_chase", "rt_groove_nebula"):
             self.assertEqual(looks[name]["params"]["width"], 2.5)

@@ -125,25 +125,27 @@ reviewed deployment/hardware gate.
   accent (3 ints 0-255; absent defaults to pure white). It replaces the removed `ZoneRampConfig.white`
   and the v1 `Palette.white` blend knob, both dead (every palette shipped `white: 0.0`). Legacy
   `white` keys still present in an un-mirrored config are ignored, not rejected. AWR-156 Task 9
-  (2026-07-08) narrowed WHERE this tint is read: it now applies only to nebula-comet slot-5 writes
-  (`rt_drop_nebula`/`rt_post_drop_nebula`) and the `rt_post_drop_firework_remnants` dimming
-  background; `post_drop_firework_chase`'s slot 5 always renders literal pure white regardless of
-  this config value (`BAKED_WHITE_SLOT5_EFFECTS` in `govee_frame_renderer.py`).
+  (2026-07-08) narrowed WHERE this tint is read: slot-5 writes outside
+  `BAKED_WHITE_SLOT5_EFFECTS` read it, while `post_drop_firework_chase`'s slot 5 always renders
+  literal pure white regardless of this config value (`BAKED_WHITE_SLOT5_EFFECTS` in
+  `govee_frame_renderer.py`). The nebula comets that read the tint were deleted by the 2026-07-17
+  cue dedup, so no cue exercises the tint path today.
 - AWR-156 (2026-07-08) adds 7 colorway strobe looks (`rt_drop_strobe_*`, `hz`/`duty`/`color_a`/
   `color_b` params) and 3 promoted looks (`rt_buildup_balloon_comet`, `rt_groove_heartbeat`,
-  `rt_post_drop_firework_remnants`) to the tracked example; see `docs/subsystems/config.md` for the
-  full param/rename/bank-move list. `width` is now a real renderer param on `rt_groove_chase`/
+  the remnants tail — effect renamed `sparkle` 2026-07-17) to the tracked example; see
+  `docs/subsystems/config.md` for the full param/rename/bank-move list. `width` is now a real renderer param on `rt_groove_chase`/
   `rt_groove_nebula`/`rt_post_drop_center_comet` (was allowlisted but silently unread before this
   round).
-- AWR-161 (2026-07-09) migrates the last ten BPM-tied strobe gates (18 effect names) onto the
-  AWR-156 Hz gate — `hz`/`duty` are now dialable on all of them (defaults hz 6.0/duty 0.3, the
-  accepted feel). Adds two new looks to the tracked example: `rt_rainbow_drop`/
-  `rt_rainbow_post_drop` (an ordered hue-by-position rainbow pair, `width`/`cycle_beats`/
-  `rainbow_span`/`travel_per_beat`/`loop_beats` params) and `rt_drop_firework_explosion` (a
-  beat-tied surge + time-based ember field, `surge_beats`/`bg_level`/`bg_hold`/`color_a`/
-  `spark_a`/`spark_b`/`sparkle_density`/`sparkle_size`/`sparkle_life_s` params), paired to
-  `rt_rainbow_post_drop` and the existing `rt_post_drop_firework_remnants` respectively via
-  `drop_pairs`; see `docs/subsystems/config.md` for the full param list.
+- AWR-161 (2026-07-09) migrates the last ten BPM-tied strobe gates (18 effect names at the time;
+  the 2026-07-17 cue dedup deleted six) onto the AWR-156 Hz gate — `hz`/`duty` are dialable on all
+  of them (defaults hz 6.0/duty 0.3, the accepted feel). Adds two new looks to the tracked example:
+  `rt_rainbow_drop`/`rt_rainbow_post_drop` (an ordered hue-by-position rainbow pair,
+  `width`/`cycle_beats`/`rainbow_span`/`travel_per_beat`/`loop_beats` params) and
+  `rt_drop_firework_explosion` (a beat-tied surge + time-based ember field, `surge_beats`/
+  `bg_level`/`bg_hold`/`color_a`/`color_b`/`spark_a`/`spark_b`/`sparkle_density`/`sparkle_size`/
+  `sparkle_life_s`/`hz`/`duty` params; its `scene_ref` is `firework_burst` as of 2026-07-17), paired
+  to `rt_rainbow_post_drop` and the post-drop sparkle look respectively via `drop_pairs`; see
+  `docs/subsystems/config.md` for the full param list.
 - Point or mono palette selections can make slots 0-4 one solid RGB for any slot cue, including realtime chase/comet/twinkle cues. `random_with_mono_chance` can opt individual looks into probabilistic solid slots 0-4 without changing shipped behavior when its chance map is empty or zero.
 - In the tracked LED example, AWR-265 FINAL keeps generic slot looks in `banks.default` and has deleted RT color-suffix clones plus the temporary `legacy_color_suffix` bank. Cyan-white / blue-ice / blue-twinkle pairs surface under `blue_cyan` (`scale_stops` order `cyan→ice→blue`).
 - Do not mirror AWR-265 into ignored live LED config without explicit operator approval, because live config may be behind the tracked example and is hardware-adjacent.

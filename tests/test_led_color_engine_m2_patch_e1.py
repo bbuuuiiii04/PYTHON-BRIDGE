@@ -2,12 +2,15 @@
 
 Covers:
 - _slot_groove_nebula unit tests (shape, multi-slot, slot-5-zero, no-strobe-gate, opposing heads)
-- _slot_drop_nebula and _slot_post_drop_nebula unit tests (shape, strobe gate, slot-5 white)
-- Config: rt_groove_nebula, rt_drop_nebula, rt_post_drop_nebula look definitions
-- Slot smoke: resolve_slot_colors for the three Patch E1 looks
-- Scene-ref verification: all Patch E1 look scene_refs point to registered SLOT_EFFECTS
-- Regression: 9 original SLOT_EFFECTS keys still present; E1 entries remain after later E patches
-- Legacy nebula looks still in exempt_looks; legacy scene_refs still in _EFFECTS
+- Config: rt_groove_nebula look definition
+- Slot smoke: resolve_slot_colors for the surviving Patch E1 look
+- Scene-ref verification: the Patch E1 look scene_ref points to a registered SLOT_EFFECT
+- Regression: original SLOT_EFFECTS keys still present; E1 entry remains after later patches
+- Legacy groove nebula look still in exempt_looks; its legacy scene_ref still in _EFFECTS
+
+The drop / post-drop nebula halves of Patch E1 were retired in the 2026-07-17
+cue dedup (indistinguishable comet-train repeats); only the groove nebula and
+the shared legacy groove scene_ref survive here.
 """
 from __future__ import annotations
 
@@ -24,9 +27,7 @@ from rb_ss_bridge_v2.govee_frame_renderer import (  # noqa: E402
     SLOT_EFFECTS,
     _EFFECTS,
     _M2_PHASE2A_PARAM_KEYS,
-    _slot_drop_nebula,
     _slot_groove_nebula,
-    _slot_post_drop_nebula,
 )
 from rb_ss_bridge_v2.led_color_engine import LedColorEngine  # noqa: E402
 from rb_ss_bridge_v2.led_config import load_led_look_director_config  # noqa: E402
@@ -44,30 +45,6 @@ def _used_slots(field: list[list[float]]) -> set[int]:
 def _call_groove_nebula(beat: float, *, segments: int = 60, frame_index: int = 0,
                         params: dict | None = None) -> list[list[float]]:
     return _slot_groove_nebula(
-        beat=beat,
-        local_t=0.0,
-        frame_index=frame_index,
-        params=params or {},
-        segments=segments,
-        seed=42,
-    )
-
-
-def _call_drop_nebula(beat: float, *, segments: int = 60, frame_index: int = 0,
-                      params: dict | None = None) -> list[list[float]]:
-    return _slot_drop_nebula(
-        beat=beat,
-        local_t=0.0,
-        frame_index=frame_index,
-        params=params or {},
-        segments=segments,
-        seed=42,
-    )
-
-
-def _call_post_drop_nebula(beat: float, *, segments: int = 60, frame_index: int = 0,
-                           params: dict | None = None) -> list[list[float]]:
-    return _slot_post_drop_nebula(
         beat=beat,
         local_t=0.0,
         frame_index=frame_index,
@@ -179,81 +156,6 @@ class SlotGrooveNebulaUnitTests(unittest.TestCase):
         self.assertNotIn(5, used, "Slot 5 should never be activated")
 
 
-class SlotDropNebulaUnitTests(unittest.TestCase):
-    """Unit tests for _slot_drop_nebula and _slot_post_drop_nebula."""
-
-    def test_drop_nebula_shape_segments_x_6(self) -> None:
-        field = _call_drop_nebula(beat=9.0, segments=60)
-        self.assertEqual(len(field), 60)
-        for row in field:
-            self.assertEqual(len(row), MAX_SLOTS)
-
-    def test_post_drop_nebula_shape_segments_x_6(self) -> None:
-        field = _call_post_drop_nebula(beat=1.0, segments=60)
-        self.assertEqual(len(field), 60)
-        for row in field:
-            self.assertEqual(len(row), MAX_SLOTS)
-
-    def test_drop_nebula_strobe_gate_can_go_dark(self) -> None:
-        # AWR-161: the strobe gate migrated to the wall-clock Hz gate
-        # (_hz_strobe_on), driven by local_t not beat. Pin the real contract:
-        # across one full strobe period at the reference hz 6.0 / duty 0.3
-        # there must be BOTH lit frames and fully dark frames -- a strobe that
-        # never goes dark is the exact bug this guards.
-        cycle_s = 1.0 / 6.0
-        params = {"hz": 6.0, "duty": 0.3}
-        lit = dark = False
-        for i in range(48):
-            field = _slot_drop_nebula(
-                beat=0.0625,
-                local_t=cycle_s * i / 48.0,
-                frame_index=i,
-                params=params,
-                segments=60,
-                seed=42,
-            )
-            if sum(sum(row) for row in field) > 0.0:
-                lit = True
-            else:
-                dark = True
-        self.assertTrue(lit, "strobe never lit across a full period")
-        self.assertTrue(dark, "strobe never went dark across a full period")
-
-    def test_post_drop_nebula_strobe_gate_can_go_dark(self) -> None:
-        # AWR-161: same Hz-gate contract as drop_nebula above -- sweep local_t
-        # across one full 1/6 s period and require both lit and dark frames.
-        cycle_s = 1.0 / 6.0
-        params = {"hz": 6.0, "duty": 0.3}
-        lit = dark = False
-        for i in range(48):
-            field = _slot_post_drop_nebula(
-                beat=0.0625,
-                local_t=cycle_s * i / 48.0,
-                frame_index=i,
-                params=params,
-                segments=60,
-                seed=42,
-            )
-            if sum(sum(row) for row in field) > 0.0:
-                lit = True
-            else:
-                dark = True
-        self.assertTrue(lit, "strobe never lit across a full period")
-        self.assertTrue(dark, "strobe never went dark across a full period")
-
-    def test_drop_nebula_comet_phase_uses_palette_and_white_slots(self) -> None:
-        field = _call_drop_nebula(beat=9.0, segments=60)
-        used = _used_slots(field)
-        self.assertTrue(used & set(range(5)), f"no palette slots used: {sorted(used)}")
-        self.assertIn(5, used, "white comet should use slot 5")
-
-    def test_post_drop_nebula_uses_palette_and_white_slots(self) -> None:
-        field = _call_post_drop_nebula(beat=1.0, segments=60)
-        used = _used_slots(field)
-        self.assertTrue(used & set(range(5)), f"no palette slots used: {sorted(used)}")
-        self.assertIn(5, used, "white comet should use slot 5")
-
-
 class PatchE1ConfigTests(unittest.TestCase):
     """Config validation and look-attribute tests for Patch E1."""
 
@@ -272,32 +174,7 @@ class PatchE1ConfigTests(unittest.TestCase):
         self.assertFalse(look.allow_strobe)
         self.assertEqual(look.safety_class, "groove")
 
-    def test_rt_drop_nebula_look_example(self) -> None:
-        # AWR-156 T6.4 amendment: renamed to rt_post_drop_remnant_nebula
-        # (LOOK-name rename only; scene_ref stays rt_drop_nebula).
-        result = self._load_config("config/led_look_director.example.json")
-        self.assertTrue(result.available, f"config not available: {result.reason}")
-        self.assertEqual(tuple(result.errors), ())
-        look = result.config.looks.get("rt_post_drop_remnant_nebula")
-        self.assertIsNotNone(look, "rt_post_drop_remnant_nebula missing from example config")
-        self.assertEqual(look.scene_ref, "rt_drop_nebula")
-        self.assertEqual(look.color_source, "engine")
-        self.assertTrue(look.allow_strobe)
-        self.assertEqual(look.safety_class, "drop")
-        self.assertIsNone(result.config.looks.get("rt_drop_nebula"))
-
-    def test_rt_post_drop_nebula_look_example(self) -> None:
-        result = self._load_config("config/led_look_director.example.json")
-        self.assertTrue(result.available, f"config not available: {result.reason}")
-        self.assertEqual(tuple(result.errors), ())
-        look = result.config.looks.get("rt_post_drop_nebula")
-        self.assertIsNotNone(look, "rt_post_drop_nebula missing from example config")
-        self.assertEqual(look.scene_ref, "rt_post_drop_nebula")
-        self.assertEqual(look.color_source, "engine")
-        self.assertTrue(look.allow_strobe)
-        self.assertEqual(look.safety_class, "post_drop")
-
-    def test_both_nebula_configs_validate_with_zero_errors(self) -> None:
+    def test_nebula_config_validates_with_zero_errors(self) -> None:
         result = self._load_config("config/led_look_director.example.json")
         self.assertTrue(result.available, f"config not available: {result.reason}")
         self.assertEqual(tuple(result.errors), (), f"example config errors: {result.errors}")
@@ -310,23 +187,12 @@ class PatchE1ConfigTests(unittest.TestCase):
         bank = result.config.banks.get("default")
         self.assertIsNotNone(bank)
         self.assertIn("rt_groove_nebula", bank.groove)
-        # AWR-156 bank recast (f), T6.4 amended (rename not just move):
-        # rt_drop_nebula moved drop -> post_drop AND renamed to
-        # rt_post_drop_remnant_nebula ("current sparkling cues can play the
-        # role of the sparkling remnants"); scene_ref stays rt_drop_nebula.
-        self.assertIn("rt_post_drop_remnant_nebula", bank.post_drop)
-        self.assertNotIn("rt_drop_nebula", bank.drop)
-        self.assertNotIn("rt_post_drop_remnant_nebula", bank.drop)
-        self.assertIn("rt_post_drop_nebula", bank.post_drop)
-
-    def test_drop_nebula_pairs_to_post_drop_nebula(self) -> None:
-        # AWR-156 bank recast (f): a post_drop-role look never fires a pair,
-        # so rt_drop_nebula's drop_pairs entry was removed.
-        result = self._load_config("config/led_look_director.example.json")
-        self.assertTrue(result.available, f"config not available: {result.reason}")
-        self.assertEqual(tuple(result.errors), ())
-        self.assertIsNone(result.config.drop_pairs.get("rt_drop_nebula"))
-        self.assertIsNone(result.config.drop_pairs.get("rt_post_drop_remnant_nebula"))
+        # 2026-07-17 dedup: the drop/post-drop nebula looks are retired, so
+        # neither they nor their renamed remnant twins may reappear in a bank.
+        for retired in ("rt_drop_nebula", "rt_post_drop_nebula",
+                        "rt_post_drop_remnant_nebula"):
+            self.assertNotIn(retired, bank.drop, retired)
+            self.assertNotIn(retired, bank.post_drop, retired)
 
 
 class PatchE1SlotSmokeTests(unittest.TestCase):
@@ -344,8 +210,6 @@ class PatchE1SlotSmokeTests(unittest.TestCase):
 
         for look_name, role in (
             ("rt_groove_nebula", "groove"),
-            ("rt_drop_nebula", "drop"),
-            ("rt_post_drop_nebula", "post_drop"),
         ):
             engine = LedColorEngine(result.config.color_engine, set_seed=123)
             engine.begin_dispatch(
@@ -377,16 +241,10 @@ class PatchE1SlotSmokeTests(unittest.TestCase):
         """All Patch E1 look scene_refs must be registered in SLOT_EFFECTS."""
         result = self._load_config()
         self.assertTrue(result.available, f"config not available: {result.reason}")
-        for look_name in ("rt_groove_nebula", "rt_post_drop_nebula"):
+        for look_name in ("rt_groove_nebula",):
             scene_ref = result.config.looks[look_name].scene_ref
             self.assertEqual(scene_ref, look_name)
             self.assertIn(scene_ref, SLOT_EFFECTS)
-        # AWR-156 T6.4 amendment: rt_drop_nebula was renamed to
-        # rt_post_drop_remnant_nebula (LOOK-name rename only), so its
-        # scene_ref no longer matches its look name.
-        scene_ref = result.config.looks["rt_post_drop_remnant_nebula"].scene_ref
-        self.assertEqual(scene_ref, "rt_drop_nebula")
-        self.assertIn(scene_ref, SLOT_EFFECTS)
 
 
 class PatchE1RegressionTests(unittest.TestCase):
@@ -394,8 +252,6 @@ class PatchE1RegressionTests(unittest.TestCase):
 
     _ORIGINAL_SLOT_EFFECT_KEYS = frozenset({
         "rt_groove_chase",
-        "rt_post_drop_chase",
-        "rt_drop_chase",
         "rt_drop_center_burst",
         "groove_center_chase",
         "groove_center_burst_retract",
@@ -404,33 +260,30 @@ class PatchE1RegressionTests(unittest.TestCase):
         "breakdown_star_twinkle",
     })
 
-    def test_original_9_slot_effects_still_present(self) -> None:
+    def test_original_slot_effects_still_present(self) -> None:
         for key in self._ORIGINAL_SLOT_EFFECT_KEYS:
             self.assertIn(key, SLOT_EFFECTS, f"{key} missing from SLOT_EFFECTS")
 
     def test_slot_effects_preserves_e1_entries_after_later_patches(self) -> None:
-        # AWR-156 added rt_groove_heartbeat + rt_post_drop_firework_remnants;
-        # AWR-188 Part G added palette_comet.
+        # AWR-156 added rt_groove_heartbeat + the remnants tail (now `sparkle`);
+        # AWR-188 Part G added palette_comet; the 2026-07-17 dedup deleted the
+        # four slot comet-trains.
         self.assertEqual(
-            len(SLOT_EFFECTS), 17,
-            f"Expected 17 SLOT_EFFECTS after AWR-188, got {len(SLOT_EFFECTS)}: "
-            f"{sorted(SLOT_EFFECTS.keys())}"
+            len(SLOT_EFFECTS), 13,
+            f"Expected 13 SLOT_EFFECTS after the 2026-07-17 dedup, got "
+            f"{len(SLOT_EFFECTS)}: {sorted(SLOT_EFFECTS.keys())}"
         )
 
     def test_patch_e1_looks_in_slot_effects(self) -> None:
-        for name in ("rt_groove_nebula", "rt_drop_nebula", "rt_post_drop_nebula"):
+        for name in ("rt_groove_nebula",):
             self.assertIn(name, SLOT_EFFECTS)
 
     def test_patch_e1_looks_in_realtime_effect_names(self) -> None:
-        for name in ("rt_groove_nebula", "rt_drop_nebula", "rt_post_drop_nebula"):
+        for name in ("rt_groove_nebula",):
             self.assertIn(name, REALTIME_EFFECT_NAMES)
 
     def test_rt_groove_nebula_not_in_strobe_effects(self) -> None:
         self.assertNotIn("rt_groove_nebula", REALTIME_STROBE_EFFECTS)
-
-    def test_drop_and_post_drop_nebula_in_strobe_effects(self) -> None:
-        self.assertIn("rt_drop_nebula", REALTIME_STROBE_EFFECTS)
-        self.assertIn("rt_post_drop_nebula", REALTIME_STROBE_EFFECTS)
 
     def test_slot_colors_not_in_param_key_dicts(self) -> None:
         """slot_colors must never appear in any param-key allowlist."""
@@ -439,34 +292,26 @@ class PatchE1RegressionTests(unittest.TestCase):
                              f"slot_colors found in _M2_PHASE2A_PARAM_KEYS[{name!r}]")
 
     def test_legacy_nebula_looks_in_exempt_looks(self) -> None:
-        """The three legacy freestyle nebula looks must still be in exempt_looks."""
+        """The surviving legacy freestyle nebula look must still be exempt."""
         root = Path(__file__).resolve().parents[1]
         result = load_led_look_director_config(str(root / "config/led_look_director.example.json"))
         self.assertTrue(result.available, f"config not available: {result.reason}")
         self.assertEqual(tuple(result.errors), ())
         exempt = result.config.color_engine.exempt_looks
-        for name in (
-            "rt_groove_freestyle_nebula",
-            "rt_drop_chase_freestyle_nebula",
-            "rt_post_drop_freestyle_nebula",
-        ):
+        for name in ("rt_groove_freestyle_nebula",):
             self.assertIn(name, exempt, f"{name} missing from exempt_looks")
 
     def test_legacy_scene_refs_still_in_effects(self) -> None:
-        """Legacy scene_refs groove_freestyle_nebula, drop_chase_freestyle_nebula,
-        post_drop_freestyle_nebula must still resolve via _EFFECTS.
+        """Legacy scene_ref groove_freestyle_nebula must still resolve via
+        _EFFECTS (its drop / post-drop siblings were retired 2026-07-17).
         """
-        for scene_ref in (
-            "groove_freestyle_nebula",
-            "drop_chase_freestyle_nebula",
-            "post_drop_freestyle_nebula",
-        ):
+        for scene_ref in ("groove_freestyle_nebula",):
             self.assertIn(scene_ref, _EFFECTS,
                           f"Legacy scene_ref {scene_ref!r} missing from _EFFECTS")
 
     def test_patch_e1_param_keys_registered(self) -> None:
         """Patch E1 scene refs must be in _M2_PHASE2A_PARAM_KEYS."""
-        for name in ("rt_groove_nebula", "rt_drop_nebula", "rt_post_drop_nebula"):
+        for name in ("rt_groove_nebula",):
             self.assertIn(name, _M2_PHASE2A_PARAM_KEYS)
             keys = _M2_PHASE2A_PARAM_KEYS[name]
             self.assertIn("duration_beats", keys)

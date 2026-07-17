@@ -208,7 +208,7 @@ drawer now shows that real default instead of the control's minimum:
 
 Defaults were hand-extracted from `govee_frame_renderer.py`'s literal `params.get(key, DEFAULT)`
 fallbacks into `led_pad_controls.py::CONTROL_META` (keys whose fallback differs by scene_ref —
-`travel_beats`/`width`, the AWR-156 strobe `duty`, and AWR-187's `drop_firework_explosion_2`
+`travel_beats`, the AWR-156 strobe `duty`, and AWR-187's `firework_burst`
 surge/hold/ember keys — carry per-scene rows in `PARAM_DEFAULT_OVERRIDES`);
 `tests/test_led_pad_controls.py::LedPadControlDefaultsTests` pins every
 hand-extracted value against the exact renderer source text, so an unrelated future change to a
@@ -681,9 +681,10 @@ runtime/API behavior change):
   is one small mono line. AWR-265 FINAL: RT color-suffix clones and the
   `legacy_color_suffix` bank are gone; the pad **Legacy** tab hides when empty.
   Default Drop/Groove/Ambient/Post-Drop banks rotate the palette-fed bases
-  (`rt_drop_strobe`, `rt_drop_chase`, `rt_groove_chase`, `rt_post_drop_chase`,
-  `rt_drop_center_burst`, `rt_post_drop_center_comet`, `rt_twinkle`); cyan-white /
-  blue-ice / blue-twinkle pairs surface under `blue_cyan` via scale_stops order.
+  (`rt_drop_strobe`, `rt_groove_chase`, `rt_drop_center_burst`,
+  `rt_post_drop_center_comet`, `rt_twinkle`); cyan-white / blue-ice /
+  blue-twinkle pairs surface under `blue_cyan` via scale_stops order. (The
+  2026-07-17 cue dedup retired the drop / post-drop chase bases.)
   Pad rename/duplicate accept plain display names and auto-slug. Standing gate:
   `python3 tools/check_ui_jargon.py`.
 - **Editor close dirty check (AWR-254).** Closing the look editor compares against the last

@@ -334,21 +334,6 @@ def _gradient_sweep(beat: float, local_t: float, frame_index: int, params: Mappi
     return frame
 
 
-def _sparkle(beat: float, local_t: float, frame_index: int, params: Mapping[str, Any], segments: int, seed: int) -> Frame:
-    color = _color(params.get("color"), (255, 255, 255))
-    bg = _color(params.get("bg"), (0, 0, 0))
-    density = float(params.get("density", 0.2))
-    sparkles = _sparkle_frame(
-        segments=segments,
-        density=density,
-        color=color,
-        seed=seed,
-        frame_index=frame_index,
-        beat_bucket=int(beat * 16.0),
-    )
-    return [_lerp(bg, value, 1.0) if value != (0, 0, 0) else bg for value in sparkles]
-
-
 def _color_pulse(beat: float, local_t: float, frame_index: int, params: Mapping[str, Any], segments: int, seed: int) -> Frame:
     color = _color(params.get("color"), (255, 255, 255))
     bg = _color(params.get("bg"), (0, 0, 0))
@@ -525,21 +510,6 @@ def _post_drop_chase(name: str, beat: float, local_t: float, params: Mapping[str
     return _drop_chase_comets(name, beat, segments, color1, color2, start=0.0)
 
 
-def _post_drop_nebula(beat: float, local_t: float, params: Mapping[str, Any], segments: int) -> Frame:
-    # AWR-161: Hz-gate migration (BPM-tied 16th-note gate -> wall-clock Hz gate).
-    strobe_on = _hz_strobe_on(local_t, params)
-    if not strobe_on:
-        return _empty(segments)
-    return _drop_chase_comets(
-        "drop_chase_freestyle_nebula",
-        beat,
-        segments,
-        (0, 255, 255),
-        (255, 255, 255),
-        start=0.0,
-    )
-
-
 def _drop_white_aggressive(beat: float, local_t: float, frame_index: int, params: Mapping[str, Any], segments: int, seed: int) -> Frame:
     # AWR-156: Hz-based, frame-timing-aware strobe (AWR-153 binding ruling —
     # time-based, never beat/BPM-subdivided). Defaults hz 6.0 / duty 0.3, the
@@ -632,8 +602,9 @@ def _rainbow_ordered(beat: float, local_t: float, frame_index: int, params: Mapp
 def _ember_env(x: float, sharp: bool) -> float:
     """Ember brightness envelope over normalized life x in [0, 1).
 
-    sharp=False: the AWR-161 sine fade-in/out (drop_firework_explosion, kept
-    byte-identical). sharp=True (AWR-187): fast-in / exponential-out -- linear
+    sharp=False: the AWR-161 sine fade-in/out, kept byte-identical (no
+    caller today since the v1 firework retired). sharp=True (AWR-187, what
+    firework_burst renders with): fast-in / exponential-out -- linear
     attack over the first 15% of life to full, then exp decay to ~0.007 by end
     of life, the operator's 'aggressively spark' shape (a spark pops instantly
     and dies in a tail instead of swelling in and out)."""
@@ -648,7 +619,7 @@ def _ember_env(x: float, sharp: bool) -> float:
 def _ember_field_frame(local_t: float, segments: int, seed: int, *,
                        density: float, size: float, life_s: float, colors: tuple[RGB, RGB],
                        sharp: bool = False) -> Frame:
-    """AWR-161: frame-native ember field for drop_firework_explosion (ported
+    """AWR-161: frame-native ember field for the firework burst (ported
     from the lab _ember_field). Same independent-lifecycle timing as the
     production slot-based _ember_field (the remnants machinery: sine fade-in/
     out over life_s, a personal gap, fresh position + color each cycle,
@@ -685,46 +656,7 @@ def _ember_field_frame(local_t: float, segments: int, seed: int, *,
     return [(_clamp_channel(r), _clamp_channel(g), _clamp_channel(b)) for r, g, b in acc]
 
 
-def _drop_firework_explosion(beat: float, local_t: float, frame_index: int, params: Mapping[str, Any], segments: int, seed: int) -> Frame:
-    """AWR-161: ported from the lab drop_firework_explosion_2 (RENDER-
-    REGRESSION FIX verified in lab: the surge now resolves DOWN to bg_hold
-    over 0.5 beat after the hit, and embers BLEND-REPLACE (not add) so they
-    read against the bright background -- measured ember contrast 164/255,
-    was 35/invisible before the fix). Beat-tied surge (the hit itself) plus
-    a time-based ember field (never beat-tied, the AWR-153 sparkle ruling)."""
-    seg = max(0, int(segments))
-    surge_beats = max(0.1, float(params.get("surge_beats", 0.5)))
-    bg_level = max(0.2, min(1.0, float(params.get("bg_level", 1.0))))
-    density = max(0.0, min(0.8, float(params.get("sparkle_density", 0.35))))
-    size = max(0.5, min(3.0, float(params.get("sparkle_size", 1.0))))
-    life_s = max(0.1, min(2.0, float(params.get("sparkle_life_s", 0.35))))
-    bg = _color(params.get("color_a"), (255, 240, 220))
-    spark_a = _color(params.get("spark_a"), (255, 170, 60))
-    spark_b = _color(params.get("spark_b"), (255, 240, 220))
-
-    bg_hold = max(0.2, min(1.0, float(params.get("bg_hold", 0.7)))) * bg_level
-    if beat <= surge_beats:
-        level = max(0.0, min(1.0, beat / surge_beats)) * bg_level
-    else:
-        settle = max(0.0, min(1.0, (beat - surge_beats) / 0.5))
-        level = bg_level + (bg_hold - bg_level) * settle
-    base = [(bg[0] * level, bg[1] * level, bg[2] * level) for _ in range(seg)]
-    layer = _ember_field_frame(local_t, seg, seed, density=density, size=size,
-                               life_s=life_s, colors=(spark_a, spark_b))
-    out: Frame = []
-    for i in range(seg):
-        w = max(0.0, min(1.0, max(layer[i]) / 255.0))
-        r0, g0, b0 = base[i]
-        if w > 0.0:
-            lr, lg, lb = layer[i]
-            px = (r0 * (1.0 - w) + lr, g0 * (1.0 - w) + lg, b0 * (1.0 - w) + lb)
-        else:
-            px = (r0, g0, b0)
-        out.append((_clamp_channel(px[0]), _clamp_channel(px[1]), _clamp_channel(px[2])))
-    return out
-
-
-def _drop_firework_explosion_2(beat: float, local_t: float, frame_index: int, params: Mapping[str, Any], segments: int, seed: int) -> Frame:
+def _firework_burst(beat: float, local_t: float, frame_index: int, params: Mapping[str, Any], segments: int, seed: int) -> Frame:
     """AWR-187 firework redesign (operator visual spec, verbatim acceptance:
     'the firework background explosion should strobe with sparkling hues and
     then when the firework explosion background quickly dims, the embers
@@ -862,31 +794,6 @@ def _drop_chase_comets(
     if not frames:
         return _empty(segments)
     return GoveeFrameRenderer.fold_additive(frames, segments)
-
-
-def _drop_nebula(beat: float, local_t: float, frame_index: int, params: Mapping[str, Any], segments: int, seed: int) -> Frame:
-    # AWR-161: Hz-gate migration (BPM-tied 16th-note gate -> wall-clock Hz gate).
-    strobe_on = _hz_strobe_on(local_t, params)
-    if not strobe_on:
-        return _empty(segments)
-    if beat < 8.0:
-        progress = beat / 8.0
-        density = max(0.02, min(1.0, (4.0 * (1.0 - progress) + 0.5) / max(1.0, segments)))
-        return _sparkle_frame(
-            segments=segments,
-            density=density,
-            color=lambda idx: (0, 255, 255) if idx % 2 == 0 else (255, 255, 255),
-            seed=seed,
-            frame_index=frame_index,
-            beat_bucket=int(beat * 16.0),
-        )
-    return _drop_chase_comets(
-        "drop_chase_freestyle_nebula",
-        beat,
-        segments,
-        (0, 255, 255),
-        (255, 255, 255),
-    )
 
 
 def _buildup_nebula(beat: float, local_t: float, frame_index: int, params: Mapping[str, Any], segments: int, seed: int) -> Frame:
@@ -1139,7 +1046,7 @@ def _edm_dispatch(name: str, beat: float, local_t: float, frame_index: int, para
         return _groove_chase(name, cue_beat, segments)
     if name == "groove_freestyle_nebula":
         return _groove_nebula(cue_beat, segments)
-    if name.startswith("drop_chase_") and name != "drop_chase_freestyle_nebula":
+    if name.startswith("drop_chase_"):
         return _drop_chase(name, cue_beat, local_t, frame_index, params, segments, seed)
     if name == "drop_center_burst_blue_cyan":
         return _drop_center_burst_blue_cyan(cue_beat, local_t, frame_index, params, segments, seed)
@@ -1147,14 +1054,10 @@ def _edm_dispatch(name: str, beat: float, local_t: float, frame_index: int, para
         return _post_drop_chase(name, cue_beat, local_t, params, segments)
     if name == "post_drop_center_comet_blue_cyan":
         return _post_drop_center_comet_blue_cyan(cue_beat, local_t, frame_index, params, segments, seed)
-    if name == "post_drop_freestyle_nebula":
-        return _post_drop_nebula(cue_beat, local_t, params, segments)
     if name == "drop_white_aggressive":
         return _drop_white_aggressive(cue_beat, local_t, frame_index, params, segments, seed)
     if name == "post_drop_white_shatter":
         return _post_drop_white_shatter(cue_beat, local_t, frame_index, params, segments, seed)
-    if name == "drop_chase_freestyle_nebula":
-        return _drop_nebula(cue_beat, local_t, frame_index, params, segments, seed)
     if name == "buildup_freestyle_nebula":
         return _buildup_nebula(cue_beat, local_t, frame_index, params, segments, seed)
     if name == "buildup_white_zone_strobe":
@@ -1178,7 +1081,6 @@ _GENERIC_EFFECTS: dict[str, EffectFn] = {
     "drop_burst": _drop_burst,
     "breathe": _breathe,
     "gradient_sweep": _gradient_sweep,
-    "sparkle": _sparkle,
     "color_pulse": _color_pulse,
     "bar_wipe": _bar_wipe,
 }
@@ -1203,13 +1105,11 @@ EDM_BUILDS: dict[str, str] = {
     "drop_chase_red": "32-beat drop: 8-beat sparkle strobe burst + 2-beat red chase strobe.",
     "drop_chase_green": "32-beat drop: 8-beat sparkle strobe burst + 2-beat green chase strobe.",
     "drop_chase_cyan_white": "32-beat drop: 8-beat sparkle strobe burst + 2-beat cyan/white chase strobe.",
-    "drop_chase_freestyle_nebula": "32-beat freestyle drop: 8-beat sparkle strobe burst + 2-beat opposite comets strobe.",
     "post_drop_chase_blue": "32-beat post-drop: immediate 2-beat blue comet chase strobe.",
     "post_drop_chase_cyan": "32-beat post-drop: immediate 2-beat cyan comet chase strobe.",
     "post_drop_chase_red": "32-beat post-drop: immediate 2-beat red comet chase strobe.",
     "post_drop_chase_green": "32-beat post-drop: immediate 2-beat green comet chase strobe.",
     "post_drop_chase_cyan_white": "32-beat post-drop: immediate alternating cyan/white comet chase strobe.",
-    "post_drop_freestyle_nebula": "32-beat post-drop: immediate cyan/white freestyle comet chase strobe.",
     "drop_white_aggressive": "Drop: full-strip pure-white 32nd-note strobe (bridge-owned duration).",
     "post_drop_white_shatter": "Post-drop: per-frame full-white stroboscopic static dissolving 13->3 over 4 beats then held low.",
     "twinkle_blue": "32-beat super twinkly blue cyan look that pulses on beat.",
@@ -1243,13 +1143,11 @@ REALTIME_STROBE_EFFECTS = frozenset(
         "drop_chase_red",
         "drop_chase_green",
         "drop_chase_cyan_white",
-        "drop_chase_freestyle_nebula",
         "post_drop_chase_blue",
         "post_drop_chase_cyan",
         "post_drop_chase_red",
         "post_drop_chase_green",
         "post_drop_chase_cyan_white",
-        "post_drop_freestyle_nebula",
         "drop_white_aggressive",
         "post_drop_white_shatter",
         "twinkle_blue",
@@ -1263,7 +1161,6 @@ REALTIME_EFFECT_PARAM_KEYS: dict[str, frozenset[str]] = {
     "drop_burst": frozenset({"color", "bg", "decay"}),
     "breathe": frozenset({"color", "period_beats", "floor"}),
     "gradient_sweep": frozenset({"color_a", "color_b", "speed"}),
-    "sparkle": frozenset({"color", "bg", "density"}),
     "color_pulse": frozenset({"color", "bg"}),
     "bar_wipe": frozenset({"color", "bg"}),
 }
@@ -1291,8 +1188,6 @@ for _name in (
     "drop_chase_green", "drop_chase_cyan_white",
     "post_drop_chase_blue", "post_drop_chase_cyan", "post_drop_chase_red",
     "post_drop_chase_green", "post_drop_chase_cyan_white",
-    "post_drop_freestyle_nebula",
-    "drop_chase_freestyle_nebula",
 ):
     REALTIME_EFFECT_PARAM_KEYS[_name] = REALTIME_EFFECT_PARAM_KEYS[_name] | frozenset({"hz", "duty"})
 
@@ -1301,7 +1196,7 @@ _OVERLAP_EFFECTS = frozenset({
     "groove_chase_green", "groove_chase_cyan_white",
 })
 _RETRIGGER_EFFECTS = frozenset({
-    "beat_chase", "beat_strobe", "drop_burst", "color_pulse", "bar_wipe", "sparkle",
+    "beat_chase", "beat_strobe", "drop_burst", "color_pulse", "bar_wipe",
 })
 
 def is_comet_effect(name: str) -> bool:
@@ -1511,73 +1406,6 @@ def _slot_groove_nebula(beat: float, local_t: float, frame_index: int,
     return field
 
 
-def _slot_post_drop_chase(beat: float, local_t: float, frame_index: int,
-                          params: Mapping[str, Any], segments: int, seed: int) -> MotionField:
-    """Generic slotized post-drop chase.
-
-    Preserves the legacy immediate strobing comet timing from
-    ``_post_drop_chase`` while moving color choice to runtime slot injection.
-    """
-    cue_beat = _edm_beat(beat, params)
-    field = _empty_motion_field(segments)
-
-    # AWR-161: Hz-gate migration (BPM-tied 16th-note gate -> wall-clock Hz gate).
-    strobe_on = _hz_strobe_on(local_t, params)
-    if not strobe_on:
-        return field
-
-    width = max(0.001, float(params.get("width", 0.8)))
-    travel_beats = max(0.001, float(params.get("travel_beats", 2.0)))
-    for spawn_at, spawn_idx in _drop_chase_spawn_times(cue_beat, start=0.0):
-        # AWR-156 knob #4: per-spawn single slot, not intensity-derived hue.
-        slot = spawn_idx % 5
-        progress = (cue_beat - spawn_at) / travel_beats
-        pos = progress * segments
-        for idx in range(max(0, int(segments))):
-            dist = _distance_on_ring(idx, pos, segments)
-            intensity = max(0.0, 1.0 - (dist / max(0.001, width)))
-            if intensity <= 0.0:
-                continue
-
-            field[idx][slot] = min(1.0, field[idx][slot] + intensity)
-
-    return field
-
-
-def _slot_post_drop_nebula(beat: float, local_t: float, frame_index: int,
-                           params: Mapping[str, Any], segments: int, seed: int) -> MotionField:
-    """Slotized post-drop nebula; alternating palette comets and white comets."""
-    cue_beat = _edm_beat(beat, params)
-    field = _empty_motion_field(segments)
-
-    # AWR-161: Hz-gate migration (BPM-tied 16th-note gate -> wall-clock Hz gate).
-    strobe_on = _hz_strobe_on(local_t, params)
-    if not strobe_on:
-        return field
-
-    width = max(0.001, float(params.get("width", 0.8)))
-    travel_beats = max(0.001, float(params.get("travel_beats", 2.0)))
-    for spawn_at, spawn_idx in _drop_chase_spawn_times(cue_beat, start=0.0):
-        progress = (cue_beat - spawn_at) / travel_beats
-        pos = progress * segments
-        use_white_slot = (spawn_idx % 2) == 1
-        for idx in range(max(0, int(segments))):
-            dist = _distance_on_ring(idx, pos, segments)
-            intensity = max(0.0, 1.0 - (dist / max(0.001, width)))
-            if intensity <= 0.0:
-                continue
-
-            if use_white_slot:
-                field[idx][5] = min(1.0, field[idx][5] + intensity)
-                continue
-
-            # AWR-156 knob #4: per-spawn single slot, not intensity-derived hue.
-            slot = spawn_idx % 5
-            field[idx][slot] = min(1.0, field[idx][slot] + intensity)
-
-    return field
-
-
 def _drop_chase_sparkle_field(
     cue_beat: float,
     frame_index: int,
@@ -1615,90 +1443,6 @@ def _scale_motion_field(field: MotionField, scale: float) -> MotionField:
     if scale <= 0.0:
         return _empty_motion_field(len(field))
     return [[min(1.0, value * scale) for value in row] for row in field]
-
-
-def _slot_drop_chase(beat: float, local_t: float, frame_index: int,
-                     params: Mapping[str, Any], segments: int, seed: int) -> MotionField:
-    """Generic slotized drop chase with the legacy sparkle intro."""
-    cue_beat = _edm_beat(beat, params)
-    field = _empty_motion_field(segments)
-
-    # AWR-161: Hz-gate migration (BPM-tied 16th-note gate -> wall-clock Hz gate).
-    strobe_on = _hz_strobe_on(local_t, params)
-    if not strobe_on:
-        return field
-
-    if cue_beat < 8.0:
-        return _drop_chase_sparkle_field(
-            cue_beat, frame_index, segments, seed, intro_beats=8.0
-        )
-
-    width = max(0.001, float(params.get("width", 0.8)))
-    travel_beats = max(0.001, float(params.get("travel_beats", 2.0)))
-    for spawn_at, spawn_idx in _drop_chase_spawn_times(cue_beat, start=8.0):
-        # AWR-156 knob #4: per-spawn single slot, not intensity-derived hue.
-        slot = spawn_idx % 5
-        progress = (cue_beat - spawn_at) / travel_beats
-        pos = progress * segments
-        for idx in range(max(0, int(segments))):
-            dist = _distance_on_ring(idx, pos, segments)
-            intensity = max(0.0, 1.0 - (dist / max(0.001, width)))
-            if intensity <= 0.0:
-                continue
-
-            field[idx][slot] = min(1.0, field[idx][slot] + intensity)
-
-    return field
-
-
-def _slot_drop_nebula(beat: float, local_t: float, frame_index: int,
-                      params: Mapping[str, Any], segments: int, seed: int) -> MotionField:
-    """Slotized drop nebula with sparkle intro plus alternating palette/white comets."""
-    cue_beat = _edm_beat(beat, params)
-    field = _empty_motion_field(segments)
-
-    # AWR-161: Hz-gate migration (BPM-tied 16th-note gate -> wall-clock Hz gate).
-    strobe_on = _hz_strobe_on(local_t, params)
-    if not strobe_on:
-        return field
-
-    if cue_beat < 8.0:
-        progress = cue_beat / 8.0
-        density = max(0.02, min(1.0, (4.0 * (1.0 - progress) + 0.5) / max(1.0, segments)))
-        beat_bucket = int(cue_beat * 16.0)
-        for idx in range(max(0, int(segments))):
-            rng = _rng(seed, frame_index, beat_bucket, idx)
-            if rng.random() >= density:
-                continue
-            intensity = rng.random() ** 1.5
-            if idx % 2 == 0:
-                color_slot = random.Random(idx).randint(0, 4)
-            else:
-                color_slot = 5
-            field[idx][color_slot] = min(1.0, field[idx][color_slot] + intensity)
-        return field
-
-    width = max(0.001, float(params.get("width", 0.8)))
-    travel_beats = max(0.001, float(params.get("travel_beats", 2.0)))
-    for spawn_at, spawn_idx in _drop_chase_spawn_times(cue_beat, start=8.0):
-        progress = (cue_beat - spawn_at) / travel_beats
-        pos = progress * segments
-        use_white_slot = (spawn_idx % 2) == 1
-        for idx in range(max(0, int(segments))):
-            dist = _distance_on_ring(idx, pos, segments)
-            intensity = max(0.0, 1.0 - (dist / max(0.001, width)))
-            if intensity <= 0.0:
-                continue
-
-            if use_white_slot:
-                field[idx][5] = min(1.0, field[idx][5] + intensity)
-                continue
-
-            # AWR-156 knob #4: per-spawn single slot, not intensity-derived hue.
-            slot = spawn_idx % 5
-            field[idx][slot] = min(1.0, field[idx][slot] + intensity)
-
-    return field
 
 
 def _slot_drop_center_burst(beat: float, local_t: float, frame_index: int,
@@ -2103,8 +1847,8 @@ def _slot_rt_groove_heartbeat(beat: float, local_t: float, frame_index: int,
     return field
 
 
-def _slot_rt_post_drop_firework_remnants(beat: float, local_t: float, frame_index: int,
-                                         params: Mapping[str, Any], segments: int, seed: int) -> MotionField:
+def _slot_sparkle(beat: float, local_t: float, frame_index: int,
+                  params: Mapping[str, Any], segments: int, seed: int) -> MotionField:
     """AWR-215/256: sparse firework tail using drop-chase's sparkle intro.
 
     The synchronized drop-chase strobe gate is deliberately held open here
@@ -2189,10 +1933,6 @@ def _slot_palette_comet(beat: float, local_t: float, frame_index: int,
 SLOT_EFFECTS: dict[str, SlotEffectFn] = {
     "rt_groove_chase": _slot_groove_chase,
     "rt_groove_nebula": _slot_groove_nebula,
-    "rt_post_drop_chase": _slot_post_drop_chase,
-    "rt_post_drop_nebula": _slot_post_drop_nebula,
-    "rt_drop_chase": _slot_drop_chase,
-    "rt_drop_nebula": _slot_drop_nebula,
     "rt_drop_center_burst": _slot_drop_center_burst,
     "rt_post_drop_center_comet": _slot_post_drop_center_comet,
     "rt_twinkle": _slot_twinkle,
@@ -2202,15 +1942,13 @@ SLOT_EFFECTS: dict[str, SlotEffectFn] = {
     "breakdown_full_breathing": _slot_breakdown_full_breathing,
     "breakdown_star_twinkle": _slot_breakdown_star_twinkle,
     "rt_groove_heartbeat": _slot_rt_groove_heartbeat,
-    "rt_post_drop_firework_remnants": _slot_rt_post_drop_firework_remnants,
+    "sparkle": _slot_sparkle,
 }
 
-# AWR-156 Task 9 (operator refinement 2026-07-08 late): the zone-tinted slot-5
-# white applies to NEBULA COMETS ONLY. Firework bursts and future twinkle-star
-# white accents render BAKED pure white instead -- see render()'s slot path,
-# where this set forces slot 5 to (255, 255, 255) before colorizing. Nebula
-# white comets (rt_drop_nebula / rt_post_drop_nebula) are deliberately NOT in
-# this set -- they read the zone tint once the operator mirrors the config.
+# AWR-156 Task 9 (operator refinement 2026-07-08 late): firework bursts and
+# future twinkle-star white accents render BAKED pure white -- see render()'s
+# slot path, where this set forces slot 5 to (255, 255, 255) before colorizing.
+# Slot-5 white that should instead read the zone tint stays OUT of this set.
 # No cue writes a white twinkle-star accent today (knob #8 removed it from
 # breakdown_star_twinkle; _slot_twinkle never had one) -- if one is added
 # later, it belongs in this set too.
@@ -2238,18 +1976,10 @@ _EFFECTS["buildup_balloon_comet"] = _buildup_balloon_comet
 # injected palette). Not a strobe.
 _EFFECTS["rainbow_ordered"] = _rainbow_ordered
 
-# AWR-161: contrast-gated firework explosion promotion (see the renderer
-# contrast test); baked (spark_a/spark_b are literal RGB params, not an
-# injected palette). Not a strobe -- the surge is a smooth resolve, not a gate.
-# AWR-187: superseded by drop_firework_explosion_2 (below); v1 stays registered
-# so the pre-apply live config keeps validating -- retire after the executive
-# gate runs tools/apply_firework_redesign.py.
-_EFFECTS["drop_firework_explosion"] = _drop_firework_explosion
-
 # AWR-187: firework redesign -- strobing multi-hue explosion + quick dim +
 # aggressive embers. IS a strobe (rides _hz_strobe_on), so looks referencing it
 # need allow_strobe=true + safety.allow_strobe=true (C5 validation).
-_EFFECTS["drop_firework_explosion_2"] = _drop_firework_explosion_2
+_EFFECTS["firework_burst"] = _firework_burst
 
 # AWR-188 Part G: palette-cycling comet — the rainbow generalization. A SLOT
 # effect (the point: the dispatch layer injects the track palette as
@@ -2263,10 +1993,6 @@ REALTIME_EFFECT_NAMES = frozenset(_EFFECTS.keys() | SLOT_EFFECTS.keys())
 # The firework chase strobes (slot 5 white bursts).
 REALTIME_STROBE_EFFECTS = REALTIME_STROBE_EFFECTS | frozenset({
     "post_drop_firework_chase",
-    "rt_post_drop_chase",
-    "rt_post_drop_nebula",
-    "rt_drop_chase",
-    "rt_drop_nebula",
     "rt_post_drop_center_comet",
     "drop_strobe_colorway",
     # AWR-161-FIX: _post_drop_center_comet_blue_cyan gates on _hz_strobe_on
@@ -2274,7 +2000,7 @@ REALTIME_STROBE_EFFECTS = REALTIME_STROBE_EFFECTS | frozenset({
     # pre-existing gap. Its example/live looks already carry allow_strobe=true.
     "post_drop_center_comet_blue_cyan",
     # AWR-187: the redesigned firework explosion strobes its background.
-    "drop_firework_explosion_2",
+    "firework_burst",
 })
 
 # Param allowlist for each new name = standard EDM keys (duration_beats +
@@ -2295,12 +2021,8 @@ _M2_PHASE2A_PARAM_KEYS: dict[str, frozenset[str]] = {
     "breakdown_star_twinkle_sand": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
     "rt_groove_chase": frozenset({"duration_beats", "loop_beats"}) | _SYNC_PARAM_KEYS,
     "rt_groove_nebula": frozenset({"duration_beats", "loop_beats"}) | _SYNC_PARAM_KEYS,
-    # AWR-161: Hz-gate migration -- hz/duty now dialable per look.
-    "rt_post_drop_chase": frozenset({"duration_beats", "travel_beats", "width", "hz", "duty"}) | _SYNC_PARAM_KEYS,
-    "rt_post_drop_nebula": frozenset({"duration_beats", "travel_beats", "width", "hz", "duty"}) | _SYNC_PARAM_KEYS,
-    "rt_drop_chase": frozenset({"duration_beats", "travel_beats", "width", "hz", "duty"}) | _SYNC_PARAM_KEYS,
-    "rt_drop_nebula": frozenset({"duration_beats", "travel_beats", "width", "hz", "duty"}) | _SYNC_PARAM_KEYS,
     "rt_drop_center_burst": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
+    # AWR-161: Hz-gate migration -- hz/duty now dialable per look.
     "rt_post_drop_center_comet": frozenset({"duration_beats", "hz", "duty"}) | _SYNC_PARAM_KEYS,
     "rt_twinkle": frozenset({"duration_beats"}) | _SYNC_PARAM_KEYS,
     "drop_strobe_colorway": (
@@ -2320,14 +2042,9 @@ _M2_PHASE2A_PARAM_KEYS: dict[str, frozenset[str]] = {
         frozenset({"width", "cycle_beats", "palette_span", "travel_per_beat",
                    "loop_beats", "duration_beats"}) | _SYNC_PARAM_KEYS
     ),
-    "drop_firework_explosion": (
-        frozenset({"surge_beats", "bg_level", "bg_hold", "color_a",
-                   "spark_a", "spark_b", "sparkle_density", "sparkle_size",
-                   "sparkle_life_s", "duration_beats"}) | _SYNC_PARAM_KEYS
-    ),
     # AWR-187: v2 adds the strobe knobs (hz/duty) + color_b (second palette
     # tint; also engine-injected via the multi path when color_source=engine).
-    "drop_firework_explosion_2": (
+    "firework_burst": (
         frozenset({"surge_beats", "bg_level", "bg_hold", "color_a", "color_b",
                    "spark_a", "spark_b", "sparkle_density", "sparkle_size",
                    "sparkle_life_s", "hz", "duty", "duration_beats"}) | _SYNC_PARAM_KEYS
@@ -2336,7 +2053,7 @@ _M2_PHASE2A_PARAM_KEYS: dict[str, frozenset[str]] = {
         frozenset({"base_width", "pulse_width", "decay", "loop_beats",
                    "color_mode", "duration_beats"}) | _SYNC_PARAM_KEYS
     ),
-    "rt_post_drop_firework_remnants": (
+    "sparkle": (
         frozenset({"ember_hold_beats", "ember_decay_beats",
                    "sparkle_density", "sparkle_size", "sparkle_life_s",
                    "duration_beats"}) | _SYNC_PARAM_KEYS

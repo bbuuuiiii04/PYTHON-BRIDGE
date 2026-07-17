@@ -383,16 +383,13 @@ class RegistrationTests(unittest.TestCase):
             set(_ENGINE_CUES) | {
                 "rt_groove_chase",
                 "rt_groove_nebula",
-                "rt_post_drop_chase",
-                "rt_post_drop_nebula",
-                "rt_drop_chase",
-                "rt_drop_nebula",
                 "rt_drop_center_burst",
                 "rt_post_drop_center_comet",
                 "rt_twinkle",
                 # AWR-156: promoted accepted looks.
                 "rt_groove_heartbeat",
-                "rt_post_drop_firework_remnants",
+                # AWR-2026-07-17 dedup: remnants tail renamed to `sparkle`.
+                "sparkle",
                 # AWR-188 Part G: palette-cycling comet (rainbow generalization).
                 "palette_comet",
             },

@@ -16,7 +16,6 @@ from rb_ss_bridge_v2.govee_frame_renderer import (  # noqa: E402
     SLOT_EFFECTS,
     _M2_PHASE2A_PARAM_KEYS,
     _slot_drop_center_burst,
-    _slot_drop_chase,
 )
 from rb_ss_bridge_v2.led_color_engine import LedColorEngine  # noqa: E402
 from rb_ss_bridge_v2.led_config import load_led_look_director_config  # noqa: E402
@@ -32,16 +31,6 @@ def _used_slots(field: list[list[float]]) -> set[int]:
 
 
 class PatchDTests(unittest.TestCase):
-    def _drop_chase(self, beat: float, *, segments: int = 36, frame_index: int = 0):
-        return _slot_drop_chase(
-            beat=beat,
-            local_t=0.0,
-            frame_index=frame_index,
-            params={},
-            segments=segments,
-            seed=42,
-        )
-
     def _center_burst(self, beat: float, *, segments: int = 36):
         return _slot_drop_center_burst(
             beat=beat,
@@ -52,24 +41,12 @@ class PatchDTests(unittest.TestCase):
             seed=42,
         )
 
-    def test_both_slot_functions_return_segments_x_6(self) -> None:
-        for fn in (self._drop_chase, self._center_burst):
-            for beat in (0.0, 0.5, 1.5, 8.0, 12.25):
-                field = fn(beat, segments=24)
-                self.assertEqual(len(field), 24)
-                for row in field:
-                    self.assertEqual(len(row), MAX_SLOTS)
-
-    def test_drop_chase_uses_slots_0_to_4_and_never_slot_5(self) -> None:
-        used: set[int] = set()
-        for tick in range(640):
-            field = self._drop_chase(tick / 20.0, segments=36, frame_index=tick)
-            used.update(_used_slots(field))
+    def test_center_burst_returns_segments_x_6(self) -> None:
+        for beat in (0.0, 0.5, 1.5, 8.0, 12.25):
+            field = self._center_burst(beat, segments=24)
+            self.assertEqual(len(field), 24)
             for row in field:
-                self.assertEqual(row[5], 0.0)
-        for expected_slot in range(5):
-            self.assertIn(expected_slot, used)
-        self.assertNotIn(5, used)
+                self.assertEqual(len(row), MAX_SLOTS)
 
     def test_center_burst_uses_slots_0_to_4_and_never_slot_5(self) -> None:
         used: set[int] = set()
@@ -81,42 +58,6 @@ class PatchDTests(unittest.TestCase):
         for expected_slot in range(5):
             self.assertIn(expected_slot, used)
         self.assertNotIn(5, used)
-
-    def test_drop_chase_strobe_off_frames_are_dark(self) -> None:
-        # AWR-161: the strobe gate migrated from a beat-parity gate to the
-        # wall-clock Hz gate (_hz_strobe_on), driven by local_t not beat.
-        # Pin the real contract: across one full strobe period at the
-        # reference hz 6.0 / duty 0.3 there must be BOTH lit frames and fully
-        # dark frames. A strobe that never goes dark is the exact bug class
-        # this guards, so sweep local_t over a whole 1/6 s cycle and prove
-        # both outcomes occur.
-        cycle_s = 1.0 / 6.0
-        params = {"hz": 6.0, "duty": 0.3}
-        lit = dark = False
-        for i in range(48):
-            field = _slot_drop_chase(
-                beat=0.07,
-                local_t=cycle_s * i / 48.0,
-                frame_index=i,
-                params=params,
-                segments=24,
-                seed=42,
-            )
-            if any(value > 0.0 for row in field for value in row):
-                lit = True
-            else:
-                dark = True
-        self.assertTrue(lit, "strobe never lit across a full period")
-        self.assertTrue(dark, "strobe never went dark across a full period")
-
-    def test_drop_chase_has_sparkle_intro_and_comet_phase(self) -> None:
-        sparkle_used: set[int] = set()
-        for tick in range(80):
-            sparkle_used.update(_used_slots(self._drop_chase(tick / 20.0, segments=12, frame_index=tick)))
-        self.assertTrue(sparkle_used & set(range(5)))
-
-        comet = self._drop_chase(8.0, segments=36, frame_index=0)
-        self.assertTrue(_used_slots(comet) & set(range(5)))
 
     def test_center_burst_covers_every_pixel_not_just_even(self) -> None:
         """AWR-161: removed the even-pixels-only gate -- it left gaps every
@@ -158,14 +99,13 @@ class PatchDTests(unittest.TestCase):
         self.assertFalse(accent_slots & {0, 1, 5})
 
     def test_patch_d_registrations(self) -> None:
-        for name in ("rt_drop_chase", "rt_drop_center_burst"):
+        for name in ("rt_drop_center_burst",):
             self.assertIn(name, SLOT_EFFECTS)
             self.assertIn(name, REALTIME_EFFECT_NAMES)
             keys = _M2_PHASE2A_PARAM_KEYS.get(name, frozenset())
             all_keys = REALTIME_EFFECT_PARAM_KEYS.get(name, frozenset())
             self.assertNotIn("slot_colors", keys)
             self.assertNotIn("slot_colors", all_keys)
-        self.assertIn("rt_drop_chase", REALTIME_STROBE_EFFECTS)
         self.assertNotIn("rt_drop_center_burst", REALTIME_STROBE_EFFECTS)
 
     def test_legacy_drop_names_still_resolve(self) -> None:
@@ -213,11 +153,9 @@ class PatchDTests(unittest.TestCase):
         # rt_post_drop_palette_comet gained loop_beats 4.0 below.
         expected_by_rel = {
             "config/led_look_director.example.json": {
-                "rt_post_drop_remnant_chase": ("rt_drop_chase", "engine", {"width": 4, "travel_beats": 2.0}, "post_drop", "drop"),
                 "rt_drop_center_burst": ("rt_drop_center_burst", "engine", {}, "drop", "drop"),
             },
             "config/led_look_director.json": {
-                "rt_drop_chase_freestyle_nebula": ("drop_chase_freestyle_nebula", "engine", {}, "drop", "drop"),
                 "rt_drop_center_burst": ("rt_drop_center_burst", "engine", {}, "drop", "drop"),
                 # AWR-265 FINAL: baked colorway strobes deleted; palette-fed base remains.
                 "rt_drop_strobe": ("drop_strobe_colorway", "engine", {"hz": 6.0, "duty": 0.3}, "drop", "drop"),
@@ -227,7 +165,7 @@ class PatchDTests(unittest.TestCase):
                 "rt_drop_palette_comet": ("palette_comet", "engine", {"width": 6, "cycle_beats": 1, "travel_per_beat": 30}, "drop", "drop"),
                 "rt_post_drop_palette_comet": ("palette_comet", "engine", {"width": 2, "cycle_beats": 8, "loop_beats": 4.0}, "post_drop", "post_drop"),
                 # AWR-187 post-apply firework redesign (single approved state).
-                "rt_drop_firework_explosion": ("drop_firework_explosion_2", "engine", {"color_a": [255, 240, 220], "color_b": [255, 170, 60], "spark_a": [255, 170, 60], "spark_b": [255, 240, 220], "surge_beats": 0.25, "bg_hold": 0.0, "sparkle_density": 0.5, "sparkle_size": 1.0, "sparkle_life_s": 0.15, "hz": 6.0, "duty": 0.3}, "drop", "drop"),
+                "rt_drop_firework_explosion": ("firework_burst", "engine", {"color_a": [255, 240, 220], "color_b": [255, 170, 60], "spark_a": [255, 170, 60], "spark_b": [255, 240, 220], "surge_beats": 0.25, "bg_hold": 0.0, "sparkle_density": 0.5, "sparkle_size": 1.0, "sparkle_life_s": 0.15, "hz": 6.0, "duty": 0.3}, "drop", "drop"),
             },
         }
         retired_strobes = (
@@ -271,7 +209,7 @@ class PatchDTests(unittest.TestCase):
         self.assertFalse(result.config.color_engine.step_within_section.get("drop", True))
         self.assertEqual(result.config.color_engine.fade_beats_by_role.get("drop"), 0.0)
 
-        for name in ("rt_drop_chase", "rt_drop_center_burst"):
+        for name in ("rt_drop_center_burst",):
             engine = LedColorEngine(result.config.color_engine, set_seed=123)
             engine.begin_dispatch(
                 active_deck=1,

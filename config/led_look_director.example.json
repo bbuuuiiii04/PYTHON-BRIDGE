@@ -355,9 +355,7 @@
       "rt_buildup_white_half_strobe",
       "rt_buildup_freestyle_nebula",
       "rt_groove_freestyle_nebula",
-      "rt_drop_chase_freestyle_nebula",
       "rt_drop_white_aggressive",
-      "rt_post_drop_freestyle_nebula",
       "rt_post_drop_white_shatter"
     ],
     "diy_color_tags": {
@@ -624,14 +622,6 @@
     }
   },
   "drop_pairs": {
-    "rt_drop_chase": {
-      "post_drop": "rt_post_drop_chase",
-      "duration_beats": 8.0
-    },
-    "rt_drop_chase_freestyle_nebula": {
-      "post_drop": "rt_post_drop_freestyle_nebula",
-      "duration_beats": 8.0
-    },
     "rt_drop_white_aggressive": {
       "post_drop": "rt_post_drop_white_shatter"
     },
@@ -666,11 +656,8 @@
     "enabled": true,
     "drop_look_routing": {
       "WALL": {
-        "1": [
-          "rt_drop_chase"
-        ],
+        "1": [],
         "2": [
-          "rt_drop_chase_freestyle_nebula",
           "rt_drop_white_aggressive",
           "rt_drop_center_burst",
           "rt_drop_strobe",
@@ -678,7 +665,6 @@
           "rt_drop_firework_explosion"
         ],
         "3": [
-          "rt_drop_chase_freestyle_nebula",
           "rt_drop_white_aggressive",
           "rt_drop_center_burst",
           "rt_drop_strobe",
@@ -687,11 +673,8 @@
         ]
       },
       "COMET": {
-        "1": [
-          "rt_drop_chase"
-        ],
+        "1": [],
         "2": [
-          "rt_drop_chase_freestyle_nebula",
           "rt_drop_white_aggressive",
           "rt_drop_center_burst",
           "rt_drop_strobe",
@@ -699,7 +682,6 @@
           "rt_drop_firework_explosion"
         ],
         "3": [
-          "rt_drop_chase_freestyle_nebula",
           "rt_drop_white_aggressive",
           "rt_drop_center_burst",
           "rt_drop_strobe",
@@ -708,11 +690,8 @@
         ]
       },
       "HOUSE": {
-        "1": [
-          "rt_drop_chase"
-        ],
+        "1": [],
         "2": [
-          "rt_drop_chase_freestyle_nebula",
           "rt_drop_white_aggressive",
           "rt_drop_center_burst",
           "rt_drop_strobe",
@@ -720,7 +699,6 @@
           "rt_drop_firework_explosion"
         ],
         "3": [
-          "rt_drop_chase_freestyle_nebula",
           "rt_drop_white_aggressive",
           "rt_drop_center_burst",
           "rt_drop_strobe",
@@ -729,11 +707,8 @@
         ]
       },
       "NEUTRAL": {
-        "1": [
-          "rt_drop_chase"
-        ],
+        "1": [],
         "2": [
-          "rt_drop_chase_freestyle_nebula",
           "rt_drop_white_aggressive",
           "rt_drop_center_burst",
           "rt_drop_strobe",
@@ -741,7 +716,6 @@
           "rt_drop_firework_explosion"
         ],
         "3": [
-          "rt_drop_chase_freestyle_nebula",
           "rt_drop_white_aggressive",
           "rt_drop_center_burst",
           "rt_drop_strobe",
@@ -1213,68 +1187,12 @@
         "travel_beats": 4
       }
     },
-    "rt_post_drop_remnant_chase": {
-      "target": "room_perimeter",
-      "action": "realtime",
-      "scene_ref": "rt_drop_chase",
-      "fallback": "rt_blackout",
-      "safety_class": "drop",
-      "brightness": 100,
-      "allow_strobe": true,
-      "backend": "realtime_razer",
-      "color_source": "engine",
-      "motion_style": "sharp",
-      "travel": "wide",
-      "params": {
-        "width": 4,
-        "travel_beats": 2.0
-      }
-    },
-    "rt_drop_chase_freestyle_nebula": {
-      "target": "room_perimeter",
-      "action": "realtime",
-      "scene_ref": "drop_chase_freestyle_nebula",
-      "fallback": "rt_blackout",
-      "safety_class": "drop",
-      "brightness": 100,
-      "allow_strobe": true,
-      "backend": "realtime_razer",
-      "params": {}
-    },
     "rt_drop_white_aggressive": {
       "target": "room_perimeter",
       "action": "realtime",
       "scene_ref": "drop_white_aggressive",
       "fallback": "rt_blackout",
       "safety_class": "drop",
-      "brightness": 100,
-      "allow_strobe": true,
-      "backend": "realtime_razer",
-      "params": {}
-    },
-    "rt_post_drop_chase": {
-      "target": "room_perimeter",
-      "action": "realtime",
-      "scene_ref": "rt_post_drop_chase",
-      "fallback": "rt_blackout",
-      "safety_class": "post_drop",
-      "brightness": 100,
-      "allow_strobe": true,
-      "backend": "realtime_razer",
-      "color_source": "engine",
-      "motion_style": "flowing",
-      "travel": "calm",
-      "params": {
-        "width": 4,
-        "travel_beats": 2.0
-      }
-    },
-    "rt_post_drop_freestyle_nebula": {
-      "target": "room_perimeter",
-      "action": "realtime",
-      "scene_ref": "post_drop_freestyle_nebula",
-      "fallback": "rt_blackout",
-      "safety_class": "post_drop",
       "brightness": 100,
       "allow_strobe": true,
       "backend": "realtime_razer",
@@ -1425,36 +1343,6 @@
         "loop_beats": 4.0
       }
     },
-    "rt_post_drop_remnant_nebula": {
-      "target": "room_perimeter",
-      "action": "realtime",
-      "scene_ref": "rt_drop_nebula",
-      "fallback": "rt_blackout",
-      "safety_class": "drop",
-      "brightness": 100,
-      "allow_strobe": true,
-      "backend": "realtime_razer",
-      "color_source": "engine",
-      "params": {
-        "width": 4,
-        "travel_beats": 2.0
-      }
-    },
-    "rt_post_drop_nebula": {
-      "target": "room_perimeter",
-      "action": "realtime",
-      "scene_ref": "rt_post_drop_nebula",
-      "fallback": "rt_blackout",
-      "safety_class": "post_drop",
-      "brightness": 100,
-      "allow_strobe": true,
-      "backend": "realtime_razer",
-      "color_source": "engine",
-      "params": {
-        "width": 4,
-        "travel_beats": 2.0
-      }
-    },
     "rt_buildup_balloon_comet": {
       "target": "room_perimeter",
       "action": "realtime",
@@ -1545,7 +1433,7 @@
     "rt_drop_firework_explosion": {
       "target": "room_perimeter",
       "action": "realtime",
-      "scene_ref": "drop_firework_explosion_2",
+      "scene_ref": "firework_burst",
       "fallback": "rt_blackout",
       "safety_class": "drop",
       "brightness": 100,
@@ -1603,7 +1491,7 @@
     "rt_post_drop_firework_remnants": {
       "target": "room_perimeter",
       "action": "realtime",
-      "scene_ref": "rt_post_drop_firework_remnants",
+      "scene_ref": "sparkle",
       "fallback": "rt_blackout",
       "safety_class": "post_drop",
       "brightness": 100,
@@ -1625,18 +1513,6 @@
       },
       "safety_class": "drop",
       "scene_ref": "drop_strobe_colorway",
-      "target": "room_perimeter"
-    },
-    "rt_drop_chase": {
-      "action": "realtime",
-      "allow_strobe": true,
-      "backend": "realtime_razer",
-      "brightness": 100,
-      "color_source": "engine",
-      "fallback": "rt_blackout",
-      "params": {},
-      "safety_class": "drop",
-      "scene_ref": "rt_drop_chase",
       "target": "room_perimeter"
     }
   },
@@ -1679,22 +1555,15 @@
       ],
       "pre_drop": [],
       "drop": [
-        "rt_drop_chase_freestyle_nebula",
         "rt_drop_white_aggressive",
         "rt_drop_center_burst",
-        "rt_drop_chase",
         "rt_drop_strobe",
         "rt_rainbow_drop",
         "rt_drop_firework_explosion"
       ],
       "post_drop": [
-        "rt_post_drop_chase",
-        "rt_post_drop_nebula",
-        "rt_post_drop_freestyle_nebula",
         "rt_post_drop_center_comet",
         "rt_post_drop_firework_chase",
-        "rt_post_drop_remnant_chase",
-        "rt_post_drop_remnant_nebula",
         "rt_post_drop_firework_remnants",
         "rt_rainbow_post_drop"
       ],

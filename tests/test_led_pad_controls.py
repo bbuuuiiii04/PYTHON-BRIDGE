@@ -91,7 +91,7 @@ class LedPadControlsTests(unittest.TestCase):
             self.assertEqual(item["beat_synced"], item["timing_mode"] in ("beat", "mixed"))
         self.assertEqual(catalog["beat_chase"]["timing_mode"], "beat")
         self.assertEqual(catalog["drop_white_aggressive"]["timing_mode"], "time")
-        self.assertEqual(catalog["drop_firework_explosion_2"]["timing_mode"], "mixed")
+        self.assertEqual(catalog["firework_burst"]["timing_mode"], "mixed")
         self.assertEqual(catalog["solid"]["timing_mode"], "static")
 
     def test_color_sig_metadata_matches_runner_signature_keys(self) -> None:
@@ -190,14 +190,12 @@ class LedPadControlDefaultsTests(unittest.TestCase):
             'params.get("period_beats", 4.0)',
             'params.get("floor", 0.1)',
             'params.get("speed", 1.0)',
-            'params.get("density", 0.2)',
             'params.get("duration_beats", _EDM_DURATION_BEATS)',
             'params.get("loop_beats", 4.0)',
             "params.get('burst_beats', 1.0)",
             "params.get('breath_beats', 8.0)",
             "params.get('drift_beats', 32.0)",
             'params.get("travel_beats", 1.0)',
-            'params.get("travel_beats", 2.0)',
             'params.get("width", 0.8)',
             # AWR-156 additions.
             'params.get("hz", 6.0)',
@@ -209,11 +207,9 @@ class LedPadControlDefaultsTests(unittest.TestCase):
             'params.get("base_width", 1.5)',
             'params.get("pulse_width", 3.0)',
             'params.get("color_mode", 2)',
-            'params.get("sparkle_density", 0.35)',
             'params.get("sparkle_size", 1.0)',
-            # AWR-191 wiring audit — AWR-187's drop_firework_explosion_2
-            # divergent fallbacks (PARAM_DEFAULT_OVERRIDES rows, v1 keeps the
-            # CONTROL_META globals above).
+            # AWR-191 wiring audit — AWR-187's firework_burst divergent
+            # fallbacks (PARAM_DEFAULT_OVERRIDES rows).
             'params.get("surge_beats", 0.25)',
             'params.get("bg_hold", 0.25)',
             'params.get("sparkle_density", 0.5)',
@@ -239,7 +235,6 @@ class LedPadControlDefaultsTests(unittest.TestCase):
         self.assertEqual(CONTROL_META["period_beats"]["default"], 4.0)
         self.assertEqual(CONTROL_META["floor"]["default"], 0.1)
         self.assertEqual(CONTROL_META["speed"]["default"], 1.0)
-        self.assertEqual(CONTROL_META["density"]["default"], 0.2)
         self.assertEqual(CONTROL_META["duration_beats"]["default"], 32.0)
         self.assertEqual(CONTROL_META["loop_beats"]["default"], 4.0)
         self.assertEqual(CONTROL_META["burst_beats"]["default"], 1.0)
@@ -282,17 +277,13 @@ class LedPadControlDefaultsTests(unittest.TestCase):
         expected = {
             "groove_center_chase": {"travel_beats": 1.0},
             "post_drop_firework_chase": {"travel_beats": 1.0},
-            "rt_post_drop_chase": {"travel_beats": 2.0, "width": 0.8},
-            "rt_post_drop_nebula": {"travel_beats": 2.0, "width": 0.8},
-            "rt_drop_chase": {"travel_beats": 2.0, "width": 0.8},
-            "rt_drop_nebula": {"travel_beats": 2.0, "width": 0.8},
             # AWR-156: the Hz gate's duty fallback (0.3) differs from
             # beat_strobe's (0.5, the global CONTROL_META default).
             "drop_white_aggressive": {"duty": 0.3},
             "drop_strobe_colorway": {"duty": 0.3},
-            # AWR-187: the redesigned firework's fallbacks diverge from v1's
-            # (which set the CONTROL_META globals).
-            "drop_firework_explosion_2": {
+            # AWR-187: the redesigned firework's fallbacks diverge from the
+            # retired v1's (which set the CONTROL_META globals).
+            "firework_burst": {
                 "surge_beats": 0.25, "bg_hold": 0.25, "sparkle_density": 0.5,
                 "sparkle_life_s": 0.15, "duty": 0.3,
             },

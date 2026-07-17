@@ -72,7 +72,6 @@ CONTROL_META: dict[str, dict[str, Any]] = {
     "span_beats": _meta("Span Beats", "number", min=0, max=32, step=0.25, help="How many beats the span covers.", default=1.0),
     "period_beats": _meta("Breath Beats", "number", min=0, max=32, step=0.25, help="How many beats a pulse takes.", default=4.0),
     "floor": _meta("Minimum Glow", "number", min=0, max=1, step=0.05, help="The dimmest point in the pulse.", default=0.1),
-    "density": _meta("Sparkle Density", "number", min=0, max=1, step=0.05, help="How many sparkles appear.", default=0.2),
     "duty": _meta("Flash length (%)", "number", min=0, max=1, step=0.05, help="How long each flash stays on (fraction of the cycle).", default=0.5),
     "subdivision": _meta(
         "Flashes per beat",
@@ -133,7 +132,7 @@ CONTROL_META: dict[str, dict[str, Any]] = {
     "sparkle_size": _meta("Sparkle Size (LEDs)", "number", min=0.5, max=3, step=0.1, help="How wide each ember appears.", default=1.0),
     "sparkle_life_s": _meta("Sparkle Life (seconds)", "number", min=0.1, max=2, step=0.05, help="How many real seconds each ember lives.", default=0.8),
     # AWR-161 additions (defaults hand-extracted from govee_frame_renderer.py's
-    # `_rainbow_ordered` / `_drop_firework_explosion` params.get fallbacks).
+    # `_rainbow_ordered` / `_firework_burst` params.get fallbacks).
     "cycle_beats": _meta("Color cycle (beats)", "number", min=1, max=64, step=0.5, help="How many beats one full color cycle takes.", default=8.0),
     "rainbow_span": _meta("Rainbow Span", "number", min=0.1, max=2, step=0.05, help="How much of the spectrum spans the strip.", default=1.0),
     "travel_per_beat": _meta("Travel Per Beat", "number", min=2, max=120, step=1, help="Beat-locked head advance (auto = legacy loop pace).", advanced=True, default=None),
@@ -161,18 +160,14 @@ for _key, _entry in CONTROL_META.items():
 PARAM_DEFAULT_OVERRIDES: dict[str, dict[str, Any]] = {
     "groove_center_chase": {"travel_beats": 1.0},
     "post_drop_firework_chase": {"travel_beats": 1.0},
-    "rt_post_drop_chase": {"travel_beats": 2.0, "width": 0.8},
-    "rt_post_drop_nebula": {"travel_beats": 2.0, "width": 0.8},
-    "rt_drop_chase": {"travel_beats": 2.0, "width": 0.8},
-    "rt_drop_nebula": {"travel_beats": 2.0, "width": 0.8},
     # AWR-156: the Hz gate's duty fallback (0.3) differs from beat_strobe's
     # (0.5, the global CONTROL_META default).
     "drop_white_aggressive": {"duty": 0.3},
     "drop_strobe_colorway": {"duty": 0.3},
-    # AWR-187: the redesigned firework's fallbacks diverge from v1's (which set
-    # the CONTROL_META globals): quicker surge, much lower hold, denser +
-    # shorter-lived embers, Hz-gate duty 0.3.
-    "drop_firework_explosion_2": {
+    # AWR-187: the redesigned firework's fallbacks diverge from the retired
+    # v1's (which set the CONTROL_META globals): quicker surge, much lower hold,
+    # denser + shorter-lived embers, Hz-gate duty 0.3.
+    "firework_burst": {
         "surge_beats": 0.25, "bg_hold": 0.25, "sparkle_density": 0.5,
         "sparkle_life_s": 0.15, "duty": 0.3,
     },
@@ -199,7 +194,6 @@ _COMET_MOTION_KEYS: tuple[str, ...] = (
 # bucket behavior (FABLE-3 A7 — verify, don't blanket).
 _RETRIGGER_SYNC_BY_EFFECT: dict[str, tuple[str, ...]] = {
     "drop_burst": ("sync_mode", "beat_division"),  # decay reads local_t
-    "sparkle": ("sync_mode", "beat_division"),  # seed^bucket on spawn
     # beat_chase / beat_strobe / color_pulse / bar_wipe: render from beat phase
     # only — retrigger vs continuous is visually identical on a forward grid.
 }
@@ -209,10 +203,6 @@ _RETRIGGER_SYNC_BY_EFFECT: dict[str, tuple[str, ...]] = {
 _CLASS_C_EXTRA_SYNC: dict[str, tuple[str, ...]] = {
     "groove_center_chase": ("travel_beats",),
     "post_drop_firework_chase": ("travel_beats",),
-    "rt_post_drop_chase": ("travel_beats", "width"),
-    "rt_post_drop_nebula": ("travel_beats", "width"),
-    "rt_drop_chase": ("travel_beats", "width"),
-    "rt_drop_nebula": ("travel_beats", "width"),
     "rt_groove_chase": ("width",),
     "rt_groove_nebula": ("width",),
     "rt_post_drop_center_comet": ("width",),
@@ -222,13 +212,12 @@ _CLASS_C_EXTRA_SYNC: dict[str, tuple[str, ...]] = {
 
 # Allowlisted but unread / no visible frame delta for that effect.
 _CLASS_C_HIDE: dict[str, frozenset[str]] = {
-    "rt_post_drop_firework_remnants": frozenset(
+    "sparkle": frozenset(
         {"sparkle_density", "sparkle_size", "sparkle_life_s"}
     ),
     "drop_strobe_colorway": frozenset({"duration_beats"}),
     "rainbow_ordered": frozenset({"duration_beats"}),
     "palette_comet": frozenset({"duration_beats"}),
-    "drop_firework_explosion": frozenset({"duration_beats"}),
     # Short-period loops: duration wrap lands on an identical animation phase
     # (cue 0 vs cue 8 look the same). Keep duration on ramps/builds where the
     # pad preview actually changes.
@@ -242,7 +231,7 @@ _CLASS_C_HIDE: dict[str, frozenset[str]] = {
     "rt_groove_heartbeat": frozenset({"duration_beats"}),
     # color_b is allowlisted for engine multi-inject; baked probe is dominated
     # by color_a / spark path in the short surge window.
-    "drop_firework_explosion_2": frozenset({"duration_beats", "color_b"}),
+    "firework_burst": frozenset({"duration_beats", "color_b"}),
 }
 
 
@@ -289,7 +278,6 @@ RENDER_GROUPS: dict[str, tuple[str, ...]] = {
     "Ambient & breakdown": (
         "breathe",
         "gradient_sweep",
-        "sparkle",
         "twinkle_blue",
         "rt_twinkle",
         "breakdown_full_breathing",
@@ -330,14 +318,10 @@ RENDER_GROUPS: dict[str, tuple[str, ...]] = {
         "drop_chase_green",
         "drop_chase_cyan_white",
         "drop_center_burst_blue_cyan",
-        "drop_chase_freestyle_nebula",
         "drop_white_aggressive",
-        "rt_drop_chase",
-        "rt_drop_nebula",
         "rt_drop_center_burst",
         "drop_strobe_colorway",
-        "drop_firework_explosion",
-        "drop_firework_explosion_2",
+        "firework_burst",
         "rainbow_ordered",
         "palette_comet",
     ),
@@ -348,13 +332,10 @@ RENDER_GROUPS: dict[str, tuple[str, ...]] = {
         "post_drop_chase_green",
         "post_drop_chase_cyan_white",
         "post_drop_center_comet_blue_cyan",
-        "post_drop_freestyle_nebula",
         "post_drop_white_shatter",
-        "rt_post_drop_chase",
-        "rt_post_drop_nebula",
         "rt_post_drop_center_comet",
         "post_drop_firework_chase",
-        "rt_post_drop_firework_remnants",
+        "sparkle",
     ),
 }
 
@@ -382,13 +363,12 @@ for _name in (
     "buildup_freestyle_nebula", "buildup_ramp_1", "buildup_ramp_2",
     "buildup_white_zone_strobe", "buildup_white_half_strobe",
     "drop_chase_blue", "drop_chase_cyan", "drop_chase_red", "drop_chase_green",
-    "drop_chase_cyan_white", "drop_chase_freestyle_nebula",
+    "drop_chase_cyan_white",
     "post_drop_chase_blue", "post_drop_chase_cyan", "post_drop_chase_red",
     "post_drop_chase_green", "post_drop_chase_cyan_white",
-    "post_drop_freestyle_nebula", "post_drop_center_comet_blue_cyan",
-    "post_drop_white_shatter", "drop_firework_explosion", "drop_firework_explosion_2",
-    "rt_drop_chase", "rt_drop_nebula", "rt_post_drop_chase", "rt_post_drop_nebula",
-    "rt_post_drop_center_comet", "rt_post_drop_firework_remnants",
+    "post_drop_center_comet_blue_cyan",
+    "post_drop_white_shatter", "firework_burst",
+    "rt_post_drop_center_comet",
 ):
     EFFECT_TIMING_MODES[_name] = "mixed"
 

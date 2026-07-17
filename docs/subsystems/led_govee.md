@@ -31,6 +31,38 @@ Audit P3 (2026-07-03):
   StateManager push-loop caller; the runner thread now performs that teardown before another frame
   is sent.
 
+Cue dedup — the comet-train kill (2026-07-17; implemented, software-tested,
+hardware-unvalidated): the operator ran the post-drop bank live and rejected the comet-train family
+as indistinguishable repeats. Frame-level verification agreed: `rt_post_drop_chase` and
+`rt_post_drop_nebula` were the same comet train (nebula differed only by white on odd spawn
+indices), as were `rt_drop_chase` / `rt_drop_nebula` with an 8-beat sparkle intro. Deleted this
+round:
+- SLOT_EFFECTS `rt_post_drop_chase`, `rt_post_drop_nebula`, `rt_drop_chase`, `rt_drop_nebula` and
+  their fns, with their registry / param-allowlist / description / strobe-list entries.
+- `_EFFECTS` aliases `post_drop_freestyle_nebula` + `drop_chase_freestyle_nebula` (dispatch branches
+  to the v1 baked-color prototypes `_post_drop_nebula` / `_drop_nebula`, both now orphaned and gone).
+- The legacy frame effect `sparkle` (zero config users) and the AWR-161 v1 `drop_firework_explosion`
+  (zero config users, superseded by v2).
+
+Renamed (looks say WHEN, effects say WHAT — no name may live in both layers):
+- `rt_post_drop_firework_remnants` -> `sparkle` (fn `_slot_sparkle`). It is not a
+  `_RETRIGGER_EFFECTS` member, so `default_sync_mode('sparkle')` is `continuous` — the opposite of
+  the legacy frame effect that used to own the name. Pinned by `SparkleRenameTests`.
+- `drop_firework_explosion_2` -> `firework_burst` (fn `_firework_burst`).
+
+Every surviving effect renders byte-identical frames: this round is deletions and re-keying only,
+no renderer body logic was edited (the determinism/golden tests are the proof). `_drop_chase_spawn_times`
+and `_drop_chase_sparkle_field` survive — both still have live callers. The three dead sparkle params
+(`sparkle_density`, `sparkle_life_s`, `sparkle_size`) stay on the sparkle look AND stay allowlisted:
+dropping them would trip the C5 fail-safe on the live look's params. Pad `CONTROL_META` lost
+`density` (the legacy sparkle's only param; zero effects allowlist it now).
+
+Config: live 65 -> 58 looks; drop bank 6 -> 5, post_drop bank 9 -> 4. Deleted looks
+`rt_post_drop_chase`, `rt_post_drop_nebula`, `rt_post_drop_freestyle_nebula`,
+`rt_post_drop_remnant_chase`, `rt_post_drop_remnant_nebula`, `rt_drop_nebula`,
+`rt_drop_chase_freestyle_nebula` plus their bank/pair/routing/exempt entries. Both configs load with
+zero errors. Everything lands on the NEXT bridge start; nothing here touched a running process.
+
 Speed/size law (AWR-197, 2026-07-10; staged, software-tested, hardware-unvalidated): realtime
 groove, breakdown, drop, and post-drop looks carry explicit beat-speed parameters by musical role,
 with big drop looks paired to smaller post-drop echoes. The law's terms live in
@@ -542,8 +574,8 @@ LED round 2: strobe-gate rebuild + accepted-look promotion (AWR-156, 2026-07-08;
   COMETS ONLY. A new `BAKED_WHITE_SLOT5_EFFECTS = frozenset({"post_drop_firework_chase"})` set,
   checked at `GoveeFrameRenderer.render()`'s slot-color resolution site, forces slot 5 to literal
   `(255, 255, 255)` for any effect in the set before colorizing — one site covers bridge, pad, and
-  lab injection paths alike. Nebula white comets (`rt_drop_nebula`/`rt_post_drop_nebula`) are
-  deliberately NOT in the set — they read the zone tint once mirrored. `rt_post_drop_firework_remnants`'s
+  lab injection paths alike. Slot-5 white outside the set reads the zone tint (2026-07-17: the
+  nebula comets that exercised that branch are deleted, so no cue reads it today). `rt_post_drop_firework_remnants`'s
   slot-5 dimming background is a background, not a white accent, and stays zone-tinted (an
   executive-visibility boundary note, not a gap — a one-line addition if the operator wants it
   pure). No cue writes a twinkle-star white accent today (AWR-152's knob #8 removed it from
@@ -1022,7 +1054,7 @@ Config:
   already accepted this session, the room holds its current look instead of blacking out. Set it
   `false` to restore the pre-AWR-157 blackout-on-blank behavior. Absent key parses as `true`.
 - LED Pad persists its edit draft in `config/led_look_director.draft.json` and commits only after the full draft passes `load_led_look_director_config_from_dict()`. In the UI this draft commit is labeled **Apply** (2026-07-03 visual reskin; the `/api/commit` route name is unchanged, and the reskin — design tokens plus a vendored Archivo font in `tools/led_pad_assets/` — changes no runtime behavior). The pad-only Drafts bank lives in root `_pad_meta.drafts`, so those looks are automation-invisible unless moved into `banks.default`.
-- LED Pad Locked Palette writes through `color_engine.locked_palette_by_look`; playback of a locked look ignores the session Test Palette. Renderer param unlocks are frame-identical when omitted: `loop_beats` on `rt_groove_chase`/`rt_groove_nebula`; `travel_beats` + `width` on `rt_drop_chase`, `rt_post_drop_chase`, `rt_drop_nebula`, and `rt_post_drop_nebula`; `travel_beats` on `groove_center_chase` and `post_drop_firework_chase`.
+- LED Pad Locked Palette writes through `color_engine.locked_palette_by_look`; playback of a locked look ignores the session Test Palette. Renderer param unlocks are frame-identical when omitted: `loop_beats` on `rt_groove_chase`/`rt_groove_nebula`; `travel_beats` on `groove_center_chase` and `post_drop_firework_chase`.
 - AWR-240 (2026-07-15): with lighting-engine v2 enabled, `_inject_engine_colors` in `tools/led_pad_web.py` must `set_scripted_stand_down(True)` on its fresh offline `LedColorEngine` before Test Palette fill. Without that, v2 has no dressing/manual color and returns empty `slot_colors`, so pad preview and lab slot cues paint black (slots 1–5) / white-only (slot 0). Bridge runtime modules are unchanged. Covered by `tests/test_led_pad_service.py` (`test_v2_enabled_pad_still_injects_slot_colors_from_test_palette`).
 - AWR-241 (2026-07-15): Template Lab beat meter + metronome. `PadPlayback.status()` includes `beat` from `SyntheticClock` (frozen while stopped). Lab UI: preview derives beat from `frameIndex * bpm / (60 * fps)` (exact; counter `bar B · beat K`); live phase-locks to polled `status.beat` (label **beat phase (server)**). Optional WebAudio click (off by default) — preview = exact, live = synced ± poll jitter. Covered by `tests/test_led_pad_playback.py` (`test_status_beat_advances_with_fake_time`); JS is manual-smoke only.
 - AWR-242 (2026-07-15): Template Lab UX overhaul (lab route only). `LabRegistry.save` persists optional `target_role` (empty or ambient/groove/buildup/pre_drop/drop/post_drop/breakdown/utility); list payload includes it. Lab UI: searchable/filterable/grouped draft list, Phrase+Timing selects (timing_mode settable), preview-first detail layout, client health strip + Self-test composing existing `/api/runtime_status` + `/api/lab/reload` + `/api/lab/preview`. New CSS scoped under `.lab-route`. Covered by `tests/test_led_pad_lab.py` (`test_registry_target_role_*`); Pad route markup untouched.
@@ -1048,7 +1080,7 @@ Config:
 - AWR-263 (2026-07-16): Lab control truth + New cue clone (master-plan R4). New dialog = display name (auto-slug) + start-from working draft; `param_specs` gains `select`; Zone/Texture/Color Mode worded dropdowns; firework specs → spark_a/spark_b family; draft labels preserved (`cycle_beats` → "Color cycle (beats)"); JSON blur re-syncs controls; preview retunes while Preview runs; search relaxes status chips with note; self-test clears on draft switch. Covered by `tests/test_awr263_lab_control_truth.py`. Lab-lane only; no bridge restart.
 - AWR-264 (2026-07-16): Language + hierarchy rename-only (master-plan R5). Musician-legible CONTROL_META + pad/lab/sim copy (Flashes per second / Flash length (%) / Save to show / Match the track / …). Look tiles lead with human effect name; machine id demoted; `legacy_color_suffix` colorway chips (A5). Pad rename/duplicate auto-slug. Sim: Saved look, corners, Reverse direction, Seed behind Advanced, human picker labels. Standing gate `tools/check_ui_jargon.py` (hard check). Zero lighting behavior change; no restarts in-round. Covered by `tests/test_awr264_language_hierarchy.py`.
 - AWR-265 (2026-07-16): Color-clone collapse COMPLETE (master-plan R10). Steps 0–3 + FINAL: all RT color-suffix clones deleted from example+live; `legacy_color_suffix` bank gone; pad Legacy tab hides when empty. Residual cyan-white / blue-ice / blue-twinkle pairs promoted into in-rotation `blue_cyan` by reordering `scale_stops` so `ice` sits between `cyan` and `blue` (existing cyan→blue multi ends preserved; slots also carry exact ice + reserved white). Living gate: `tests/test_awr265_color_clone_collapse.py` color-level A/B. Tools `tools/awr265_color_clone_collapse.py` / `tools/awr265_step3_delete_clones.py` stay runnable-honest on clone-free configs. Config-only (no `led_color_engine.py` edits). Loader `available=True` on example+live. Bridge was stopped; no restart by implementer.
-- AWR-256 (2026-07-15): `rt_post_drop_firework_remnants` wires `ember_hold_beats` (default 8, clamp 1..32) and `ember_decay_beats` (default 0 hard cut, clamp 0..8). Shared `_drop_chase_sparkle_field` keeps default hold byte-identical to AWR-215; longer holds map onto the classic 8-beat density curve (no comet half). Dead `dim_beats` removed from allowlist + pad `CONTROL_META`. Covered by `PostDropFireworkRemnantsTests` in `tests/test_govee_frame_renderer.py`. Bridge restart required to load live params; implementer did not restart.
+- AWR-256 (2026-07-15): the remnants tail (renamed `sparkle` 2026-07-17) wires `ember_hold_beats` (default 8, clamp 1..32) and `ember_decay_beats` (default 0 hard cut, clamp 0..8). Shared `_drop_chase_sparkle_field` keeps default hold byte-identical to AWR-215; longer holds map onto the classic 8-beat density curve (no comet half). Dead `dim_beats` removed from allowlist + pad `CONTROL_META`. Covered by `PostDropFireworkRemnantsTests` in `tests/test_govee_frame_renderer.py`. Bridge restart required to load live params; implementer did not restart.
 - AWR-258 (2026-07-15): Data-integrity round. Lab writes take the service lock + optional `updated` CAS (409 `stale_entry`); pad Save includes `locked_palette`; sim Save carries `base_mtime` (409 `stale_profile`), rotates `.bak-*` (keep 5), and refuses overwrite while `profile_error`; beforeunload on lab/pad/sim; lab reconnect stashes dirty fields; rotating snapshots for `config/led_lab/*` on drafts write. Covered by `tests/test_led_pad_lab.py`, `tests/test_led_sim_service.py`, `tests/test_led_ui_integrity.py`. Bridge runtime untouched.
 - AWR-259 (2026-07-15): Pad integrity tail (master-plan R1). Pad look Save CAS via `_pad_meta.looks[<name>].updated` (409 `stale_look`; UI Reload re-opens editor); top-bar **Discard all changes** with honest whole-draft confirm + dirty-look count; Lab `_last_lab_applied` persisted to `led_lab/last_applied.json` (Accept after restart still snapshotted); `snapshot_fallback` + Lab UI note when Accept has no snapshot; shared `EDITOR_FIELDS` constant for pad dirty/save parity. Covered by `tests/test_led_pad_service.py`, `tests/test_led_ui_integrity.py`. Bridge runtime untouched; no pad/bridge restart by implementer.
 - AWR-260 (2026-07-16): Accept wires a lab draft into production immediately. `lab_accept` persists status=accepted, writes a realtime look with `scene_ref=lab:<draft>`, places it in the `target_role` bank (or the pad **Untagged** shelf = `_pad_meta.drafts` when untagged), auto-Applies via the existing commit path, and appends `led_reload_looks`. The frame-engine child renders `lab:*` / `lab_adapter` through `govee_lab_adapter.LabProductionAdapter` (fail-dark + ~10 ms budget disable-for-session). Adapter resolves draft entry **name → fn** from sibling `drafts.json` (clone/Save-as rename case; fail-soft to name-only if drafts.json is missing). `led_reload_looks` reloads the look-director config and re-imports lab effects + the fn map off the push loop. Reject stays a status flip with plain copy. Covered by `tests/test_awr260_lab_accept_wirein.py`. SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED; no bridge restart in-round.
@@ -1067,7 +1099,7 @@ Config:
 
 Tests:
 - inspect `tests/` for LED color engine, Govee realtime runner, frame renderer, state manager LED integration, and config tests
-- slot-color coverage lives in `tests/test_led_color_engine.py`, `tests/test_led_color_engine_m2_phase1.py`, `tests/test_led_color_engine_m2_patch_b.py`, `tests/test_led_color_engine_m2_patch_c.py`, `tests/test_led_color_engine_m2_patch_d.py`, `tests/test_led_color_engine_m2_patch_e1.py`, `tests/test_led_color_engine_m2_patch_e2.py`, `tests/test_led_color_engine_m2_patch_e3.py`, `tests/test_led_color_engine_m2_patch_s.py`, `tests/test_led_color_engine_m2_patch_f.py`, and config validation coverage in `tests/test_color_engine_config.py`
+- slot-color coverage lives in `tests/test_led_color_engine.py`, `tests/test_led_color_engine_m2_phase1.py`, `tests/test_led_color_engine_m2_patch_b.py`, `tests/test_led_color_engine_m2_patch_d.py`, `tests/test_led_color_engine_m2_patch_e1.py`, `tests/test_led_color_engine_m2_patch_e2.py`, `tests/test_led_color_engine_m2_patch_e3.py`, `tests/test_led_color_engine_m2_patch_s.py`, `tests/test_led_color_engine_m2_patch_f.py`, and config validation coverage in `tests/test_color_engine_config.py`
 - scripted-mode LED policy coverage lives in `tests/test_led_config.py` and `tests/test_led_state_manager.py`, including blackout mapping for groove/drop/post-drop; this is software validation only and does not prove room-visible Govee behavior during scripted SoundSwitch tracks.
 - blank-role hold guard coverage (AWR-157) lives in `tests/test_led_state_manager.py`
   (`BlankRoleHoldTests`): suppression + look retention while playing, no-op when not playing or
@@ -1153,15 +1185,11 @@ M2.5 slot cues in SLOT_EFFECTS (govee_frame_renderer.py):
 | breakdown_star_twinkle | _slot_breakdown_star_twinkle | breakdown | no | software-validated |
 | rt_groove_chase | _slot_groove_chase | groove | no | software-validated |
 | rt_groove_nebula | _slot_groove_nebula | groove | no | software-validated (Patch E1) |
-| rt_post_drop_chase | _slot_post_drop_chase | post_drop | yes | software-validated |
-| rt_post_drop_nebula | _slot_post_drop_nebula | post_drop | yes | software-validated (Patch E1) |
-| rt_drop_chase | _slot_drop_chase | drop | yes | software-validated |
-| rt_drop_nebula | _slot_drop_nebula | drop | yes | software-validated (Patch E1) |
 | rt_drop_center_burst | _slot_drop_center_burst | drop | no | software-validated |
 | rt_post_drop_center_comet | _slot_post_drop_center_comet | post_drop | yes | software-validated (Patch E2) |
 | rt_twinkle | _slot_twinkle | ambient | no | software-validated (Patch E3) |
 | rt_groove_heartbeat | _slot_rt_groove_heartbeat | groove | no | software-validated (AWR-156) |
-| rt_post_drop_firework_remnants | _slot_rt_post_drop_firework_remnants | post_drop | no | software-validated (AWR-215/256: ember_hold_beats + ember_decay_beats; dim_beats removed) |
+| sparkle | _slot_sparkle | post_drop | no | software-validated (AWR-215/256: ember_hold_beats + ember_decay_beats; dim_beats removed. Renamed from `rt_post_drop_firework_remnants` 2026-07-17) |
 
 Non-slot (baked) frame effects added by AWR-156/AWR-161, registered in `_EFFECTS`:
 
@@ -1170,11 +1198,13 @@ Non-slot (baked) frame effects added by AWR-156/AWR-161, registered in `_EFFECTS
 | drop_strobe_colorway | _drop_strobe_colorway | drop | yes | software-validated (AWR-156) |
 | buildup_balloon_comet | _buildup_balloon_comet | buildup | no | software-validated (AWR-156) |
 | rainbow_ordered | _rainbow_ordered | drop / post_drop | no | software-validated (AWR-161) |
-| drop_firework_explosion | _drop_firework_explosion | drop | no | software-validated, contrast-gated (AWR-161) |
+| firework_burst | _firework_burst | drop | yes | software-validated, contrast-gated (AWR-187; renamed from `drop_firework_explosion_2` 2026-07-17. The AWR-161 v1 `drop_firework_explosion` was deleted the same round) |
 
-AWR-156 look-name rename (config only; the `Scene ref` column above is unaffected — `scene_ref`
-never changed): the example config's `rt_drop_chase` / `rt_drop_nebula` LOOKS are now named
-`rt_post_drop_remnant_chase` / `rt_post_drop_remnant_nebula` and live in `banks.default.post_drop`.
+Superseded by the 2026-07-17 cue dedup, kept for history: "AWR-156 look-name rename (config only;
+the `Scene ref` column above is unaffected — `scene_ref` never changed): the example config's
+`rt_drop_chase` / `rt_drop_nebula` LOOKS are now named `rt_post_drop_remnant_chase` /
+`rt_post_drop_remnant_nebula` and live in `banks.default.post_drop`." Both looks, both renames, and
+their scene_refs were deleted 2026-07-17 — see the dedup entry below.
 
 Patch E pairings:
 - rt_drop_center_burst pairs explicitly to rt_post_drop_center_comet through `drop_pairs`.
@@ -1182,13 +1212,13 @@ Patch E pairings:
   deleted as part of the bank recast (a post_drop-role look never fires a pair). Superseded line,
   kept for history: "rt_drop_nebula pairs explicitly to rt_post_drop_nebula through `drop_pairs`."
 - AWR-161: rt_rainbow_drop pairs to rt_rainbow_post_drop; rt_drop_firework_explosion pairs to the
-  existing rt_post_drop_firework_remnants (the AWR-149 explosion->remnants arc, now real) —
-  both through `drop_pairs`.
+  existing rt_post_drop_sparkle look (the AWR-149 explosion->remnants arc, now real) — both through
+  `drop_pairs`. (2026-07-17: the look's scene_ref is now `sparkle`; the pairing itself is unchanged.)
 
 All slot cues, `random_with_mono_chance`, and Patch F bank cleanup: SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
-Phase 3 renderer params: `rt_groove_chase`/`rt_groove_nebula` accept `loop_beats`; `rt_drop_chase`/`rt_post_drop_chase`/`rt_drop_nebula`/`rt_post_drop_nebula` accept `travel_beats` and `width`; `groove_center_chase`/`post_drop_firework_chase` accept `travel_beats`. Missing params preserve previous frames.
-AWR-161: `hz`/`duty` are now dialable on all 18 migrated strobe effects (the non-slot chase/nebula/center-comet family plus `rt_post_drop_chase`/`rt_post_drop_nebula`/`rt_drop_chase`/`rt_drop_nebula`/`rt_post_drop_center_comet`), same defaults/caps as `drop_white_aggressive` (hz 0.5-10 default 6.0, duty 0.05-0.5 default 0.3). `rainbow_ordered` accepts `width`/`cycle_beats`/`rainbow_span`/`travel_per_beat`/`loop_beats`. `drop_firework_explosion` accepts `surge_beats`/`bg_level`/`bg_hold`/`color_a`/`spark_a`/`spark_b`/`sparkle_density`/`sparkle_size`/`sparkle_life_s`.
-The stable-hue sparkle (rt_drop_chase), center-burst 0-2/2-4 accent band split (rt_drop_center_burst), Patch E1 looks (rt_groove_nebula, rt_drop_nebula, rt_post_drop_nebula), Patch E2 center-comet (rt_post_drop_center_comet), Patch E3 ambient twinkle (rt_twinkle), Patch S probabilistic solid-color outcomes, and Patch F generic-default bank rotation still need operator hardware visual sign-off. AWR-161 additions also await hardware sign-off: the ten migrated strobe gates' Hz feel at the mirrored config, the rainbow pair (rt_rainbow_drop/rt_rainbow_post_drop), the firework explosion (rt_drop_firework_explosion), and the center-burst all-pixel fix.
+Phase 3 renderer params: `rt_groove_chase`/`rt_groove_nebula` accept `loop_beats`; `groove_center_chase`/`post_drop_firework_chase` accept `travel_beats`. Missing params preserve previous frames. (The `travel_beats`/`width` row for the four slot comet-trains went with them on 2026-07-17.)
+AWR-161: `hz`/`duty` are dialable on the migrated strobe effects (the surviving non-slot chase/center-comet family plus `rt_post_drop_center_comet`), same defaults/caps as `drop_white_aggressive` (hz 0.5-10 default 6.0, duty 0.05-0.5 default 0.3). The 2026-07-17 dedup deleted the freestyle-nebula aliases and the four slot comet-trains from that migrated set. `rainbow_ordered` accepts `width`/`cycle_beats`/`rainbow_span`/`travel_per_beat`/`loop_beats`. `firework_burst` accepts `surge_beats`/`bg_level`/`bg_hold`/`color_a`/`color_b`/`spark_a`/`spark_b`/`sparkle_density`/`sparkle_size`/`sparkle_life_s`/`hz`/`duty`.
+The center-burst 0-2/2-4 accent band split (rt_drop_center_burst), the surviving Patch E1 look (rt_groove_nebula), Patch E2 center-comet (rt_post_drop_center_comet), Patch E3 ambient twinkle (rt_twinkle), Patch S probabilistic solid-color outcomes, and Patch F generic-default bank rotation still need operator hardware visual sign-off. AWR-161 additions also await hardware sign-off: the surviving migrated strobe gates' Hz feel at the mirrored config, the rainbow pair (rt_rainbow_drop/rt_rainbow_post_drop), the firework burst (rt_drop_firework_explosion), and the center-burst all-pixel fix.
 
 Known risks:
 - API/cloud rate limits

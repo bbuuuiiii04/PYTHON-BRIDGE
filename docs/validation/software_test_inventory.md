@@ -406,9 +406,8 @@ physical strip behavior, or room-visible output.
 |---|---|---|
 | tests/test_led_color_engine_m2_phase1.py | Phase 2a/b engine cues, renderer byte-identity, resolve_slot_colors | Phase 1 |
 | tests/test_led_color_engine_m2_patch_b.py | rt_groove_chase slotization | Patch B |
-| tests/test_led_color_engine_m2_patch_c.py | rt_post_drop_chase slotization | Patch C |
-| tests/test_led_color_engine_m2_patch_d.py | rt_drop_chase, rt_drop_center_burst slotization | Patch D |
-| tests/test_led_color_engine_m2_patch_e1.py | rt_groove_nebula, rt_drop_nebula, rt_post_drop_nebula slot fns plus rt_drop_nebula pairing | Patch E1 |
+| tests/test_led_color_engine_m2_patch_d.py | rt_drop_center_burst slotization (the Patch D drop chase was retired by the 2026-07-17 cue dedup; the Patch C file went with its only subject) | Patch D |
+| tests/test_led_color_engine_m2_patch_e1.py | rt_groove_nebula slot fn (the drop / post-drop nebula halves were retired by the 2026-07-17 cue dedup) | Patch E1 |
 | tests/test_led_color_engine_m2_patch_e2.py | rt_post_drop_center_comet slot fn, rt_drop_center_burst pairing, legacy center-comet regression, solid slot-color selection for slot cues | Patch E2 |
 | tests/test_led_color_engine_m2_patch_e3.py | rt_twinkle slot fn, generic ambient config, legacy twinkle_blue regression, solid slot-color selection for rt_twinkle | Patch E3 |
 | tests/test_led_color_engine_m2_patch_s.py | random_with_mono_chance mono hit/miss behavior, chance 0 equality with random_with_replacement, determinism, stepping, fade tail, journey RNG isolation, allowlist regression | Patch S |
