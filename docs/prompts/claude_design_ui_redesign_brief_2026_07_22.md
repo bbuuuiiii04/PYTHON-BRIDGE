@@ -1,202 +1,205 @@
-# Claude Design handoff — lighting console UI redesign (2026-07-22)
+# Claude Design handoff — full lighting console UI/UX redesign (2026-07-22)
 
 Status: prompt handoff for claude.ai/design. Not documentation of current truth — the inventory
 below was verified against source on 2026-07-22 and goes stale from there. The prototype this
 produces is a design direction only; landing it in the bridge is a separate implementation step.
+Operator intent: the design agent gets full creative authority ("think of everything itself");
+this file supplies only facts it cannot know and constraints that are real product requirements.
 
 Everything below the line is the prompt to paste into a new claude.ai/design project.
 
 ---
 
-# Redesign brief: DJ lighting console (three-screen web app)
+# Redesign my DJ lighting console — full UI/UX, from first principles
 
-## What this is
+## Your role
 
-You are redesigning an existing, working web console that one DJ uses to control LED strip
-lighting during live mixes. It runs locally on their Mac (Python servers) and is used from both
-the Mac and a phone. It works today — the problem is that it grew screen by screen, so layout,
-hierarchy, and interaction patterns drift between screens. Your job is to redesign it as **one
-coherent design system** and rebuild the screens as a working React prototype with mock data.
+You have **full creative authority**. Redesign the entire UI/UX of this console from first
+principles: information architecture, navigation, how features group into screens, layout,
+visual language, interaction patterns, copy structure — question all of it. The current design
+is described at the end **as reference only**, so you know what exists; you are free to keep,
+evolve, or discard any of it. Nothing binds you except the Non-negotiables section — those are
+real product requirements (live-show safety, an enforced plain-language rule, platform
+reality), not taste.
 
-This is a **redesign, not a reinvention**: the workflows, safety rules, and plain-language
-wording rules below are settled and must survive. What you own is visual design, layout,
-hierarchy, component consistency, and polish.
+Two honesty rules for your redesign: nothing in the functional inventory may be **silently**
+dropped — if you think something shouldn't exist, cut it in the design but flag it as a
+proposal; and every screen must demonstrate its real states (live, stale, conflict, empty,
+error), not just the happy path.
 
-**User context that should drive the design:** one person, often mid-mix in a dark room,
-glancing at this on a phone while doing something else with their hands. Cold screens must be
-simple and calm; power tools live behind disclosure. Anything live/dangerous must be impossible
-to miss. Dark theme only.
+## The product and its user
 
-## The three screens (one shared shell)
+A local web console one DJ uses to control lighting during live mixes — LED strips and lasers
+driven by a Python "bridge" that follows the music. Runs on their Mac; used from the Mac and a
+phone. The critical usage moment: **mid-mix, in a dark room, glancing at a phone with one free
+hand.** Cold screens need to be calm and instantly readable; deep tools can live behind
+disclosure. There is also a desk mode: sitting at the Mac authoring and tuning cues between
+shows. Dark environment always.
 
-A shared top bar with route tabs `Pad` / `Lab` / `Sim` plus a session cluster and an always
-visible red `■ STOP` (emergency stop). Pad↔Lab switch in place; Sim is currently a separate
-server the phone can't reach (today a toast says "Sim runs on the Mac for now" — design a more
-graceful treatment of that limitation).
+Today the console is four surfaces (three servers). This division is itself up for redesign —
+re-divide however serves the user, as long as every capability survives:
 
-### 1. Pad — the play surface (used mid-mix)
+## Functional inventory (what the console must be able to do)
 
-A grid of saved lighting "looks" (cues), grouped into phrase banks matching song structure:
-tabs `Untagged, Ambient, Groove, Buildup, Drop, Post-Drop, Breakdown, Utility, Legacy…, Other`,
-each with a count and a role color. Each look card shows: human title + machine id (mono),
-color mode ("Uses show colors" with gradient dot, or "Set colors" with fixed dot), badges
-(`<N> beats`, timing, `⚡ strobe`, `Lab cue`, `LIVE`), a primary `▶ Play`, and icon actions
-(Edit ✎, Duplicate ⧉, Rename Aa, Move ⇄, Delete 🗑). The playing card pulses green with a
-`LIVE` chip.
+### A. Play surface ("Pad") — used mid-mix
+- Grid of saved lighting "looks" (cues), grouped by song-structure phrase banks: Ambient,
+  Groove, Buildup, Drop, Post-Drop, Breakdown, Utility (+ Untagged/Legacy/Other overflow).
+  Phrase roles have a learned color vocabulary.
+- Each look: human title + machine id, color mode ("Uses show colors" vs "Set colors"), length
+  in beats, timing kind, strobe flag, origin (Lab cue / cloud scene — cloud scenes aren't
+  previewable), live indicator. Actions: Play, Edit, Duplicate, Rename, Move, Delete.
+- Session controls: preview tempo (60–200 BPM, steppers), test palette, loop toggle. When the
+  live show is running, tempo follows the music and manual tempo locks ("Following your music ·
+  128 · tempo set by the live mix").
+- Ownership model: the lights are owned by nobody / the show / this pad. Stated in plain words
+  ("Lights are free" / "The show is running the lights" / "This pad is running the lights"),
+  with Take control / Release. Taking control from the show always confirms first ("The show
+  side goes dark until you release.").
+- Per-look editor: transport (play/stop, cue length 4/8/16/32/custom beats), effect picker,
+  color section (Match the track / Use set colors, palette, brightness %, "Strobe allowed"
+  switch with warning copy), color spread (even/random/random-with-solid-chance), per-effect
+  motion controls with reset + advanced collapse, save/undo/cancel with dirty state.
+- Pad edits are a local draft layer: "Push pad edits" writes them to the lighting file (with a
+  confirm explaining the show picks them up at next bridge start); "Undo all changes" reverts.
+- Emergency `■ STOP` — always visible, nothing may ever cover it.
+- Connect-another-device flow (QR code + LAN URL, with a "anyone on this Wi-Fi can edit"
+  warning).
 
-Top bar session cluster: `Preview tempo` (60–200 with −/+ steppers), `Test Palette` select,
-`Loop` toggle. When the real show is running, a status chip reads "Following your music ·
-<bpm> · tempo set by the live mix" and the tempo controls disable.
+### B. Cue editor ("Lab") — used at the desk
+- Drafts list: search, status filters (Work in progress / Accepted / Rejected), phrase filter,
+  grouped list with status dots and relative dates.
+- Per-draft: title, status pill (Work in progress / Accepted / Rejected / Promoted), phrase
+  assignment, read-only timing note ("Locks to the beat" / "Runs on a clock" / "Still").
+- Preview: strip view and room view (uses the simulator's room layout), plus "Watch live
+  playback" — a read-only mirror of what the pad is sending right now. Preview length 2 bars /
+  4 bars / full cue. Beat meter with optional metronome click, honest about click accuracy.
+- Tuning: dynamic controls (sliders/toggles/selects/color pickers) generated per effect; cue
+  length; live-apply while tuning; "Save draft" with dirty chip.
+- The verdict: **"Accept — adds it to your show"** vs **"Reject — keep out of show"**. Accept
+  is the ONLY way any cue enters the show, and it promotes what you actually heard (last
+  live-tuned values).
+- "Play once on lights": fires the draft on the real lights exactly once — one cue, no loop,
+  always saves first. When another lab cue is already live it becomes "Switch live lights".
+- New draft from a starter (clone a working cue, or an empty shell that needs code before it
+  previews). Also: brief/notes text, advanced params JSON, reload effect code, archive
+  (refused while live), delete, a collapsed diagnostics corner (server health, effect-code
+  health with traceback access, playback state, one-click self-test), help popover.
 
-Ownership model (important): the lights are owned by `free` / the show (`bridge_owned`) / this
-pad (`pad_owned`). A pill states it in plain words — "Lights are free" / "The show is running
-the lights" / "This pad is running the lights" — with a `Take control` / `Release` button.
-Taking control from the show always confirms first: "The show is running the lights right now.
-Take control?" / "The show side goes dark until you release."
+### C. Room simulator ("Sim") — preview + setup, never touches lights
+- Offline room preview of the strip on a canvas: Room/Strip views, labels toggle,
+  play/scrub/loop, collapsed diagnostics (device facts: 60 segments, 360 LEDs, 49.2 ft; FPS;
+  draw health "Browser draw health, not hardware").
+- Two persistent honesty signals: "Preview only — never touches the lights" and "Colors not
+  calibrated yet" (until calibration exists).
+- Play: render any saved look / built-in effect / lab draft / recorded session at a chosen
+  BPM and duration; demo shelf of named look groups.
+- Setup (deliberately one step removed so everyday play stays simple):
+  - **Layout:** room-shape editing by dragging corners (add/remove points on edges; LED
+    spacing is fixed — the path never stretches), presets (Perimeter / Snake / Custom), room
+    dimensions in feet with mm hints, a layout library (use/save-as/rename/delete), reverse
+    direction, reset, undo, lock toggle that gates all edit gestures.
+  - **Calibrate:** measurement sequences + static reference frames for a later capture against
+    the real strip ("Nothing is sent now."), screen-matching knobs (color curve, RGB balance,
+    brightness, glow size/amount, color spill, target FPS, latency, response model), save/
+    revert with dirty chip, its own lock.
+- Keyboard: space play/pause, L labels, ←→ step frame, arrows nudge a corner 10mm (⇧ 100mm),
+  ⌘Z undo layout.
+- Today this is a separate local server the phone cannot reach at all — the current answer is
+  a toast ("Sim runs on the Mac for now"). Design the honest version of this reality however
+  you see fit.
 
-An editor drawer (right side, always below the STOP button in z-order) opens per look:
-transport (`▶ Play`, `■ Stop`, cue length 4/8/16/32/custom beats), Effect select, Color section
-(segmented "Match the track" / "Use set colors", palette select, Brightness %, "Strobe allowed"
-switch with warning copy), Color spread (Even / Random / Random with solid chance), Motion
-Pattern (dynamic per-effect controls with reset ↺ and an "Advanced motion" collapse), and a
-footer `Save` / `Undo` / `Cancel` with dirty state ("Unsaved changes" / "Draft saved").
+### D. Laser controller ("Laser Pad") — currently a separate app
+- Master "Lasers enabled" toggle (immediate, danger-tinted when on). Runtime pill showing the
+  live personality/scene/reason, with emergency and offline states.
+- MIDI output port picker (with manual-name fallback), and a test mode ("Practice mode — pads
+  light up in the UI but don't send real MIDI") + test BPM.
+- A grid of MIDI-note pads in banks (per-bank MIDI channel): each mapped pad shows its label,
+  role, personality membership chips, and a safety dot on a safe→strobe→blackout scale.
+  Click = send test note; modifier-click = toggle personality membership; long-press/right-
+  click = editor drawer; drag-drop = reassign with overwrite confirm and a 10-second undo.
+- Per-pad editor: display name, move to bank/pad, primary mapping (role, trigger style
+  tap/hold, trigger length, intensity, cooldown beats, fire instantly, motion level, backup
+  scene), bank rotation pool (scene list with a primary star), send test / set primary /
+  remove.
+- Settings: global (drop transition style, lifecycle scenes for startup/stop/stale/emergency/
+  fallback, manual MIDI test), personalities (create/rename/duplicate/delete, chip color,
+  aliases, BPM band, timing, per-bank primaries, a resolver test), blackout on/off signals,
+  bank management.
+- Config checks: validate ("✓ check config") and verify mappings ("▶ … no lasers fired"),
+  with errors/warnings surfaced in a banner and failing pads ringed red.
+- Save model: every edit is a draft (staged + immediately live), "Apply" writes to disk and
+  reloads the bridge, "Discard" reverts; save badge (Draft saved / Applied / Saving… / error).
+  Backup history with restore + diff.
 
-Pad edits are a local draft: a disclosure ("Pad look edits", with count) holds `Push pad edits`
-(confirm: "This writes N Pad look edit(s) into your lighting file. Your lights will use them at
-the next bridge start. Lab drafts are not touched.") and `Undo all changes` (confirm).
+## Non-negotiables
 
-### 2. Lab — the cue editor (used at the desk)
+**Live-show safety semantics** (redesign their presentation freely; never weaken them):
+1. Accept is the only path into the show; saving a draft never touches it.
+2. "Play once" fires exactly one cue, no loop, and never fires unsaved params.
+3. Taking the lights away from the running show always confirms first.
+4. An emergency stop is always visible and reachable on the LED surfaces; nothing covers it.
+5. The simulator can never touch real lights, and the UI keeps saying so, honestly.
+6. Concurrent-edit conflicts (someone/something else changed the file) surface explicitly,
+   with reload-the-latest as the safe default.
+7. Staleness is honest: the UI distinguishes "bridge not running", "your applied changes
+   aren't live yet — restart the bridge to load them", and "live config matches the running
+   bridge".
+8. Laser: test mode really sends nothing; "verify" fires no lasers; enabled/emergency state
+   is unmissable.
 
-Where new cues are authored, tuned, previewed, and — only via `Accept` — promoted into the show.
-Two-panel layout: a drafts list (search, status filter chips `Work in progress` / `Accepted` /
-`Rejected`, phrase filter, grouped list with phrase chips + status dots + relative dates) and a
-detail panel with, today, six stacked zones:
+**Language** (a CI gate enforces this; musician-plain always): allowed vocabulary includes
+BPM, beat, bar, drop, groove, buildup, breakdown. Banned → required: "Strobe Hz" → "Flashes
+per second"; "Strobe Duty" → "Flash length (%)"; "Strobe Rate" → "Flashes per beat"; "Beat
+Division" → "Trigger every … beats"; "Dim Floor" → "Minimum brightness"; "Fade Decay" →
+"Fade-out"; "Follow Show Color" → "Match the track"; "Locked Palette" → "Use set colors";
+"time driven" → "Runs on a clock"; "beat sync" → "Locks to the beat"; "Bridge owns LEDs" →
+"The show is running the lights"; "UNMEASURED" → "Colors not calibrated yet"; "Flip chain" →
+"Reverse direction"; "Neighbor bleed" → "Color spill"; "Renderer" as a heading → "Effect";
+"vertex/vertices" → "corner/corners"; "(px)" → "(LEDs)". The voice: buttons are verbs/
+outcomes, often with a plain tail ("Accept — adds it to your show"); safety copy is always
+explicit ("one cue · no loop", "never touches the lights", "no lasers fired"). Write new copy
+freely, in this voice.
 
-1. Header: draft title, kind chip, status pill (`Work in progress`/`Accepted`/`Rejected`/
-   `Promoted`), `LIVE` chip, Phrase select, read-only Timing note ("Locks to the beat" /
-   "Beat + clock" / "Runs on a clock" / "Still").
-2. Preview hero: `Strip` / `Room` / `Watch live playback` modes, canvas, transport
-   (`◉ Preview`, preview length `2 bars`/`4 bars`/`Full cue`, `▶ Play once on lights`,
-   `■ Stop`), beat meter with metronome, honest captions ("Room view · simulator layout ·
-   preview only", "Play once sends to the real lights · one cue · no loop").
-3. Tuning card: dynamic sliders/toggles/selects/color pickers, cue length, `Save draft` +
-   dirty chip.
-4. Verdict bar: `Accept — adds it to your show` (green) / `Reject — keep out of show` (danger).
-5. Text: Brief textarea, Notes, advanced Params JSON.
-6. Footer utils: `⟳ Reload effect code`, `Archive draft`, `Delete`.
+**Platform reality:** dark environment (design for dark; a light theme is not needed); phone
+and desktop both first-class; touch targets ≥44px on touch devices; visible focus rings; AA
+contrast.
 
-This detail panel is dense — improving its hierarchy is a core ask. There's also a collapsed
-`Diagnostics` disclosure in the top bar (server health dot, effect-code health dot, playback
-dot, `Check this draft` self-test) and a `?` help popover.
+**Backend contract:** the prototype runs on mock data, but shaped by the real state model —
+ownership (free / show / pad), playback (which look, current beat), config staleness
+(not running / stale / fresh), heartbeat-driven tempo lock, look and draft fields as in the
+inventory, stale-save conflicts, a live mirror stream, and the laser draft/apply/discard
+cycle. Include fixtures that exercise: show-owned vs pad-owned vs free; stale config; a look
+live; a stale-save conflict; empty states; a strobe look with strobe disallowed; laser test
+mode; laser emergency.
 
-When another lab cue is already live, `▶ Play once on lights` morphs into `⇄ Switch live
-lights` (amber).
+## Known pain points (evidence from the current app — diagnoses, not instructions)
 
-### 3. Sim — room preview + setup ("H612D Studio")
+- The three LED surfaces share tokens but drifted: the emergency STOP is styled two different
+  ways, there are two modal systems with different behavior, and the Sim feels like a
+  different app.
+- The Pad's look editor and the Lab's tuning card are the same job (tune an effect's controls)
+  built twice with different layouts.
+- The Lab's detail panel is six stacked zones — dense and scroll-heavy.
+- The Laser Pad is a whole separate application with its own interaction patterns, its own
+  dirty-state philosophy, and copy that never went through the plain-language pass.
+- Badges, chips, pills, and banners each have local variants per screen.
+- Empty states are honest but undesigned plain text.
 
-An offline room preview of the LED strip (canvas, Room/Strip view modes, Labels toggle, Play/
-scrub/Loop transport, collapsed Diagnostics corner with device facts and FPS). Persistent
-honesty chips: "Preview only — never touches the lights" (green) and "Colors not calibrated
-yet" (amber, until calibration). A sidecar has two tabs:
+## Current design (reference only — yours to keep or discard)
 
-- **Play:** source picker (Saved look / Built-in effect / Lab draft / Recording), BPM +
-  duration, `Render`, plus a shelf of named demo look-groups.
-- **Setup** (deliberately one extra step so everyday Play stays simple), two subtabs:
-  **Layout** — layout library (Use / Save as… / Rename / Delete), lock toggle, corner-drag room
-  editing ("Drag corners on the room. Double-click or long-press an edge to add a point, a
-  corner to remove one. LED spacing is fixed — the path is never stretched."), presets
-  (Perimeter / Snake / Custom), room dimensions, `Reverse direction`, `Reset to Perimeter`,
-  Undo, `Save changes`. **Calibrate** — lock toggle, measurement sequences and static reference
-  frames, screen-matching knobs (color curve, RGB balance, brightness, glow, "Color spill",
-  FPS, latency, response model), `Save values` / `Revert` + dirty chip.
+Dark UI. Tokens: bg #0b0d10; surfaces #14171c / #1b2027 / #232a33; borders #2b333d /
+#3a4450; text #edf1f5 / dim #98a4b1 / faint #6b7683; ok #3fd68f; warn #e8b13f; danger
+#f25f5c. Phrase-role colors (the one visual vocabulary the user has actually learned — if you
+replace it, replace it deliberately and consistently): ambient #4cc9c0, groove #4da3ff,
+buildup #e8b13f, drop #f25f5c, post-drop #b48cff, breakdown #6f9bd1, utility #8b98a5.
+Per-screen identity accents: Pad blue, Lab violet, Sim cyan+violet, Laser green. Type:
+Archivo variable font for UI, system mono for data/ids. Radius 10px, spacing 4/8/12/16/24,
+soft shadows. State conventions: live = green pulse, draft = violet, dirty/stale = amber,
+danger = red.
 
-Keyboard: Space play/pause, L labels, ←→ step frame, arrows nudge corner 10mm (⇧ = 100mm),
-⌘Z undo layout.
+## Deliverable
 
-## Hard rules that must survive the redesign
-
-**Safety and flow semantics (do not weaken):**
-- `Accept` in the Lab is the ONLY way a cue enters the show. `Save draft` never touches it.
-- "Play once on lights" is exactly one cue, no loop, and always saves the draft first.
-- Taking the lights from the running show always gets a confirm.
-- `■ STOP` is always visible and clickable — nothing may cover it, ever.
-- Sim never touches real lights, and the UI keeps saying so.
-- Concurrent-edit conflicts surface as a modal ("Look changed elsewhere" / "Draft changed
-  elsewhere") with Reload as the safe default.
-- Config staleness is stated honestly in a banner with three states: bridge not running /
-  changes not live yet, restart to load them / "Live config matches the running bridge."
-
-**Language (a CI gate enforces this — banned phrases in parentheses):**
-Musician words are fine: BPM, beat, bar, drop, groove, buildup, breakdown. Engineer jargon is
-banned. Never write: "Strobe Hz" (→ Flashes per second), "Strobe Duty" (→ Flash length %),
-"Strobe Rate" (→ Flashes per beat), "Beat Division" (→ Trigger every … beats), "Dim Floor"
-(→ Minimum brightness), "Fade Decay" (→ Fade-out), "Follow Show Color" (→ Match the track),
-"Locked Palette" (→ Use set colors), "time driven" (→ Runs on a clock), "beat sync" (→ Locks
-to the beat), "Bridge owns LEDs" (→ The show is running the lights), "UNMEASURED" (→ Colors
-not calibrated yet), "Flip chain" (→ Reverse direction), "Neighbor bleed" (→ Color spill),
-"Renderer" as a heading (→ Effect), "vertex/vertices" (→ corner/corners), "(px)" (→ "(LEDs)").
-Button labels are verbs/outcomes, often with a plain tail: "Accept — adds it to your show",
-"Play once on lights", "Push pad edits". Honesty copy is always spelled out: "no loop",
-"never touches the lights". You may write new copy, but in this voice.
-
-**Platform:** dark theme only; phone + desktop; touch targets ≥44px on touch; visible focus
-rings; AA contrast on all text.
-
-## Current visual system (baseline — evolve it, don't discard its logic)
-
-Tokens shared across screens: bg `#0b0d10`, surfaces `#14171c` / `#1b2027` / `#232a33`,
-borders `#2b333d` / `#3a4450`; text `#edf1f5`, dim `#98a4b1`, faint `#6b7683`; ok `#3fd68f`,
-warn `#e8b13f`, danger `#f25f5c`. Phrase-role colors (a real vocabulary users learn — keep the
-concept): ambient `#4cc9c0`, groove `#4da3ff`, buildup `#e8b13f`, drop `#f25f5c`, post-drop
-`#b48cff`, breakdown `#6f9bd1`, utility `#8b98a5`. Per-screen identity: Pad accent blue
-`#4da3ff`, Lab recolors primary to violet `#b48cff`, Sim uses cyan `#4dd8e6` for dimension
-truth + violet for interaction. Font: Archivo variable (100–900) for UI; system mono for
-data/ids. Radius 10px (6px small), spacing scale 4/8/12/16/24, soft shadows.
-
-State color conventions: live/playing = green pulse; draft/lab = violet; dirty/stale = amber;
-danger/stop = red. Keep these mappings.
-
-## Known problems — your redesign mandate
-
-1. STOP is styled differently on Pad (filled red) vs Sim (outline). One treatment everywhere.
-2. Two dialog/modal systems with different focus behavior. One modal component.
-3. The Pad's editor drawer and the Lab's tuning card are the same job (tune an effect's
-   controls) with different layouts. One shared editor component, used by both.
-4. The Lab detail panel is six stacked zones — dense and scroll-heavy. Restructure the
-   hierarchy so Preview + tune + verdict feel like one workflow.
-5. Sim feels like a different app (different title style, slightly different chrome). Same
-   shell, same components.
-6. The phone can't reach the Sim at all today (separate localhost server) — the current
-   answer is a toast. Design the honest version of that state.
-7. Card badge rows, chips, pills, and banners each have local variants. One badge/chip/banner
-   system with the state colors above.
-8. Empty states exist ("No looks yet", "Select a draft", "No drafts yet — press New to make
-   one.") but are plain text. Keep them honest and calm, make them designed.
-
-## Backend reality (mock this; don't redesign it)
-
-The prototype should run on mock data shaped like the real API. The states that matter:
-- `runtime_status`: ownership `free|bridge_owned|pad_owned`; playback (which look, beat);
-  `config_stale` `not_running|stale|fresh`; bridge heartbeat freshness (drives the
-  "Following your music" tempo lock).
-- Looks: id, human title, bank/phrase role, beats, timing kind, strobe flag, color mode
-  (show colors vs set colors + palette), playable vs cloud-scene (not previewable), dirty flag.
-- Lab drafts: name, kind, status (`work in progress|accepted|rejected|promoted`), phrase,
-  brief/notes, param specs (slider/toggle/select/color), preview frames, live/not.
-- Conflict model: saves can fail stale (someone else edited) → Reload / Overwrite modal.
-- A live mirror stream (what the pad is sending right now) that the Lab can watch read-only.
-
-Build mock fixtures for: free vs show-owned vs pad-owned; fresh vs stale config; a look
-playing live; a stale-save conflict; empty states; a strobe look with strobe disallowed.
-
-## How to work
-
-Build in this order, showing me each stage: (1) the shared shell + design tokens + core
-components (buttons, cards, chips, banners, modal, editor controls), (2) the Pad screen with
-all its states, (3) the Lab, (4) the Sim + Setup. Keep a components reference page so the
-system stays consistent. Every screen should demo its live/stale/empty/conflict states, not
-just the happy path.
-
-One future note (design the system to allow it, don't build it): a fourth surface exists — a
-laser controller pad, currently a separate app with its own patterns. The design system you
-create should be able to absorb it later (same shell, same components, one more route tab).
+A working React prototype of the full redesigned console — every surface, every major flow,
+real state coverage, on mock data — plus whatever design-system reference you need to keep it
+coherent. How you structure the work, what you show first, and every design decision along
+the way: your call. Surprise me.
