@@ -43,5 +43,16 @@ One repo skill per target agent — read the matching skill before writing:
   safety-sensitive one-shots; safeguard hygiene lives there).
 - Opus 4.8 prompt → `.claude/skills/opus-prompt-writer/SKILL.md` (default coding/agentic/knowledge/
   frontend/review work).
+- Template Lab handoff → `.claude/skills/template-lab/SKILL.md` (new/tuned LED cues: draft Govee
+  render → live placeholder-color play → iterate → promote into `govee_frame_renderer.py` via
+  tests + contracts; LED only, not laser/SoundSwitch).
 Fable/Opus prompts are for reasoning, planning, auditing, or review; Codex remains the
 implementation path unless a current repo instruction explicitly says otherwise.
+
+## Multi-agent org work
+When running or joining the rb_ss_bridge_v2 multi-agent org (executive/manager/orchestrator/
+implementer seats, tmux dispatch/watch, round gating, seat handoffs), read
+`.claude/skills/agent-org-workflow/SKILL.md` first — it points at the canonical, model-agnostic
+doctrine in `docs/agents/multi_agent_org_workflow.md`. Build-lane seats additionally follow
+`docs/agents/opus_seat_harness.md`; resume a cold program from the newest
+`docs/agents/codex_resume_state_*.md`.
