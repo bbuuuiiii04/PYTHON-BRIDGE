@@ -411,7 +411,10 @@ class ZeroRuntimeImporterTests(unittest.TestCase):
                 continue
             try:
                 text = path.read_text(encoding="utf-8")
-            except OSError:
+            except (OSError, UnicodeDecodeError):
+                # non-source / non-utf8 files (e.g. joblib test fixtures inside
+                # gitignored venvs under local/) can never import an ASCII module
+                # path — skip rather than crash the invariant scan.
                 continue
             if _imports_hardness_v0(text):
                 importers.append(rel)
