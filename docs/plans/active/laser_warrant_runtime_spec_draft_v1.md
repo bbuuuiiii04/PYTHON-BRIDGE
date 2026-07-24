@@ -1,11 +1,13 @@
 ---
 doc_status: draft
 truth_level: >
-  DRAFT implementation spec — pending the vetted list (operator veto pass not
-  yet run) + operator veto-mode confirmation. NO code has changed. Not an
-  implementation authorization: implementation channel is Codex or a
-  sanctioned Claude seat AFTER exec review + operator activation — never the
-  authoring seat.
+  DRAFT v2 implementation spec — v2 = v1 + EXACTLY the RTREV cures (F1
+  conjunction join, F2 insertion-point pin, F3 results-on-disk correction +
+  161 confirmed, N1-N3 notes; ruling FIX, architecture approved). Pending the
+  vetted list (operator veto pass not yet run) + operator veto-mode
+  confirmation. NO code has changed. Not an implementation authorization:
+  implementation channel is Codex or a sanctioned Claude seat AFTER exec
+  review + operator activation — never the authoring seat.
 last_verified_commit: e76cbbf0
 last_verified_date: 2026-07-24
 validation_scope: >
@@ -14,9 +16,11 @@ validation_scope: >
   ONLY / HARDWARE-UNVALIDATED applies to the whole repo and everything here.
 ---
 
-# Codex Implementation Spec — Laser-warrant vetted spans: artifact + runtime wiring (DRAFT v1)
+# Codex Implementation Spec — Laser-warrant vetted spans: artifact + runtime wiring (DRAFT v2)
 
-Status: **DRAFT — pending vetted list + operator veto-mode confirmation.**
+Status: **DRAFT v2 — pending vetted list + operator veto-mode confirmation.**
+(v2 folds the RTREV review's three required cures and three notes; the
+architecture was ruled approved shape — nothing structural moved.)
 Two deliverables in one spec: (1) the bridge-consumable **vetted-spans
 artifact** built from the operator's veto pass over the laser-warrant ranked
 list, and (2) the **runtime wiring** that lets lasers fire (or be permitted)
