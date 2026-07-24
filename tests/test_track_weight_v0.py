@@ -16,6 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))   # /Users/bbui
 
 from rb_ss_bridge_v2 import track_weight_v0  # noqa: E402
+from rb_ss_bridge_v2 import section_energy_v0  # noqa: E402
 from rb_ss_bridge_v2.track_weight_v0 import (  # noqa: E402
     COMPONENT_KEYS,
     MIN_BEATS,
@@ -24,6 +25,7 @@ from rb_ss_bridge_v2.track_weight_v0 import (  # noqa: E402
     components,
     degenerate_components,
     rank_in,
+    robust_dynamic_range,
     spearman,
     track_weight,
 )
@@ -109,6 +111,24 @@ class GainInvarianceTests(unittest.TestCase):
                 self.assertAlmostEqual(comps[2][k], c2[k], places=9)
             self.assertAlmostEqual(track_weight(c2, dist), w_before, places=9)
 
+    def test_uniform_shift_rounded_within_tolerance(self):
+        # The honest tolerance (A.4 item 3): the real pipeline rounds every stored
+        # dB value to 0.1 dP, so exact places=9 cannot hold end-to-end. Round the
+        # shifted series to 1 dP and recompute; components must stay within 0.01.
+        full = tuple((-1.0 if i < 32 else -15.0) for i in range(64))  # far from thr
+        v4 = _mk(full=full)
+        base = components(v4)
+        for d in (6.0, -6.0):
+            sv = shifted(v4, d)
+            series = {k: (tuple(round(x, 1) for x in v) if k.endswith("_db") else v)
+                      for k, v in sv.series.items()}
+            scalars = dict(sv.scalars)
+            scalars["loudness_ref_db"] = round(_p95(series["full_db"]), 1)
+            c = components(replace(sv, series=series, scalars=scalars))
+            for k in COMPONENT_KEYS:
+                self.assertLessEqual(abs(base[k] - c[k]), 0.01,
+                                     msg="%s d=%s" % (k, d))
+
 
 class SpearmanTests(unittest.TestCase):
     def test_monotone_reversed_constant_short(self):
@@ -147,17 +167,53 @@ class ComponentGuardTests(unittest.TestCase):
         bad[10] = float("nan")
         self.assertIsNone(components(_mk(full=bad)))
 
+    def test_components_have_brightness_not_sub_duty(self):
+        c = components(_mk())
+        self.assertIn("brightness_med", c)
+        self.assertNotIn("sub_duty", c)
+
+    def _with_scalar(self, **over):
+        v = _mk()
+        scalars = dict(v.scalars)
+        scalars.update(over)
+        return replace(v, scalars=scalars)
+
+    def test_missing_brightness_returns_none(self):
+        v = _mk()
+        scalars = {k: val for k, val in v.scalars.items() if k != "brightness_med"}
+        self.assertIsNone(components(replace(v, scalars=scalars)))
+
+    def test_nonnumeric_brightness_returns_none(self):
+        self.assertIsNone(components(self._with_scalar(brightness_med="loud")))
+
+    def test_nonfinite_brightness_returns_none(self):
+        self.assertIsNone(components(self._with_scalar(brightness_med=float("inf"))))
+
+
+class RobustDynamicRangeTests(unittest.TestCase):
+    def test_exact_p95_minus_p25(self):
+        full = tuple(float(i) for i in range(64))       # 0..63
+        v4 = _mk(full=full)
+        ordered = sorted(full)
+        expect = _p95(full) - track_weight_v0._percentile(ordered, 25)
+        self.assertAlmostEqual(robust_dynamic_range(v4), expect, places=9)
+
+    def test_short_absent_nonfinite_none(self):
+        self.assertIsNone(robust_dynamic_range(_mk(n_beats=MIN_BEATS - 1)))
+        bad = list(float(i) for i in range(64))
+        bad[3] = float("nan")
+        self.assertIsNone(robust_dynamic_range(_mk(full=bad)))
+
 
 class DegenerateTests(unittest.TestCase):
     def test_flat_component_flagged_healthy_not(self):
-        # body_duty constant across the library (full identical + ref auto),
-        # the others varied.
-        comps = [{"body_duty": 0.5, "sub_duty": 0.1 * i,
+        # body_duty constant across the library, the others varied.
+        comps = [{"body_duty": 0.5, "brightness_med": 100.0 * i,
                   "onset_mh_mean": float(i), "growl_flatness_mean": 0.05 * i}
                  for i in range(5)]
         dist = build_distribution(comps)
         self.assertIn("body_duty", degenerate_components(dist))
-        self.assertNotIn("sub_duty", degenerate_components(dist))
+        self.assertNotIn("brightness_med", degenerate_components(dist))
 
     def test_healthy_distribution_none_degenerate(self):
         comps = [{k: 0.1 * i + 0.01 * j for j, k in enumerate(COMPONENT_KEYS)}
@@ -166,14 +222,33 @@ class DegenerateTests(unittest.TestCase):
 
 
 class AcceptanceVerdictTests(unittest.TestCase):
-    def test_all_four_outcomes(self):
-        self.assertEqual(acceptance_verdict(50, 0.1, []), (False, "insufficient_corpus"))
-        self.assertEqual(acceptance_verdict(120, 0.6, []), (False, "loudness_proxy"))
-        self.assertEqual(acceptance_verdict(120, None, []), (False, "loudness_proxy"))
-        self.assertEqual(acceptance_verdict(120, 0.3, ["body_duty"]),
+    def test_precedence_every_branch(self):
+        # signature: (n_by_genre, rho, rho_drama, rho_components_max, degenerate)
+        self.assertEqual(acceptance_verdict(50, 0.1, 0.1, 0.1, []),
+                         (False, "insufficient_corpus"))
+        self.assertEqual(acceptance_verdict(120, 0.6, 0.1, 0.1, []),
+                         (False, "loudness_proxy"))
+        self.assertEqual(acceptance_verdict(120, None, 0.1, 0.1, []),
+                         (False, "loudness_proxy"))
+        self.assertEqual(acceptance_verdict(120, 0.3, 0.7, 0.1, []),
+                         (False, "compression_proxy"))
+        self.assertEqual(acceptance_verdict(120, 0.3, None, 0.1, []),
+                         (False, "compression_proxy"))          # None fails closed
+        self.assertEqual(acceptance_verdict(120, 0.3, 0.4, 0.7, []),
+                         (False, "redundant_components"))
+        self.assertEqual(acceptance_verdict(120, 0.3, 0.4, None, []),
+                         (False, "redundant_components"))        # None fails closed
+        self.assertEqual(acceptance_verdict(120, 0.3, 0.4, 0.2, ["body_duty"]),
                          (False, "degenerate_component"))
-        self.assertEqual(acceptance_verdict(120, 0.3, []), (True, "ok"))
-        self.assertEqual(acceptance_verdict(120, -0.50, []), (True, "ok"))   # boundary
+        self.assertEqual(acceptance_verdict(120, 0.3, 0.4, 0.2, []), (True, "ok"))
+        self.assertEqual(acceptance_verdict(120, -0.50, -0.55, 0.60, []),
+                         (True, "ok"))                           # all boundaries
+
+
+class SchemaSkewTests(unittest.TestCase):
+    def test_e1_and_e2_schema_agree(self):        # EREV1 N5: two literals, no skew
+        self.assertEqual(track_weight_v0.STORE_SCHEMA_VERSION,
+                         section_energy_v0.STORE_SCHEMA_VERSION)
 
 
 class StoreRoundTripTests(unittest.TestCase):
@@ -187,18 +262,21 @@ class StoreRoundTripTests(unittest.TestCase):
              "track_weight": 0.6}]
         dist = build_distribution([r["components"] for r in scored])
         acc = {"accepted": True, "reason": "ok", "rho_by_genre": 0.2,
-               "n_by_genre": 123, "rho_library": 0.25, "degenerate": []}
-        store = twr.build_store(scored, dist, acc, 1234567)
+               "n_by_genre": 123, "rho_library": 0.25, "rho_drama": -0.48,
+               "rho_components_max": 0.24, "degenerate": []}
+        store = twr.build_store(scored, dist, acc, 1234567,
+                                drop_body_levels_by_genre=[-3.0, -1.0, 0.0])
         with tempfile.TemporaryDirectory() as td:
             path = twr.write_store(store, Path(td))
             self.assertTrue(path.exists())
             re = json.loads(path.read_text(encoding="utf-8"))
-        self.assertEqual(re["schema_version"], 1)
+        self.assertEqual(re["schema_version"], 2)               # AWR-291 bump
         self.assertEqual(set(re["tracks"]), {"k1", "k2"})
         self.assertIs(re["accepted"], True)
         self.assertEqual(re["acceptance"]["threshold"], 0.5)
         self.assertEqual(re["acceptance"]["n_by_genre"], 123)
         self.assertEqual(sorted(re["distribution"]), sorted(COMPONENT_KEYS))
+        self.assertEqual(re["drop_body_distribution"], [-3.0, -1.0, 0.0])
         self.assertEqual(re["tracks"]["k1"]["title"], "T1")
 
 

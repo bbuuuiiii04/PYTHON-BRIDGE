@@ -5,6 +5,7 @@ gates verdict, and the static import fence.
 """
 import ast
 import queue
+import random
 import sys
 import unittest
 from dataclasses import replace
@@ -16,7 +17,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from rb_ss_bridge_v2 import drop_energy_v0  # noqa: E402
 from rb_ss_bridge_v2 import section_energy_v0  # noqa: E402
 from rb_ss_bridge_v2.drop_energy_v0 import (  # noqa: E402
-    MIN_WINDOW_BEATS, DROP_WINDOW_BEATS, grade_drops, grades_by_beat, gates_verdict)
+    MIN_WINDOW_BEATS, DROP_WINDOW_BEATS, grade_drops, grades_by_beat,
+    gates_verdict, drop_body_levels, score_windows, _percentile)
+from rb_ss_bridge_v2.track_weight_v0 import spearman  # noqa: E402
 from rb_ss_bridge_v2 import state_manager as state_manager_mod  # noqa: E402
 from rb_ss_bridge_v2.state_manager import _read_runtime_anlz_data, StateManager  # noqa: E402
 from rb_ss_bridge_v2.models import Ev  # noqa: E402
@@ -41,18 +44,22 @@ def _p95(xs):
     return v[lo] * (1 - (pos - lo)) + v[hi] * (pos - lo)
 
 
-def _v4(n_beats=80, full=None, sub=None, onset=None, ref="auto", p90=2.0):
+def _v4(n_beats=80, full=None, onset=None, perc=None, growl=None, ref="auto",
+        p90=2.0):
     z = tuple(0.0 for _ in range(n_beats))
     if full is None:
         full = tuple(-2.0 + 0.05 * i for i in range(n_beats))   # near-ceiling body
-    if sub is None:
-        sub = tuple(-4.0 + 0.02 * i for i in range(n_beats))
     if onset is None:
         onset = tuple(2.0 for _ in range(n_beats))
+    if perc is None:
+        perc = tuple(0.3 + 0.002 * i for i in range(n_beats))   # non-degenerate p90
+    if growl is None:
+        growl = tuple(0.2 + 0.001 * i for i in range(n_beats))
     series = {k: z for k in V4_SERIES_KEYS}
-    series.update({"full_db": tuple(full), "sub_db": tuple(sub),
-                   "onset_density_midhigh": tuple(onset)})
-    scalars = {k: 0.5 for k in V4_SCALAR_KEYS}
+    series.update({"full_db": tuple(full),
+                   "onset_density_midhigh": tuple(onset),
+                   "perc_high": tuple(perc), "growl_flatness": tuple(growl)})
+    scalars = {k: 0.5 for k in V4_SCALAR_KEYS}      # growl_timbre_p90 = 0.5 (>0)
     scalars["onset_mh_p90"] = p90
     if ref == "auto":
         scalars["loudness_ref_db"] = _p95(full)
@@ -92,30 +99,86 @@ class GainInvarianceTests(unittest.TestCase):
 
     def test_per_track_shift_library_scaled_unchanged(self):
         v4 = _v4()
-        base = grade_drops(v4, drop_beats=[16], track_weight=0.5)
-        sh = grade_drops(_shifted(v4, 6.0), drop_beats=[16], track_weight=0.5)
+        base = grade_drops(v4, drop_beats=[16, 40], track_weight=0.5)
+        sh = grade_drops(_shifted(v4, 6.0), drop_beats=[16, 40], track_weight=0.5)
         self.assertAlmostEqual(base[0]["library_scaled"], sh[0]["library_scaled"], places=9)
 
 
 class ProductAndWindowTests(unittest.TestCase):
     def test_product_law_and_null(self):
-        g = grade_drops(_v4(), drop_beats=[16], track_weight=0.5)
-        self.assertAlmostEqual(g[0]["library_scaled"], g[0]["within_track"] * 0.5, places=9)
-        self.assertIsNone(grade_drops(_v4(), drop_beats=[16], track_weight=None)[0]["library_scaled"])
+        g = grade_drops(_v4(), drop_beats=[16, 40], track_weight=0.5)
+        for row in g:
+            self.assertAlmostEqual(row["library_scaled"], row["within_track"] * 0.5, places=9)
+        g0 = grade_drops(_v4(), drop_beats=[16, 40], track_weight=None)
+        self.assertTrue(all(row["library_scaled"] is None for row in g0))
 
-    def test_coverage_floor_and_end_clamp(self):
-        # a drop < MIN_WINDOW_BEATS from the end is ungraded (omitted)
-        g = grade_drops(_v4(n_beats=80), drop_beats=[75], track_weight=None)
-        self.assertEqual(g, [])
-        g2 = grade_drops(_v4(n_beats=80), drop_beats=[80 - MIN_WINDOW_BEATS], track_weight=None)
-        self.assertEqual(len(g2), 1)
-        self.assertEqual(g2[0]["coverage"], MIN_WINDOW_BEATS)
+    def test_drop_body_levels_window(self):
+        v4 = _v4(n_beats=80)
+        self.assertEqual(len(drop_body_levels(v4, [16, 40])), 2)
+        self.assertEqual(drop_body_levels(v4, [75]), [])            # coverage < 8
+        self.assertEqual(len(drop_body_levels(v4, [80 - MIN_WINDOW_BEATS])), 1)  # == 8
+        self.assertEqual(drop_body_levels(_v4(ref=None), [16]), [])  # absent ref
+        bad = list(-2.0 + 0.05 * i for i in range(80))
+        bad[18] = float("nan")
+        self.assertEqual(drop_body_levels(_v4(full=bad), [16]), [])  # non-finite window
 
-    def test_p90_zero_omits_onset_term(self):
-        with_p90 = grade_drops(_v4(p90=2.0), drop_beats=[16], track_weight=None)[0]["within_track"]
-        no_p90 = grade_drops(_v4(p90=0.0), drop_beats=[16], track_weight=None)[0]["within_track"]
-        # both finite [0,1]; the term-omission path must not blow up or fabricate
-        self.assertTrue(0.0 <= with_p90 <= 1.0 and 0.0 <= no_p90 <= 1.0)
+    def test_body_basis_selection(self):
+        v4 = _v4()
+        g = grade_drops(v4, drop_beats=[16, 40], track_weight=None)
+        self.assertTrue(g and all(x["body_basis"] == "track_drops" for x in g))
+        g1 = grade_drops(v4, drop_beats=[16], track_weight=None,
+                         corpus_drop_levels=[-2.0, -1.0, 0.0, 1.0])
+        self.assertEqual([x["body_basis"] for x in g1], ["corpus"])
+        self.assertEqual(grade_drops(v4, drop_beats=[16], track_weight=None), [])
+
+    def test_two_drop_granularity_and_ties(self):
+        # 2 drops at DIFFERENT levels -> body in {0.25, 0.75}
+        v4 = _v4()
+        pool = drop_body_levels(v4, [16, 40])
+        terms = score_windows(v4, [16, 40], body_pool=pool)
+        self.assertEqual(sorted(t["body"] for t in terms), [0.25, 0.75])
+        # 2 drops at the SAME level -> both 0.5 (mid-rank tie)
+        vf = _v4(full=tuple(-3.0 for _ in range(80)))
+        tf = score_windows(vf, [16, 40], body_pool=drop_body_levels(vf, [16, 40]))
+        self.assertTrue(all(abs(t["body"] - 0.5) < 1e-9 for t in tf))
+
+    def test_four_terms_or_omit(self):
+        base = grade_drops(_v4(), drop_beats=[16, 40], track_weight=None)
+        self.assertEqual(len(base), 2)
+        # onset_mh_p90 <= 0
+        self.assertEqual(grade_drops(_v4(p90=0.0), drop_beats=[16, 40], track_weight=None), [])
+        # growl_timbre_p90 non-finite
+        vg = _v4()
+        sc = dict(vg.scalars); sc["growl_timbre_p90"] = float("nan")
+        self.assertEqual(grade_drops(replace(vg, scalars=sc), drop_beats=[16, 40],
+                                     track_weight=None), [])
+        # perc_high p90 <= 0 (all-zero series)
+        self.assertEqual(grade_drops(_v4(perc=tuple(0.0 for _ in range(80))),
+                                     drop_beats=[16, 40], track_weight=None), [])
+        # body basis absent (1 own drop, no corpus)
+        self.assertEqual(grade_drops(_v4(), drop_beats=[16], track_weight=None), [])
+        # and no within_track is ever a mean over fewer than four terms
+        pool = drop_body_levels(_v4(), [16, 40])
+        for row in score_windows(_v4(), [16, 40], body_pool=pool):
+            self.assertAlmostEqual(
+                row["within_track"],
+                (row["body"] + row["onset"] + row["perc_high"] + row["growl"]) / 4.0,
+                places=12)
+
+    def test_perc_high_only_variation_still_differs(self):
+        # drops identical in level/onset/growl, differing ONLY in perc_high: v1's
+        # level+sub+onset composite tied them; v2 must separate them. THE reason
+        # this revision exists.
+        n = 80
+        perc = [0.1] * n
+        for i in range(40, 56):
+            perc[i] = 0.9
+        v4 = _v4(n_beats=n, full=tuple(-3.0 for _ in range(n)),
+                 onset=tuple(2.0 for _ in range(n)),
+                 growl=tuple(0.2 for _ in range(n)), perc=tuple(perc))
+        g = grade_drops(v4, drop_beats=[0, 40], track_weight=None)
+        self.assertEqual(len(g), 2)
+        self.assertNotAlmostEqual(g[0]["within_track"], g[1]["within_track"])
 
     def test_missing_ref_empty(self):
         self.assertEqual(grade_drops(_v4(ref=None), drop_beats=[16], track_weight=None), [])
@@ -257,12 +320,64 @@ class FourFlagMatrixTests(unittest.TestCase):
 
 
 class GatesVerdictTests(unittest.TestCase):
-    def test_five_outcomes(self):
-        self.assertEqual(gates_verdict(50, 50, 0.2, 0.3), (False, "insufficient_corpus"))
-        self.assertEqual(gates_verdict(200, 100, 0.2, 0.3), (False, "insufficient_coverage"))
-        self.assertEqual(gates_verdict(200, 195, 0.02, 0.3), (False, "degenerate_distribution"))
-        self.assertEqual(gates_verdict(200, 195, 0.2, 0.05), (False, "inverted_or_flat_separation"))
-        self.assertEqual(gates_verdict(200, 195, 0.2, 0.3), (True, "ok"))
+    def test_precedence_every_branch(self):
+        # (n_elig, n_graded, term_railed_max, term_rho_max, iqr, rankable,
+        #  level_sep_db, grade_sep). A clean-pass baseline:
+        ok = (200, 195, 0.05, 0.24, 0.14, 0.99, 6.5, 0.19)
+        self.assertEqual(gates_verdict(*ok), (True, "ok"))
+        self.assertEqual(gates_verdict(50, *ok[1:]), (False, "insufficient_corpus"))
+        self.assertEqual(gates_verdict(200, 100, *ok[2:]), (False, "insufficient_coverage"))
+        self.assertEqual(gates_verdict(200, 195, 0.5, *ok[3:]), (False, "saturated_term"))
+        self.assertEqual(gates_verdict(200, 195, None, *ok[3:]), (False, "saturated_term"))
+        self.assertEqual(gates_verdict(200, 195, 0.05, 0.7, *ok[4:]), (False, "redundant_terms"))
+        self.assertEqual(gates_verdict(200, 195, 0.05, None, *ok[4:]), (False, "redundant_terms"))
+        self.assertEqual(gates_verdict(200, 195, 0.05, 0.24, 0.02, *ok[5:]),
+                         (False, "degenerate_distribution"))
+        self.assertEqual(gates_verdict(200, 195, 0.05, 0.24, None, *ok[5:]),
+                         (False, "degenerate_distribution"))
+        self.assertEqual(gates_verdict(200, 195, 0.05, 0.24, 0.14, 0.5, 6.5, 0.19),
+                         (False, "unrankable_grades"))
+        self.assertEqual(gates_verdict(200, 195, 0.05, 0.24, 0.14, None, 6.5, 0.19),
+                         (False, "unrankable_grades"))
+        self.assertEqual(gates_verdict(200, 195, 0.05, 0.24, 0.14, 0.99, 1.0, 0.19),
+                         (False, "inverted_level_separation"))
+        self.assertEqual(gates_verdict(200, 195, 0.05, 0.24, 0.14, 0.99, None, 0.19),
+                         (False, "inverted_level_separation"))
+        self.assertEqual(gates_verdict(200, 195, 0.05, 0.24, 0.14, 0.99, 6.5, 0.05),
+                         (False, "inverted_or_flat_grade_separation"))
+        self.assertEqual(gates_verdict(200, 195, 0.05, 0.24, 0.14, 0.99, 6.5, None),
+                         (False, "inverted_or_flat_grade_separation"))
+
+    def test_random_composite_rejected_by_g7(self):
+        # EREV1 F3: a pure RNG passed all six of the first draft's E3 gates because
+        # none read the grade. G7 reads the grade. An all-random four-term composite
+        # must be REJECTED, and the reason must be G7 specifically — this is the
+        # test that proves the E3 gate set is no longer noise-passable.
+        rng = random.Random(20260724)
+        terms = {k: [rng.random() for _ in range(2000)]
+                 for k in ("body", "onset", "perc", "growl")}
+        drops = [sum(terms[k][i] for k in terms) / 4.0 for i in range(2000)]
+        lows = [rng.random() for _ in range(600)]
+
+        def railed(vs):
+            return sum(1 for v in vs if v <= 0.0 or v >= 1.0) / len(vs)
+
+        term_railed_max = max(railed(terms[k]) for k in terms)
+        keys = list(terms)
+        term_rho_max = max(
+            abs(spearman(terms[a], terms[b]))
+            for i, a in enumerate(keys) for b in keys[i + 1:])
+        ds = sorted(drops)
+        iqr = _percentile(ds, 75) - _percentile(ds, 25)
+        grade_sep = _percentile(ds, 50) - _percentile(sorted(lows), 50)
+        # earlier gates all PASS; only G7 (grade separation) is meant to trip:
+        self.assertLessEqual(term_railed_max, drop_energy_v0.TERM_SATURATION_MAX)
+        self.assertLessEqual(term_rho_max, drop_energy_v0.TERM_CORRELATION_MAX)
+        self.assertGreaterEqual(iqr, drop_energy_v0.IQR_GATE)
+        self.assertLess(abs(grade_sep), drop_energy_v0.GRADE_SEPARATION_GATE)
+        verdict = gates_verdict(2000, 2000, term_railed_max, term_rho_max, iqr,
+                                1.0, 6.5, grade_sep)
+        self.assertEqual(verdict, (False, "inverted_or_flat_grade_separation"))
 
 
 def _imports_drop_energy_v0(text: str) -> bool:

@@ -85,7 +85,7 @@ def _shifted(v4, delta):
 
 
 def _store(cache_key="k", tw=0.4, **over):
-    d = {"schema_version": 1, "accepted": True,
+    d = {"schema_version": 2, "accepted": True,
          "distribution": {"body_duty": [0.1, 0.9]},
          "tracks": {cache_key: {"track_weight": tw}}}
     d.update(over)
@@ -129,8 +129,8 @@ class StoreRefusalTests(unittest.TestCase):
     def test_unparseable(self):
         self.assertIsNone(load_track_weight_store(self._write("{not json")))
 
-    def test_wrong_version(self):
-        self.assertIsNone(load_track_weight_store(self._write(_store(schema_version=2))))
+    def test_wrong_version(self):    # a v1 store is refused by the v2 loader
+        self.assertIsNone(load_track_weight_store(self._write(_store(schema_version=1))))
 
     def test_not_accepted(self):
         self.assertIsNone(load_track_weight_store(self._write(_store(accepted=False))))
@@ -144,6 +144,15 @@ class StoreRefusalTests(unittest.TestCase):
     def test_store_track_weight_absent_key(self):
         self.assertIsNone(store_track_weight(_store(), "missing"))
         self.assertEqual(store_track_weight(_store("k", 0.4), "k"), 0.4)
+
+    def test_v1_store_refused_but_within_track_still_grades(self):
+        # EREV1 N6: a refused (v1) store yields no library_scaled, but within_track
+        # takes no store input — the section still grades, never an empty list.
+        self.assertIsNone(load_track_weight_store(self._write(_store(schema_version=1))))
+        g = grade_sections(_v4(), anlz_drops=[32], anlz_buildups=[0],
+                           anlz_breakdowns=[], track_weight=None)
+        self.assertTrue(g)
+        self.assertTrue(all(row["library_scaled"] is None for row in g))
 
 
 class ProductLawTests(unittest.TestCase):
@@ -189,12 +198,51 @@ class SegmentationTests(unittest.TestCase):
                                     MIN_SECTION_BEATS)
 
 
+class SpanAndMedianTests(unittest.TestCase):
+    def test_span_maps_and_clips(self):
+        # -12 dB -> 0.0, -6 -> 0.5, 0 -> 1.0, and clips outside [-12, 0].
+        for rel, want in ((-12.0, 0.0), (-6.0, 0.5), (0.0, 1.0),
+                          (5.0, 1.0), (-20.0, 0.0)):
+            v4 = _v4(n_beats=64, full=tuple(0.0 for _ in range(64)), ref=-rel)
+            g = grade_sections(v4, anlz_drops=[32], anlz_buildups=[0],
+                               anlz_breakdowns=[], track_weight=None)
+            self.assertTrue(g)
+            self.assertAlmostEqual(g[0]["within_track"], want, places=9,
+                                   msg="rel=%s" % rel)
+
+    def test_median_aggregator_encodes_e2b(self):
+        # A section whose beats are [-3,-3,-3,-100] grades from the MEDIAN (-3 dB ->
+        # 1.0), not the mean (-27.25 dB -> 0.0). One silent beat can no longer drag
+        # the whole section to zero. This single assertion IS E2-b.
+        full = tuple([-3.0, -3.0, -3.0, -100.0] + [-3.0] * 60)
+        v4 = _v4(n_beats=64, full=full, ref=-3.0)
+        g = grade_sections(v4, anlz_drops=[4], anlz_buildups=[0],
+                           anlz_breakdowns=[], track_weight=None)
+        first = [s for s in g if s["start_beat"] == 0]
+        self.assertTrue(first)
+        self.assertAlmostEqual(first[0]["within_track"], 1.0, places=9)
+
+
 class GatesVerdictTests(unittest.TestCase):
-    def test_four_outcomes(self):
-        self.assertEqual(gates_verdict(50, 50, 50), (False, "insufficient_corpus"))
-        self.assertEqual(gates_verdict(200, 100, 100), (False, "insufficient_coverage"))
-        self.assertEqual(gates_verdict(200, 195, 100), (False, "flat_grades"))
-        self.assertEqual(gates_verdict(200, 195, 190), (True, "ok"))
+    def test_precedence_every_branch(self):
+        # (n_by_genre_eligible, n_graded, railed_fraction, rankable_fraction, sep)
+        self.assertEqual(gates_verdict(50, 50, 0.1, 0.95, 0.3),
+                         (False, "insufficient_corpus"))
+        self.assertEqual(gates_verdict(200, 100, 0.1, 0.95, 0.3),
+                         (False, "insufficient_coverage"))
+        self.assertEqual(gates_verdict(200, 195, 0.5, 0.95, 0.3),
+                         (False, "saturated_grades"))
+        self.assertEqual(gates_verdict(200, 195, None, 0.95, 0.3),
+                         (False, "saturated_grades"))            # None fails closed
+        self.assertEqual(gates_verdict(200, 195, 0.1, 0.5, 0.3),
+                         (False, "unrankable_grades"))
+        self.assertEqual(gates_verdict(200, 195, 0.1, None, 0.3),
+                         (False, "unrankable_grades"))           # None fails closed
+        self.assertEqual(gates_verdict(200, 195, 0.1, 0.95, 0.1),
+                         (False, "inverted_or_flat_separation"))
+        self.assertEqual(gates_verdict(200, 195, 0.1, 0.95, None),
+                         (False, "inverted_or_flat_separation"))  # None fails closed
+        self.assertEqual(gates_verdict(200, 195, 0.1, 0.95, 0.3), (True, "ok"))
 
 
 class CurrentSectionTests(unittest.TestCase):
