@@ -7,8 +7,10 @@ quantizes onto the runtime-injected palette slots instead of the HSV wheel. On
 rainbow-classified tracks the PALETTE is rainbow, so the same effect goes
 rainbow there — a palette, not a renderer branch.
 """
+import contextlib
 import copy
 import glob
+import io
 import json
 import os
 import sys
@@ -198,7 +200,11 @@ class ApplyPartGScriptTests(unittest.TestCase):
     def test_main_end_to_end_on_the_example_config(self):
         # The example config is a real full config: exercises the loader gate,
         # the timestamped backup, the atomic write, and idempotence.
-        with tempfile.TemporaryDirectory() as td:
+        # main() is a CLI that prints a [result]/[after] report; keep it out of
+        # the suite's stdout (a reviewer once mistook a leaked line for an
+        # import-time side effect) while still exercising the real run.
+        with tempfile.TemporaryDirectory() as td, \
+                contextlib.redirect_stdout(io.StringIO()):
             p = os.path.join(td, "led_look_director.json")
             Path(p).write_text(_EXAMPLE_PATH.read_text(encoding="utf-8"), encoding="utf-8")
             self.assertEqual(m.main(["--config", p]), 0)
@@ -218,7 +224,8 @@ class ApplyPartGScriptTests(unittest.TestCase):
     def test_main_refuses_and_writes_nothing_pre_round_a(self):
         raw = json.loads(_EXAMPLE_PATH.read_text(encoding="utf-8"))
         del raw["f2"]["drop_look_routing"]["COMET"]
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory() as td, \
+                contextlib.redirect_stdout(io.StringIO()):
             p = os.path.join(td, "led_look_director.json")
             before = json.dumps(raw, indent=2)
             Path(p).write_text(before, encoding="utf-8")
