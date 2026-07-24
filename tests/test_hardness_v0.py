@@ -399,7 +399,10 @@ def _imports_hardness_v0(text: str) -> bool:
 class ZeroRuntimeImporterTests(unittest.TestCase):
     """The machine-checkable shadow boundary: only tools/ and tests/ may import it."""
 
-    SKIP_DIRS = {".git", "graphify-out", "__pycache__", "node_modules", "build", "dist"}
+    # "local" = the gitignored scratch/venv tree (never repo code); skipping it
+    # both avoids the non-utf8 third-party fixtures under it and cuts the scan
+    # from ~75s to well under a second (E1 review O1).
+    SKIP_DIRS = {".git", "graphify-out", "__pycache__", "node_modules", "build", "dist", "local"}
 
     def test_no_runtime_module_imports_hardness_v0(self):
         importers = []

@@ -103,12 +103,14 @@ zero-runtime-importer invariant, with a companion test proving the guard catches
 `importlib.import_module`, and `__import__` forms a line-anchored regex would miss. Read-only
 offline code — `hardness_v0.py` does no I/O and has zero runtime importers; the evaluator opens the
 Rekordbox DB + v4 cache READ-ONLY only. Not run in these tests: the real corpus, cache, or DB.
-(SUITEFIX 2026-07-24: the whole-tree importer scan now tolerates non-UTF-8 files — it catches
-`UnicodeDecodeError` alongside `OSError` and skips them — so a gitignored virtualenv under `local/`
-holding a non-utf8 third-party test fixture cannot ERROR the invariant; the guard itself is
-unchanged and still FAILS on any real runtime importer, proven by a temporary synthetic-violation
-probe. `tests/test_approach_features_v0.py` reads with `errors="ignore"` and `tests/test_track_weight_v0.py`
-catches both, so both were already robust; only `tests/test_hardness_v0.py` needed the cure.)
+(SUITEFIX 2026-07-24: the whole-tree importer scans now SKIP the gitignored `local/` scratch/venv
+tree (E1-review O1 — never repo code; also cuts each scan from ~75s to sub-second) AND catch
+`UnicodeDecodeError` alongside `OSError` as defense-in-depth, so a non-utf8 third-party test fixture
+inside a gitignored venv can no longer ERROR the invariant. The guard itself is unchanged and still
+FAILS on any real runtime importer, proven by a temporary repo-root synthetic-violation probe
+(fail-with-probe → pass-without). `tests/test_hardness_v0.py` and `tests/test_track_weight_v0.py`
+received the `local/` skip; `tests/test_approach_features_v0.py` already skipped `local`/`venv` and
+read with `errors="ignore"`.)
 
 AWR-204 adds `tests/test_approach_features_v0.py` (27 tests) for the offline raw approach-descriptor
 layer `approach_features_v0.py`. On duck-typed `SpectralFeaturesV4` synthetics (no cache/DB/ANLZ) it

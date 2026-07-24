@@ -234,8 +234,10 @@ def _imports_track_weight_v0(text: str) -> bool:
 class ZeroRuntimeImporterTests(unittest.TestCase):
     """Only tools/ and tests/ may import track_weight_v0 — enforced forever."""
 
+    # "local" = the gitignored scratch/venv tree (never repo code); skipping it
+    # avoids non-utf8 third-party fixtures and cuts the scan to sub-second.
     SKIP_DIRS = {".git", "graphify-out", "__pycache__", "node_modules", "build",
-                 "dist"}
+                 "dist", "local"}
 
     def test_no_runtime_module_imports_track_weight_v0(self):
         importers = []
