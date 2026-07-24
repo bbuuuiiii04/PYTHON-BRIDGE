@@ -38,8 +38,8 @@ The additive schema-1 `soundswitch_pack` object is:
 | `pack_sha256` | Full public manifest hash used by the Art-Net compare tool to reject stale/mismatched runs. |
 | `reason` | Sanitized runtime category. |
 | `phase_offset_beats` | Finite native Autoloop calibration value; default `0.0`. |
-| `operational_state` | `disabled`, `blackout`, `input_degraded`, `static_held`, `scripted_active`, native Autoloop states (`rendering_active`, `empty_dark_look`, `base_suppressed`, `missing_binding`, `missing_autoloop_file`, `unsupported_layout`, `soundswitch_present_native_suppressed`), `autoloop_phase_blocked`, or `software_zero_frame`. `base_suppressed` means an intended-dark LED-only drop, not a pack error. |
-| `scripted_active`, `input_degraded`, `static_held`, `blackout`, `autoloop_phase_blocked` | Authoritative companion booleans; more than one may be true. `input_degraded` can mean manual Static Look input is unavailable while scripted pack DMX continues. |
+| `operational_state` | `disabled`, `blackout`, `unverified_parity`, `input_degraded`, `static_held`, `scripted_active`, native Autoloop states (`rendering_active`, `empty_dark_look`, `base_suppressed`, `missing_binding`, `missing_autoloop_file`, `unsupported_layout`, `soundswitch_present_native_suppressed`), `autoloop_phase_blocked`, or `software_zero_frame`. `base_suppressed` means an intended-dark LED-only drop, not a pack error. |
+| `scripted_active`, `input_degraded`, `static_held`, `blackout`, `parity_live_blocked`, `autoloop_phase_blocked` | Authoritative companion booleans; more than one may be true. `input_degraded` can mean manual Static Look input is unavailable while scripted pack DMX continues. |
 | `overlay_suppressed` | Stable diagnostic object with `static_held`, `blackout`, and `input_degraded` booleans. These are true only when SoundSwitch-connected suppression forces the pack lane to software ZERO while a manual overlay/degraded-input condition was present. |
 | `software_zero_frame` | The rendered CH1-CH19 software frame equals zero; not serial or physical proof. |
 | `frame_count` | Non-negative attempted normal software-frame count; not confirmed sends. |

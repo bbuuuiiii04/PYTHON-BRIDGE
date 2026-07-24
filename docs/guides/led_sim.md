@@ -256,10 +256,10 @@ Choose a source and press its render button:
 - **Saved look** reads the current look config,
   including its stable seed, base effect parameters, sync mode, and beat
   division, then uses the real runner offline.
-- **Production effect** runs an effect through the same offline runner capture.
+- **Built-in effect** runs an effect through the same offline runner capture.
 - **Lab draft** uses the Template Lab preview path and is labeled as a lab
   pipeline, not a production-runner result.
-- **Recorded frames** loads frames-JSONL from this repo or the system temp
+- **Recording** loads frames-JSONL from this repo or the system temp
   directory.
 
 The transport supports play/pause, loop, exact-frame scrubbing, left/right

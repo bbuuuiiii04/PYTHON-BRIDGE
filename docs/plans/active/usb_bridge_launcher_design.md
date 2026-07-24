@@ -425,13 +425,14 @@ in the installed location, not the stick.
   consent/result modal is native AppKit, followed by the native macOS admin
   prompt. A real friend-Mac patch and every stock-SIP live attach remain
   unvalidated. AWR-222 honesty unchanged.
-- **Dependency manifest gap (re-swept 2026-07-09, `confirmed`):** `pyproject.toml` declares
-  only `mido, pyobjc-framework-Cocoa, pyrekordbox, python-osc, zeroconf` (+ optional
-  spectral/analysis extras: `librosa`, `soundfile`, `numpy`, `scipy`) and has ZERO diff since
-  `8abccdf` — but the runtime also imports **`python-elgato-streamdeck`** (+ its `hidapi`),
-  **`Pillow`** (`streamdeck/streamdeck_midi.py`), **`python-rtmidi`** (mido's backend), and
-  `pyserial` (Enttec, AWR-124 R5). The PyInstaller spec needs either the manifest fixed or an
-  explicit hidden-imports list covering all of these. **AWR-237 (2026-07-15, amended 2026-07-14):** StreamDeck's Darwin LibUSBHIDAPI search is find_library + `$HOMEBREW_PREFIX/lib/libhidapi.dylib` only — not PyInstaller `_MEIPASS`. The frozen app ships a `libhidapi.dylib` built from the hash-locked hidapi 0.15.0 **source** tarball (`packaging/libhidapi_arm64.lock`) at `MACOSX_DEPLOYMENT_TARGET=12.3` during `make_stick` (direct `clang -dynamiclib` of `mac/hid.c`; cached under `.build-wheelhouse-macos12-arm64-cp313/`). Homebrew host dylibs were rejected live 2026-07-14 by the AWR-229 Mach-O floor gate (`requires macOS 15.0 (max 12.3)`). Authenticity = locked source SHA-256 + Mach-O floor (arm64 + minos ≤ 12.3); built dylibs are not binary-hash-pinned. Frozen `--run-streamdeck` calls `usb_launcher.prepare_frozen_hidapi` to ctypes-load that path and set `HOMEBREW_PREFIX=_MEIPASS` before importing StreamDeck. make_stick/spec fail closed if the built dylib is missing/non-arm64/too-new. Guest device behavior remains unvalidated. External system binaries the runtime
+- **Dependency manifest gap (CLOSED at HEAD; was `confirmed` 2026-07-09):** `pyproject.toml`
+  base `dependencies` are now `mido, pyobjc-framework-Cocoa, pyobjc-framework-ApplicationServices,
+  pyrekordbox, python-osc, zeroconf` (`pyproject.toml:10-17`), and the previously-undeclared
+  runtime imports are declared in a `[bundle]` optional extra (`pyproject.toml:30-38`):
+  **`streamdeck`** (+ its `hidapi`), **`Pillow`** (`streamdeck/streamdeck_midi.py`),
+  **`python-rtmidi`** (mido's backend), **`pyserial`** (Enttec, AWR-124 R5), and **`mutagen`**
+  (SoundSwitch track-id tags). A PyInstaller build or `pip install .[bundle]` now pulls the full
+  rig, so the spec no longer needs a hand-maintained hidden-imports list for these. **AWR-237 (2026-07-15, amended 2026-07-14):** StreamDeck's Darwin LibUSBHIDAPI search is find_library + `$HOMEBREW_PREFIX/lib/libhidapi.dylib` only — not PyInstaller `_MEIPASS`. The frozen app ships a `libhidapi.dylib` built from the hash-locked hidapi 0.15.0 **source** tarball (`packaging/libhidapi_arm64.lock`) at `MACOSX_DEPLOYMENT_TARGET=12.3` during `make_stick` (direct `clang -dynamiclib` of `mac/hid.c`; cached under `.build-wheelhouse-macos12-arm64-cp313/`). Homebrew host dylibs were rejected live 2026-07-14 by the AWR-229 Mach-O floor gate (`requires macOS 15.0 (max 12.3)`). Authenticity = locked source SHA-256 + Mach-O floor (arm64 + minos ≤ 12.3); built dylibs are not binary-hash-pinned. Frozen `--run-streamdeck` calls `usb_launcher.prepare_frozen_hidapi` to ctypes-load that path and set `HOMEBREW_PREFIX=_MEIPASS` before importing StreamDeck. make_stick/spec fail closed if the built dylib is missing/non-arm64/too-new. Guest device behavior remains unvalidated. External system binaries the runtime
   shells out to (inventory for entitlement/runbook purposes): `vmmap` (`rb_memory.py:140-143`),
   `pgrep` (`rb_memory.py:129-132`), `lsof` (`filepath_resolver.py:83-95`).
 

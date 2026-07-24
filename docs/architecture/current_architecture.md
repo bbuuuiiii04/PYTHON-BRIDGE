@@ -58,8 +58,10 @@ Capture-derived parity registries now feed the compiler for scripted,
 Autoloop, and Static Look lanes. Static Looks are generalized through the C6
 non-generic assertion plus the documented unavailable static windows, and the
 zero-seeded Autoloop-cycle fix promotes `SSAutoLoop52.ssfile` and
-`SSAutoLoop54.ssfile`, but a fresh export still has 13 active
-`unverified_parity` documents, so trusted publication remains blocked.
+`SSAutoLoop54.ssfile`. A fresh export now reports 0 active
+`unverified_parity` documents (AWR-276 re-baseline: 70 `algorithm_generalized`
+/ 14 `oracle_proven` / 0 `unverified_parity`), so trusted publication is
+software-gated green.
 
 This lane remains subordinate to existing bridge authority. `__main__` loads
 the optional config and chooses one physical laser backend before workers start;

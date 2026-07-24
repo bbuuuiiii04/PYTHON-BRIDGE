@@ -72,8 +72,8 @@ artifacts, not planning documents. They are not moved into the authority tree.
   fixtures. Static Looks are now `algorithm_generalized` through the documented
   unavailable-window fallback plus the C6 non-generic assertion. Segment-aware
   Autoloop reduction plus supported-layout-family scripted generalization now
-  reports fresh active lanes `algorithm_generalized: 67`, `oracle_proven: 16`,
-  `unverified_parity: 0`; trusted publication is software-gated green.
+  reports fresh active lanes `algorithm_generalized: 70`, `oracle_proven: 14`,
+  `unverified_parity: 0` (re-baselined 2026-07-16, AWR-276); trusted publication is software-gated green.
 - Pure scripted renderer: implemented/software-wire tested.
 - Config/startup/runtime command/StateManager/Enttec lane: implemented and
   default-off; RW-2 through RW-5 runtime authority/status work is

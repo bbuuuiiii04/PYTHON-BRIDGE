@@ -831,9 +831,13 @@ LIGHTING ENGINE v2 F4 texture layer (AWR-164, 2026-07-09):
   bass-forward B/K mask scales sparkle density — a scalar stand-in, not literal per-beat alternation). It
   also seasons quiet role cues with sparse-dim `simmer_seasoning` params during a measured simmer.
   Euphoric windows add a bright/white-end preference through the existing
-  `_led_look_preference_predicate`. The v2-dressing, F2 family/tier, and F4
-  bright terms narrow independently in that order; an empty F4 intersection
-  keeps the F2-routed pool instead of reopening the full drop bank.
+  `_led_look_preference_predicate`. The F2 family/tier, v2-dressing, and F4
+  bright terms narrow the pool in that authority order — F2 family/tier FIRST
+  (AWR-257-B). Order matters: each term fails open on an empty intersection
+  (`led_look_director` applies them as a sequential fold), so the first term is
+  the hard floor and later terms only refine WITHIN it — dressing can narrow the
+  family pool but can never replace it. An empty F4 intersection keeps the
+  F2-routed pool instead of reopening the full drop bank.
 - Kill switch: the `/f4` config block, example-ON / absent-OFF (`led_config.load_f4_config` /
   `led_models.F4Config`), so an un-mirrored live config stays byte-identical to F2-only. `busy_pulse`
   is COMPUTED-NOT-CONSUMED behind `busy_pulse_experimental` (renders nothing; C§6d). `sustained_synth`

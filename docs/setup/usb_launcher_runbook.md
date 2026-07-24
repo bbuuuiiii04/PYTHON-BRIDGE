@@ -79,10 +79,13 @@ prebuilt `libpython`. Only a low-target interpreter fixes it.
   `/Library/Frameworks/Python.framework/Versions/*/bin/python3` (target < 13,
   universal2); override with `RBSS_BUILD_PYTHON=/path/to/python3`. It refuses to
   build with a Homebrew/target-15 interpreter.
-- **Minimum macOS supported by the fixed build:** ~**macOS 11 (Big Sur)** in
-  practice (`MACOSX_DEPLOYMENT_TARGET=11.0`); the `libpython` floor is 10.13, but
-  the real floor is the highest `minos` among the bundled wheels/dylibs. This
-  comfortably clears the reported macOS 12 target.
+- **Minimum macOS supported by the fixed build:** **macOS 12.3**
+  (`MACOSX_DEPLOYMENT_TARGET=12.3` default in `packaging/make_stick.sh`;
+  `LSMinimumSystemVersion 12.3` in `packaging/rbss_launcher.spec`). Official
+  CPython 3.13 SciPy wheels are tagged macOS 12.0 but their Mach-O slices require
+  12.3, so macOS 12.0–12.2 are intentionally unsupported and `make_stick.sh`'s
+  binary scan enforces the real floor. This is the accepted envelope (Apple
+  Silicon + macOS ≥ 12.3) and agrees with the packaging section below.
 - **Deps:** NO `--system-site-packages` (that pulled Homebrew's arm64/target-15
   wheels back in). `make_stick.sh` installs the rig fresh into a clean venv:
   ```bash

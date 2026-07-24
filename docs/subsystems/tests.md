@@ -92,6 +92,17 @@ Coverage expectations:
   `available=False` + honest reason), empty track unavailable-not-error, inconsistent caller inputs
   raising, determinism, and
   the AST+text zero-runtime-importer invariant. Stdlib-only; duck-typed synthetics, no cache/DB.
+- Energy E2/E3 per-section/per-drop grades (`section_energy_v0.py`/`drop_energy_v0.py`, AWR-288/290;
+  runtime-imported on the ANLZ worker, status-only, `RBSS_SECTION_ENERGY`/`RBSS_DROP_ENERGY` default-off)
+  changes need `tests/test_section_energy_v0.py` (20 tests) and `tests/test_drop_energy_v0.py` (14 tests):
+  within-track gain-invariance, `library_scaled = within × track_weight` (or null), the E1 store consumed
+  only through `load_track_weight_store` (refuses accepted:false/missing/malformed/wrong-version), absent
+  data (no store / no v4 / no markers / short section / non-finite) → absent grades never fabricated, the
+  pinned gate math (E2 G1 0.95 / G2 0.90@0.10; E3 G1 0.95 / G2 IQR 0.05 / G3 separation 0.15 — a failed
+  gate is a valid reported result), the flag-off byte-identical kill path (no compute, no payload key, no
+  status key; E3 also all `DropDecision.energy_grade` None), and the AST-based static import-fence
+  invariant (only `state_manager.py` + `tools/` + `tests/` may import). Stdlib-only; duck-typed synthetics,
+  no cache/DB.
 - Config schema changes need validation tests.
 - LED/Govee rendering changes need deterministic renderer/runner tests where practical.
 - Laser changes need config/executor/director tests.
