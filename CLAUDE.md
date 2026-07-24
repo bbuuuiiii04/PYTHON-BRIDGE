@@ -22,8 +22,17 @@ Also follow `AGENTS.md` §0 Brandon Communication Mode:
   old plans may be stale — verify against current code.
 - **Present findings, ask before changing.** No unsolicited changes beyond the stated scope.
 - **Live safety first.** Reason through the live-mixing scenario before proposing any change. After
-  any bridge restart, verify exactly one process: `pgrep -f rb_ss_bridge_v2 | wc -l` must be `1`
-  (SoundSwitch won't autorotate without the bridge running).
+  any bridge restart, verify exactly one bridge process — must be `1`
+  (SoundSwitch won't autorotate without the bridge running):
+
+  ```bash
+  pgrep -f "^[^[:space:]]*(python3|Python)[^[:space:]]*([[:space:]]+-u)?[[:space:]]+-m[[:space:]]+rb_ss_bridge_v2$" | wc -l
+  ```
+
+  Use exactly this anchored pattern (the same one `scripts/ss_bridge_watcher.sh:104` uses). A bare
+  `pgrep -f rb_ss_bridge_v2` **over-counts badly** — it also matches the menubar, `led_pad`,
+  `laser_pad`, `led_sim_web`, lane watchers, and any shell whose command line contains the repo
+  name. Measured 2026-07-24: the bare form returned `8` while the bridge was **not running at all**.
 - **Cost discipline.** Offload large read-only sweeps (logs / capture corpora / multi-file research)
   to a read-only subagent and verify its load-bearing claims before relying on them; keep
   safety-critical (live-mixing / runtime-invariant / laser-LED) reasoning on a high tier.

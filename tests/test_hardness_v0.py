@@ -401,7 +401,8 @@ class ZeroRuntimeImporterTests(unittest.TestCase):
 
     # "local" = the gitignored scratch/venv tree (never repo code); skipping it
     # both avoids the non-utf8 third-party fixtures under it and cuts the scan
-    # from ~75s to well under a second (E1 review O1).
+    # from ~75s to ~1.5s (E1 review O1). Not sub-second: the rglob walk over
+    # local/ is the floor; os.walk pruning is a recorded future optimization.
     SKIP_DIRS = {".git", "graphify-out", "__pycache__", "node_modules", "build", "dist", "local"}
 
     def test_no_runtime_module_imports_hardness_v0(self):
@@ -413,11 +414,12 @@ class ZeroRuntimeImporterTests(unittest.TestCase):
             if rel == "hardness_v0.py":
                 continue
             try:
-                text = path.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
-                # non-source / non-utf8 files (e.g. joblib test fixtures inside
-                # gitignored venvs under local/) can never import an ASCII module
-                # path — skip rather than crash the invariant scan.
+                # errors="replace" keeps a non-utf8 file IN SCOPE (it can't
+                # match an ASCII import path, but the invariant should still see
+                # it) while OSError still skips a genuinely unreadable file —
+                # matching the elder test_approach_features_v0.py sibling (O2).
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
                 continue
             if _imports_hardness_v0(text):
                 importers.append(rel)

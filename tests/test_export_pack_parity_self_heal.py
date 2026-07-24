@@ -196,9 +196,13 @@ class ExportFallsBackWhenFixturesAreAbsentTests(unittest.TestCase):
             lanes = json.loads((dest / "manifest.json").read_text())["parity_lanes"]
 
         # Fallback-path proof (REAL in BOTH worlds): with every fixture absent
-        # the export must NOT re-derive -- it must compile exactly ONCE, fed the
-        # committed snapshot. If the fallback were broken (snapshot never
-        # loaded, or a spurious second compile), these fail regardless of lanes.
+        # the export must NOT re-derive -- it must compile exactly ONCE, and the
+        # committed snapshot is the registry LOADED AND HANDED to that compile.
+        # The spy proves loaded-and-handed-once, not that the packer honored the
+        # snapshot's rows (that is covered by test_soundswitch_scripted_parity
+        # .py:233-243); "consumed" holds only in the match branch below. If the
+        # fallback were broken (snapshot never loaded, or a spurious second
+        # compile), these fail regardless of lanes.
         self.assertEqual(len(observed_registries), 1)
         self.assertEqual(observed_registries[0], committed_registries)
 

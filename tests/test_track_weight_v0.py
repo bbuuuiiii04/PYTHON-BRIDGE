@@ -235,7 +235,8 @@ class ZeroRuntimeImporterTests(unittest.TestCase):
     """Only tools/ and tests/ may import track_weight_v0 — enforced forever."""
 
     # "local" = the gitignored scratch/venv tree (never repo code); skipping it
-    # avoids non-utf8 third-party fixtures and cuts the scan to sub-second.
+    # avoids non-utf8 third-party fixtures and cuts the scan to ~1.5s (was ~75s;
+    # not sub-second — the rglob walk over local/ is the floor). E1 review O1.
     SKIP_DIRS = {".git", "graphify-out", "__pycache__", "node_modules", "build",
                  "dist", "local"}
 
@@ -249,11 +250,12 @@ class ZeroRuntimeImporterTests(unittest.TestCase):
             if rel == "track_weight_v0.py":
                 continue
             try:
-                text = path.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
-                # non-source / non-utf8 files (e.g. joblib test fixtures inside
-                # gitignored venvs under local/) can never be a real importer of
-                # an ASCII module path — skip rather than crash the invariant.
+                # errors="replace" keeps a non-utf8 file IN SCOPE (it can't
+                # match an ASCII import path, but the invariant should still see
+                # it) while OSError still skips a genuinely unreadable file —
+                # matching the elder test_approach_features_v0.py sibling (O2).
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
                 continue
             if _imports_track_weight_v0(text):
                 importers.append(rel)

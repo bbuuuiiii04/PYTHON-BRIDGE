@@ -104,13 +104,16 @@ zero-runtime-importer invariant, with a companion test proving the guard catches
 offline code — `hardness_v0.py` does no I/O and has zero runtime importers; the evaluator opens the
 Rekordbox DB + v4 cache READ-ONLY only. Not run in these tests: the real corpus, cache, or DB.
 (SUITEFIX 2026-07-24: the whole-tree importer scans now SKIP the gitignored `local/` scratch/venv
-tree (E1-review O1 — never repo code; also cuts each scan from ~75s to sub-second) AND catch
-`UnicodeDecodeError` alongside `OSError` as defense-in-depth, so a non-utf8 third-party test fixture
-inside a gitignored venv can no longer ERROR the invariant. The guard itself is unchanged and still
-FAILS on any real runtime importer, proven by a temporary repo-root synthetic-violation probe
-(fail-with-probe → pass-without). `tests/test_hardness_v0.py` and `tests/test_track_weight_v0.py`
-received the `local/` skip; `tests/test_approach_features_v0.py` already skipped `local`/`venv` and
-read with `errors="ignore"`.)
+tree (E1-review O1 — never repo code; also cuts each scan from ~75s to ~1.5s — not sub-second: the
+`rglob` walk over `local/` is the floor, and `os.walk` pruning is a recorded future optimization).
+RETROFIX 2026-07-24 (E1-review O2): each remaining file is now read with `errors="replace"` instead
+of catching `UnicodeDecodeError` and skipping, so a non-utf8 third-party test fixture inside a
+gitignored venv STAYS IN SCOPE (it can never match an ASCII import path anyway) rather than being
+dropped from the invariant; `OSError` still skips a genuinely unreadable file. The guard itself is
+unchanged and still FAILS on any real runtime importer, proven by a temporary repo-root
+synthetic-violation probe (fail-with-probe → pass-without). `tests/test_hardness_v0.py` and
+`tests/test_track_weight_v0.py` received the `local/` skip and the `errors="replace"` read;
+`tests/test_approach_features_v0.py` already skipped `local`/`venv` and read with `errors="ignore"`.)
 
 AWR-204 adds `tests/test_approach_features_v0.py` (27 tests) for the offline raw approach-descriptor
 layer `approach_features_v0.py`. On duck-typed `SpectralFeaturesV4` synthetics (no cache/DB/ANLZ) it
