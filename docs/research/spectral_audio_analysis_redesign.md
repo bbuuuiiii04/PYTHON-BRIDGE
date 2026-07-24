@@ -814,6 +814,46 @@ may import it; a static AST+text test enforces it), no I/O, and it never times o
 
 ---
 
+## 12. Library track-weight layer (AWR-286, energy E1, offline, 2026-07-24)
+
+`track_weight_v0.py` (repo root, pure, stdlib-only, **zero runtime importers** — a
+static test enforces `tools/`+`tests/`-only imports) is energy-fabric stage E1
+(`docs/plans/active/energy_e1_track_weight_spec_v1.md`, EFREV-N3-cured). It scores
+each track's energy **against the whole library** in a way that ignores mastering
+loudness.
+
+- **What it computes.** Four gain-invariant per-track components — `body_duty`
+  (fraction of beats with `full_db ≥ ref−8`), `sub_duty` (`sub_db ≥ ref−12`),
+  `onset_mh_mean`, `growl_flatness_mean` — then `track_weight` = the mean of each
+  component's mid-rank percentile across the library (equal weights, pinned).
+- **Why it is gain-invariant (the loudness-relative construction).** `ref =
+  loudness_ref_db = p95(full_db)` (`audio_spectral_features.py:423`). Both dB
+  duties compare each track's own beats against that track's own `ref`, so a
+  uniform per-track mastering offset shifts numerator and reference together and
+  cancels **exactly**; `onset_density_midhigh` and `growl_flatness` are count /
+  ratio series untouched by level. No absolute-dB feature enters the aggregate.
+  Ranking against the library then only ever absorbs library-wide offsets. (This
+  is the fix to the parent spec's "percentile absorbs offsets" wording — per-track
+  offsets are handled one level down, by the relative construction.) A spectral
+  rebalance is outside gain-invariance scope.
+- **The pinned honesty gate (N3).** `tools/track_weight_report.py` sweeps the
+  library read-only, writes a version-owned sidecar
+  `<cache_dir>/trackweight_v1/track_weight_store.json` (machine-local, never
+  committed), and computes `Spearman(loudness_ref_db, track_weight)` on the
+  BY GENRE split (contract law: calibration stats use BY GENRE tracks only). The
+  run is ACCEPTED iff `n_by_genre ≥ 100`, `|rho| ≤ 0.50`, and no component is
+  degenerate (zero-IQR). 0.50 caps "the weight is mostly a loudness meter" while
+  allowing the genuine loud-genre correlation (harder genres are mastered hotter);
+  it and every constant move only by spec amendment — never by the implementer to
+  make a run pass. A failed acceptance is a valid, reported result.
+- **No live consumer.** E1 decides nothing live; nothing runtime reads the store
+  (E2+ consumers arrive under their own specs). The bridge is byte-identical.
+- **Status:** `implemented` / `software-tested` (unit tests incl. the exact
+  uniform-shift + per-track-shift gain-invariance checks, the Spearman tie case,
+  and the importer guard). SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
+
+---
+
 ## Appendix A — corpus recon (2026-07-05, this session, read-only)
 
 - Rekordbox DB opened exactly as `filepath_resolver.py:281-283` does (pyrekordbox
