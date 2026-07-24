@@ -1,13 +1,18 @@
 ---
 doc_status: draft
 truth_level: >
-  DRAFT v2 implementation spec — v2 = v1 + EXACTLY the RTREV cures (F1
-  conjunction join, F2 insertion-point pin, F3 results-on-disk correction +
-  161 confirmed, N1-N3 notes; ruling FIX, architecture approved). Pending the
-  vetted list (operator veto pass not yet run) + operator veto-mode
-  confirmation. NO code has changed. Not an implementation authorization:
-  implementation channel is Codex or a sanctioned Claude seat AFTER exec
-  review + operator activation — never the authoring seat.
+  DRAFT v3 implementation spec — v3 = v2 + EXACTLY the RTFIX2 cures from the
+  OQ1TRACE executor trace (local/spectral_v5_2026_07_17/OQ1TRACE_report.md):
+  C1 dedicated `warrant` role replaces the dead `role="phrase"`
+  recommendation, C2 honest director-side-only gating claim + T3 equivalence
+  pin (executor stays UNTOUCHED), C3 `role="drop"` demoted NOT-RECOMMENDED
+  with its shared-state interference named; OQ-1 flips [unknown] →
+  [confirmed-with-cures]. v2 = v1 + the RTREV cures (F1 conjunction join, F2
+  insertion-point pin, F3 results-on-disk correction + 161 confirmed, N1-N3).
+  Pending the vetted list (operator veto pass not yet run) + operator
+  veto-mode confirmation. NO code has changed. Not an implementation
+  authorization: implementation channel is Codex or a sanctioned Claude seat
+  AFTER exec review + operator activation — never the authoring seat.
 last_verified_commit: e76cbbf0
 last_verified_date: 2026-07-24
 validation_scope: >
@@ -16,11 +21,12 @@ validation_scope: >
   ONLY / HARDWARE-UNVALIDATED applies to the whole repo and everything here.
 ---
 
-# Codex Implementation Spec — Laser-warrant vetted spans: artifact + runtime wiring (DRAFT v2)
+# Codex Implementation Spec — Laser-warrant vetted spans: artifact + runtime wiring (DRAFT v3)
 
-Status: **DRAFT v2 — pending vetted list + operator veto-mode confirmation.**
-(v2 folds the RTREV review's three required cures and three notes; the
-architecture was ruled approved shape — nothing structural moved.)
+Status: **DRAFT v3 — pending vetted list + operator veto-mode confirmation.**
+(v2 folded the RTREV review's three cures and three notes; v3 folds the
+RTFIX2 cures from the OQ1TRACE executor trace. The architecture is unchanged
+across both rounds — nothing structural moved.)
 Two deliverables in one spec: (1) the bridge-consumable **vetted-spans
 artifact** built from the operator's veto pass over the laser-warrant ranked
 list, and (2) the **runtime wiring** that lets lasers fire (or be permitted)
