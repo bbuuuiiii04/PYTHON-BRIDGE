@@ -380,12 +380,32 @@ default `"off"`. Unknown mode → treated as `"off"` + one WARN (fail-open).
   in this ladder. The branch: if `ctx.laser_warrant_active` and the last warrant fire
   for this span is ≥ `min_refire_beats` behind `ctx.abs_beat`, return
   `LaserSceneDecision(scene=self._drop_scene, reason="growl_warrant",
-  priority=12, source="policy", role=<OQ-1>)`. It NEVER sets
-  `blackout_arm`, never touches masks, never writes drop-lifecycle state.
-  The executor is UNCHANGED: strict `_passes_automatic_gates`
-  (`laser_executor.py:169,625`) still applies, and the mirror path cannot
-  trigger because it keys on `reason == "drop_crossing"`
-  (`laser_executor.py:493`).
+  priority=12, source="policy", role="warrant")` (RTFIX2 C1 — a DEDICATED
+  role, deliberately NOT in `_AUTO_ROLES`). It NEVER sets `blackout_arm`,
+  never touches masks, never writes drop-lifecycle state. Selection-path
+  consequences of the dedicated role, all [confirmed] in
+  OQ1TRACE_report.md: the scene passes through verbatim
+  (`laser_executor.py:484-485`); zero role-state interference (the
+  cursor/active-scene/last-trigger-beat writes are `_AUTO_ROLES`-key-guarded,
+  `laser_executor.py:319-320, 706-716`); the same-scene skip
+  (`laser_executor.py:237-269`) gives free dedup of the level-held warrant
+  decision (fires once, then skips until another fire changes
+  `_last_triggered_scene`); backend priority is `"normal"`
+  (`laser_executor.py:721-724`), so a concurrent high-priority drop/manual
+  trigger wins at the backend; the missing-scene-mapping and high-impact
+  personality blocks still apply (`laser_executor.py:206-225`).
+  The executor is UNTOUCHED — and therefore (RTFIX2 C2, honest gating
+  claim): **the executor's strict `_passes_automatic_gates` does NOT apply
+  to the `warrant` role** — that gate is `_AUTO_ROLES`-membership-guarded
+  (`laser_executor.py:169`). Gating for the warrant path is DIRECTOR-SIDE
+  REACHABILITY ONLY: the priority-12 branch is reachable solely on full
+  ladder fall-through, and priorities 3–7 enforce playing, track loaded,
+  position fresh, not scripted, and autoloop_ready
+  (`laser_director.py:400-457`) — the same condition set as
+  `_passes_automatic_gates` (`laser_executor.py:625-633`). T3 MUST pin that
+  equivalence (see Part D) so a future ladder edit cannot silently un-gate
+  the warrant path. The mirror path cannot trigger because it requires
+  `role=="drop" AND reason=="drop_crossing"` (`laser_executor.py:488-494`).
 - Director state for the refire lockout resets wherever director lifecycle
   state already resets (master/track/stop/resume/scripted/idle transitions —
   `docs/subsystems/laser.md` "Director and executor lifecycle state reset";
@@ -393,12 +413,25 @@ default `"off"`. Unknown mode → treated as `"off"` + one WARN (fail-open).
 
 ### Open questions (exec review must close these before implementation)
 
-- **OQ-1 (role plumbing)** [unknown]: `role="phrase"` (recommended: ordinary
-  auto-scene under existing per-role cooldown/bank machinery, zero
-  drop-lifecycle interplay) vs `role="drop"` (drop-bank scene selection but
-  more executor surface). Requires one `laser_executor.py` trace of both role
-  paths at implementation-spec finalization; this draft deliberately does not
-  claim executor behavior it hasn't traced.
+- **OQ-1 (role plumbing)** [confirmed-with-cures] — CLOSED by the OQ1TRACE
+  hop-by-hop executor trace (`local/spectral_v5_2026_07_17/
+  OQ1TRACE_report.md`, RTFIX2 cures folded here). Resolution: the dedicated
+  non-`_AUTO_ROLES` role `"warrant"` (Task 5). For the record, so neither
+  dead option is resurrected: (1) `role="phrase"` is a SILENT NO-OP for any
+  new reason — `_select_scene` returns `""` unless the reason is in
+  `_PHRASE_TRIGGER_REASONS = {"default_init", "phrase_boundary"}`
+  (`laser_executor.py:26, 497-499`), so a `growl_warrant` phrase decision
+  never fires MIDI (the AWR-206 unreachable-branch failure class); reusing a
+  phrase-trigger reason string to sneak past the filter would falsify the
+  decision log and phrase semantics — banned. (2) `role="drop"` is
+  NOT-RECOMMENDED (RTFIX2 C3, musical-harm reason): a warrant fire under the
+  drop role advances the shared drop cursor/bag and
+  `_role_active_scene["drop"]` (`laser_executor.py:518-521, 523-551,
+  569-584`) and writes `_role_last_trigger_beat["drop"]` on success
+  (`:319-320`), which feeds the REAL drop's cooldown check (`:696-703`) — a
+  warrant accent could cooldown-block or bank-shift an immediately following
+  true drop hit; the UP→DROP exemption (`:694`) only rescues
+  `previous_role=="buildup"`.
 - **OQ-2 (relationship to AWR-220)** [decision deferred]: whether vetted
   spans should ALSO feed `drop_laser_qualifies` (a growl span overlapping a
   drop upgrading its laser eligibility). Explicitly NOT in v1.
@@ -528,7 +561,17 @@ subprocess (checklist #7). Fixture artifacts are inline dicts.
   honored; lockout resets on lifecycle reset; `blackout_arm` never set by
   the branch; (RTREV F2) on a warrant-return tick the tail state updates
   still ran — `_last_smart_abs_beat` advanced and the post-drop-hold
-  cleanup executed (post-drop-start reset not starved by warrant fires).
+  cleanup executed (post-drop-start reset not starved by warrant fires);
+  (RTFIX2 C2 — the gate-equivalence pin) the warrant path's director-side
+  gating is asserted against the executor's gate condition list: for EACH
+  condition in `_passes_automatic_gates` (`laser_executor.py:625-633` —
+  playing, active_track_loaded, not position_stale,
+  lighting_mode=="autoloop", scripted_id==0, autoloop_ready), a context
+  violating ONLY that condition must make `_decide` return a priority 1–11
+  decision (never the warrant branch). This pins the
+  reachability-equals-strict-gate equivalence so a future ladder edit that
+  weakens any of priorities 3–7 fails the suite instead of silently
+  un-gating the executor-ungated `warrant` role.
 - **T4 (wiring):** worker posts spans with correct payload; consumer drops
   stale `load_gen`; span store cleared on new load and on every meta-reset
   path enumerated at implementation; `LaserContext` fields default False/0
@@ -610,5 +653,9 @@ build stays I/O-free.
 Attack tried: *the accent branch outranking a safety branch after a future
 refactor renumbers priorities*. Defense: T3 is table-driven over the ladder,
 so any reordering that lets warrant beat a safety reason fails the suite.
-Residual risk (named, accepted): OQ-1's executor role choice is untraced in
-this draft; implementation cannot start until it is traced and closed.
+Formerly-residual risk, now closed (RTFIX2): OQ-1's executor role choice
+was traced hop-by-hop (OQ1TRACE_report.md) — the trace killed the
+`role="phrase"` recommendation (silent no-op), exposed that executor strict
+gates are `_AUTO_ROLES`-only, and demoted `role="drop"` for shared-state
+interference; the cures (dedicated `warrant` role, honest director-side
+gating claim, T3 equivalence pin) are folded into this v3.
