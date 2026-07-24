@@ -244,6 +244,7 @@ ever matters.
   unchanged (A19).
 - `__main__.py`: the existing flag-gated eviction worker additionally calls
   `evict_stale_v4()` — same thread, same flags, no new runtime surface.
+  *(Amended 2026-07-24, EVICTFIX: the flags were the bug. See §15.)*
 
 ### 4.6 Budget (measured basis, Appendix A/B)
 
@@ -953,6 +954,65 @@ static import-fence test enforces the allowlist).
   rejected with G7's reason specifically. Report also prints the corpus-basis drop
   count and both `library_scaled` correlations (INFORMATIONAL). Thresholds move only
   by spec amendment; a failed gate is a valid, reported result.
+- **Status:** `implemented` / `software-tested`. SOFTWARE-VALIDATED ONLY /
+  HARDWARE-UNVALIDATED.
+
+---
+
+## 15. Cache eviction repair (EVICTFIX, 2026-07-24)
+
+Diagnosis: `local/spectral_v5_2026_07_17/CACHEDIAG_report.md` (read-only, measured against
+the live cache dir). Eviction had never run on this machine, and would have destroyed the
+USB pre-warm if it had. Four defects, all now closed; none of them could ever have served
+wrong data — the cache filename *is* the key (`sha1(realpath + mtime_ns + size +
+beatgrid fingerprint)`), so a changed track lands on a different filename and re-extracts.
+This was a disk-space bug (547 MB, growing on every new track), never a live-safety one.
+
+- **The gate never opened** *(confirmed)*. The worker demanded
+  `RBSS_SPECTRAL_ENABLE=1`, which no launch path sets — not `launch_profile.BRIDGE_ENV`,
+  not `scripts/ss_bridge_watcher.sh`, not `usb_launcher.py` — while the ANLZ worker
+  *writes* entries under a different condition entirely (`state_manager` extracts and
+  caches when the gated v3 spectral path **or** LED identity-v2 is on, and identity-v2
+  comes from the colour-engine config). Zero `spectral-cache-evict` lines across 23 bridge
+  logs. Eviction now runs under that same write condition
+  (`__main__._spectral_cache_writes_enabled`), so the collector runs exactly when the
+  garbage is produced. Adding the env flag to the launch profile was rejected: it would
+  have flipped the gated v3 spectral path as a side effect.
+- **Foreign files killed the sweep** *(confirmed, reproduced)*. macOS AppleDouble `._*`
+  twins arrive with every copy off a FAT/exFAT stick (1794 of them, all dated 2026-07-10,
+  the signature of one bulk stick/install copy). `Path.glob("*.json")` returns them, unlike
+  `glob.glob`; they are binary; `UnicodeDecodeError` is a `ValueError`, not a
+  `JSONDecodeError`, so the old handler missed it and the exception escaped the loop, the
+  function and the thread — on file index 0 in **both** directories, and a v3 abort also
+  stopped the v4 sweep, which ran in the same worker. Both sweeps now skip `._*` names:
+  never read, never deleted (macOS just recreates them).
+- **Undecodable entries** now read as stale via a widened `ValueError` handler. That is
+  safe *only* because the foreign-file skip runs first — what reaches the handler is one
+  of our own entries, and one of ours that will not decode is genuinely dead.
+- **The mount guard — the one that mattered** *(confirmed)*. 599 v4 entries referenced
+  audio that does not exist right now, but **587 of them were the deliberate USB pre-warm**
+  written by `tools/spectral_stick_sweep.py`, keyed by the on-stick `/Volumes/MINK`,
+  `/Volumes/USB` path. With no stick mounted, a merely un-crashed sweep would have deleted
+  ≈229 MB of pre-warm and the operator would have found out at the next foreign-Mac gig, as
+  ~15 s of extraction per track. `os.stat` failure on a path under an unmounted `/Volumes`
+  root now reads as **unknown → keep** (`_audio_on_unmounted_volume`, `os.path.ismount` so a
+  leftover empty mount dir still counts as unplugged). The honest yield of a correct sweep
+  today is ≈46 entries / ≈4 MB, not 229 MB.
+- **Worker hardening.** `_worker` gained a `try` — no future exception can kill the thread
+  silently; the abort logs at DEBUG.
+
+Tests: `tests/test_spectral_cache.py` (sidecar survival, unmounted-kept vs dead-collected,
+stale-still-collected-beside-a-sidecar) and `tests/test_spectral_eviction_gate.py` (the
+write-condition gate + worker exception containment). Live safety: nothing here touches the
+200 Hz push loop, eviction stays a separate daemon thread, cache reads on the ANLZ worker
+are unchanged, and the sweep is now strictly more conservative than the code it replaced.
+
+Queued follow-ups (out of EVICTFIX scope, recorded): `tools/calibrate_identity_v2.py` has
+the identical uncaught-decode defect and dies on file #1 (it is not in the
+`spectral_analysis` contract's `code_globs`); `tools/spectral_sweep.py` counts sidecars in
+its entry/MB totals (≈5.3 MB of inflation); `install_controller._copy_managed_payload`
+re-imports the sidecars on every install (different contract).
+
 - **Status:** `implemented` / `software-tested`. SOFTWARE-VALIDATED ONLY /
   HARDWARE-UNVALIDATED.
 

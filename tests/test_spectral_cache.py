@@ -239,6 +239,84 @@ class SpectralCacheV4Tests(unittest.TestCase):
         self.assertEqual(set(cache_dir.glob("*.json")), v3_files)
         self.assertEqual(list((cache_dir / "v4").glob("*.json")), [])
 
+    def test_eviction_skips_appledouble_sidecars(self) -> None:
+        # EVICTFIX. macOS drops binary AppleDouble `._*` twins next to every
+        # file copied off a FAT/exFAT stick, and Path.glob("*.json") hands
+        # them back like real entries. Reading one as UTF-8 used to raise
+        # UnicodeDecodeError straight out of the sweep, out of the worker and
+        # out of the eviction thread — on file #1, so no entry was ever
+        # examined and the v3 abort also stopped the v4 sweep from running.
+        cache_dir = self._with_cache()
+        audio = self._audio_file(cache_dir)
+        beatgrid = [0.0, 500.0, 1000.0]
+        spectral_cache.put_cached(str(audio), beatgrid, _features())
+        spectral_cache.put_cached_v4(str(audio), beatgrid, _features_v4())
+        v3_entry = next(cache_dir.glob("*.json"))
+        v4_entry = next((cache_dir / "v4").glob("*.json"))
+        # First bytes of a real AppleDouble header, as measured in the live
+        # cache dir (magic 0x00051607 + "Mac OS X"); 0xb0 is not valid UTF-8.
+        sidecar_bytes = b"\x00\x05\x16\x07\x00\x02\x00\x00Mac OS X\xb0\x00"
+        v3_sidecar = cache_dir / f"._{v3_entry.name}"
+        v4_sidecar = cache_dir / "v4" / f"._{v4_entry.name}"
+        v3_sidecar.write_bytes(sidecar_bytes)
+        v4_sidecar.write_bytes(sidecar_bytes)
+
+        self.assertEqual(spectral_cache.evict_stale(), 0)
+        self.assertEqual(spectral_cache.evict_stale_v4(), 0)
+
+        for path in (v3_entry, v4_entry, v3_sidecar, v4_sidecar):
+            self.assertTrue(path.exists(), f"{path.name} must survive eviction")
+
+    def test_eviction_keeps_unmounted_volume_entry_and_removes_dead_one(self) -> None:
+        # EVICTFIX. tools/spectral_stick_sweep.py pre-warms the cache with
+        # entries keyed by the on-stick audio path so a foreign Mac gets full
+        # spectral data from the first beat. Those paths only stat when the
+        # stick is plugged in — 587 such entries (~229 MB) were sitting in the
+        # live cache on 2026-07-24 with nothing mounted. "I cannot stat it"
+        # must read as unknown, not as stale.
+        cache_dir = self._with_cache()
+        beatgrid = [0.0, 500.0, 1000.0]
+        stick_audio = cache_dir / "stick.wav"
+        stick_audio.write_bytes(b"stick-audio")
+        dead_audio = cache_dir / "dead.wav"
+        dead_audio.write_bytes(b"dead-audio-different-size")
+        spectral_cache.put_cached_v4(str(stick_audio), beatgrid, _features_v4())
+        spectral_cache.put_cached_v4(str(dead_audio), beatgrid, _features_v4())
+
+        by_audio = {}
+        for path in (cache_dir / "v4").glob("*.json"):
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            by_audio[Path(payload["audio_filepath"]).name] = (path, payload)
+        stick_entry, stick_payload = by_audio["stick.wav"]
+        dead_entry, _ = by_audio["dead.wav"]
+
+        unmounted = "/Volumes/RBSS_EVICTFIX_NOT_MOUNTED"
+        self.assertFalse(os.path.ismount(unmounted))
+        stick_payload["audio_filepath"] = f"{unmounted}/Contents/stick.wav"
+        stick_entry.write_text(json.dumps(stick_payload), encoding="utf-8")
+        dead_audio.unlink()
+
+        self.assertEqual(spectral_cache.evict_stale_v4(), 1)
+        self.assertTrue(stick_entry.exists(), "unmounted-volume entry must be kept")
+        self.assertFalse(dead_entry.exists(), "genuinely dead entry must be collected")
+
+    def test_eviction_still_collects_stale_entry_beside_a_sidecar(self) -> None:
+        # EVICTFIX. The sidecar skip must not turn into "eviction does
+        # nothing": a real stale entry sharing the directory still goes.
+        cache_dir = self._with_cache()
+        audio = self._audio_file(cache_dir)
+        beatgrid = [0.0, 500.0, 1000.0]
+        spectral_cache.put_cached_v4(str(audio), beatgrid, _features_v4())
+        v4_entry = next((cache_dir / "v4").glob("*.json"))
+        sidecar = cache_dir / "v4" / f"._{v4_entry.name}"
+        sidecar.write_bytes(b"\x00\x05\x16\x07\x00\x02\x00\x00Mac OS X\xb0\x00")
+        stat = audio.stat()
+        os.utime(audio, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+
+        self.assertEqual(spectral_cache.evict_stale_v4(), 1)
+        self.assertFalse(v4_entry.exists())
+        self.assertTrue(sidecar.exists())
+
     def test_v4_atomic_write_failure_leaves_no_cache_hit(self) -> None:
         cache_dir = self._with_cache()
         audio = self._audio_file(cache_dir)

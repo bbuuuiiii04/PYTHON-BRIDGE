@@ -724,6 +724,7 @@ contracts:
       - SCHEMA_VERSION_V4
       - get_cached_v4
       - put_cached_v4
+      - evict_stale
       - evict_stale_v4
       - SPECTRAL_V4_CALIBRATION
       - compat_features
@@ -782,6 +783,7 @@ contracts:
       - absent analysis data reads as no signal, never as a false event
       - the v3-compat block must stay bit-identical to the v3 extractor (the smart-drop scorer consumes it unchanged)
       - every future schema version gets its own cache subdirectory; eviction never crosses versions
+      - "an entry whose audio lives on an UNMOUNTED volume is unknown, not stale: eviction must never delete USB pre-warm entries (tools/spectral_stick_sweep.py writes them keyed by the on-stick /Volumes/<name>/... path) just because the stick is unplugged. Eviction also never reads or deletes foreign files: macOS AppleDouble `._*` sidecars are skipped by both sweeps, which is what makes 'undecodable entry => stale' safe."
       - calibration statistics and validation claims use BY GENRE playlist tracks only
 
   lighting_sidecar:

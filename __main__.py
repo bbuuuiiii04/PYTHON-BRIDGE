@@ -1099,16 +1099,39 @@ def _shutdown_zero_pack_outputs(
             pass
 
 
-def _start_spectral_cache_eviction_if_enabled() -> threading.Thread | None:
-    if (
-        os.environ.get("RBSS_SMART_REARM_EXPERIMENT") != "1"
-        or os.environ.get("RBSS_SPECTRAL_ENABLE") != "1"
-    ):
+def _spectral_cache_writes_enabled(led_color_engine: Any) -> bool:
+    """Mirror of the condition under which the ANLZ worker WRITES cache entries.
+
+    state_manager._read_runtime_anlz_data extracts + caches when the gated v3
+    spectral path is on OR LED identity-v2 is on, and identity-v2 comes from
+    the colour-engine config, not from an env flag. The old eviction gate
+    demanded RBSS_SPECTRAL_ENABLE=1, which no launch path sets, so the
+    collector never ran while the cache grew on every new track (547 MB by
+    2026-07-24). Collect exactly when the garbage is produced.
+    """
+    spectral_enabled = (
+        os.environ.get("RBSS_SMART_REARM_EXPERIMENT") == "1"
+        and os.environ.get("RBSS_SPECTRAL_ENABLE") == "1"
+    )
+    v2_cfg = getattr(getattr(led_color_engine, "_config", None), "v2", None)
+    return spectral_enabled or bool(getattr(v2_cfg, "enabled", False))
+
+
+def _start_spectral_cache_eviction_if_enabled(
+    led_color_engine: Any = None,
+) -> threading.Thread | None:
+    if not _spectral_cache_writes_enabled(led_color_engine):
         return None
 
     def _worker() -> None:
-        evicted = spectral_cache.evict_stale()
-        evicted_v4 = spectral_cache.evict_stale_v4()
+        # No exception may escape: this used to be a bare body, so one
+        # undecodable file killed the thread silently.
+        try:
+            evicted = spectral_cache.evict_stale()
+            evicted_v4 = spectral_cache.evict_stale_v4()
+        except Exception as exc:
+            log.debug("[MAIN] spectral-cache-evict-aborted  err=%s", type(exc).__name__)
+            return
         log.info(
             "[MAIN] spectral-cache-evict  evicted=%d  evicted_v4=%d",
             evicted,
@@ -1339,7 +1362,7 @@ def main() -> None:
     if live_bpm.disabled:
         log.warning("[MAIN] live-bpm-disabled  reason=%s=1  fallback=engine-state-bpm",
                     LIVE_BPM_DISABLE_ENV)
-    _start_spectral_cache_eviction_if_enabled()
+    _start_spectral_cache_eviction_if_enabled(led_bundle.led_color_engine)
 
     # OS2L output
     conn = OS2LConnection()

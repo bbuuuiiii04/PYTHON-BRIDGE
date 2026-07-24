@@ -5,6 +5,11 @@ subdirectory (v3 = the top-level dir for historical reasons, v4 = ``v4/``, a
 future v5 = ``v5/``). Eviction never crosses versions — ``evict_stale`` globs
 only top-level v3 files, ``evict_stale_v4`` only ``v4/``. v4 code never
 modifies or deletes v3 entries.
+
+Two eviction rules that are equally non-negotiable: foreign files (macOS
+``._*`` AppleDouble twins) are never read and never deleted, and an entry
+whose audio lives on an unmounted ``/Volumes`` root is unknown, not stale —
+eviction must never wipe the USB pre-warm because the stick is unplugged.
 """
 from __future__ import annotations
 
@@ -130,6 +135,8 @@ def evict_stale() -> int:
         return 0
     removed = 0
     for path in cache_dir.glob("*.json"):
+        if _is_foreign_file(path):
+            continue
         if _cache_file_is_stale(path):
             try:
                 path.unlink()
@@ -202,6 +209,8 @@ def evict_stale_v4() -> int:
         return 0
     removed = 0
     for path in cache_dir.glob("*.json"):
+        if _is_foreign_file(path):
+            continue
         if _cache_file_is_stale_v4(path):
             try:
                 path.unlink()
@@ -308,12 +317,48 @@ def _payload_v4_for_write(
     return payload
 
 
-def _cache_file_is_stale_v4(path: Path) -> bool:
+def _is_foreign_file(path: Path) -> bool:
+    """True for files in the cache dir that are not ours to read or delete.
+
+    macOS writes a binary AppleDouble twin (``._<name>``) beside every file
+    copied off a FAT/exFAT volume, and ``Path.glob("*.json")`` returns those
+    twins (unlike ``glob.glob``). They are not cache entries: never read them,
+    never delete them (macOS just recreates them on the next stick copy).
+    """
+    return path.name.startswith("._")
+
+
+def _audio_on_unmounted_volume(audio_filepath: str) -> bool:
+    """True when the audio path lives on a ``/Volumes`` root that is not mounted.
+
+    "I cannot stat it" then means unknown, not stale.
+    ``tools/spectral_stick_sweep.py`` deliberately pre-warms the cache with
+    entries keyed by the on-stick absolute path so a bridge on any Mac that
+    mounts the same stick gets full spectral data from the first beat. Those
+    entries stat-fail whenever the stick is unplugged; deleting them would
+    silently destroy the pre-warm (587 entries / ~229 MB measured 2026-07-24).
+    """
+    parts = Path(audio_filepath).parts
+    if len(parts) < 4 or parts[0] != os.sep or parts[1] != "Volumes":
+        return False
+    # ismount(), not exists(): a leftover empty /Volumes/<name> dir from a bad
+    # eject must still read as "not mounted" so the entry is kept.
+    return not os.path.ismount(os.path.join(os.sep, "Volumes", parts[2]))
+
+
+def _entry_is_stale(path: Path, schema_version: int) -> bool:
+    """Shared staleness rule for both versions; callers must skip foreign files.
+
+    ValueError covers UnicodeDecodeError as well as JSONDecodeError. Returning
+    stale for an undecodable file is safe ONLY because _is_foreign_file()
+    already excluded the AppleDouble twins upstream — what is left is one of
+    our own entries, and one of ours that will not decode is genuinely dead.
+    """
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):
         return True
-    if payload.get("schema_version") != SCHEMA_VERSION_V4:
+    if not isinstance(payload, dict) or payload.get("schema_version") != schema_version:
         return True
     audio_filepath = payload.get("audio_filepath")
     if not isinstance(audio_filepath, str):
@@ -321,11 +366,15 @@ def _cache_file_is_stale_v4(path: Path) -> bool:
     try:
         stat = os.stat(audio_filepath)
     except OSError:
-        return True
+        return not _audio_on_unmounted_volume(audio_filepath)
     return (
         int(payload.get("mtime_ns", -1)) != int(stat.st_mtime_ns)
         or int(payload.get("size", -1)) != int(stat.st_size)
     )
+
+
+def _cache_file_is_stale_v4(path: Path) -> bool:
+    return _entry_is_stale(path, SCHEMA_VERSION_V4)
 
 
 def _beatgrid_fingerprint(beatgrid_times_ms: Sequence[float]) -> str:
@@ -381,23 +430,7 @@ def _payload_for_write(
 
 
 def _cache_file_is_stale(path: Path) -> bool:
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return True
-    if payload.get("schema_version") != SCHEMA_VERSION:
-        return True
-    audio_filepath = payload.get("audio_filepath")
-    if not isinstance(audio_filepath, str):
-        return True
-    try:
-        stat = os.stat(audio_filepath)
-    except OSError:
-        return True
-    return (
-        int(payload.get("mtime_ns", -1)) != int(stat.st_mtime_ns)
-        or int(payload.get("size", -1)) != int(stat.st_size)
-    )
+    return _entry_is_stale(path, SCHEMA_VERSION)
 
 
 def _fsync_dir(path: Path) -> None:
