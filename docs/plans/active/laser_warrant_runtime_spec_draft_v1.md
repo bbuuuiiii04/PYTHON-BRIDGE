@@ -47,11 +47,13 @@ a dark or wrong show.
   `local/spectral_v5_2026_07_17/laser_warrant_v1/` (MANIFEST.json pins runner
   + fixtures + `cid_title_map.json`; spec =
   `local/spectral_v5_2026_07_17/laser_warrant_list_spec_v3.md`, sha
-  `6e40100f…`). `results/` are regenerable outputs, not frozen, and are NOT
-  currently on disk (verified 2026-07-24: no `results/` under the package
-  dir). The row count of the delivered batches (~161 rows per the exec4
-  handoff) is therefore [assumed] here; the deterministic double-run
-  (spec v3 §E.1) makes regeneration byte-reproducible.
+  `6e40100f…`). `results/` are regenerable outputs, not frozen, and ARE on
+  disk (RTREV F3 correction — the v1 absence claim was a truncated-listing
+  reading error; re-verified 2026-07-24: `results/ranked_events.json`
+  present). [confirmed] Row count **161** rendered rows over 200 accepted
+  events, read from `results/ranked_events.json`
+  (`row_count`/`event_count`); the deterministic double-run (spec v3 §E.1)
+  makes regeneration byte-reproducible regardless.
 - [confirmed] Row schema, from the frozen runner
   (`laser_warrant_v1/laser_warrant_v1.py:364-381`): each rendered row carries
   `content_id` (64-hex sha256 of the audio file bytes), `title`,
@@ -94,9 +96,15 @@ the bridge does not know that hash at runtime.**
   (`filepath_resolver.py:911-933`, log `[FRES] usb-twin-match`). So on both
   local and successful-twin USB loads, `meta.content_id` and `meta.filepath`
   are the local library's values — the same library the offline build hashed.
-  On twin miss/ambiguity there is no local identity ([confirmed] log paths at
-  `filepath_resolver.py:934-938`) → no warrant spans for that load
-  (fail-open, today's behavior).
+  On twin miss/ambiguity the twin path yields no local identity ([confirmed]
+  log paths at `filepath_resolver.py:934-938`), BUT (RTREV F1) the **sidecar
+  fallback** (`filepath_resolver.py:1014`, `_payload_for_sidecar`
+  `:674-718`) still returns identity-shaped values: `content_id` = the
+  sidecar record's export-time LOCAL ContentID (`:710`) with `filepath` =
+  the DEVICE audio path. A stale sidecar id is an id-reuse window — which is
+  why the runtime join is a CONJUNCTION (Task 3): sidecar loads degrade to
+  no-spans **by construction** (device path ≠ recorded local path), correct
+  for an operator's-laptop feature.
 - [confirmed] No runtime audio-bytes sha256 exists anywhere:
   `spectral_cache.py:337-352` keys its cache by
   sha1(realpath, mtime_ns, size, beatgrid-fingerprint) — file *stats*, not
@@ -110,8 +118,12 @@ the bridge does not know that hash at runtime.**
 - [assumed] `elapsed_ms` is track-file-timeline position (the same timeline
   as `beatgrid_times_ms`, hence pitch-fader-invariant): strong evidence is
   that beat interpolation and `first_beat_ms` both work off
-  `beatgrid_times_ms` against elapsed (`filepath_resolver.py:859`), but the
-  implementer must re-verify at the wiring site before relying on it.
+  `beatgrid_times_ms` against elapsed (`filepath_resolver.py:859`). (RTREV
+  N1) `grid_sanity` does NOT cover this — it validates beatgrid-vs-seconds
+  at LOAD time and says nothing about `elapsed_ms` semantics at tick time.
+  The implementer's re-verify at the wiring site is the real gate and is a
+  HARD precondition of Task 4.4; implementation must not proceed past it
+  unverified.
 - [confirmed] The sanctioned off-push-loop pattern for per-track-load work:
   `StateManager._start_anlz_worker` (`state_manager.py:2325-2411`) — daemon
   worker thread, `load_gen` staleness guard on both entry
@@ -197,7 +209,9 @@ one writable area inside the package; sealed payloads stay untouched):
    passes are the absence of a veto for a delivered row. Files are never
    edited after the session; corrections append a newer file (later file
    wins per (batch, rank); a later `"unveto"` verdict value is permitted for
-   correction and must be supported by the builder).
+   correction and must be supported by the builder). (RTREV N2) Within a
+   single verdicts file, multiple records for the same (batch, rank): last
+   record in file order wins — same rule as between files.
 
 ### Task 2 — Artifact builder (offline tool, no runtime importers)
 
@@ -274,9 +288,24 @@ functions; the pure seam for Part D tests:
 - `load_artifact(path) -> WarrantArtifact | None` — parse + schema-validate;
   `None` (with reason string for the log) on any failure. Called only from
   the Task-4 worker thread, never from the push loop.
-- `spans_for_track(artifact, rb_content_id, filepath) -> tuple[WarrantSpan, ...]`
-  — join order: (1) `rb_content_id` exact match, (2) `filepath` exact match.
-  Returns `()` on miss.
+- `spans_for_track(artifact, rb_content_id, filepath, size_bytes, mtime_ns)
+  -> tuple[WarrantSpan, ...]` — (RTREV F1) the join is a **CONJUNCTION**, not
+  a fallback chain: a match requires `rb_content_id` == recorded
+  `join.rb_content_id` AND `filepath` == recorded `join.filepath` AND
+  `size_bytes`/`mtime_ns` == the recorded stat values. ANY mismatch → `()`
+  plus one INFO line naming which leg failed. The `size_bytes`/`mtime_ns`
+  arguments come from an `os.stat` of the loaded track's filepath performed
+  on the Task-4 WORKER thread (I/O is legal there; never on the push loop) —
+  this function itself stays pure. Why conjunction: a filepath-only fallback
+  wrong-track-matches when a file is replaced at the same path (re-import →
+  new ContentID, old path now holding different music, and `grid_sanity` at
+  ±0.75 s on two points is trivially passable by two same-BPM tracks), and an
+  id-only match wrong-track-matches on rekordbox ContentID reuse or a stale
+  sidecar id. Under the conjunction, every breaker — re-import, move, retag,
+  path-swap, id-reuse, stale sidecar — provably degrades to no-spans: a
+  replaced file cannot keep path AND size AND nanosecond mtime. Sidecar
+  loads (A.2) degrade to no-spans by construction (device path ≠ recorded
+  local path).
 - `grid_sanity(span, beatgrid_times_ms, tol_s=0.75) -> bool` — cross-check
   `beatgrid_times_ms[beat_span[i]]/1000` against `seconds_span[i]` (both
   ends, index-guarded). A failure means the track was re-analyzed / regridded
@@ -296,7 +325,9 @@ functions; the pure seam for Part D tests:
    the `_start_anlz_worker` pattern EXACTLY (`state_manager.py:2343-2411`):
    entry `load_gen` re-check, artifact file `os.stat` mtime check → (re)load
    via `laser_warrant.load_artifact` only when changed (cached parsed
-   artifact otherwise), compute `spans_for_track` + `grid_sanity` filter,
+   artifact otherwise), `os.stat(meta.filepath)` for the F1 conjunction's
+   `size_bytes`/`mtime_ns` legs (stat failure → no spans, one INFO line),
+   compute `spans_for_track` + `grid_sanity` filter,
    post `Ev.LASER_WARRANT_SPANS` with `eq.put_nowait` (queue-full → WARN,
    drop, same as `state_manager.py:2388-2389`). All artifact I/O therefore
    happens on this worker at track load — never at tick time. This one
@@ -330,12 +361,17 @@ default `"off"`. Unknown mode → treated as `"off"` + one WARN (fail-open).
   (`laser_decision_log.py`) gains `warrant_active`/`warrant_rank` fields so
   a mix can be replayed to see exactly when the gate WOULD have acted. This
   is the first-activation mode: the operator mixes normally, we read the log.
-- `"accent"`: one new branch in `_decide`, inserted BETWEEN the priority-11
-  buildup-window branch (`laser_director.py:647-661`) and the terminal
-  `_decide_phrase_default` call (`laser_director.py:676`) — i.e. reachable
-  only when priorities 1–11 all declined, which is what "sits UNDER
-  blackout/emergency masks, drop policy, and personality" means in this
-  ladder. The branch: if `ctx.laser_warrant_active` and the last warrant fire
+- `"accent"`: one new branch in `_decide`, inserted (RTREV F2 — pinned
+  exactly) **immediately BEFORE the terminal `_decide_phrase_default` call
+  at `laser_director.py:676` and AFTER all tail state updates** — i.e. after
+  `self._last_smart_abs_beat = abs_beat` (`laser_director.py:669`) and the
+  post-drop-hold cleanup (`:670-674`). Those tail mutations must execute on
+  EVERY fall-through tick, warrant ticks included; a return placed before
+  them would skip smart-state bookkeeping while the warrant fires
+  (post-drop-start never resetting → lifecycle drift). Placed there, the
+  branch is reachable only when priorities 1–11 all declined, which is what
+  "sits UNDER blackout/emergency masks, drop policy, and personality" means
+  in this ladder. The branch: if `ctx.laser_warrant_active` and the last warrant fire
   for this span is ≥ `min_refire_beats` behind `ctx.abs_beat`, return
   `LaserSceneDecision(scene=self._drop_scene, reason="growl_warrant",
   priority=12, source="policy", role=<OQ-1>)`. It NEVER sets
@@ -361,13 +397,16 @@ default `"off"`. Unknown mode → treated as `"off"` + one WARN (fail-open).
   spans should ALSO feed `drop_laser_qualifies` (a growl span overlapping a
   drop upgrading its laser eligibility). Explicitly NOT in v1.
 - **OQ-3 (hardest question — join durability)** [assumed]: `rb_content_id` +
-  local `filepath` are stable for the operator's library between artifact
-  builds. Known breakers: track re-import (new ContentID), file move (path),
-  file retag (sha changes offline, but runtime join doesn't hash — the
-  `grid_sanity` check catches re-analysis, NOT a pure retag that keeps the
-  grid). Consequence of every breaker is identical: no spans for that track,
-  today's behavior. The correct long-term fix if it ever bites is re-running
-  the builder (minutes), not runtime hashing.
+  local `filepath` + file stat are stable for the operator's library between
+  artifact builds. Known breakers: track re-import (new ContentID), file
+  move (path), file retag (stat changes; sha changes offline, but the
+  runtime join doesn't hash), path-swap (file replaced at the same path),
+  rekordbox ContentID reuse, stale sidecar id. Under the F1 conjunction
+  join, the consequence of EVERY breaker is provably identical: no spans for
+  that track, today's behavior — never a wrong-track match (a replaced file
+  cannot keep path AND size AND nanosecond mtime; `grid_sanity` stays as the
+  re-analysis guard on top). The correct long-term fix if a breaker bites is
+  re-running the builder (minutes), not runtime hashing.
 - **OQ-4 (veto-mode confirmation)** [operator]: the whole round activates
   only after Brandon confirms the veto workflow shape (batches in chat,
   veto-only, silence is a pass) and actually runs the pass. This spec is
@@ -467,16 +506,23 @@ subprocess (checklist #7). Fixture artifacts are inline dicts.
   built without the feature fields — the byte-identity claim in Part B is a
   test, not a sentence. (Pattern precedent: the `enabled: false` drop
   presentation gate test in `tests/test_state_manager_drop_presentation.py`.)
+  (RTREV N3) Scope honesty: T1 tests LASER DECISIONS only. Part B's "LED
+  frame and SS frame byte-identical" holds vacuously — no LED/SS code is in
+  scope — and no LED/SS replay harness is expected or built here.
 - **T2 (pure module):** schema accept/reject (missing keys, wrong types,
-  future schema_version → None + reason); join order rb_content_id-first
-  then filepath, miss → `()`; `grid_sanity` pass/fail/one-end-out-of-grid;
-  `active_span` boundaries (enter at s0, exclusive at s1, between-spans gap,
-  empty tuple).
+  future schema_version → None + reason); (RTREV F1) conjunction join rows —
+  **path-swap** (id miss + path hit), **stat mismatch** (id + path hit,
+  size or mtime differs), **id-only match**, **path-only match**: ALL must
+  return `()`; full conjunction (id AND path AND size AND mtime) returns the
+  spans; `grid_sanity` pass/fail/one-end-out-of-grid; `active_span`
+  boundaries (enter at s0, exclusive at s1, between-spans gap, empty tuple).
 - **T3 (director branch):** for every priority-1..11 condition, warrant
   active + that condition ⇒ decision is the HIGHER-priority one (ladder
   table-driven); warrant fires only on full fall-through; refire lockout
   honored; lockout resets on lifecycle reset; `blackout_arm` never set by
-  the branch.
+  the branch; (RTREV F2) on a warrant-return tick the tail state updates
+  still ran — `_last_smart_abs_beat` advanced and the post-drop-hold
+  cleanup executed (post-drop-start reset not starved by warrant fires).
 - **T4 (wiring):** worker posts spans with correct payload; consumer drops
   stale `load_gen`; span store cleared on new load and on every meta-reset
   path enumerated at implementation; `LaserContext` fields default False/0
@@ -538,6 +584,12 @@ the two-step off switch, and the restart + single-process check.
 
 ### Adversarial self-review (checklist #9 — how this breaks, and why it can't)
 
+Attack found by review (RTREV F1, now cured): *wrong-track match via a
+fallback join* — a file replaced at the same path, a reused rekordbox
+ContentID, or a stale sidecar id could have matched another track's spans
+with only `grid_sanity` behind it. Defense: the conjunction join (id AND
+path AND size AND mtime, T2-tested) makes every such breaker degrade to
+no-spans; wrong lasers are structurally unreachable through the join.
 Attack tried: *stale spans firing lasers at the wrong moment after the
 operator re-analyzes a track* (grid shift). Defense: `grid_sanity` compares
 both span ends against the CURRENT loaded beatgrid at track load and drops
