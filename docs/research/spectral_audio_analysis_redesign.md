@@ -997,7 +997,7 @@ This was a disk-space bug (547 MB, growing on every new track), never a live-saf
   ~15 s of extraction per track. `os.stat` failure on a path under an unmounted `/Volumes`
   root now reads as **unknown → keep** (`_audio_on_unmounted_volume`, `os.path.ismount` so a
   leftover empty mount dir still counts as unplugged). The honest yield of a correct sweep
-  today is ≈46 entries / ≈4 MB, not 229 MB.
+  today is ≈46 entries / ≈8.9 MB, not 229 MB.
 - **Worker hardening.** `_worker` gained a `try` — no future exception can kill the thread
   silently; the abort logs at DEBUG.
 
