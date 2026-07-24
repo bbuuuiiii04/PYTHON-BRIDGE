@@ -150,6 +150,7 @@ class TrackAnlzData:
     led_identity: Optional[dict[str, Any]] = None
     f2_plan: Optional[Any] = None   # lighting_moments_v2.F2TrackPlan, or None
     section_grades: Optional[list] = None   # E2 (AWR-288) per-section grades, or None
+    drop_grades: Optional[list] = None   # E3 (AWR-290) per-drop grades, or None
 
 
 def read_smart_drop_energy_shadow(

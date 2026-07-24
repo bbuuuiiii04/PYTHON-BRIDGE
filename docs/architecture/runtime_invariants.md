@@ -210,6 +210,15 @@ push loop.
   payload key, no status key — kill test). Any failure (no store / no v4 / no
   markers / compute error) ⇒ grades absent/null, fail open; nothing reads them at
   E2 (status-only, no lighting consumer).
+- E3 per-drop grades (AWR-290, `RBSS_DROP_ENERGY`, default OFF): the ANLZ worker
+  grades RAW-marker windows (fail open to None); grades ATTACH to plan decisions
+  built from `meta.smart_drops` at the existing tick-side plan build (one dict
+  lookup per decision, no push-loop work) and surface status-only from
+  plan-attached TRUE drops only — no surface enumerates the raw set (true-drop
+  law). Flag OFF ⇒ byte-identical on all four surfaces (no compute, no payload
+  key, no status key, `DropDecision.energy_grade` all None; `plan_track`'s new
+  keyword-only `drop_grades=None` keeps the legacy call shape). The store is
+  reached only through E2's memo; nothing reads `energy_grade` at E3.
 - `ANLZ_PATH`/`TRACK_LOADED` carry `rb_raw_deck` (the RB deck index 0-3). While
   a bridge deck is playing, a load/anlz event from the idle sibling RB deck
   (1&3 share bridge 1, 2&4 share bridge 2) is ignored

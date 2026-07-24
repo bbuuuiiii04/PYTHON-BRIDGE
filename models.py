@@ -67,6 +67,9 @@ class TrackMetadata:
     # E2 (AWR-288) per-section energy grades (status-only); None when
     # RBSS_SECTION_ENERGY off or no v4/markers. reset in clear() beside f2_plan.
     section_grades: Optional[list] = None
+    # E3 (AWR-290) per-drop energy grades (status-only); None when
+    # RBSS_DROP_ENERGY off or no v4/markers. reset in clear() beside section_grades.
+    drop_grades: Optional[list] = None
 
     def clear(self) -> None:
         self.filepath = ""
@@ -89,6 +92,7 @@ class TrackMetadata:
         self.smart_drop_energy_shadow = []
         self.f2_plan = None
         self.section_grades = None
+        self.drop_grades = None
 
     def is_empty(self) -> bool:
         return not self.filepath

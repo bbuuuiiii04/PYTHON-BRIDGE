@@ -242,6 +242,13 @@ document. (Operator ruling 2026-07-04: ratings are polluted by energy-level
 tagging; a dedicated playlist name is the sanctioned future bulk-curation
 path if ever wanted.)
 
+E3 (AWR-290) adds an INERT `energy_grade` slot to `DropDecision` — a status-only
+per-drop energy grade dict (or None), attached at plan build behind the default-off
+`RBSS_DROP_ENERGY` flag. It is NOT an input to this policy: no presentation, laser,
+or LED decision reads it at E3 (import fence + contract law enforce this); it exists
+only so a future stage, under its own go-ahead, could consume it. Flag off ⇒ every
+decision's `energy_grade` is None and the plan is byte-identical.
+
 ## Observability
 
 Status must expose, per dealt drop, the presentation and a concise reason

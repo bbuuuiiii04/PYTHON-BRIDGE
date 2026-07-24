@@ -896,6 +896,49 @@ E2 there is no consumer. A static import-fence test allows only `state_manager.p
 
 ---
 
+## 14. Per-drop energy grades (AWR-290, energy E3, status-only, 2026-07-24)
+
+`drop_energy_v0.py` (repo root, pure, stdlib-only, runtime-imported by
+`state_manager.py` on the ANLZ worker) is energy-fabric stage E3
+(`docs/plans/active/energy_e3_drop_grades_spec_v1.md`). It grades each drop and
+**decides nothing live**: at E3 there is no consumer — no presentation/laser/LED
+path may read `DropDecision.energy_grade` (a static import-fence test enforces the
+allowlist).
+
+- **Three gain-invariant terms** over the `[beat, beat+16)` window: `body`
+  (loudness-relative mean `full_db` on the −8/−3 dB span), `sub_duty`
+  (`sub_db ≥ ref−12`), `onset_ratio` (mean `onset_density_midhigh` over the
+  track's own `onset_mh_p90`, omitted when p90 ≤ 0). `within_track` = mean of the
+  present terms; `library_scaled` = `within_track × track_weight` or null. A
+  uniform per-track mastering offset cancels exactly (the E1/E2 mechanism; exact
+  uniform-shift test).
+- **True-drop law honored structurally.** The worker grades RAW ANLZ-marker
+  windows (mechanical necessity — it has only `data.drop_beat_indices`), but
+  grades ATTACH to plan decisions built from `meta.smart_drops` (via
+  `grades_by_beat` + `plan_track`'s new keyword-only `drop_grades`), and ONLY
+  plan-attached true-drop grades are surfaced. No surface enumerates the raw set.
+- **Store consumed by construction.** Track weight comes ONLY from E2's memoized
+  `_track_weight_store_once()` + `section_energy_v0.store_track_weight` — E3 opens
+  no store file. Refusals ⇒ `library_scaled` null; `within_track` never needs it.
+- **Flag-off byte-identity (four surfaces).** `RBSS_DROP_ENERGY` default OFF ⇒ no
+  computation, no ANLZ_DATA payload key, no `drop_energy` status key, and every
+  `DropDecision.energy_grade` is None (the `__slots__`/`__eq__` addition stays
+  symmetric; `plan_track`'s new kwarg defaults None, preserving the legacy call
+  shape). Kill test proves all four. All compute + the single store read run on
+  the ANLZ worker; the 200 Hz push loop gains nothing.
+- **Pinned gates (offline `tools/drop_energy_report.py`):** G1 coverage ≥ 0.95 on
+  the eligible denominator (by_genre track with v4 + accepted-store row + ≥1 ANLZ
+  drop; absolute coverage printed informationally); G2 non-degeneracy IQR ≥ 0.05;
+  G3 separation = median drop `within_track` − median "low"-section `within_track`
+  (E2's output, same tracks) ≥ 0.15 — the direction-of-truth honesty gate (a
+  sign-inverted window would pass G1/G2 and die here). Report also prints both G3
+  medians (E3REV N1) and the smart-vs-raw attach-match rate. Thresholds move only
+  by spec amendment; a failed gate is a valid, reported result.
+- **Status:** `implemented` / `software-tested`. SOFTWARE-VALIDATED ONLY /
+  HARDWARE-UNVALIDATED.
+
+---
+
 ## Appendix A — corpus recon (2026-07-05, this session, read-only)
 
 - Rekordbox DB opened exactly as `filepath_resolver.py:281-283` does (pyrekordbox

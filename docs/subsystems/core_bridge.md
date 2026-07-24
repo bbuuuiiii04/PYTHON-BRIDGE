@@ -44,6 +44,12 @@ Spectral v4 (2026-07-05):
   (reset in `clear()`), and surfaced in the per-deck status `section_energy` block. Status-only:
   no lighting consumer reads them at E2.
   Details + proofs: `docs/research/spectral_audio_analysis_redesign.md`.
+- E3 drop-energy grades (AWR-290, `drop_energy_v0.grade_drops`): computed on the same ANLZ
+  worker when `RBSS_DROP_ENERGY` is on (default OFF ⇒ byte-identical), carried on `ANLZ_DATA`
+  beside `section_grades`, stored on `TrackMetadata.drop_grades` (reset in `clear()`), and
+  ATTACHED to `DropDecision.energy_grade` at the tick-side plan build via `plan_track`'s
+  keyword-only `drop_grades`. Surfaced in the per-deck status `drop_energy` block from the
+  CURRENT plan's true drops only. Status-only: no presentation/laser/LED path reads it at E3.
 
 SoundSwitch pack-player boundary:
 - The strict decoder/exporter/verifier and immutable pack loader/player remain outside `StateManager`. Optional MIDI-input, backend, and Enttec components are built by startup/command-thread orchestration and passed to `StateManager` as one immutable runtime bundle.

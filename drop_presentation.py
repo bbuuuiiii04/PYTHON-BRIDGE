@@ -196,11 +196,11 @@ class DropDecision:
     `resolve_presentation()` combines this with live inputs per actual drop
     arrival (authority doc, Implementation Notes)."""
 
-    __slots__ = ("beat", "tagged", "learned", "is_finale", "personality_presentation", "runway")
+    __slots__ = ("beat", "tagged", "learned", "is_finale", "personality_presentation", "runway", "energy_grade")
 
     def __init__(
         self, *, beat: float, tagged: bool, learned: bool, is_finale: bool,
-        personality_presentation: str, runway: float,
+        personality_presentation: str, runway: float, energy_grade=None,
     ) -> None:
         self.beat = beat
         self.tagged = tagged
@@ -208,6 +208,10 @@ class DropDecision:
         self.is_finale = is_finale
         self.personality_presentation = personality_presentation
         self.runway = runway
+        # E3 (AWR-290) inert per-drop energy grade dict, or None when off/unmatched.
+        # STATUS-ONLY: no presentation/laser/LED path reads this. __eq__ iterates
+        # __slots__ so equality stays symmetric (both None when off ⇒ unchanged).
+        self.energy_grade = energy_grade
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, DropDecision):
@@ -218,7 +222,7 @@ class DropDecision:
         return (
             f"DropDecision(beat={self.beat!r}, tagged={self.tagged!r}, learned={self.learned!r}, "
             f"is_finale={self.is_finale!r}, personality_presentation={self.personality_presentation!r}, "
-            f"runway={self.runway!r})"
+            f"runway={self.runway!r}, energy_grade={self.energy_grade!r})"
         )
 
 
@@ -251,6 +255,7 @@ def plan_track(
     learned_keys: Sequence[float],
     config: DropPresentationConfig,
     laser_tiers: Optional[dict[float, str]] = None,
+    drop_grades: Optional[dict] = None,
 ) -> TrackPlan:
     """Per true drop: the pure track-structure classification (authority doc's
     tiers 3/4/8/9 inputs). Deterministic — identical inputs always produce an
@@ -340,7 +345,17 @@ def plan_track(
             is_finale=(beat == last_drop),
             personality_presentation=presentation,
             runway=runways[beat],
+            # E3 (AWR-290): inert grade for the plan-selected true drop, keyed on
+            # the raw-marker int beat; None when off or unmatched (smart-drop
+            # selection may shift a beat off its raw marker). STATUS-ONLY.
+            energy_grade=(drop_grades.get(int(beat))
+                          if drop_grades is not None else None),
         ))
+
+    if drop_grades is not None:
+        unmatched = sum(1 for beat in drops if drop_grades.get(int(beat)) is None)
+        if unmatched:
+            log.debug("[E3] drop-grade-unmatched count=%d of %d", unmatched, len(drops))
 
     return TrackPlan(
         drop_beats=drops,

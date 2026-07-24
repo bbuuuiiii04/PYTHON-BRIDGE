@@ -130,6 +130,7 @@ from . import spectral_cache
 from . import spectral_profile
 from . import lighting_moments_v2
 from . import section_energy_v0
+from . import drop_energy_v0
 from .audio_spectral_features import (
     extract_spectral_features,
     extract_spectral_features_v4,
@@ -229,6 +230,7 @@ WIDE_WINDOW_ENV = "RBSS_DROP_WIDE_WINDOW"
 SCRIPTED_SHOWFILE_DIRECT_ENV = "RBSS_SCRIPTED_SHOWFILE_DIRECT"
 STATE_MANAGER_PROFILE_ENV = "RBSS_SM_PROFILE"
 SECTION_ENERGY_ENV = "RBSS_SECTION_ENERGY"   # E2 (AWR-288), default OFF
+DROP_ENERGY_ENV = "RBSS_DROP_ENERGY"   # E3 (AWR-290), default OFF
 # WI-1/2/3/4/5/6/7 kill-switches (read once at startup; default ON except cooldown)
 _SNAPSHOT_PUBLISH_INTERVAL_S = 0.05
 _PROFILE_SUMMARY_INTERVAL_S = 10.0
@@ -262,6 +264,7 @@ def _read_runtime_anlz_data(
     wide_window: bool = False,
     f2_enabled: bool = False,
     section_energy_enabled: bool = False,
+    drop_energy_enabled: bool = False,
     sidecar_v4=None,
 ) -> TrackAnlzData:
     data = read_anlz_drops(anlz_path)
@@ -334,6 +337,29 @@ def _read_runtime_anlz_data(
         except Exception:
             log.debug("[E2] section-grade-failed", exc_info=True)
             data.section_grades = None
+
+    # E3 (AWR-290) per-drop energy grades — STATUS-ONLY, no consumer. On this
+    # worker thread, never the push loop; gated so off computes NOTHING (kill
+    # test). Grades raw-marker windows here (the worker has only drop_beat_indices);
+    # attachment to plan-selected true drops + all surfacing happen tick-side.
+    # Reuses E2's memoized store + loader — no second store path.
+    if drop_energy_enabled and v4 is not None and data.drop_beat_indices:
+        try:
+            tw = None
+            store = _track_weight_store_once()
+            if store is not None and audio_filepath:
+                key = spectral_cache._cache_key(audio_filepath, beatgrid_times_ms)
+                if key is not None:
+                    tw = section_energy_v0.store_track_weight(store, key)
+            data.drop_grades = drop_energy_v0.grade_drops(
+                v4, drop_beats=data.drop_beat_indices, track_weight=tw) or None
+            log.info("[E3] drop-grades  drops=%d  store=%s  tw=%s",
+                     len(data.drop_grades or []),
+                     "loaded" if store is not None else "refused_or_missing",
+                     ("%.2f" % tw) if tw is not None else "none")
+        except Exception:
+            log.debug("[E3] drop-grade-failed", exc_info=True)
+            data.drop_grades = None
 
     if spectral_enabled and ctx is not None and data.drop_beat_indices:
         if not beatgrid_times_ms:
@@ -843,6 +869,10 @@ class StateManager(LEDDispatchPolicyMixin):
         # E2 (AWR-288) per-section energy grades: default OFF ⇒ byte-identical
         # bridge (kill test). On computes status-only grades on the ANLZ worker.
         self._section_energy_enabled = _os.environ.get(SECTION_ENERGY_ENV, "0") == "1"
+        # E3 (AWR-290) per-drop energy grades: default OFF ⇒ byte-identical (kill
+        # test). On grades raw-marker windows on the ANLZ worker; grades attach to
+        # plan-selected true drops only and surface status-only.
+        self._drop_energy_enabled = _os.environ.get(DROP_ENERGY_ENV, "0") == "1"
         # F2 (LIGHTING ENGINE v2 moments) master switch, from the `/f2` config
         # block. Absent block ⇒ disabled ⇒ byte-identical to v1 (kill test); the
         # example config ships enabled, activated by the operator's mirror + restart.
@@ -1265,6 +1295,26 @@ class StateManager(LEDDispatchPolicyMixin):
                     "current": (section_energy_v0.current_section(grades, ab)
                                 if grades and ab is not None else None),
                 }
+            # E3 (AWR-290): per-deck drop-energy block ONLY when the flag is on
+            # (off ⇒ key absent ⇒ byte-identical, kill test). Built from the
+            # CURRENT plan's true-drop decisions only — never meta.drop_grades /
+            # the raw set. NO playhead lookup (O1 stays out of E3).
+            if self._drop_energy_enabled:
+                plan = self._drop_presentation_plan
+                decs = (plan.decisions
+                        if plan is not None
+                        and self._drop_presentation_plan_deck == num else ())
+                graded = [dec for dec in decs
+                          if getattr(dec, "energy_grade", None)]
+                deck[str(num)]["drop_energy"] = {
+                    "drops": len(graded),
+                    "store": ("loaded" if _SECTION_STORE_MEMO is not None
+                              else "refused_or_missing"),
+                    "grades": [{"beat": dec.beat,
+                                "within_track": dec.energy_grade["within_track"],
+                                "library_scaled": dec.energy_grade["library_scaled"]}
+                               for dec in graded],
+                }
         now = time.monotonic()
         mixer_age = (
             now - self._mixer_snapshot.updated_at
@@ -1675,6 +1725,10 @@ class StateManager(LEDDispatchPolicyMixin):
                     section_grades = ev.payload.get("section_grades")
                     if section_grades is not None:
                         meta.section_grades = section_grades
+                    # E3 (AWR-290): key absent when off ⇒ no-op ⇒ byte-identical.
+                    drop_grades = ev.payload.get("drop_grades")
+                    if drop_grades is not None:
+                        meta.drop_grades = drop_grades
                     meta.smart_drop_energy_shadow = new_shadow
                     if markers_changed or shadow_changed:
                         log.info("[SM] smart-transition-select  deck=%d  drops=%d  smart_drops=%d  bd=%d  smart_bd=%d  up=%d  source=%s",
@@ -2404,6 +2458,7 @@ class StateManager(LEDDispatchPolicyMixin):
         wide_window: bool = False,
         f2_enabled: bool = False,
         section_energy_enabled: bool = False,
+        drop_energy_enabled: bool = False,
         sidecar_v4=None,
     ) -> None:
         eq = self._eq
@@ -2434,6 +2489,7 @@ class StateManager(LEDDispatchPolicyMixin):
                         wide_window=wide_window,
                         f2_enabled=f2_enabled,
                         section_energy_enabled=section_energy_enabled,
+                        drop_energy_enabled=drop_energy_enabled,
                         sidecar_v4=sidecar_v4,
                     )
                 except Exception:
@@ -2453,6 +2509,9 @@ class StateManager(LEDDispatchPolicyMixin):
                     if section_energy_enabled:
                         # E2 byte-identity rule: key present ONLY when flag on.
                         _anlz_payload["section_grades"] = result.section_grades
+                    if drop_energy_enabled:
+                        # E3 byte-identity rule: key present ONLY when flag on.
+                        _anlz_payload["drop_grades"] = result.drop_grades
                     eq.put_nowait(BridgeEvent(
                         kind=Ev.ANLZ_DATA,
                         deck=bridge_deck,
@@ -2689,6 +2748,7 @@ class StateManager(LEDDispatchPolicyMixin):
                         "wide_window": self._wide_window_enable,
                         "f2_enabled": self._f2_enabled,
                         "section_energy_enabled": self._section_energy_enabled,
+                        "drop_energy_enabled": self._drop_energy_enabled,
                     }
                     if payload.get("sidecar_v4") is not None:
                         worker_kwargs["sidecar_v4"] = payload["sidecar_v4"]
@@ -2795,10 +2855,17 @@ class StateManager(LEDDispatchPolicyMixin):
             self._drop_presentation_learned_store.beats_for_track(content_id)
             if content_id else ()
         )
+        # E3 (AWR-290): attach per-drop grades to plan decisions ONLY when the
+        # flag is on AND graded raw markers exist; omit the kwarg entirely when off
+        # so the legacy call shape (and every decision) is byte-identical.
+        _plan_kwargs = {"laser_tiers": self._f2_laser_tiers(d, drop_beats)}
+        if self._drop_energy_enabled and d.meta.drop_grades:
+            _plan_kwargs["drop_grades"] = drop_energy_v0.grades_by_beat(
+                d.meta.drop_grades)
         self._drop_presentation_plan = plan_track(
             drop_beats, phrase_roles, tag_beats, learned_beats,
             self._drop_presentation_config,
-            laser_tiers=self._f2_laser_tiers(d, drop_beats),
+            **_plan_kwargs,
         )
         self._drop_presentation_plan_deck = deck
         self._drop_presentation_plan_load_gen = load_gen
