@@ -1,7 +1,15 @@
 ---
 doc_status: draft
 truth_level: >
-  DRAFT v3 implementation spec — v3 = v2 + EXACTLY the RTFIX2 cures from the
+  DRAFT v4 implementation spec — v4 = v3 + EXACTLY the RTREV3 R3-1 cure
+  (local/spectral_v5_2026_07_17/RTREV3_review.md): the warrant branch guard
+  gains the two legs the ladder fall-through does not supply
+  (lighting_mode=="autoloop", scripted_id==0), Task 5's gate claim restated
+  as the exact composition (P3-5/7 four conditions + P6 scripted-exclusion +
+  branch-guard two legs = the _passes_automatic_gates six-condition set), T3
+  pin byte-unchanged (passes truthfully under the cured guard), plus the
+  reviewer-sanctioned A.3 four-word membership clarifier. v3 = v2 + the
+  RTFIX2 cures from the
   OQ1TRACE executor trace (local/spectral_v5_2026_07_17/OQ1TRACE_report.md):
   C1 dedicated `warrant` role replaces the dead `role="phrase"`
   recommendation, C2 honest director-side-only gating claim + T3 equivalence
@@ -151,7 +159,8 @@ the bridge does not know that hash at runtime.**
 - [confirmed] The personality's drop scene attribute is `self._drop_scene`
   (`laser_director.py:542`).
 - [confirmed] The executor is role-driven with a fixed `_AUTO_ROLES` set and
-  strict gates `_passes_automatic_gates` (`laser_executor.py:61-62, 131,
+  strict gates `_passes_automatic_gates` (membership-guarded —
+  `_AUTO_ROLES` only) (`laser_executor.py:61-62, 131,
   169, 625`); the drop-lifecycle mirror path keys on
   `reason == "drop_crossing"` specifically (`laser_executor.py:493`), so a
   new reason string cannot trip it.
@@ -377,11 +386,13 @@ default `"off"`. Unknown mode → treated as `"off"` + one WARN (fail-open).
   (post-drop-start never resetting → lifecycle drift). Placed there, the
   branch is reachable only when priorities 1–11 all declined, which is what
   "sits UNDER blackout/emergency masks, drop policy, and personality" means
-  in this ladder. The branch: if `ctx.laser_warrant_active` and the last warrant fire
-  for this span is ≥ `min_refire_beats` behind `ctx.abs_beat`, return
-  `LaserSceneDecision(scene=self._drop_scene, reason="growl_warrant",
-  priority=12, source="policy", role="warrant")` (RTFIX2 C1 — a DEDICATED
-  role, deliberately NOT in `_AUTO_ROLES`). It NEVER sets `blackout_arm`,
+  in this ladder. The branch (RTFIX3 R3-1 — guard gains the two legs the
+  fall-through does NOT supply): fire only if `ctx.laser_warrant_active AND
+  ctx.lighting_mode == "autoloop" AND ctx.scripted_id == 0 AND` the last
+  warrant fire for this span is ≥ `min_refire_beats` behind `ctx.abs_beat`;
+  then return `LaserSceneDecision(scene=self._drop_scene,
+  reason="growl_warrant", priority=12, source="policy", role="warrant")`
+  (RTFIX2 C1 — a DEDICATED role, deliberately NOT in `_AUTO_ROLES`). It NEVER sets `blackout_arm`,
   never touches masks, never writes drop-lifecycle state. Selection-path
   consequences of the dedicated role, all [confirmed] in
   OQ1TRACE_report.md: the scene passes through verbatim
@@ -398,13 +409,19 @@ default `"off"`. Unknown mode → treated as `"off"` + one WARN (fail-open).
   claim): **the executor's strict `_passes_automatic_gates` does NOT apply
   to the `warrant` role** — that gate is `_AUTO_ROLES`-membership-guarded
   (`laser_executor.py:169`). Gating for the warrant path is DIRECTOR-SIDE
-  REACHABILITY ONLY: the priority-12 branch is reachable solely on full
-  ladder fall-through, and priorities 3–7 enforce playing, track loaded,
-  position fresh, not scripted, and autoloop_ready
-  (`laser_director.py:400-457`) — the same condition set as
-  `_passes_automatic_gates` (`laser_executor.py:625-633`). T3 MUST pin that
-  equivalence (see Part D) so a future ladder edit cannot silently un-gate
-  the warrant path. The mirror path cannot trigger because it requires
+  ONLY, and it is a COMPOSITION, not a ladder property alone (RTFIX3 R3-1 —
+  the earlier flat "priorities 3–7 ≡ the gate" claim was FALSE on
+  `lighting_mode` and inexact on `scripted_id`): priorities 3–5/7 supply
+  four conditions — playing, active_track_loaded, not position_stale,
+  autoloop_ready; priority 6 excludes scripted contexts only
+  (`scripted_id > 0` or `lighting_mode == "scripted"` — NOT
+  `lighting_mode == "autoloop"`, whose domain also spans `"idle"` and `""`
+  on reset paths); the branch's OWN guard supplies
+  `lighting_mode == "autoloop"` and `scripted_id == 0` exactly. TOGETHER
+  these equal the `_passes_automatic_gates` six-condition set
+  (`laser_executor.py:625-633`) — no equivalence is claimed beyond that
+  composition. T3 MUST pin it per-condition (see Part D) so a future ladder
+  edit cannot silently un-gate the warrant path. The mirror path cannot trigger because it requires
   `role=="drop" AND reason=="drop_crossing"` (`laser_executor.py:488-494`).
 - Director state for the refire lockout resets wherever director lifecycle
   state already resets (master/track/stop/resume/scripted/idle transitions —
