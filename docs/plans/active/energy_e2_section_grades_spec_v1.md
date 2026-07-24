@@ -12,6 +12,12 @@ validation_scope: >
   track-weight store with refusal-by-construction (E1REV closing law). All
   code claims verified at HEAD d8ff8240. Awaiting exec review + operator gate
   before Codex executes. SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
+  CHANGE RECORD 2026-07-24 (E2FIX, same seat): E2REV ruling FIX folded — F1
+  (G1 denominator pinned: n_by_genre_eligible defined, informational absolute
+  coverage required), F2 (models.py named in Task 2 / Task 5 / Part E.1;
+  TrackMeta field + clear() mirror at models.py:66/:87), N1 (kill test also
+  asserts status-block absence), N2 (static import-fence test added), N3
+  (Part E.2 reds wording). N4 banked for E4's review, no change here.
 ---
 
 # Codex Implementation Spec - Energy E2: per-section energy grades (status-only)
@@ -195,8 +201,13 @@ Functions (pure; exact signatures):
   tuple[bool, str]` — G1/G2 verdict for the offline tool (reasons: `ok`,
   `insufficient_coverage`, `flat_grades`, `insufficient_corpus` when
   `n_by_genre_eligible < 100` — same floor as E1's `MIN_ACCEPT_N`).
+  **Definition (E2REV F1, pinned):** `n_by_genre_eligible` = the count of
+  by_genre tracks that have BOTH a v4 cache entry AND a row in the accepted
+  E1 store; G1 passes iff `n_graded / n_by_genre_eligible >= COVERAGE_GATE`.
+  The denominator is NOT all by_genre tracks — G1 polices segmentation and
+  grade-math holes only, which is what its prior supports.
 
-### Task 2 - runtime wiring (state_manager.py + anlz_reader.py, F2 pattern verbatim)
+### Task 2 - runtime wiring (state_manager.py + anlz_reader.py + models.py, F2 pattern verbatim)
 
 1. `anlz_reader.py:151` area: add `section_grades: Optional[list] = None` to
    `TrackAnlzData` (beside `f2_plan`).
@@ -233,10 +244,14 @@ if section_energy_enabled and v4 is not None:
    re-polling.
 4. ANLZ_DATA payload (`:2371-2388`): add `"section_grades":
    result.section_grades` ONLY when the flag is on (off ⇒ key absent — the
-   byte-identity rule); consumer (`:1606` area) stores `meta.section_grades`;
-   clear it wherever `f2_plan` is cleared on track change/reset (find every
-   `f2_plan` reset site and mirror it — Pre-handoff check 4: cleanup on EVERY
-   transition path).
+   byte-identity rule); consumer (`:1606` area) stores `meta.section_grades`.
+   **models.py (E2REV F2):** add `section_grades: Optional[list] = None` to
+   `TrackMeta` beside `f2_plan` (`models.py:66`) and mirror the reset in
+   `TrackMeta.clear()` beside `self.f2_plan = None` (`models.py:87`) — the
+   reviewer's enumeration confirms `clear()` is the ONLY f2_plan reset site
+   at HEAD (the consumer at `state_manager.py:1606` only assigns), so this
+   one field + one clear line IS the complete cleanup-on-every-transition
+   obligation (Pre-handoff check 4).
 5. StateManager snapshot: include a compact per-deck block (only when flag
    on): `{"sections": len(grades), "store": "loaded"|"refused_or_missing",
    "current": current_section(grades, abs_beat) or None}`; expose to
@@ -254,11 +269,17 @@ track with a v4 entry: load the E1 store ONCE via
 `load_track_weight_store()` (the refusal gate — tool and runtime share the
 one loader), compute `grade_sections(...)`, then evaluate:
 
-- **G1 coverage (pinned 0.95):** fraction of by_genre tracks having BOTH a v4
-  entry AND a store row that produce a non-empty grade list ≥ `COVERAGE_GATE`.
+- **G1 coverage (pinned 0.95; denominator per Task 1's F1 definition):**
+  `n_graded / n_by_genre_eligible >= COVERAGE_GATE`, where
+  `n_by_genre_eligible` counts by_genre tracks with BOTH a v4 entry AND a
+  store row, and `n_graded` counts those producing a non-empty grade list.
   Prior grounding: the E1 run scored n=551 by_genre tracks and marker/
-  section_map fallback makes segmentation near-universal; a >5% hole means a
-  real defect (short tracks, ref missing), not corpus noise.
+  section_map fallback makes segmentation near-universal; a >5% hole among
+  ELIGIBLE tracks means a real defect (short tracks, ref missing), not
+  corpus noise. **The report MUST also print
+  `n_by_genre_eligible / n_by_genre_total` as an INFORMATIONAL absolute-
+  coverage line** — a store/cache coverage hole stays visible even though
+  the gate deliberately does not police it.
 - **G2 non-degeneracy (pinned 0.90 @ 0.10):** among graded by_genre tracks,
   the fraction whose `max(within_track) − min(within_track) >= SPREAD_MIN`
   must be ≥ `SPREAD_GATE_FRACTION`. Rationale: the −8/−3 dB mapping spans
@@ -286,18 +307,30 @@ one loader), compute `grade_sections(...)`, then evaluate:
 5. **Flag-off byte-identity (kill test):** `_read_runtime_anlz_data(...,
    section_energy_enabled=False)` on a rich fixture ⇒ `section_grades is
    None` AND a monkeypatched `grade_sections`/loader assert ZERO calls; the
-   ANLZ_DATA payload contains no `section_grades` key.
+   ANLZ_DATA payload contains no `section_grades` key; AND (E2REV N1) the
+   per-deck status snapshot contains no `section_energy` key when the flag
+   is off — status-key absence is part of the byte-identity claim.
 6. **gates_verdict:** all four outcomes.
 7. **current_section:** inside/outside/boundary beats.
 8. Pure seams only — no disk (store fixtures are dicts passed to the loader
    via tmp files only in the refusal test), no subprocess, no DB.
+9. **Import fence (E2REV N2, machine enforcement of the no-lighting-consumer
+   law):** a static-scan test asserting that only `state_manager.py`,
+   `tools/`, and `tests/` import `section_energy_v0` (the E1 importer-guard
+   precedent, `tests/test_hardness_v0.py:399-419`-style, retargeted with the
+   allowlist including `state_manager.py`). Include the robustness idiom
+   from the SUITEFIX round: skip gitignored `local/` trees and catch
+   `UnicodeDecodeError` alongside `OSError` in the file scan, so a stray
+   non-UTF-8 fixture in an ignored venv can never redden the fence.
 
 ### Task 5 - contract + docs (contract-first, apply as text)
 
 1. `docs/agents/change_contracts.yml`:
    - `rekordbox_readers` (line 480): add `anlz_reader.py` to `code_globs`
      (it parses Rekordbox ANLZ files; `state_manager.py` is already there) —
-     this covers the `TrackAnlzData` field.
+     this covers the `TrackAnlzData` field. The `models.py` edit (Task 2)
+     needs no contract extension: `models.py` already sits in `core_bridge`'s
+     code_globs, whose docs_update list step 2 below carries.
    - `spectral_analysis` (line 698): add `section_energy_v0.py`,
      `tools/section_energy_report.py` to `code_globs`; add `grade_sections`,
      `load_track_weight_store`, `gates_verdict` to `key_symbols`; add a
@@ -367,12 +400,13 @@ failure into a pass.
 ## Part E - Acceptance (definition of done)
 
 1. Files: `section_energy_v0.py`, `tools/section_energy_report.py`,
-   `tests/test_section_energy_v0.py`, the Task-2 wiring, the Task-5
-   contract/docs edits — nothing else.
+   `tests/test_section_energy_v0.py`, the Task-2 wiring (`state_manager.py`,
+   `anlz_reader.py`, `models.py`), the Task-5 contract/docs edits — nothing
+   else.
 2. All four hard checks green; full `python3 -m unittest discover tests`
-   green apart from the two PRE-EXISTING unrelated reds documented in
-   `E1BUILD_report.md` (hardness venv scan + soundswitch pack self-heal) —
-   do not fix or mask them; report the counts.
+   green up to the pre-existing reds documented in
+   `E1BUILD_report.md` (the suite may be greener than that list on any given
+   desk — E2REV N3) — do not fix or mask them; report the counts.
 3. Kill test green: flag off ⇒ byte-identical (Task 4 test 5).
 4. **One real corpus run**: `python3 tools/section_energy_report.py --out
    local/spectral_v5_2026_07_17/section_energy_report_2026_07_XX.txt`;
