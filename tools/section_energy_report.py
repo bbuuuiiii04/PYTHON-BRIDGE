@@ -127,11 +127,15 @@ def run(argv: "Sequence[str]") -> int:
     n_by_genre_total = 0
     n_by_genre_eligible = 0        # by_genre + v4 + store row (G1 denominator)
     n_graded = 0                   # eligible + non-empty grades (G1 numerator)
-    n_spread_ok = 0                # graded + within_track spread >= SPREAD_MIN
+    n_chorus_tracks = 0            # eligible tracks with >= 3 chorus sections
+    n_chorus_rankable = 0          # ... of those, with >= 2 distinct chorus grades
     lib_graded = 0
     lib_scored = 0
     counts = {"no_grid": 0, "no_v4": 0}
-    spreads = []
+    all_section_withins = []       # every graded by_genre section (G2 saturation)
+    chorus_withins = []            # chorus sections (G4 + 4c bottom-rail)
+    low_withins = []               # 'low' sections (G4 separation)
+    jitter = {off: [] for off in JITTER_OFFSETS}   # 4b, report-only
     for t in tracks:
         if t["by_genre"]:
             n_by_genre_total += 1
@@ -151,11 +155,12 @@ def run(argv: "Sequence[str]") -> int:
         has_row = bool(store) and key is not None \
             and key in store.get("tracks", {})
         tw = store_track_weight(store, key) if (store and key) else None
+        drops = list(data.drop_beat_indices)
+        buildups = list(data.buildup_beat_indices)
+        breakdowns = list(data.breakdown_beat_indices)
         grades = grade_sections(
-            v4, anlz_drops=list(data.drop_beat_indices),
-            anlz_buildups=list(data.buildup_beat_indices),
-            anlz_breakdowns=list(data.breakdown_beat_indices),
-            track_weight=tw)
+            v4, anlz_drops=drops, anlz_buildups=buildups,
+            anlz_breakdowns=breakdowns, track_weight=tw)
         lib_scored += 1
         if grades:
             lib_graded += 1
@@ -163,25 +168,54 @@ def run(argv: "Sequence[str]") -> int:
             n_by_genre_eligible += 1
             if grades:
                 n_graded += 1
-                wt = [g["within_track"] for g in grades]
-                spread = max(wt) - min(wt)
-                spreads.append(spread)
-                if spread >= SPREAD_MIN:
-                    n_spread_ok += 1
+                chorus_here = []
+                for g in grades:
+                    w = g["within_track"]
+                    all_section_withins.append(w)
+                    if g["label"] == "chorus":
+                        chorus_withins.append(w)
+                        chorus_here.append(w)
+                    elif g["label"] == "low":
+                        low_withins.append(w)
+                if len(chorus_here) >= 3:
+                    n_chorus_tracks += 1
+                    if len(set(chorus_here)) >= 2:
+                        n_chorus_rankable += 1
+                # 4b boundary-jitter: slide every marker by `off` and re-grade
+                n_beats = int(v4.n_beats)
+                base = grades
+                for off in JITTER_OFFSETS:
+                    sh = grade_sections(
+                        v4, anlz_drops=_shift(drops, off, n_beats),
+                        anlz_buildups=_shift(buildups, off, n_beats),
+                        anlz_breakdowns=_shift(breakdowns, off, n_beats),
+                        track_weight=None)
+                    for a, b in zip(base, sh):
+                        jitter[off].append(abs(b["within_track"] - a["within_track"]))
+
+    railed_fraction = (sum(1 for w in all_section_withins if w <= 0.0 or w >= 1.0)
+                       / len(all_section_withins)) if all_section_withins else None
+    rankable_fraction = (n_chorus_rankable / n_chorus_tracks) if n_chorus_tracks else None
+    chorus_med = _pct(sorted(chorus_withins), 50) if chorus_withins else None
+    low_med = _pct(sorted(low_withins), 50) if low_withins else None
+    separation = (chorus_med - low_med) if (chorus_med is not None
+                                            and low_med is not None) else None
+    chorus_bottom = sum(1 for w in chorus_withins if w <= 0.0)
 
     if forced_partial:
         accepted, reason = False, "partial_run"
     else:
         accepted, reason = gates_verdict(n_by_genre_eligible, n_graded,
-                                         n_spread_ok)
+                                         railed_fraction, rankable_fraction,
+                                         separation)
 
     emit("# Energy E2 — per-section grade report")
     emit("# OFFLINE / read-only. Bridge unchanged. Grades are STATUS-ONLY (no consumer).")
     emit("")
     emit("store: %s" % ("loaded (E1 accepted)" if store else "refused_or_missing"))
     emit("by_genre tracks total: %d" % n_by_genre_total)
-    emit("  eligible (v4 + store row): %d   graded: %d   spread_ok(>=%.2f): %d"
-         % (n_by_genre_eligible, n_graded, SPREAD_MIN, n_spread_ok))
+    emit("  eligible (v4 + store row): %d   graded: %d   graded sections: %d"
+         % (n_by_genre_eligible, n_graded, len(all_section_withins)))
     emit("  no_grid: %d   no_v4: %d" % (counts["no_grid"], counts["no_v4"]))
     emit("  library-wide (informational): scored %d, graded %d"
          % (lib_scored, lib_graded))
@@ -191,17 +225,37 @@ def run(argv: "Sequence[str]") -> int:
          % (n_by_genre_eligible, n_by_genre_total, abs_cov))
     emit("")
     g1 = (n_graded / n_by_genre_eligible) if n_by_genre_eligible else 0.0
-    g2 = (n_spread_ok / n_graded) if n_graded else 0.0
     emit("ACCEPTANCE: %s   reason=%s" % ("ACCEPTED" if accepted else "NOT ACCEPTED",
                                          reason))
-    emit("  G1 coverage  n_graded/n_by_genre_eligible = %.3f  (gate >= %.2f)"
+    emit("  G1 coverage    n_graded/n_by_genre_eligible = %.3f  (gate >= %.2f)"
          % (g1, COVERAGE_GATE))
-    emit("  G2 spread    n_spread_ok/n_graded = %.3f  (gate >= %.2f at spread >= %.2f)"
-         % (g2, SPREAD_GATE_FRACTION, SPREAD_MIN))
-    if spreads:
-        ss = sorted(spreads)
-        emit("  within_track spread: min %.3f  median %.3f  max %.3f"
-             % (ss[0], ss[len(ss) // 2], ss[-1]))
+    emit("  G2 saturation  railed fraction = %s  (gate <= %.2f)"
+         % (("%.4f" % railed_fraction) if railed_fraction is not None else "n/a",
+            SATURATION_GATE_MAX))
+    emit("  G3 rankability chorus tracks (>=3) with >=2 distinct grades = %s  (gate >= %.2f, n=%d)"
+         % (("%.4f" % rankable_fraction) if rankable_fraction is not None else "n/a",
+            RANKABILITY_GATE, n_chorus_tracks))
+    emit("  G4 separation  median(chorus) - median('low') = %s  (gate >= %.2f)"
+         % (("%.4f" % separation) if separation is not None else "n/a",
+            SEPARATION_GATE))
+    emit("     median(chorus) = %s ; median('low') = %s"
+         % (("%.4f" % chorus_med) if chorus_med is not None else "n/a",
+            ("%.4f" % low_med) if low_med is not None else "n/a"))
+    # 4c bottom-rail chorus fraction, counted DIRECTLY over all chorus sections
+    n_chorus = len(chorus_withins)
+    pct_bottom = (100.0 * chorus_bottom / n_chorus) if n_chorus else 0.0
+    emit("  chorus sections at the bottom rail = %d / %d = %.2f%%  (INFORMATIONAL; median aggregator, expect ~0.6%%)"
+         % (chorus_bottom, n_chorus, pct_bottom))
+    emit("")
+    emit("## Boundary-jitter sensitivity (INFORMATIONAL — not a gate)")
+    emit("  offset  median |delta|  p90 |delta|")
+    for off in JITTER_OFFSETS:
+        ds = sorted(jitter[off])
+        med = _pct(ds, 50)
+        p90 = _pct(ds, 90)
+        emit("  %+d      %s          %s"
+             % (off, ("%.4f" % med) if med is not None else "n/a",
+                ("%.4f" % p90) if p90 is not None else "n/a"))
     if forced_partial:
         emit("")
         emit("!! PARTIAL RUN (--limit %s): acceptance forced FALSE (partial_run)."

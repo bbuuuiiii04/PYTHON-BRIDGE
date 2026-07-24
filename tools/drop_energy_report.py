@@ -24,10 +24,15 @@ from rb_ss_bridge_v2 import section_energy_v0  # noqa: E402
 from rb_ss_bridge_v2 import drop_energy_v0  # noqa: E402
 from rb_ss_bridge_v2.anlz_reader import read_anlz_drops  # noqa: E402
 from rb_ss_bridge_v2.smart_phrasing import select_smart_drops  # noqa: E402
+from rb_ss_bridge_v2.track_weight_v0 import spearman  # noqa: E402
 from rb_ss_bridge_v2.section_energy_v0 import (  # noqa: E402
-    load_track_weight_store, store_track_weight, grade_sections)
+    load_track_weight_store, store_track_weight)
 from rb_ss_bridge_v2.drop_energy_v0 import (  # noqa: E402
-    COVERAGE_GATE, IQR_GATE, SEPARATION_GATE, grade_drops, gates_verdict)
+    COVERAGE_GATE, TERM_SATURATION_MAX, TERM_CORRELATION_MAX, IQR_GATE,
+    RANKABILITY_GATE, LEVEL_SEPARATION_DB, GRADE_SEPARATION_GATE,
+    drop_body_levels, score_windows, grade_drops, gates_verdict, _all_finite)
+
+TERMS = ("body", "onset", "perc_high", "growl")
 
 SHARE_ROOT = Path("~/Library/Pioneer/rekordbox/share").expanduser()
 DB_PATH = Path("~/Library/Pioneer/rekordbox/master.db").expanduser()
@@ -110,11 +115,21 @@ def run(argv: "Sequence[str]") -> int:
     if forced_partial:
         tracks = tracks[:max(0, args.limit)]
 
+    corpus_dist = list((store or {}).get("drop_body_distribution") or [])
     n_by_genre_total = 0
     n_by_genre_eligible = 0
     n_graded = 0
-    drop_withins = []        # all graded by_genre drops' within_track (G2 + G3)
-    low_withins = []         # "low"-section within_track over eligible tracks (G3)
+    total_graded_drops = 0
+    corpus_basis_count = 0
+    n_drop_tracks = 0        # eligible tracks with >= 3 graded drops (G5)
+    n_drop_rankable = 0      # ... of those, with >= 2 distinct composite grades
+    term_vals = {k: [] for k in TERMS}   # G2 saturation + G3 correlation
+    drop_withins = []        # composite (G4 IQR + G7 drop median)
+    drop_levels = []         # drop-window rel dB (G6 drop side)
+    low_levels = []          # 'low' section rel dB (G6 low side)
+    low_composites = []      # G7 'low' composite (body ranked vs track's drops)
+    lib_tw_pairs = []        # (library_scaled, track_weight) — INFORMATIONAL
+    lib_within_pairs = []    # (library_scaled, within_track) — INFORMATIONAL
     smart_total = 0
     smart_matched = 0
     counts = {"no_grid": 0, "no_v4": 0, "no_drops": 0, "no_store_row": 0}
@@ -146,37 +161,101 @@ def run(argv: "Sequence[str]") -> int:
         # ELIGIBLE: by_genre + v4 + store row + >=1 ANLZ drop marker
         n_by_genre_eligible += 1
         tw = store_track_weight(store, key)
-        grades = grade_drops(v4, drop_beats=raw_drops, track_weight=tw)
+        buildups = list(data.buildup_beat_indices)
+        breakdowns = list(data.breakdown_beat_indices)
+        own_levels = drop_body_levels(v4, raw_drops)
+        grades = grade_drops(v4, drop_beats=raw_drops, track_weight=tw,
+                             corpus_drop_levels=corpus_dist)
         if grades:
             n_graded += 1
+            basis = grades[0]["body_basis"]
+            pool = own_levels if basis == "track_drops" else corpus_dist
+            scored = score_windows(v4, raw_drops, body_pool=pool)
+            for row in scored:
+                for k in TERMS:
+                    term_vals[k].append(row[k])
+            withins = [g["within_track"] for g in grades]
+            drop_withins.extend(withins)
+            total_graded_drops += len(grades)
+            corpus_basis_count += sum(1 for g in grades if g["body_basis"] == "corpus")
+            if len(withins) >= 3:
+                n_drop_tracks += 1
+                if len(set(withins)) >= 2:
+                    n_drop_rankable += 1
+            if tw is not None:
+                for g in grades:
+                    if g["library_scaled"] is not None:
+                        lib_tw_pairs.append((g["library_scaled"], tw))
+                        lib_within_pairs.append((g["library_scaled"], g["within_track"]))
             graded_beats = {g["drop_beat"] for g in grades}
-            drop_withins.extend(g["within_track"] for g in grades)
             smart = select_smart_drops(raw_drops, total_beats=int(v4.n_beats))
             smart_total += len(smart)
             smart_matched += sum(1 for sd in smart if int(sd) in graded_beats)
-        for sec in grade_sections(
-                v4, anlz_drops=raw_drops,
-                anlz_buildups=list(data.buildup_beat_indices),
-                anlz_breakdowns=list(data.breakdown_beat_indices),
-                track_weight=tw):
-            if sec["label"] == "low":
-                low_withins.append(sec["within_track"])
+        # G6 drop side (this track's drop-window rel dB)
+        drop_levels.extend(own_levels)
+        # G6 low side + G7 low composite (body ranked vs the track's OWN drops)
+        ref = float(v4.scalars["loudness_ref_db"])
+        full = v4.series["full_db"]
+        n_beats = int(v4.n_beats)
+        for (start, end, label) in section_energy_v0._normalized_segments(
+                v4, raw_drops, buildups, breakdowns):
+            if label != "low":
+                continue
+            s = max(0, int(start))
+            e = min(n_beats, int(end))
+            if e - s >= 1:
+                fw = full[s:e]
+                if _all_finite(fw):
+                    low_levels.append(sum(fw) / len(fw) - ref)
+            if own_levels:
+                for row in score_windows(v4, [start], body_pool=own_levels):
+                    low_composites.append(row["within_track"])
 
+    # ---- gate quantities ----
+    def _railed(vals):
+        return (sum(1 for v in vals if v <= 0.0 or v >= 1.0) / len(vals)) if vals else None
+
+    term_railed = {k: _railed(term_vals[k]) for k in TERMS}
+    _rf = [v for v in term_railed.values() if v is not None]
+    term_railed_max = max(_rf) if _rf else None
+    term_matrix = {}
+    term_rho_max = None
+    for a in TERMS:
+        for b in TERMS:
+            if a == b:
+                term_matrix[(a, b)] = 1.0
+                continue
+            rho = spearman(term_vals[a], term_vals[b])
+            term_matrix[(a, b)] = rho
+            if rho is not None:
+                term_rho_max = abs(rho) if term_rho_max is None else max(term_rho_max, abs(rho))
     ds = sorted(drop_withins)
     iqr = (_pct(ds, 75) - _pct(ds, 25)) if len(ds) >= 2 else None
-    drop_median = _pct(ds, 50)
-    low_median = _pct(sorted(low_withins), 50)
-    separation = (drop_median - low_median) if (drop_median is not None
-                                                and low_median is not None) else None
+    rankable_fraction = (n_drop_rankable / n_drop_tracks) if n_drop_tracks else None
+    drop_lvl_med = _pct(sorted(drop_levels), 50)
+    low_lvl_med = _pct(sorted(low_levels), 50)
+    level_sep = (drop_lvl_med - low_lvl_med) if (drop_lvl_med is not None
+                                                 and low_lvl_med is not None) else None
+    drop_comp_med = _pct(ds, 50)
+    low_comp_med = _pct(sorted(low_composites), 50)
+    grade_sep = (drop_comp_med - low_comp_med) if (drop_comp_med is not None
+                                                   and low_comp_med is not None) else None
+    rho_lib_tw = (spearman([p[0] for p in lib_tw_pairs], [p[1] for p in lib_tw_pairs])
+                  if len(lib_tw_pairs) >= 3 else None)
+    rho_lib_within = (spearman([p[0] for p in lib_within_pairs],
+                               [p[1] for p in lib_within_pairs])
+                      if len(lib_within_pairs) >= 3 else None)
 
     if forced_partial:
         accepted, reason = False, "partial_run"
     else:
-        accepted, reason = gates_verdict(n_by_genre_eligible, n_graded, iqr,
-                                         separation)
+        accepted, reason = gates_verdict(
+            n_by_genre_eligible, n_graded, term_railed_max, term_rho_max, iqr,
+            rankable_fraction, level_sep, grade_sep)
 
     match_rate = (smart_matched / smart_total) if smart_total else None
     abs_cov = (n_by_genre_eligible / n_by_genre_total) if n_by_genre_total else 0.0
+    corpus_pct = (100.0 * corpus_basis_count / total_graded_drops) if total_graded_drops else 0.0
 
     emit("# Energy E3 — per-drop grade report")
     emit("# OFFLINE / read-only. Bridge unchanged. Grades are STATUS-ONLY (no consumer).")
@@ -188,22 +267,50 @@ def run(argv: "Sequence[str]") -> int:
          % (counts["no_grid"], counts["no_v4"], counts["no_drops"], counts["no_store_row"]))
     emit("  absolute coverage n_by_genre_eligible/n_by_genre_total = %d/%d = %.3f (INFORMATIONAL)"
          % (n_by_genre_eligible, n_by_genre_total, abs_cov))
-    emit("  graded drops: %d   'low' sections: %d" % (len(ds), len(low_withins)))
+    emit("  graded drops: %d   'low' windows: %d" % (len(ds), len(low_composites)))
+    emit("  corpus body-basis drops = %d / %d = %.2f%% (INFORMATIONAL; expect ~2.18%%)"
+         % (corpus_basis_count, total_graded_drops, corpus_pct))
     emit("  attach-match rate (smart drops on a graded raw beat) = %s (%d/%d, INFORMATIONAL)"
          % (("%.3f" % match_rate) if match_rate is not None else "n/a",
             smart_matched, smart_total))
     emit("")
     g1 = (n_graded / n_by_genre_eligible) if n_by_genre_eligible else 0.0
     emit("ACCEPTANCE: %s   reason=%s" % ("ACCEPTED" if accepted else "NOT ACCEPTED", reason))
-    emit("  G1 coverage  n_graded/n_by_genre_eligible = %.3f  (gate >= %.2f)" % (g1, COVERAGE_GATE))
-    emit("  G2 non-degeneracy  IQR(drop within_track) = %s  (gate >= %.2f)"
+    emit("  G1 coverage      n_graded/n_by_genre_eligible = %.3f  (gate >= %.2f)" % (g1, COVERAGE_GATE))
+    emit("  G2 saturation    worst term railed fraction = %s  (gate <= %.2f)"
+         % (("%.4f" % term_railed_max) if term_railed_max is not None else "n/a", TERM_SATURATION_MAX))
+    for k in TERMS:
+        emit("       term %-10s railed = %s"
+             % (k, ("%.4f" % term_railed[k]) if term_railed[k] is not None else "n/a"))
+    emit("  G3 correlation   worst |rho| between terms = %s  (gate <= %.2f)"
+         % (("%.4f" % term_rho_max) if term_rho_max is not None else "n/a", TERM_CORRELATION_MAX))
+    emit("       %-12s%s" % ("", "".join("%11s" % k for k in TERMS)))
+    for a in TERMS:
+        cells = "".join(
+            ("%+11.3f" % term_matrix[(a, b)]) if term_matrix[(a, b)] is not None
+            else "%11s" % "None" for b in TERMS)
+        emit("       %-12s%s" % (a, cells))
+    emit("  G4 IQR           IQR(drop within_track) = %s  (gate >= %.2f)"
          % (("%.4f" % iqr) if iqr is not None else "n/a", IQR_GATE))
-    emit("  G3 separation  median(drop) - median('low') = %s  (gate >= %.2f)"
-         % (("%.4f" % separation) if separation is not None else "n/a", SEPARATION_GATE))
-    # N1 fold: both medians, not just their difference
-    emit("     median(drop within_track) = %s ; median('low' section within_track) = %s"
-         % (("%.4f" % drop_median) if drop_median is not None else "n/a",
-            ("%.4f" % low_median) if low_median is not None else "n/a"))
+    emit("  G5 rankability   tracks (>=3 drops) with >=2 distinct grades = %s  (gate >= %.2f, n=%d)"
+         % (("%.4f" % rankable_fraction) if rankable_fraction is not None else "n/a",
+            RANKABILITY_GATE, n_drop_tracks))
+    emit("  G6 level sep     median(drop rel_dB) - median('low' rel_dB) = %s  (gate >= %.2f dB)"
+         % (("%.4f" % level_sep) if level_sep is not None else "n/a", LEVEL_SEPARATION_DB))
+    emit("       median(drop rel_dB) = %s ; median('low' rel_dB) = %s"
+         % (("%.4f" % drop_lvl_med) if drop_lvl_med is not None else "n/a",
+            ("%.4f" % low_lvl_med) if low_lvl_med is not None else "n/a"))
+    emit("  G7 grade sep     median(drop composite) - median('low' composite) = %s  (gate >= %.2f)"
+         % (("%.4f" % grade_sep) if grade_sep is not None else "n/a", GRADE_SEPARATION_GATE))
+    emit("       median(drop) = %s ; median('low') = %s ; n_low = %d"
+         % (("%.4f" % drop_comp_med) if drop_comp_med is not None else "n/a",
+            ("%.4f" % low_comp_med) if low_comp_med is not None else "n/a",
+            len(low_composites)))
+    emit("")
+    emit("  rho(library_scaled, track_weight) = %s   (INFORMATIONAL; v1 +0.9803, v2 expected ~+0.884)"
+         % (("%+.4f" % rho_lib_tw) if rho_lib_tw is not None else "n/a"))
+    emit("  rho(library_scaled, within_track) = %s   (INFORMATIONAL; v1 +0.1713, v2 expected ~+0.510)"
+         % (("%+.4f" % rho_lib_within) if rho_lib_within is not None else "n/a"))
     if forced_partial:
         emit("")
         emit("!! PARTIAL RUN (--limit %s): acceptance forced FALSE (partial_run)." % args.limit)
