@@ -29,12 +29,13 @@ validation_scope: >
   ONLY / HARDWARE-UNVALIDATED applies to the whole repo and everything here.
 ---
 
-# Codex Implementation Spec — Laser-warrant vetted spans: artifact + runtime wiring (DRAFT v3)
+# Codex Implementation Spec — Laser-warrant vetted spans: artifact + runtime wiring (DRAFT v4)
 
-Status: **DRAFT v3 — pending vetted list + operator veto-mode confirmation.**
-(v2 folded the RTREV review's three cures and three notes; v3 folds the
-RTFIX2 cures from the OQ1TRACE executor trace. The architecture is unchanged
-across both rounds — nothing structural moved.)
+Status: **DRAFT v4 — pending vetted list + operator veto-mode confirmation.**
+(v2 folded the RTREV review's three cures and three notes; v3 folded the
+RTFIX2 cures from the OQ1TRACE executor trace; v4 folds RTREV3's single
+R3-1 cure — two guard legs + the truthful composition claim. The
+architecture is unchanged across all rounds — nothing structural moved.)
 Two deliverables in one spec: (1) the bridge-consumable **vetted-spans
 artifact** built from the operator's veto pass over the laser-warrant ranked
 list, and (2) the **runtime wiring** that lets lasers fire (or be permitted)
