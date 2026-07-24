@@ -125,9 +125,14 @@ class ApplyGentleDropRoutingTests(unittest.TestCase):
         self.assertNotIn("rt_drop_chase_red", data["banks"]["default"]["drop"])
 
     def test_main_writes_once_then_no_op(self):
-        import tempfile, os
+        import contextlib, io, os, tempfile
         data = _fixture()
-        with tempfile.TemporaryDirectory() as td:
+        # main() is a CLI: it prints a [before]/[after]/[result] report to stdout.
+        # Keep that out of the suite's stdout (a reviewer mistook the leaked
+        # "[result] already applied" line for an import-time side effect); the
+        # test still exercises the real write-once idempotency below.
+        with tempfile.TemporaryDirectory() as td, \
+                contextlib.redirect_stdout(io.StringIO()):
             p = os.path.join(td, "cfg.json")
             Path(p).write_text(json.dumps(data), encoding="utf-8")
             self.assertEqual(m.main(["--config", p]), 0)
