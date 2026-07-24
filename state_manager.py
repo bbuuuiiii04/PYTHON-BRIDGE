@@ -129,6 +129,7 @@ from .sound_switch_engine import SoundSwitchEngine
 from . import spectral_cache
 from . import spectral_profile
 from . import lighting_moments_v2
+from . import section_energy_v0
 from .audio_spectral_features import (
     extract_spectral_features,
     extract_spectral_features_v4,
@@ -227,10 +228,28 @@ def _pack_operational_state(
 WIDE_WINDOW_ENV = "RBSS_DROP_WIDE_WINDOW"
 SCRIPTED_SHOWFILE_DIRECT_ENV = "RBSS_SCRIPTED_SHOWFILE_DIRECT"
 STATE_MANAGER_PROFILE_ENV = "RBSS_SM_PROFILE"
+SECTION_ENERGY_ENV = "RBSS_SECTION_ENERGY"   # E2 (AWR-288), default OFF
 # WI-1/2/3/4/5/6/7 kill-switches (read once at startup; default ON except cooldown)
 _SNAPSHOT_PUBLISH_INTERVAL_S = 0.05
 _PROFILE_SUMMARY_INTERVAL_S = 10.0
 _PROFILE_WINDOW = 2048
+
+# E2 (AWR-288): the E1 track-weight store, loaded at most once per process on the
+# first ANLZ worker that needs it — worker/offline threads only, NEVER the push
+# loop. Result (store dict or None) memoized; a store created after bridge start
+# is picked up at the next restart (no re-polling), stated in the status block.
+_SECTION_STORE_MEMO = None
+_SECTION_STORE_ATTEMPTED = False
+
+
+def _track_weight_store_once():
+    global _SECTION_STORE_MEMO, _SECTION_STORE_ATTEMPTED
+    if not _SECTION_STORE_ATTEMPTED:
+        _SECTION_STORE_ATTEMPTED = True
+        path = spectral_cache._cache_dir() / "trackweight_v1" / "track_weight_store.json"
+        _SECTION_STORE_MEMO = section_energy_v0.load_track_weight_store(path)
+    return _SECTION_STORE_MEMO
+
 
 def _read_runtime_anlz_data(
     anlz_path: str,
@@ -242,6 +261,7 @@ def _read_runtime_anlz_data(
     identity_config: IdentityV2Config | None = None,
     wide_window: bool = False,
     f2_enabled: bool = False,
+    section_energy_enabled: bool = False,
     sidecar_v4=None,
 ) -> TrackAnlzData:
     data = read_anlz_drops(anlz_path)
@@ -289,6 +309,31 @@ def _read_runtime_anlz_data(
         except Exception:
             log.debug("[F2] plan-compute-failed", exc_info=True)
             data.f2_plan = None
+
+    # E2 (AWR-288) per-section energy grades — STATUS-ONLY, no consumer. On this
+    # worker thread, never the push loop; gated so off computes NOTHING (kill-test
+    # byte-identity). Missing store/v4/markers ⇒ absent grades (fail open). The E1
+    # store is read once per process and refused by construction.
+    if section_energy_enabled and v4 is not None:
+        try:
+            tw = None
+            store = _track_weight_store_once()
+            if store is not None and audio_filepath:
+                key = spectral_cache._cache_key(audio_filepath, beatgrid_times_ms)
+                if key is not None:
+                    tw = section_energy_v0.store_track_weight(store, key)
+            data.section_grades = section_energy_v0.grade_sections(
+                v4, anlz_drops=data.drop_beat_indices,
+                anlz_buildups=data.buildup_beat_indices,
+                anlz_breakdowns=data.breakdown_beat_indices,
+                track_weight=tw) or None
+            log.info("[E2] section-grades  sections=%d  store=%s  tw=%s",
+                     len(data.section_grades or []),
+                     "loaded" if store is not None else "refused_or_missing",
+                     ("%.2f" % tw) if tw is not None else "none")
+        except Exception:
+            log.debug("[E2] section-grade-failed", exc_info=True)
+            data.section_grades = None
 
     if spectral_enabled and ctx is not None and data.drop_beat_indices:
         if not beatgrid_times_ms:
@@ -795,6 +840,9 @@ class StateManager(LEDDispatchPolicyMixin):
             and _os.environ.get(SPECTRAL_ENABLE_ENV, "0") == "1"
         )
         self._wide_window_enable = _os.environ.get(WIDE_WINDOW_ENV, "1") != "0"
+        # E2 (AWR-288) per-section energy grades: default OFF ⇒ byte-identical
+        # bridge (kill test). On computes status-only grades on the ANLZ worker.
+        self._section_energy_enabled = _os.environ.get(SECTION_ENERGY_ENV, "0") == "1"
         # F2 (LIGHTING ENGINE v2 moments) master switch, from the `/f2` config
         # block. Absent block ⇒ disabled ⇒ byte-identical to v1 (kill test); the
         # example config ships enabled, activated by the operator's mirror + restart.
@@ -1202,6 +1250,21 @@ class StateManager(LEDDispatchPolicyMixin):
                 "soundswitch_id": state.meta.soundswitch_id,
                 "load_gen": state.load_gen,
             }
+            # E2 (AWR-288): compact per-deck grades block, ONLY when the flag is
+            # on (off ⇒ key absent ⇒ byte-identical status, kill test N1). Reads
+            # the store memo directly — no store I/O on the publish path. abs_beat
+            # is an approximate playhead (elapsed×bpm) for the "current" lookup.
+            if self._section_energy_enabled:
+                grades = state.meta.section_grades or []
+                ab = (state.elapsed_ms * state.meta.bpm / 60000.0
+                      if state.playing and state.meta.bpm else None)
+                deck[str(num)]["section_energy"] = {
+                    "sections": len(grades),
+                    "store": ("loaded" if _SECTION_STORE_MEMO is not None
+                              else "refused_or_missing"),
+                    "current": (section_energy_v0.current_section(grades, ab)
+                                if grades and ab is not None else None),
+                }
         now = time.monotonic()
         mixer_age = (
             now - self._mixer_snapshot.updated_at
@@ -1607,6 +1670,11 @@ class StateManager(LEDDispatchPolicyMixin):
                     if f2_plan is not None and f2_plan is not meta.f2_plan:
                         meta.f2_plan = f2_plan
                         log.info("[F2] plan deck=%d %s", ev.deck, f2_plan.summary())
+                    # E2 (AWR-288): key absent when the flag is off ⇒ no-op ⇒
+                    # byte-identical. Grades ride the same load_gen-guarded path.
+                    section_grades = ev.payload.get("section_grades")
+                    if section_grades is not None:
+                        meta.section_grades = section_grades
                     meta.smart_drop_energy_shadow = new_shadow
                     if markers_changed or shadow_changed:
                         log.info("[SM] smart-transition-select  deck=%d  drops=%d  smart_drops=%d  bd=%d  smart_bd=%d  up=%d  source=%s",
@@ -2335,6 +2403,7 @@ class StateManager(LEDDispatchPolicyMixin):
         identity_config: IdentityV2Config | None = None,
         wide_window: bool = False,
         f2_enabled: bool = False,
+        section_energy_enabled: bool = False,
         sidecar_v4=None,
     ) -> None:
         eq = self._eq
@@ -2364,25 +2433,30 @@ class StateManager(LEDDispatchPolicyMixin):
                         identity_config=identity_config,
                         wide_window=wide_window,
                         f2_enabled=f2_enabled,
+                        section_energy_enabled=section_energy_enabled,
                         sidecar_v4=sidecar_v4,
                     )
                 except Exception:
                     log.debug("[SM] anlz-worker-error", exc_info=True)
                     return
                 try:
+                    _anlz_payload = {
+                        "drop_beat_indices": result.drop_beat_indices,
+                        "breakdown_beat_indices": result.breakdown_beat_indices,
+                        "buildup_beat_indices": result.buildup_beat_indices,
+                        "mood": result.mood,
+                        "energy_shadow": result.energy_shadow,
+                        "f2_plan": result.f2_plan,
+                        "load_gen": gen,
+                        "source": source,
+                    }
+                    if section_energy_enabled:
+                        # E2 byte-identity rule: key present ONLY when flag on.
+                        _anlz_payload["section_grades"] = result.section_grades
                     eq.put_nowait(BridgeEvent(
                         kind=Ev.ANLZ_DATA,
                         deck=bridge_deck,
-                        payload={
-                            "drop_beat_indices": result.drop_beat_indices,
-                            "breakdown_beat_indices": result.breakdown_beat_indices,
-                            "buildup_beat_indices": result.buildup_beat_indices,
-                            "mood": result.mood,
-                            "energy_shadow": result.energy_shadow,
-                            "f2_plan": result.f2_plan,
-                            "load_gen": gen,
-                            "source": source,
-                        },
+                        payload=_anlz_payload,
                         source=source,
                     ))
                 except queue.Full:
@@ -2614,6 +2688,7 @@ class StateManager(LEDDispatchPolicyMixin):
                         "spectral_enabled": self._spectral_enable,
                         "wide_window": self._wide_window_enable,
                         "f2_enabled": self._f2_enabled,
+                        "section_energy_enabled": self._section_energy_enabled,
                     }
                     if payload.get("sidecar_v4") is not None:
                         worker_kwargs["sidecar_v4"] = payload["sidecar_v4"]

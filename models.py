@@ -64,6 +64,9 @@ class TrackMetadata:
     # F2 per-track plan (lighting_moments_v2.F2TrackPlan); None when F2 off or no
     # v4 cache. Typed Any to keep models.py free of a lighting-engine import.
     f2_plan: Optional[Any] = None
+    # E2 (AWR-288) per-section energy grades (status-only); None when
+    # RBSS_SECTION_ENERGY off or no v4/markers. reset in clear() beside f2_plan.
+    section_grades: Optional[list] = None
 
     def clear(self) -> None:
         self.filepath = ""
@@ -85,6 +88,7 @@ class TrackMetadata:
         self.anlz_mood = 0
         self.smart_drop_energy_shadow = []
         self.f2_plan = None
+        self.section_grades = None
 
     def is_empty(self) -> bool:
         return not self.filepath

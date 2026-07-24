@@ -854,6 +854,48 @@ loudness.
 
 ---
 
+## 13. Per-section energy grades (AWR-288, energy E2, status-only, 2026-07-24)
+
+`section_energy_v0.py` (repo root, pure, stdlib-only) is energy-fabric stage E2
+(`docs/plans/active/energy_e2_section_grades_spec_v1.md`). Unlike E1's offline
+descriptor, this module IS runtime-imported — by `state_manager.py` on the ANLZ
+worker thread at track load — but it grades sound and **decides nothing live**: at
+E2 there is no consumer. A static import-fence test allows only `state_manager.py`
++ `tools/` + `tests/` to import it.
+
+- **Two grades per section.** `within_track` = the section's mean `full_db` mapped
+  through the repo's section-tier span (−8 dB → 0.0, −3 dB → 1.0, measured against
+  the track's own `loudness_ref_db`) — exactly gain-invariant (a uniform per-track
+  mastering offset shifts the section level and the reference together and
+  cancels). `library_scaled` = `within_track × track_weight` (the ladder's §B.2
+  product law), or `null` when the E1 store is missing / refused.
+- **Store consumed by construction (E1REV law).** `load_track_weight_store()` is
+  the ONE store access; it returns None unless the file parses,
+  `schema_version == 1`, `accepted is True`, and `tracks`/`distribution` are
+  dicts. An `accepted:false` / missing / malformed store ⇒ every `library_scaled`
+  is null; `within_track` still computes (it never needs the store).
+- **Segments self-describe.** Section boundaries come from
+  `build_phrase_segments_from_markers` (markers → up/chorus/low), falling back to
+  `section_map` blocks (label "other"), then `[]`. Grades carry their own
+  `start_beat`/`end_beat` so no consumer can confuse them with the tick-side
+  segment list (the worker has no smart drops at compute time).
+- **Flag-off byte-identity.** `RBSS_SECTION_ENERGY` defaults OFF ⇒ zero new
+  computation, zero new payload keys, zero new status keys — proven by the kill
+  test. All compute + the single memoized store read run on the ANLZ worker
+  thread; the 200 Hz push loop gains nothing; the status thread only formats
+  cached values. Surfaced (flag on) as a compact per-deck `section_energy` block
+  in the status file. No LED/laser/SoundSwitch module reads the grades in E2.
+- **Pinned gates (offline tool `tools/section_energy_report.py`):** G1 coverage
+  `n_graded / n_by_genre_eligible ≥ 0.95` (denominator = by_genre tracks with BOTH
+  a v4 entry AND an accepted-store row; the absolute `eligible/total` coverage is
+  printed informationally), G2 spread `≥ 0.90` of graded tracks with a
+  `within_track` max−min `≥ 0.10`, corpus floor `n ≥ 100`. Thresholds move only by
+  spec amendment; a failed gate is a valid, reported result.
+- **Status:** `implemented` / `software-tested`. SOFTWARE-VALIDATED ONLY /
+  HARDWARE-UNVALIDATED.
+
+---
+
 ## Appendix A — corpus recon (2026-07-05, this session, read-only)
 
 - Rekordbox DB opened exactly as `filepath_resolver.py:281-283` does (pyrekordbox
