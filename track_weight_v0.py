@@ -1,4 +1,4 @@
-"""Offline library track-weight descriptor — energy-fabric stage E1 (AWR-286).
+"""Offline library track-weight descriptor — energy-fabric stage E1 (AWR-286/291).
 
 **NON-AUTHORITATIVE / OFFLINE ONLY.** This module has **zero runtime importers**
 (only ``tools/`` and ``tests/`` may import it — a static test enforces this
@@ -7,18 +7,43 @@ NOTHING live. There is no live consumer at this stage — E2+ consumers arrive
 under their own specs. Absent / short / malformed data returns ``None`` — never a
 fabricated weight.
 
-What it computes: four gain-invariant per-track descriptor components, then a
-library-relative weight in [0,1] = the mean of each component's mid-rank
-percentile across the whole library.
+What it computes: four per-track descriptor components, then a library-relative
+weight in [0,1] = the mean of each component's mid-rank percentile across the
+whole library. The v2 component set (AWR-291) is:
 
-Gain-invariance by construction (the EFREV-N3 cure): the two dB duties compare
-each track's own ``full_db`` / ``sub_db`` beats against that track's OWN
-``loudness_ref_db`` (= p95 full_db, ``audio_spectral_features.py:423``), so a
-uniform per-track mastering offset shifts numerator and reference together and
-cancels EXACTLY; ``onset_density_midhigh`` and ``growl_flatness`` are count / ratio
-series untouched by level. Ranking against the library then only ever absorbs
-LIBRARY-WIDE offsets — no absolute-dB feature enters the aggregate. (A spectral
-REBALANCE is outside gain-invariance scope, per review N3.)
+- ``body_duty``           — fraction of beats within 8 dB of the track's own p95
+                            (a loudness-relative dB duty).
+- ``brightness_med``      — the track's median spectral centroid in Hz
+                            (``audio_spectral_features.py:422``). It REPLACED
+                            ``sub_duty``, which duplicated ``body_duty`` (measured
+                            rho +0.578, giving the shared "how full" factor ~2 of
+                            4 votes).
+- ``onset_mh_mean``       — mean mid/high onset density (a count series).
+- ``growl_flatness_mean`` — mean growl-band flatness (a ratio series).
+
+Why brightness satisfies the "no absolute-dB feature in the aggregate" law
+(``energy_e1_track_weight_spec_v1.md:101``) by a DIFFERENT route than the duties:
+the dB duty compares each track's own ``full_db`` beats against that track's OWN
+``loudness_ref_db`` (= p95 full_db, ``:423``), so a uniform per-track mastering
+offset shifts numerator and reference together; ``brightness_med`` is a
+power-weighted centroid (``:374``) that carries no absolute dB at all, so a level
+change cannot move it either. ``onset_density_midhigh`` / ``growl_flatness`` are
+count / ratio series untouched by level.
+
+Gain-invariant by construction in exact arithmetic. In the shipped pipeline the
+cancellation is exact to about ±0.005 grade units, because every stored dB value
+is rounded to 0.1 dB (``audio_spectral_features.py:307-311``); and it does not
+hold at all on beats pinned at the fixed −100.0 dB power floor (``:35``,
+``:313-314``), which occurs on ~19% of BY GENRE tracks. Verified by re-extraction
+at two gains, not by adding an offset to cached values
+(``tools/energy_perturbation_check.py``).
+
+Three acceptance controls police the aggregate on the by_genre split: the loudness
+proxy (|rho(loudness_ref_db, weight)| ≤ 0.50), the compression negative control
+(|rho(weight, robust dynamic range)| ≤ 0.55 via ``robust_dynamic_range``, because
+a loud master is made by limiting and reshaping the level distribution, which a dB
+duty reads almost directly), and component redundancy (worst |rho| between any two
+components ≤ 0.60, the mirror of E3's term gate).
 
 Constants are pinned; changing any — including the acceptance thresholds — is a
 spec amendment for the exec, NEVER an implementation decision to make a run pass.
@@ -34,10 +59,14 @@ from typing import Optional, Sequence
 
 # ---- pinned constants (changing any is a spec amendment) --------------------
 REL_BODY_OFFSET_DB = -8.0    # reuse of the section_quiet_offset_db precedent
-REL_SUB_OFFSET_DB = -12.0    # [assumed] sub-presence floor below the track's p95
 MIN_BEATS = 64               # tracks shorter than 16 bars yield None
-COMPONENT_KEYS = ("body_duty", "sub_duty", "onset_mh_mean", "growl_flatness_mean")
-SPEARMAN_ACCEPT_MAX = 0.50   # |rho| gate, by_genre split (Part D rationale)
+COMPONENT_KEYS = ("body_duty", "brightness_med", "onset_mh_mean",
+                  "growl_flatness_mean")
+SPEARMAN_ACCEPT_MAX = 0.50   # |rho| loudness gate, by_genre split (Part D)
+DRAMA_ACCEPT_MAX = 0.55      # |rho(track_weight, robust dynamic range)| ceiling (E1-a)
+COMPONENT_CORRELATION_MAX = 0.60  # worst |rho| between any two components (F6)
+STORE_SCHEMA_VERSION = 2     # AWR-291 bump; FIRST of two declarations
+                             # (section_energy_v0 restates the literal — no import)
 MIN_ACCEPT_N = 100           # by_genre tracks required for the gate to be meaningful
 
 
@@ -68,6 +97,14 @@ def components(v4) -> "Optional[dict]":
         return None
     if not math.isfinite(ref):
         return None
+    if "brightness_med" not in scalars:
+        return None
+    try:
+        bright = float(scalars["brightness_med"])
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(bright):
+        return None
     n = int(getattr(v4, "n_beats", 0) or 0)
     if n < MIN_BEATS:
         return None
@@ -76,23 +113,47 @@ def components(v4) -> "Optional[dict]":
         return None
     try:
         full = series["full_db"]
-        sub = series["sub_db"]
         onset = series["onset_density_midhigh"]
         flat = series["growl_flatness"]
     except (KeyError, TypeError):
         return None
-    parsed = [_finite_floats(s) for s in (full, sub, onset, flat)]
+    parsed = [_finite_floats(s) for s in (full, onset, flat)]
     if any(p is None or len(p) < n for p in parsed):
         return None
-    full, sub, onset, flat = (p[:n] for p in parsed)
+    full, onset, flat = (p[:n] for p in parsed)
     body_thr = ref + REL_BODY_OFFSET_DB
-    sub_thr = ref + REL_SUB_OFFSET_DB
     return {
         "body_duty": sum(1 for x in full if x >= body_thr) / n,
-        "sub_duty": sum(1 for x in sub if x >= sub_thr) / n,
+        "brightness_med": bright,
         "onset_mh_mean": sum(onset) / n,
         "growl_flatness_mean": sum(flat) / n,
     }
+
+
+def robust_dynamic_range(v4) -> "Optional[float]":
+    """p95 - p25 of the track's own per-beat full_db, in dB. The silence-robust
+    stand-in for the cached `drama` scalar (which is p95 - p05 and is pinned by
+    the -100 dB power floor on ~19% of BY GENRE tracks). None on absent / short /
+    non-finite data - never a fabricated range."""
+    n = int(getattr(v4, "n_beats", 0) or 0)
+    if n < MIN_BEATS:
+        return None
+    series = getattr(v4, "series", None)
+    if not series:
+        return None
+    try:
+        full = series["full_db"]
+    except (KeyError, TypeError):
+        return None
+    parsed = _finite_floats(full)
+    if parsed is None or len(parsed) < n:
+        return None
+    ordered = sorted(parsed[:n])
+    p95 = _percentile(ordered, 95)
+    p25 = _percentile(ordered, 25)
+    if p95 is None or p25 is None:
+        return None
+    return p95 - p25
 
 
 def rank_in(sorted_values: "Sequence[float]", value: float) -> float:
@@ -191,13 +252,20 @@ def degenerate_components(distribution: "dict") -> "list":
 
 
 def acceptance_verdict(n_by_genre: int, rho: "Optional[float]",
+                       rho_drama: "Optional[float]",
+                       rho_components_max: "Optional[float]",
                        degenerate: "Sequence[str]") -> "tuple":
     """Pure accept decision (Part-D gate, test seam). Returns (accepted, reason).
-    Precedence: corpus size -> loudness proxy -> degenerate component -> ok."""
+    Precedence: corpus size -> loudness proxy -> compression proxy -> component
+    redundancy -> degenerate component -> ok. Every None fails closed."""
     if n_by_genre < MIN_ACCEPT_N:
         return (False, "insufficient_corpus")
     if rho is None or abs(rho) > SPEARMAN_ACCEPT_MAX:
         return (False, "loudness_proxy")
+    if rho_drama is None or abs(rho_drama) > DRAMA_ACCEPT_MAX:
+        return (False, "compression_proxy")
+    if rho_components_max is None or rho_components_max > COMPONENT_CORRELATION_MAX:
+        return (False, "redundant_components")
     if list(degenerate):
         return (False, "degenerate_component")
     return (True, "ok")

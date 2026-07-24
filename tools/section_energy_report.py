@@ -23,14 +23,34 @@ from rb_ss_bridge_v2 import spectral_cache  # noqa: E402
 from rb_ss_bridge_v2 import section_energy_v0  # noqa: E402
 from rb_ss_bridge_v2.anlz_reader import read_anlz_drops  # noqa: E402
 from rb_ss_bridge_v2.section_energy_v0 import (  # noqa: E402
-    SPREAD_MIN,
     COVERAGE_GATE,
-    SPREAD_GATE_FRACTION,
+    RANKABILITY_GATE,
+    SATURATION_GATE_MAX,
+    SEPARATION_GATE,
     gates_verdict,
     grade_sections,
     load_track_weight_store,
     store_track_weight,
 )
+
+JITTER_OFFSETS = (-4, -2, -1, 1, 2, 4)
+
+
+def _pct(sorted_vals, q):
+    n = len(sorted_vals)
+    if n == 0:
+        return None
+    if n == 1:
+        return float(sorted_vals[0])
+    pos = (q / 100.0) * (n - 1)
+    lo, hi = int(pos), min(int(pos) + 1, n - 1)
+    return sorted_vals[lo] * (1 - (pos - lo)) + sorted_vals[hi] * (pos - lo)
+
+
+def _shift(markers, off, n):
+    """Every marker moved by `off` beats, clamped into [0, n]. Sliding all markers
+    slides every section boundary — the boundary-jitter probe (E2-c)."""
+    return [min(max(0, int(m) + off), n) for m in markers]
 
 SHARE_ROOT = Path("~/Library/Pioneer/rekordbox/share").expanduser()
 DB_PATH = Path("~/Library/Pioneer/rekordbox/master.db").expanduser()

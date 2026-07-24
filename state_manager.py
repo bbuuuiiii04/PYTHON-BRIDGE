@@ -352,7 +352,8 @@ def _read_runtime_anlz_data(
                 if key is not None:
                     tw = section_energy_v0.store_track_weight(store, key)
             data.drop_grades = drop_energy_v0.grade_drops(
-                v4, drop_beats=data.drop_beat_indices, track_weight=tw) or None
+                v4, drop_beats=data.drop_beat_indices, track_weight=tw,
+                corpus_drop_levels=(store or {}).get("drop_body_distribution")) or None
             log.info("[E3] drop-grades  drops=%d  store=%s  tw=%s",
                      len(data.drop_grades or []),
                      "loaded" if store is not None else "refused_or_missing",

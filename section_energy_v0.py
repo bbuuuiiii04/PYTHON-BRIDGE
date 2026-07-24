@@ -1,4 +1,4 @@
-"""Per-section energy grades — energy-fabric stage E2 (AWR-288), STATUS-ONLY.
+"""Per-section energy grades — energy-fabric stage E2 (AWR-288/291), STATUS-ONLY.
 
 **Describes sound; never times or triggers a cue.** At E2 there is NO consumer:
 no LED / laser / SoundSwitch module may read these grades (a static import-fence
@@ -15,18 +15,32 @@ avoid any import-order coupling at bridge startup. The ONLY I/O is
 `load_track_weight_store()` — worker / offline threads only, NEVER the push loop.
 
 Two grades per section:
-- `within_track` = the section's mean `full_db` mapped through the same
-  loudness-relative span the repo's section tiers use (−8 dB → 0.0, −3 dB → 1.0,
-  measured against the track's own `loudness_ref_db`). Exactly gain-invariant: a
-  uniform per-track mastering offset shifts the section level and the reference
-  together and cancels.
+- `within_track` = the section's **median** `full_db` (AWR-291: median, not mean
+  — one silent beat pinned at the −100 dB floor no longer drags a whole drop
+  section's grade to zero; a mean over a long outro that fades to silence
+  describes neither the drop nor the tail) mapped through the loudness-relative
+  span −12 dB → 0.0, 0 dB → 1.0, measured against the track's own
+  `loudness_ref_db`. This span is NO LONGER the `spectral_profile` section tiers
+  (those are −8/−3): the old top rail sat on the corpus median and pinned ~49% of
+  sections at 1.000, so AWR-291 re-placed it from the measured section-level
+  distribution.
 - `library_scaled` = `within_track × track_weight` (the ladder's §B.2 product
   law), or `None` when the E1 track-weight store is missing / refused.
 
-E1REV closing law, enforced by construction: `load_track_weight_store()` returns
-None unless the file parses, `schema_version == 1`, `accepted is True`, and
+Gain-invariant by construction in exact arithmetic. In the shipped pipeline the
+cancellation is exact to about ±0.005 grade units, because every stored dB value
+is rounded to 0.1 dB (`audio_spectral_features.py:307-311`); and it does not hold
+at all on beats pinned at the fixed −100.0 dB power floor (`:35`, `:313-314`),
+which occurs on ~19% of BY GENRE tracks. Verified by re-extraction at two gains,
+not by adding an offset to cached values (`tools/energy_perturbation_check.py`).
+
+Refusal law, enforced by construction: `load_track_weight_store()` returns None
+unless the file parses, `schema_version == 2` (AWR-291), `accepted is True`, and
 `tracks`/`distribution` are present dicts — so an `accepted: false` / missing /
-malformed store yields no library-scaled grade, never a fabricated one.
+malformed / v1 store yields no library-scaled grade, never a fabricated one.
+`within_track` takes no store input, so with a refused store the section still
+grades, with `library_scaled = None` (EREV1 N6) — this refuses to library-scale,
+not to grade.
 """
 from __future__ import annotations
 
@@ -35,18 +49,40 @@ import math
 from typing import Any, Optional
 
 # ---- pinned constants (a spec amendment moves any of these, never the impl) --
-SECTION_QUIET_OFFSET_DB = -8.0   # same values as spectral_profile section tiers
-SECTION_LOUD_OFFSET_DB = -3.0    # (NOT imported — runtime coupling stays one-way)
+# Loudness-relative span for the section grade. NOT the spectral_profile section
+# tier offsets any more: those are -8/-3 and are flagged in their own source as
+# "engineering scale constants, not corpus-calibrated" (spectral_profile.py:54-55).
+# Re-placed by AWR-291 from the measured corpus distribution of section levels
+# relative to loudness_ref_db (p05 -12.02, p50 -3.13, p95 -0.40 dB): the old top
+# rail sat on the corpus MEDIAN, pinning 49.0% of sections at 1.000.
+SECTION_SPAN_LOW_DB = -12.0      # -> 0.0
+SECTION_SPAN_HIGH_DB = 0.0       # -> 1.0
 MIN_SECTION_BEATS = 4
-STORE_SCHEMA_VERSION = 1
+STORE_SCHEMA_VERSION = 2         # AWR-291 bump; SECOND of two declarations (the
+                                 # first is track_weight_v0.STORE_SCHEMA_VERSION —
+                                 # NOT imported here, restated; both fail closed on
+                                 # skew, asserted equal in tests).
 COVERAGE_GATE = 0.95             # G1, by_genre (Part D)
-SPREAD_GATE_FRACTION = 0.90      # G2, by_genre (Part D)
-SPREAD_MIN = 0.10                # G2 per-track within_track max-min
+SATURATION_GATE_MAX = 0.20       # G2: fraction of sections on either rail
+RANKABILITY_GATE = 0.90          # G3: tracks whose chorus sections differ
+SEPARATION_GATE = 0.25           # G4: median(chorus) - median(low)
 MIN_ACCEPT_N = 100               # G-gate corpus floor (== E1's MIN_ACCEPT_N)
 
 
 def _clip01(x: float) -> float:
     return 0.0 if x < 0.0 else (1.0 if x > 1.0 else x)
+
+
+def _median(values) -> float:
+    """Median of a non-empty numeric sequence. Local — importing spectral_profile
+    would couple this runtime module to it (same one-way convention as the span
+    constants above)."""
+    v = sorted(values)
+    n = len(v)
+    mid = n // 2
+    if n % 2:
+        return float(v[mid])
+    return (float(v[mid - 1]) + float(v[mid])) / 2.0
 
 
 def load_track_weight_store(path) -> "Optional[dict]":
@@ -125,7 +161,7 @@ def grade_sections(v4, *, anlz_drops, anlz_buildups, anlz_breakdowns,
     if n <= 0 or len(full) < n:
         return []
 
-    span = SECTION_LOUD_OFFSET_DB - SECTION_QUIET_OFFSET_DB          # 5.0 dB
+    span = SECTION_SPAN_HIGH_DB - SECTION_SPAN_LOW_DB                # 12.0 dB
     grades: "list[dict]" = []
     for start, end, label in _normalized_segments(
             v4, anlz_drops, anlz_buildups, anlz_breakdowns):
@@ -137,8 +173,8 @@ def grade_sections(v4, *, anlz_drops, anlz_buildups, anlz_breakdowns,
         if not beats or not all(isinstance(x, (int, float)) and math.isfinite(x)
                                 for x in beats):
             continue
-        rel = (sum(beats) / len(beats)) - ref
-        within = _clip01((rel - SECTION_QUIET_OFFSET_DB) / span)
+        rel = _median(beats) - ref
+        within = _clip01((rel - SECTION_SPAN_LOW_DB) / span)
         lib = (within * track_weight
                if isinstance(track_weight, (int, float))
                and math.isfinite(track_weight) else None)
@@ -157,14 +193,21 @@ def current_section(grades: "list[dict]", abs_beat: float) -> "Optional[dict]":
 
 
 def gates_verdict(n_by_genre_eligible: int, n_graded: int,
-                  n_spread_ok: int) -> "tuple[bool, str]":
-    """G1/G2 offline verdict. Precedence: corpus floor → G1 coverage → G2 spread.
-    `n_by_genre_eligible` = by_genre tracks with BOTH a v4 entry AND an accepted-
-    store row (E2REV F1); G1 polices segmentation/grade-math holes only."""
+                  railed_fraction: "Optional[float]",
+                  rankable_fraction: "Optional[float]",
+                  separation: "Optional[float]") -> "tuple[bool, str]":
+    """Offline verdict. Precedence: corpus floor → G1 coverage → G2 saturation →
+    G3 rankability → G4 separation. `n_by_genre_eligible` = by_genre tracks with a
+    v4 entry AND an accepted-store row (E2REV F1); G1 polices segmentation /
+    grade-math holes only. Every None fails closed."""
     if n_by_genre_eligible < MIN_ACCEPT_N:
         return (False, "insufficient_corpus")
     if n_graded / n_by_genre_eligible < COVERAGE_GATE:
         return (False, "insufficient_coverage")
-    if n_graded <= 0 or n_spread_ok / n_graded < SPREAD_GATE_FRACTION:
-        return (False, "flat_grades")
+    if railed_fraction is None or railed_fraction > SATURATION_GATE_MAX:
+        return (False, "saturated_grades")
+    if rankable_fraction is None or rankable_fraction < RANKABILITY_GATE:
+        return (False, "unrankable_grades")
+    if separation is None or separation < SEPARATION_GATE:
+        return (False, "inverted_or_flat_separation")
     return (True, "ok")
