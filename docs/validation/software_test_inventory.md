@@ -209,6 +209,18 @@ active/inactive lane summaries, and static non-generic assertion fallback.
 including doc-sha retirement, identical-sha regression pinning, synthetic
 publish fallback to `algorithm_generalized`, and unchanged-source publish
 blocking through `UnverifiedParityPublishError`.
+`tests/test_export_pack_parity_self_heal.py` covers the export-time parity
+self-heal: the healed path (fixtures present) recomputes each surface's registry
+from the committed captures so a stale committed snapshot heals instead of
+stranding documents, and the fixtures-absent fallback compiles exactly once from
+the committed snapshot. `ExportFallsBackWhenFixturesAreAbsentTests` asserts the
+STRUCTURAL fail-closed invariant — fixtures-absent + venue-sha mismatch ⇒ every
+document `unverified_parity` (count derived from the staged pack, not a pinned
+total); fixtures-absent + venue-sha match ⇒ trusted lanes populated — instead of
+a hard-coded lane split, because the operator's live `SoundSwitchVenues.bin` sha
+drifts every time they edit their real project (6ec3→dd7d→68ab); it computes both
+shas at runtime and branches. Root cause + the drift-proofing rationale are the
+PACKDIAG/PACKFIX seat reports.
 These are passive capture/software
 oracle tests only; remaining active `unverified_parity` documents block trusted
 publication.
