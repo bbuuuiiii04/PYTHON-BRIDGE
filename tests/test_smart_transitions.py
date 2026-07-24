@@ -466,6 +466,7 @@ class SmartRearmFlagTests(unittest.TestCase):
                 spectral_enabled=True,
                 wide_window=True,
                 f2_enabled=True,
+                section_energy_enabled=False,
             ),
         ])
 
@@ -498,6 +499,7 @@ class SmartRearmFlagTests(unittest.TestCase):
             spectral_enabled=True,
             wide_window=True,
             f2_enabled=True,
+            section_energy_enabled=False,
         )
 
     def test_usb_twin_smart_rearm_starts_resolved_worker_with_spectral_disabled(self) -> None:
@@ -528,6 +530,7 @@ class SmartRearmFlagTests(unittest.TestCase):
             spectral_enabled=False,
             wide_window=True,
             f2_enabled=True,
+            section_energy_enabled=False,
         )
 
     def test_local_load_still_runs_both_early_and_resolved_anlz_workers(self) -> None:
@@ -561,6 +564,7 @@ class SmartRearmFlagTests(unittest.TestCase):
                 spectral_enabled=True,
                 wide_window=True,
                 f2_enabled=True,
+                section_energy_enabled=False,
             ),
         ])
         self.assertEqual(start_worker.call_count, 2)
@@ -589,6 +593,7 @@ class SmartRearmFlagTests(unittest.TestCase):
                 spectral_enabled=True,
                 wide_window=False,
                 f2_enabled=True,
+                section_energy_enabled=False,
             ),
         ])
 
