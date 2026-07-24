@@ -1,9 +1,11 @@
-"""Offline library track-weight report — energy-fabric stage E1 (AWR-286).
+"""Offline library track-weight report — energy-fabric stage E1 (AWR-286,
+revised by AWR-291).
 
 Read-only corpus sweep: enumerates on-disk Rekordbox tracks + the BY GENRE
 playlist folder, loads each track's cached v4 spectral features, computes the
 gain-invariant track-weight components (``track_weight_v0``), builds the
-library-relative weight, checks the pinned acceptance gate on the by_genre split,
+library-relative weight, checks the three pinned acceptance controls on the
+by_genre split — loudness, dynamic-range compression, and component redundancy —
 writes a version-owned sidecar store, and prints a human report.
 
 ZERO runtime behavior change: nothing in the bridge imports this tool or the

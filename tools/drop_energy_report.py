@@ -1,15 +1,18 @@
-"""Offline per-drop energy-grade report — energy-fabric stage E3 (AWR-290).
+"""Offline per-drop energy-grade report — energy-fabric stage E3 (AWR-290,
+revised by AWR-291).
 
 Read-only corpus sweep: enumerates the BY GENRE Rekordbox tracks, loads each
 track's cached v4 features + the E1 track-weight store (through the ONE E2 refusal
-loader), grades the raw ANLZ drop markers, and evaluates the pinned G1/G2/G3
-gates. Also computes E2's "low"-section grades (the G3 comparison set) and the
+loader), grades the raw ANLZ drop markers, and evaluates the seven pinned gates:
+G1 coverage, G2 worst-term railed fraction, G3 worst-term correlation, G4
+composite IQR, G5 rankability, G6 dB-level separation, G7 grade-space separation.
+Also computes E2's "low"-section grades (the G6/G7 comparison set) and the
 smart-vs-raw attach-match rate (informational). Writes NO store.
 
 ZERO runtime behavior change; DB / ANLZ / audio / caches READ-ONLY. No threshold
 tuning — a failed gate is a valid result, reported plainly, exit 1; changing any
-pinned constant is a spec amendment for the exec. (E3REV N1 fold: this report
-prints BOTH G3 medians — drops AND "low" sections — not just their difference.)
+pinned constant is a spec amendment for the exec. (E3REV N1 fold: the G6 and G7
+lines print BOTH medians — drops AND "low" sections — not just their difference.)
 """
 import argparse
 import os

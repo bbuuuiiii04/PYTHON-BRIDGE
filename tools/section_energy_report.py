@@ -1,10 +1,12 @@
-"""Offline per-section energy-grade report — energy-fabric stage E2 (AWR-288).
+"""Offline per-section energy-grade report — energy-fabric stage E2 (AWR-288,
+revised by AWR-291).
 
 Read-only corpus sweep: enumerates the BY GENRE Rekordbox tracks, loads each
 track's cached v4 features + the E1 track-weight store (through the ONE refusal
 gate `section_energy_v0.load_track_weight_store`, shared with the runtime),
-computes per-section grades, and evaluates the pinned G1/G2 gates. Writes NO
-store (E2 has no sidecar); `--out` copies the report text only.
+computes per-section grades, and evaluates the four pinned gates: G1 coverage,
+G2 saturation, G3 rankability, G4 separation. Writes NO store (E2 has no
+sidecar); `--out` copies the report text only.
 
 ZERO runtime behavior change: importing this tool touches nothing live; the
 Rekordbox DB / ANLZ / audio / caches are READ-ONLY. No threshold tuning to pass —
