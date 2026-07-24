@@ -268,7 +268,8 @@ def run(argv: "Sequence[str]") -> int:
     emit("  absolute coverage n_by_genre_eligible/n_by_genre_total = %d/%d = %.3f (INFORMATIONAL)"
          % (n_by_genre_eligible, n_by_genre_total, abs_cov))
     emit("  graded drops: %d   'low' windows: %d" % (len(ds), len(low_composites)))
-    emit("  corpus body-basis drops = %d / %d = %.2f%% (INFORMATIONAL; expect ~2.18%%)"
+    emit("  corpus body-basis drops = %d / %d = %.2f%% (INFORMATIONAL; per-drop rate; "
+         "~2.18%% of TRACKS have <2 own drops and fall to the corpus basis)"
          % (corpus_basis_count, total_graded_drops, corpus_pct))
     emit("  attach-match rate (smart drops on a graded raw beat) = %s (%d/%d, INFORMATIONAL)"
          % (("%.3f" % match_rate) if match_rate is not None else "n/a",

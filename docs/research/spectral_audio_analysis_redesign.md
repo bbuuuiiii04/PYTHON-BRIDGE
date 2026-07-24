@@ -814,125 +814,144 @@ may import it; a static AST+text test enforces it), no I/O, and it never times o
 
 ---
 
-## 12. Library track-weight layer (AWR-286, energy E1, offline, 2026-07-24)
+## 12. Library track-weight layer (AWR-286/291, energy E1, offline, 2026-07-24)
 
 `track_weight_v0.py` (repo root, pure, stdlib-only, **zero runtime importers** — a
 static test enforces `tools/`+`tests/`-only imports) is energy-fabric stage E1
-(`docs/plans/active/energy_e1_track_weight_spec_v1.md`, EFREV-N3-cured). It scores
+(`docs/plans/active/energy_e1_track_weight_spec_v1.md`; formulation revised by
+AWR-291, `docs/plans/active/energy_formulation_revision_spec_v1.md`). It scores
 each track's energy **against the whole library** in a way that ignores mastering
 loudness.
 
-- **What it computes.** Four gain-invariant per-track components — `body_duty`
-  (fraction of beats with `full_db ≥ ref−8`), `sub_duty` (`sub_db ≥ ref−12`),
-  `onset_mh_mean`, `growl_flatness_mean` — then `track_weight` = the mean of each
-  component's mid-rank percentile across the library (equal weights, pinned).
-- **Why it is gain-invariant (the loudness-relative construction).** `ref =
-  loudness_ref_db = p95(full_db)` (`audio_spectral_features.py:423`). Both dB
-  duties compare each track's own beats against that track's own `ref`, so a
-  uniform per-track mastering offset shifts numerator and reference together and
-  cancels **exactly**; `onset_density_midhigh` and `growl_flatness` are count /
-  ratio series untouched by level. No absolute-dB feature enters the aggregate.
-  Ranking against the library then only ever absorbs library-wide offsets. (This
-  is the fix to the parent spec's "percentile absorbs offsets" wording — per-track
-  offsets are handled one level down, by the relative construction.) A spectral
-  rebalance is outside gain-invariance scope.
-- **The pinned honesty gate (N3).** `tools/track_weight_report.py` sweeps the
+- **What it computes (v2 component set).** Four per-track components — `body_duty`
+  (fraction of beats with `full_db ≥ ref−8`), `brightness_med` (the track's median
+  spectral centroid in Hz, `audio_spectral_features.py:422`), `onset_mh_mean`,
+  `growl_flatness_mean` — then `track_weight` = the mean of each component's
+  mid-rank percentile across the library (equal weights, pinned). AWR-291 replaced
+  `sub_duty`, which duplicated `body_duty` (measured rho +0.578) and read the
+  compression confound; `brightness_med` is far less redundant (0.242) and less
+  compression-coupled (−0.480 vs −0.675).
+- **Why no absolute-dB feature enters the aggregate.** `ref = loudness_ref_db =
+  p95(full_db)` (`:423`). `body_duty` compares each track's own beats against that
+  track's own `ref`, so a uniform per-track offset shifts numerator and reference
+  together; `brightness_med` is a power-weighted centroid (`:374`) carrying no
+  absolute dB, so a level change cannot move it; `onset_density_midhigh` /
+  `growl_flatness` are count / ratio series. Gain-invariant by construction in
+  exact arithmetic; in the shipped pipeline the cancellation is exact to ~±0.005
+  grade units (every stored dB is rounded to 0.1 dB, `:307-311`) and fails on beats
+  pinned at the −100.0 dB power floor (`:35`, `:313-314`), ~19% of BY GENRE tracks
+  — checked by re-extraction (`tools/energy_perturbation_check.py`), not by an
+  offset to cached values.
+- **Three pinned acceptance controls.** `tools/track_weight_report.py` sweeps the
   library read-only, writes a version-owned sidecar
-  `<cache_dir>/trackweight_v1/track_weight_store.json` (machine-local, never
-  committed), and computes `Spearman(loudness_ref_db, track_weight)` on the
-  BY GENRE split (contract law: calibration stats use BY GENRE tracks only). The
-  run is ACCEPTED iff `n_by_genre ≥ 100`, `|rho| ≤ 0.50`, and no component is
-  degenerate (zero-IQR). 0.50 caps "the weight is mostly a loudness meter" while
-  allowing the genuine loud-genre correlation (harder genres are mastered hotter);
-  it and every constant move only by spec amendment — never by the implementer to
-  make a run pass. A failed acceptance is a valid, reported result.
+  `<cache_dir>/trackweight_v1/track_weight_store.json` (**schema_version 2**, now
+  carrying `drop_body_distribution` — E3's body-term corpus fallback; machine-local,
+  never committed), and on the BY GENRE split (contract law: BY GENRE tracks only,
+  `n ≥ 100`) ACCEPTS iff loudness proxy `|Spearman(loudness_ref_db, weight)| ≤
+  0.50`, compression negative control `|Spearman(robust_dynamic_range = p95−p25
+  full_db, weight)| ≤ 0.55`, worst component-pair `|rho| ≤ 0.60`, and no component
+  is degenerate. Every constant moves only by spec amendment — never by the
+  implementer to make a run pass. A failed acceptance is a valid, reported result.
 - **No live consumer.** E1 decides nothing live; nothing runtime reads the store
   (E2+ consumers arrive under their own specs). The bridge is byte-identical.
 - **Status:** `implemented` / `software-tested` (unit tests incl. the exact
-  uniform-shift + per-track-shift gain-invariance checks, the Spearman tie case,
-  and the importer guard). SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
+  uniform-shift + a rounding-aware sibling, `robust_dynamic_range`, the full
+  acceptance precedence table, the schema-skew check, and the importer guard).
+  SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
 
 ---
 
-## 13. Per-section energy grades (AWR-288, energy E2, status-only, 2026-07-24)
+## 13. Per-section energy grades (AWR-288/291, energy E2, status-only, 2026-07-24)
 
 `section_energy_v0.py` (repo root, pure, stdlib-only) is energy-fabric stage E2
-(`docs/plans/active/energy_e2_section_grades_spec_v1.md`). Unlike E1's offline
-descriptor, this module IS runtime-imported — by `state_manager.py` on the ANLZ
-worker thread at track load — but it grades sound and **decides nothing live**: at
-E2 there is no consumer. A static import-fence test allows only `state_manager.py`
-+ `tools/` + `tests/` to import it.
+(`docs/plans/active/energy_e2_section_grades_spec_v1.md`; formulation revised by
+AWR-291). Unlike E1's offline descriptor, this module IS runtime-imported — by
+`state_manager.py` on the ANLZ worker thread at track load — but it grades sound and
+**decides nothing live**: at E2 there is no consumer. A static import-fence test
+allows only `state_manager.py` + `tools/` + `tests/` to import it.
 
-- **Two grades per section.** `within_track` = the section's mean `full_db` mapped
-  through the repo's section-tier span (−8 dB → 0.0, −3 dB → 1.0, measured against
-  the track's own `loudness_ref_db`) — exactly gain-invariant (a uniform per-track
-  mastering offset shifts the section level and the reference together and
-  cancels). `library_scaled` = `within_track × track_weight` (the ladder's §B.2
-  product law), or `null` when the E1 store is missing / refused.
-- **Store consumed by construction (E1REV law).** `load_track_weight_store()` is
-  the ONE store access; it returns None unless the file parses,
-  `schema_version == 1`, `accepted is True`, and `tracks`/`distribution` are
-  dicts. An `accepted:false` / missing / malformed store ⇒ every `library_scaled`
-  is null; `within_track` still computes (it never needs the store).
+- **Two grades per section (v2).** `within_track` = the section's **median**
+  `full_db` (AWR-291: median, not mean — one silent beat pinned at the −100 dB
+  floor no longer drags a whole drop section to zero) mapped through the
+  loudness-relative span **−12 dB → 0.0, 0 dB → 1.0** against the track's own
+  `loudness_ref_db`. The span is NO LONGER the −8/−3 section tiers: the old top
+  rail sat on the corpus median and pinned ~49% of sections at 1.000, so AWR-291
+  re-placed it from the measured section-level distribution. Gain-invariant by
+  construction (exact to ~±0.005 grade units after 0.1 dB rounding). `library_scaled`
+  = `within_track × track_weight` (the ladder's §B.2 product law), or `null` when
+  the E1 store is missing / refused.
+- **Store consumed by construction.** `load_track_weight_store()` is the ONE store
+  access; it returns None unless the file parses, `schema_version == 2` (AWR-291),
+  `accepted is True`, and `tracks`/`distribution` are dicts. A v1 / `accepted:false`
+  / missing / malformed store refuses to **library-scale** (every `library_scaled`
+  null) but `within_track` still computes — it never needs the store (EREV1 N6).
 - **Segments self-describe.** Section boundaries come from
   `build_phrase_segments_from_markers` (markers → up/chorus/low), falling back to
   `section_map` blocks (label "other"), then `[]`. Grades carry their own
-  `start_beat`/`end_beat` so no consumer can confuse them with the tick-side
-  segment list (the worker has no smart drops at compute time).
+  `start_beat`/`end_beat`.
 - **Flag-off byte-identity.** `RBSS_SECTION_ENERGY` defaults OFF ⇒ zero new
   computation, zero new payload keys, zero new status keys — proven by the kill
-  test. All compute + the single memoized store read run on the ANLZ worker
-  thread; the 200 Hz push loop gains nothing; the status thread only formats
-  cached values. Surfaced (flag on) as a compact per-deck `section_energy` block
-  in the status file. No LED/laser/SoundSwitch module reads the grades in E2.
-- **Pinned gates (offline tool `tools/section_energy_report.py`):** G1 coverage
-  `n_graded / n_by_genre_eligible ≥ 0.95` (denominator = by_genre tracks with BOTH
-  a v4 entry AND an accepted-store row; the absolute `eligible/total` coverage is
-  printed informationally), G2 spread `≥ 0.90` of graded tracks with a
-  `within_track` max−min `≥ 0.10`, corpus floor `n ≥ 100`. Thresholds move only by
-  spec amendment; a failed gate is a valid, reported result.
+  test (UNCHANGED by AWR-291). All compute + the single memoized store read run on
+  the ANLZ worker; the 200 Hz push loop gains nothing.
+- **Pinned gates (offline `tools/section_energy_report.py`):** G1 coverage
+  `n_graded / n_by_genre_eligible ≥ 0.95`, **G2 saturation** (railed fraction of
+  all graded sections `≤ 0.20` — the gate that would have caught the v1 collapse),
+  **G3 rankability** (`≥ 0.90` of tracks with ≥3 chorus sections have ≥2 distinct
+  chorus grades), **G4 separation** (`median(chorus) − median(low) ≥ 0.25`), corpus
+  floor `n ≥ 100`. The report also prints a boundary-jitter diagnostic (±1/±2/±4
+  beats) and the bottom-rail chorus fraction, both INFORMATIONAL. Thresholds move
+  only by spec amendment; a failed gate is a valid, reported result.
 - **Status:** `implemented` / `software-tested`. SOFTWARE-VALIDATED ONLY /
   HARDWARE-UNVALIDATED.
 
 ---
 
-## 14. Per-drop energy grades (AWR-290, energy E3, status-only, 2026-07-24)
+## 14. Per-drop energy grades (AWR-290/291, energy E3, status-only, 2026-07-24)
 
 `drop_energy_v0.py` (repo root, pure, stdlib-only, runtime-imported by
 `state_manager.py` on the ANLZ worker) is energy-fabric stage E3
-(`docs/plans/active/energy_e3_drop_grades_spec_v1.md`). It grades each drop and
-**decides nothing live**: at E3 there is no consumer — no presentation/laser/LED
-path may read `DropDecision.energy_grade` (a static import-fence test enforces the
-allowlist).
+(`docs/plans/active/energy_e3_drop_grades_spec_v1.md`; formulation revised by
+AWR-291). It grades each drop and **decides nothing live**: at E3 there is no
+consumer — no presentation/laser/LED path may read `DropDecision.energy_grade` (a
+static import-fence test enforces the allowlist).
 
-- **Three gain-invariant terms** over the `[beat, beat+16)` window: `body`
-  (loudness-relative mean `full_db` on the −8/−3 dB span), `sub_duty`
-  (`sub_db ≥ ref−12`), `onset_ratio` (mean `onset_density_midhigh` over the
-  track's own `onset_mh_p90`, omitted when p90 ≤ 0). `within_track` = mean of the
-  present terms; `library_scaled` = `within_track × track_weight` or null. A
-  uniform per-track mastering offset cancels exactly (the E1/E2 mechanism; exact
-  uniform-shift test).
+- **Four REQUIRED terms** over the `[beat, beat+16)` window, all ranks or ratios
+  (so all inherently level-invariant): `body` = mid-rank of this window's level
+  (mean `full_db` − ref) among the track's OWN drop-window levels when it has ≥2
+  (`body_basis = "track_drops"`, ranked against the RAW ANLZ marker set) else the
+  corpus drop-level distribution from the v2 store (`body_basis = "corpus"`, ~2.18%
+  of tracks) — a rank cannot saturate, unlike the v1 level term (pinned at 1.000 on
+  94% of drops); `onset` = clip(mean `onset_density_midhigh` / `onset_mh_p90`);
+  `perc_high` = clip(mean `perc_high` / the track's own `perc_high` p90); `growl` =
+  clip(mean `growl_flatness` / `growl_timbre_p90`). `within_track` = mean of ALL
+  FOUR — if any normaliser is absent/non-finite/≤0 the drop is **omitted**, never a
+  re-weighted mean over fewer terms (cures a latent v1 silent-reweight). The single
+  term-math implementation is `score_windows`; `grade_drops` wraps it and the report
+  / G7 reuse it. `library_scaled` = `within_track × track_weight` or null.
 - **True-drop law honored structurally.** The worker grades RAW ANLZ-marker
-  windows (mechanical necessity — it has only `data.drop_beat_indices`), but
-  grades ATTACH to plan decisions built from `meta.smart_drops` (via
-  `grades_by_beat` + `plan_track`'s new keyword-only `drop_grades`), and ONLY
-  plan-attached true-drop grades are surfaced. No surface enumerates the raw set.
-- **Store consumed by construction.** Track weight comes ONLY from E2's memoized
-  `_track_weight_store_once()` + `section_energy_v0.store_track_weight` — E3 opens
-  no store file. Refusals ⇒ `library_scaled` null; `within_track` never needs it.
+  windows, but grades ATTACH to plan decisions built from `meta.smart_drops` and
+  ONLY plan-attached true-drop grades are surfaced; `body_basis` is recorded on
+  every grade but never surfaced. No surface enumerates the raw set.
+- **Store consumed by construction.** Track weight AND the corpus fallback
+  `drop_body_distribution` come ONLY from E2's memoized `_track_weight_store_once()`
+  (the ONE authorized wiring delta reads the fallback off the same already-loaded
+  object) — E3 opens no store file. Refusals ⇒ `library_scaled` null.
 - **Flag-off byte-identity (four surfaces).** `RBSS_DROP_ENERGY` default OFF ⇒ no
   computation, no ANLZ_DATA payload key, no `drop_energy` status key, and every
-  `DropDecision.energy_grade` is None (the `__slots__`/`__eq__` addition stays
-  symmetric; `plan_track`'s new kwarg defaults None, preserving the legacy call
-  shape). Kill test proves all four. All compute + the single store read run on
-  the ANLZ worker; the 200 Hz push loop gains nothing.
-- **Pinned gates (offline `tools/drop_energy_report.py`):** G1 coverage ≥ 0.95 on
-  the eligible denominator (by_genre track with v4 + accepted-store row + ≥1 ANLZ
-  drop; absolute coverage printed informationally); G2 non-degeneracy IQR ≥ 0.05;
-  G3 separation = median drop `within_track` − median "low"-section `within_track`
-  (E2's output, same tracks) ≥ 0.15 — the direction-of-truth honesty gate (a
-  sign-inverted window would pass G1/G2 and die here). Report also prints both G3
-  medians (E3REV N1) and the smart-vs-raw attach-match rate. Thresholds move only
+  `DropDecision.energy_grade` is None. Kill test proves all four (UNCHANGED by
+  AWR-291). All compute + the single store read run on the ANLZ worker; the 200 Hz
+  push loop gains nothing.
+- **Seven pinned gates (offline `tools/drop_energy_report.py`):** G1 coverage
+  ≥ 0.95; **G2 term-saturation** (worst term railed `≤ 0.20`); **G3 term-correlation**
+  (worst term-pair `|rho| ≤ 0.60`); **G4 composite IQR ≥ 0.10** (raised from v1's
+  0.05); **G5 rankability ≥ 0.90**; **G6 level-separation** (median drop-window
+  rel-dB − median 'low' rel-dB `≥ 3.0` dB — a dB sanity check on the window
+  indexing, NOT a grade check); **G7 GRADE-SPACE separation** (median drop composite
+  − median 'low' composite `≥ 0.10`) — the one gate that reads the grade itself,
+  added because a pure `random.random()` composite passed all six of the first
+  draft's gates (EREV1 F3); a regression test requires the all-random composite be
+  rejected with G7's reason specifically. Report also prints the corpus-basis drop
+  count and both `library_scaled` correlations (INFORMATIONAL). Thresholds move only
   by spec amendment; a failed gate is a valid, reported result.
 - **Status:** `implemented` / `software-tested`. SOFTWARE-VALIDATED ONLY /
   HARDWARE-UNVALIDATED.

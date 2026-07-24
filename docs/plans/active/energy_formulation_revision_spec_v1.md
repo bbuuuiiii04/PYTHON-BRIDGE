@@ -1616,3 +1616,50 @@ The first real test is the operator's veto after E4 exists.
    trigger on landing. Caught by EREV1 F1. Prevented going forward by Task 4c
    requiring the fraction to be counted directly, and worth generalising: in this
    spec, if a number is a fraction of a population, measure it on the population.
+
+---
+
+## Change record
+
+Written into this spec at implementation time (Task 10d), five items — the three
+record-keeping items from A.4 plus the two EREV1 additions:
+
+1. **The compression confound was never considered.** Every invariance claim in the
+   energy lane was proven only for a *uniform* dB offset. A loud master is made by
+   limiting and compression, which reshape the level distribution rather than
+   shifting it, and E1's `body_duty` read that reshaping almost directly
+   (`rho(track_weight, p95−p25) = −0.675`). AWR-291 swaps `sub_duty` for
+   `brightness_med` and adds the compression negative control
+   `DRAMA_ACCEPT_MAX = 0.55` (measured v2 −0.486, headroom 0.064).
+
+2. **The ladder's §B.2 intent for drop grades was silently narrowed.**
+   `energy_fabric_ladder_spec_v1.md:230-231` asked for "the drop's energy within the
+   track's set of drops"; E3 shipped an absolute loudness-relative measure instead,
+   and no document recorded the change. AWR-291 restores the within-set ranking as
+   the rank-based `body` term.
+
+3. **Three docstrings overclaimed exact gain invariance.** Re-extraction at 1.0×/0.5×
+   showed the end-to-end cancellation is exact only to ~±0.005 grade units (0.1 dB
+   rounding, `audio_spectral_features.py:307-311`) and fails outright on beats at the
+   fixed −100.0 dB power floor (`:35`, `:313-314`, 18.9% of BY GENRE tracks). All
+   three module docstrings are corrected to that measured truth (Task 10c), and
+   `tools/energy_perturbation_check.py` verifies it by re-extraction, not by an offset
+   to cached values.
+
+4. **The body term ranks against the RAW ANLZ marker set, not the true drops**
+   (EREV1 F7, Task 5c). Measured: 3,335 raw graded drop windows against 1,659
+   surfaced true drops, so **49.7% of the ranking population is never surfaced**, and
+   a surfaced drop's grade **moves if Rekordbox re-analysis adds or removes a marker
+   anywhere in the track**. A defensible narrowing — the raw set is the stable,
+   complete, tick-independent population — recorded here because it is the same class
+   of thing as the §B.2 item: a choice that must not be silent. `body_basis` is
+   written onto every grade so a mixed-basis composite cannot go unnoticed.
+
+5. **The silence-gated reference was specified, measured, and found inert** (Task 3e).
+   An EBU Tech 3342-style gate on the p95 reference moves it by 4th-decimal amounts
+   and cannot change any E2 gate outcome under any configuration, because our
+   reference is a lone p95 anchor (deleting ~1% of the bottom of a distribution moves
+   a p95 by ~one percentile step), not a range statistic whose low anchor sits in the
+   removed material. Defaulted to **not implemented**, veto-first; recorded so the
+   idea is not re-derived later as an oversight. The silence damage it targeted is
+   real and is cured 86% by the median aggregator (Task 3d).
