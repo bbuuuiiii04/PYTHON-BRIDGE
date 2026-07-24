@@ -32,7 +32,15 @@ Also follow `AGENTS.md` §0 Brandon Communication Mode:
   Use exactly this anchored pattern (the same one `scripts/ss_bridge_watcher.sh:104` uses). A bare
   `pgrep -f rb_ss_bridge_v2` **over-counts badly** — it also matches the menubar, `led_pad`,
   `laser_pad`, `led_sim_web`, lane watchers, and any shell whose command line contains the repo
-  name. Measured 2026-07-24: the bare form returned `8` while the bridge was **not running at all**.
+  name. Measured 2026-07-24 with the bridge **not running at all**, the bare form returned a
+  non-zero count that drifted between `4` and `9` as unrelated helper processes came and went, while
+  the anchored form correctly returned `0`.
+
+  Two known blind spots in the anchored form (it can report `0` while the bridge IS up) — inherited
+  from the watcher, not introduced here: the **frozen/USB app**, which the menubar spawns as
+  `<app> --run-bridge` with no `python -m` in its command line (`scripts/bridge_menubar.py:2313`),
+  and a `PYTHON` override pointing at a bare `python` with no `3`. In either case, check the
+  menubar's own status instead of trusting this count.
 - **Cost discipline.** Offload large read-only sweeps (logs / capture corpora / multi-file research)
   to a read-only subagent and verify its load-bearing claims before relying on them; keep
   safety-critical (live-mixing / runtime-invariant / laser-LED) reasoning on a high tier.

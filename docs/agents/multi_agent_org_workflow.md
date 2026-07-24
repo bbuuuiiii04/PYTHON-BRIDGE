@@ -26,8 +26,8 @@ shipped a quarter's worth of gated work with zero regressions reaching the opera
 |---|---|---|---|
 | **Executive manager** | exactly ONE | strongest reasoning available, highest effort | The operator's only surface. Program design, sequencing, authorization, INDEPENDENT verification gates, ship notices, the morning/session report. Never implements. |
 | **Manager** | one per workstream, parallel OK | strongest tier (or one below), high effort | Owns a workstream end-to-end: spec authoring, dispatching orchestrators, ADVERSARIAL review of everything its lanes produce, escalation to the executive. |
-| **Orchestrator** | per build round | mid tier (throughput model) | Executes a written spec task-by-task: one commit per task, runs scoped tests, reports honestly, BLOCKS instead of inventing when reality diverges from the spec. |
-| **Implementer / subagent** | fan-out | cheapest adequate tier | Bounded single tasks inside an orchestrator's round: searches, file grinds, test runs. Returns conclusions + exact file:line refs, never transcripts. |
+| **Orchestrator** | per build round | **Opus** (see the tier pin below) | Executes a written spec task-by-task: one commit per task, runs scoped tests, reports honestly, BLOCKS instead of inventing when reality diverges from the spec. |
+| **Implementer / subagent** | fan-out | **Opus** (see the tier pin below) | Bounded single tasks inside an orchestrator's round: searches, file grinds, test runs. Returns conclusions + exact file:line refs, never transcripts. |
 
 Hard rules (operator-pinned, restated repeatedly):
 - The top-tier model NEVER appears below the manager seat. Thinking is expensive;
