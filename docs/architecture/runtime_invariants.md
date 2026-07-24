@@ -203,6 +203,13 @@ push loop.
   `load_gen`.
 - Resolver and ANLZ worker results must carry `load_gen`; stale generations are
   ignored.
+- E2 section-energy grades (AWR-288, `RBSS_SECTION_ENERGY`, default OFF): all
+  grade computation and the single memoized E1-store read run on the ANLZ worker
+  thread, never the 200 Hz push loop; grades ride the same `load_gen`-guarded
+  `ANLZ_DATA` event as `f2_plan`. Flag OFF ⇒ byte-identical (no computation, no
+  payload key, no status key — kill test). Any failure (no store / no v4 / no
+  markers / compute error) ⇒ grades absent/null, fail open; nothing reads them at
+  E2 (status-only, no lighting consumer).
 - `ANLZ_PATH`/`TRACK_LOADED` carry `rb_raw_deck` (the RB deck index 0-3). While
   a bridge deck is playing, a load/anlz event from the idle sibling RB deck
   (1&3 share bridge 1, 2&4 share bridge 2) is ignored

@@ -38,6 +38,11 @@ Spectral v4 (2026-07-05):
   fresh extraction (v4 preferred; grids longer than ~15 min take the legacy v3 extraction at
   load and leave v4 to the offline sweep). Every path feeds the smart-drop scorer a
   bit-identical v3-shaped view, and the chosen path is logged as `[SM] spectral-path`.
+- E2 section-energy grades (AWR-288, `section_energy_v0.grade_sections`): computed on the
+  same ANLZ worker at track load when `RBSS_SECTION_ENERGY` is on (default OFF ⇒ byte-identical),
+  carried on the `ANLZ_DATA` event beside `f2_plan`, stored on `TrackMetadata.section_grades`
+  (reset in `clear()`), and surfaced in the per-deck status `section_energy` block. Status-only:
+  no lighting consumer reads them at E2.
   Details + proofs: `docs/research/spectral_audio_analysis_redesign.md`.
 
 SoundSwitch pack-player boundary:

@@ -183,7 +183,11 @@ SoundSwitch pack-player boundary (T7c/T7e):
   state. SoundSwitch status, deck rows, check status, smart-phrasing
   status/menu, Laser Director menu, Record Session, Test the Lights, and
   normal Health Check remain absent from both editions. The detailed facts
-  remain available in the live log and status JSON; removing menu items does
+  remain available in the live log and status JSON. E2 (AWR-288): when
+  `RBSS_SECTION_ENERGY=1`, each per-deck block in the status JSON
+  (`state_manager.deck.<n>`) gains a `section_energy` sub-block
+  (`{sections, store, current}`); the key is ABSENT with the flag off
+  (byte-identical). No new runtime command is added. Removing menu items does
   not remove their runtime commands.
 - AWR-222's dormant Accessibility MEASUREMENT probe adds no menu item and no
   runtime wiring (`--probe-rekordbox-accessibility` is packaged dispatch only;
