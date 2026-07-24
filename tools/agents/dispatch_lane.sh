@@ -19,7 +19,10 @@ REPO=/Users/bbui/rb_ss_bridge_v2
 SIG=/tmp/rbss_lane_signals; mkdir -p "$SIG"
 rm -f "$SIG/$SESSION.$TAG.done" "$SIG/$SESSION.$TAG.blocked"
 
-if tmux has-session -t "$SESSION" 2>/dev/null; then
+# "=" = exact match. Bare -t prefix-matches (-t r4b hits a live r4bimpl seat),
+# which would /clear and hijack someone else's lane. Quoted, so zsh's own "="
+# word expansion never sees it.
+if tmux has-session -t "=$SESSION" 2>/dev/null; then
   # hands-off: abort if a human sits mid-thought at the prompt. Only the LAST
   # prompt line counts (older ❯ lines are transcript echoes), and a bare
   # slash-command echo like "/clear" is not typed text (2026-07-09 field bug).
@@ -53,8 +56,20 @@ if [[ "$AGENT" == "codex" ]]; then
   echo "VERIFY-MODEL-MANUALLY $SESSION (codex lane: pins are launch flags -m $MODEL / effort $EFFORT)"
 else
   tmux send-keys -t "$SESSION" "/model $MODEL" Enter; sleep 4
-  if ! tmux capture-pane -p -t "$SESSION" -S -12 | grep -qi "set model to.*$MODEL"; then
-    echo "MODEL-PIN-FAILED $SESSION -> $MODEL (verify manually; task NOT sent)"; exit 1
+  # Claude acks with the model's DISPLAY name, not the id we passed
+  # (claude-opus-5 -> "Set model to Opus 5", claude-opus-4-8 -> "Opus 4.8",
+  # fable -> "Fable 5", claude-haiku-4-5-20251001 -> "Haiku 4.5" — captured
+  # live 2026-07-24, Claude Code v2.1.219). The old literal "$MODEL" grep
+  # false-negatived on every dated/versioned id. Compare alphanumerics only,
+  # and accept when either side is a prefix of the other: aliases are shorter
+  # than the display name (fable -> fable5), dated ids are longer
+  # (haiku4520251001 vs haiku45). A wrong family or version still aborts.
+  ACK=$(tmux capture-pane -p -t "$SESSION" -S -12 | grep -i 'set model to' | tail -1)
+  ACKKEY=$(printf '%s' "$ACK" | sed -E 's/.*[Ss]et model to //; s/ and saved.*//' | tr -cd '[:alnum:]' | tr '[:upper:]' '[:lower:]')
+  WANTKEY=$(printf '%s' "$MODEL" | sed -E 's/^claude-//' | tr -cd '[:alnum:]' | tr '[:upper:]' '[:lower:]')
+  if [[ -z "$ACKKEY" || -z "$WANTKEY" ]] \
+     || { [[ "$ACKKEY" != "$WANTKEY"* ]] && [[ "$WANTKEY" != "$ACKKEY"* ]]; }; then
+    echo "MODEL-PIN-FAILED $SESSION -> $MODEL (pane ack: ${ACK:-<none>}; verify manually; task NOT sent)"; exit 1
   fi
   tmux send-keys -t "$SESSION" "/effort $EFFORT" Enter
   # /effort renders a picker that EATS a paste landing while it is open
