@@ -14,9 +14,18 @@ validation_scope: >
   -0.043 with loudness). Changes descriptor math + acceptance gates + report
   tools ONLY: the env flags, thread placement, status surfaces, import fences
   and flag-off byte-identity kill tests DO NOT MOVE. Store schema bumps to 2
-  so E2/E3 refuse v1 stores by the existing refusal law. All code claims
-  verified at HEAD 0a40b7b9 on 2026-07-24. Awaiting exec review + operator
-  gate before Codex executes. SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
+  so a v1 store refuses to library-scale by the existing refusal law.
+  Revision r2 (2026-07-24) folds the EREV1 hostile review in full, F1-F7 and
+  N1-N8: E2-b lands in-round as the median section aggregator, because its
+  deferral trigger was measured tripped at 2.25% (the 1.6% baseline had been
+  extrapolated from a subset); E3 gains a grade-space separation gate, because a
+  random-number generator passed all six of the first draft's E3 gates; E1 gains
+  a component-correlation gate; the product-law claim is relabelled a measured
+  prediction with permanent report lines. EREV1 independently reproduced every
+  number in this spec including the v2 candidate predictions. Code claims
+  verified at HEAD 0a40b7b9, re-checked by the reviewer at 0e252037. Awaiting
+  exec review + operator gate before Codex executes.
+  SOFTWARE-VALIDATED ONLY / HARDWARE-UNVALIDATED.
 ---
 
 # Codex Implementation Spec - AWR-291: energy formulation revision (E1/E2/E3 v2)
@@ -86,7 +95,7 @@ p50 0.910, p95 1.000, IQR **0.0625** against a G2 floor of 0.05.
 Mechanism for `sub_duty`: in drop windows `sub_db` sits **+15.2 dB above**
 `loudness_ref_db` at the median (p05 +9.3, p95 +16.5), because `full_db` averages
 all 128 mel bands (`audio_spectral_features.py:354-355`) while `sub_db` averages
-only the two bands at 20–60 Hz (`:39-40`, `:350-352`). The threshold `ref − 12`
+only the two bands at 20–60 Hz (`:40-41`, `:350-352`). The threshold `ref − 12`
 therefore sits ~27 dB below where the signal is; the term has 16 possible values
 in a 16-beat window and takes the top one on 92.3% of drops.
 
@@ -476,7 +485,9 @@ a silent 2× on the tool's I/O and it is avoidable in four lines.
 
 **One implementation of the window convention only.** Import the new
 `drop_energy_v0.drop_body_levels` (Task 5) from this tool. `tools/` is inside the
-E3 import fence allowlist (`tests/test_drop_energy_v0.py:297`), so this is legal;
+E3 import fence allowlist — the `tools/` permission is at
+`tests/test_drop_energy_v0.py:314-316`, not the `:297` ALLOW line (EREV1 N7) — so
+this is legal;
 `track_weight_v0.py` must **not** import it, because that root module is outside
 the allowlist and would break the fence. Do not reimplement the window math here —
 a second copy would drift and the fallback would silently rank against a different
@@ -1264,25 +1275,36 @@ with the measured truth:
 > not by adding an offset to cached values (`tools/energy_perturbation_check.py`).
 
 **10d. Write the change record into this spec file** under a `## Change record`
-heading, carrying the three record-keeping items verbatim from A.4: the
-unexamined compression confound, the unrecorded §B.2 narrowing, and the
-docstring overclaims.
+heading, carrying **five** items: the three from A.4 (the unexamined compression
+confound, the unrecorded §B.2 narrowing, the docstring overclaims), plus:
 
-**10e. Record the deferred follow-up.** E2-b (section **median** instead of mean,
-plus EBU Tech 3342-style silence gating before the p95 reference is formed) is
-**DEFERRED by exec adjudication**, on the ENERGYRES recommendation to land the
-span fix first. Record it in the change record with its trigger, measured now so
-the trigger is checkable:
+4. **The body term ranks against the RAW ANLZ marker set** (EREV1 F7, detailed in
+   Task 5c): 3,335 raw graded drop windows against 1,659 surfaced true drops, so
+   **49.7% of the ranking population is never surfaced**, and a surfaced drop's
+   grade moves if Rekordbox re-analysis adds or removes a marker anywhere in the
+   track. Recorded beside the §B.2 item because it is the same class of thing —
+   a defensible narrowing that must not be silent.
+5. **The silence-gated reference was specified, measured, and found inert**
+   (Task 3e). Recorded so the idea is not re-derived later as an oversight.
 
-> **E2-b trigger** — authorize E2-b as its own spec if, after AWR-291 lands,
-> either (i) the boundary-jitter diagnostic (Task 4b) shows a median
-> `|Δwithin_track| > 0.10` at ±4 beats, or (ii) the fraction of `chorus` sections
-> graded at the bottom rail exceeds 2% of all chorus sections. Baseline for (ii)
-> under the new span: among the 24.6% of chorus sections that are ≥64 beats, the
-> mean aggregator grades 6.7% at the bottom rail, which is ~1.6% of all chorus
-> sections — under the trigger, but only just. Evidence that E2-b works when
-> needed: switching that aggregator to the section p75 drops the long-section
-> false-zero rate from 13.3% to 0.1%.
+**10e. E2-b lands in this round — the deferral machinery is DELETED.** E2-b was
+drafted as a deferred follow-up with a "> 2% of chorus sections at the bottom
+rail" trigger and a baseline of ~1.6%. That baseline was extrapolated from the
+long-section subset and was **40% too low**: measured directly, the real figure is
+**2.25%**, so the trigger was tripped on landing (EREV1 F1). The exec adjudicated
+option (a) — bring E2-b in now — on the grounds that re-placing a threshold to
+preserve a deferral is the forbidden goalpost move.
+
+Delete the trigger, the deferral wording, and the "named follow-up" framing
+wherever they appear. The median aggregator is **Task 3d**, a shipping part of
+this spec, with its own measured rationale and its own acceptance line. The
+silence-gated half of the E2-b sketch is **Task 3e**, measured inert, defaulting
+to not-implemented pending an exec veto.
+
+**Method note worth carrying forward:** the defect in that baseline was not a
+measurement error, it was an *extrapolation* — a rate computed on a filtered
+subset and multiplied out to the whole. Task 4c now requires the fraction to be
+counted directly over all chorus sections for exactly this reason.
 
 **10f. Regeneration is the implementation's final step, not this spec's.** After
 all gates pass, rebuild in dependency order — E1 store (v2) → E2 report → E3
@@ -1304,7 +1326,8 @@ grades that will no longer exist; do not leave it presented as current.
    preserved unchanged.
 3. **There is still no consumer.** No LED, laser, SoundSwitch, Govee or
    presentation module may read any grade. The import fences
-   (`tests/test_section_energy_v0.py:326`, `tests/test_drop_energy_v0.py:297`,
+   (`tests/test_section_energy_v0.py:326`, `tests/test_drop_energy_v0.py:297` with
+   its `tools/` allowance at `:314-316`,
    and E1's zero-runtime-importer test) stay exactly as they are and must still
    pass. `track_weight_v0.py` gains no runtime importer — in particular it must
    not import `drop_energy_v0`.
@@ -1356,22 +1379,37 @@ real ones, never adjust anything to reach these):
 
 | layer | gate | floor | expected |
 |---|---|---|---|
-| E1 | loudness \|rho\| | ≤ 0.50 | ~0.04 |
-| E1 | dynamic-range \|rho\| | ≤ 0.55 | ~0.48 |
+| E1 | loudness \|rho\| | ≤ 0.50 | ~0.044 |
+| E1 | dynamic-range \|rho\| | ≤ 0.55 | **~0.486** |
+| E1 | worst component pair \|rho\| | ≤ 0.60 | ~0.242 |
 | E2 | coverage | ≥ 0.95 | 1.000 |
-| E2 | railed fraction | ≤ 0.20 | ~0.053 |
-| E2 | rankability | ≥ 0.90 | ~1.000 |
-| E2 | separation | ≥ 0.25 | ~0.50 |
+| E2 | railed fraction | ≤ 0.20 | ~0.044 |
+| E2 | rankability | ≥ 0.90 | ~0.994 |
+| E2 | separation | ≥ 0.25 | ~0.471 |
 | E3 | worst term railed | ≤ 0.20 | ~0.062 |
-| E3 | worst term pair \|rho\| | ≤ 0.60 | ~0.25 |
+| E3 | worst term pair \|rho\| | ≤ 0.60 | ~0.246 |
 | E3 | composite IQR | ≥ 0.10 | ~0.145 |
 | E3 | rankability | ≥ 0.90 | 1.000 |
 | E3 | level separation | ≥ 3.0 dB | ~6.5 dB |
+| E3 | grade separation | ≥ 0.10 | ~0.194 |
 
-The E1 dynamic-range gate is the tightest (~0.48 against 0.55). **If it fails,
-that is a real result, not a tuning opportunity** — it means one swapped component
-was not enough and the next candidate is `body_duty` itself, which is banked and
-explicitly NOT authorized here.
+All E2 figures are for the **as-landing** configuration (median aggregator, span
+−12/0). Informational, not gated: chorus at the bottom rail ~0.63%; drops on the
+`"corpus"` body basis ~2.18%; `rho(library_scaled, track_weight)` ~+0.884 and
+`rho(library_scaled, within_track)` ~+0.510.
+
+**The E1 swap cannot move any E2 or E3 gate figure** (EREV1 N8). Every E2 and E3
+gate quantity above is a `within_track` statistic, and `within_track` takes no
+track-weight input at any layer. The only thing E1 moves downstream is the
+**eligible set** — through E1 acceptance and which tracks have store rows — plus
+`library_scaled`, which is gated nowhere. So these expectations are genuinely
+re-baselined for v2 rather than silently carried over from v1 measurements taken
+under a different weight.
+
+The E1 dynamic-range gate is the tightest (**~0.486 against 0.55, headroom
+0.064**). **If it fails, that is a real result, not a tuning opportunity** — it
+means one swapped component was not enough and the next candidate is `body_duty`
+itself, which is banked and explicitly NOT authorized here.
 
 ---
 
@@ -1382,13 +1420,27 @@ explicitly NOT authorized here.
       `track_weight_v0.py`; refusal on a missing `brightness_med` is tested.
 - [ ] `robust_dynamic_range` exists, is pure, uses p95−p25, and is tested against
       the cached `drama` scalar's silence exposure.
-- [ ] `acceptance_verdict` has the `compression_proxy` branch in the pinned
-      precedence order, with `None` failing closed, and every branch is tested.
-- [ ] Store writes `schema_version: 2` with `drop_body_distribution`;
-      `section_energy_v0` refuses v1 stores; a test proves the refusal.
+- [ ] `acceptance_verdict` has the `compression_proxy` **and
+      `redundant_components`** branches in the pinned precedence order, with
+      `None` failing closed, and every branch is tested.
+- [ ] `tools/track_weight_report.py` prints the 4×4 component correlation matrix
+      and gates its worst off-diagonal at `COMPONENT_CORRELATION_MAX = 0.60`
+      (completing the adjudicated three-part E1-b comparison).
+- [ ] `_grid_for` was widened to return the drop markers; the ANLZ file is opened
+      **once** per track, not twice.
+- [ ] Store writes `schema_version` from `track_weight_v0.STORE_SCHEMA_VERSION`
+      (no third literal) with `drop_body_distribution`; a v1 store refuses to
+      library-scale while still yielding v2 `within_track` grades; both are tested,
+      and a test asserts the two module literals agree.
 - [ ] E2 span is `SECTION_SPAN_LOW_DB = -12.0` / `SECTION_SPAN_HIGH_DB = 0.0`,
       renamed with the comment explaining why they are no longer the tier
       constants.
+- [ ] **E2-b landed:** the section aggregate is the **median**, with the
+      `[-3,-3,-3,-100]` test asserting it. The bottom-rail chorus fraction is
+      printed directly (never extrapolated) and reads ~0.63%.
+- [ ] Task 3e's silence-gated reference is **not** implemented (measured inert),
+      and its measurement is recorded in the change record — or the exec vetoed
+      that call and it is implemented.
 - [ ] E2's spread gate is replaced by saturation / rankability / separation, all
       three computed and printed by the report, every branch tested.
 - [ ] E2 report prints the boundary-jitter diagnostic at ±1/±2/±4 beats, clearly
@@ -1402,8 +1454,18 @@ explicitly NOT authorized here.
       test proves no `within_track` is ever a mean over fewer than four terms.
 - [ ] `drop_body_levels` is the single implementation of the window convention;
       `tools/track_weight_report.py` imports it; `track_weight_v0.py` does not.
-- [ ] E3's six gates are implemented, printed, tested branch by branch, and the
-      report prints the `"corpus"`-basis drop count.
+- [ ] E3's **seven** gates are implemented, printed, tested branch by branch, and
+      the report prints the `"corpus"`-basis drop count plus both
+      `library_scaled` correlations.
+- [ ] **G7 exists and works:** the grade-space separation gate scores the same
+      four-term formula on `low` windows (ranked against the same track's drop
+      levels), reads ~0.194, and the all-random-composite regression test is
+      REJECTED with reason `inverted_or_flat_grade_separation`.
+- [ ] The three module **docstrings are fully rewritten** to describe the v2
+      formulations — not just the invariance sentence: `track_weight_v0.py`
+      (v2 component set), `section_energy_v0.py` (−12/0 span, median aggregator,
+      tier identity dropped), `drop_energy_v0.py` (four terms, rank-based body,
+      four-terms-or-omit law).
 - [ ] `state_manager.py` changed in exactly one place: the `corpus_drop_levels`
       keyword at the existing E3 call site. No flag, thread, status key, or log
       line moved. `git diff --stat state_manager.py` shows a single hunk.
@@ -1418,10 +1480,15 @@ explicitly NOT authorized here.
 - [ ] Contract updated (`code_globs`, `key_symbols`, all three
       `forbidden_assumptions` entries) and its `docs_update` docs updated:
       `docs/research/spectral_audio_analysis_redesign.md` and `AGENTS.md`.
-- [ ] Spec registered in `docs/status/active_work_registry.md` and classified in
-      `docs/architecture/doc_index.md`; §10 status language only.
-- [ ] Change record written into this spec: compression confound, §B.2 narrowing,
-      docstring overclaims, and the deferred E2-b with its measurable trigger.
+- [ ] The **AWR-291 registry row's status is updated** to implemented /
+      software-tested with the real measured gate values; §10 status language
+      only. Do **not** also classify the spec in `docs/architecture/doc_index.md`
+      — `check_agent_contracts.py` accepts either location and the registry row
+      already satisfies it (Task 10b; the earlier draft of this checklist said
+      "and", which contradicted Task 10b — Task 10b wins).
+- [ ] Change record written into this spec, **five items**: compression confound,
+      §B.2 narrowing, docstring overclaims, the raw-marker ranking basis, and the
+      measured-inert silence-gated reference.
 - [ ] All five repo checks green and `python3 -m unittest discover tests` green.
 - [ ] All three reports rerun in dependency order and ACCEPTED — or a failure
       reported plainly, with **no constant moved**.
@@ -1446,10 +1513,14 @@ floors; and the one-hunk `state_manager.py` diff for review.
   quietly become a single measurement instead of three, and the track weight was
   reading how squashed a master is more than how hard the music hits.
 - **What is different now:** section grades spread out instead of pinning at the
-  rails; drop grades are built from four things that actually vary — where the
-  drop sits among that track's own drops, how busy the top end is, how percussive
-  it is, and how gritty it is; and the track weight now has a check that catches
-  the squashed-master problem.
+  rails; a section is now judged by its **typical** loudness rather than its
+  average, so a bit of silence at the end of a track can no longer drag a whole
+  drop section down to zero; drop grades are built from four things that actually
+  vary — where the drop sits among that track's own drops, how busy the top end
+  is, how percussive it is, and how gritty it is; and both the track weight and
+  the drop grade now have checks that catch the two ways this went wrong before
+  (a squashed master faking energy, and a measurement that had quietly stopped
+  measuring anything).
 - **What to watch:** the numbers will all move. A track that was 0.9 may now be
   0.6 — that is the scale spreading out, not the track changing. The old trust
   dossier is stale and gets regenerated.
@@ -1469,14 +1540,29 @@ every corpus number measured over the 551 BY GENRE tracks / 6,837 sections /
 3,335 drops in ENERGYRES, whose counts reproduce the three accepted reports
 exactly.
 
-**[assumed-reasonable]** — the five new thresholds `DRAMA_ACCEPT_MAX = 0.55`,
-`SATURATION_GATE_MAX = 0.20`, `RANKABILITY_GATE = 0.90`, `SEPARATION_GATE = 0.25`,
-`TERM_CORRELATION_MAX = 0.60`, and the raised `IQR_GATE = 0.10` and new
-`LEVEL_SEPARATION_DB = 3.0`. Each is pinned from a measured value with stated
-headroom, in the same spirit as the existing `SPEARMAN_ACCEPT_MAX = 0.50`. The
-author saw both today's and the candidate's numbers before pinning them — that is
-disclosed here rather than hidden, and it is exactly why they are frozen at
-implementation time.
+**[independently reproduced]** — EREV1, a fresh reviewer seat working from its own
+read-only extraction over the same 551-track corpus and re-implementing every
+formula from source, reproduced **every** number in this spec, including all of
+the v2 candidate predictions that nobody had checked before: E2 railed
+0.6675/0.0527, chorus pinned 0.8390, rankability 314/504, section rel-dB
+percentiles, E3 `body` 0.9400 and `sub_duty` 0.9226, `rho(onset, within_track)`
++0.9448, v2 worst term railed 0.0624, worst term pair 0.2459, composite IQR
+0.1448, `rho(v2, onset proxy)` +0.4212, G6 +6.52 dB, corpus fallback 12/550, the
+E1 candidate table (0.242/0.389/0.399/0.540) and the −100 dB floor count 104/551.
+Where our two measurements differ they are noted in place: `DRAMA` −0.4799 vs
+−0.4858 (the reviewer's pessimistic figure is the planning number) and the
+`fluxsum` correlation, resolved by naming the normalisation.
+
+**[assumed-reasonable]** — the eight new thresholds `DRAMA_ACCEPT_MAX = 0.55`,
+`COMPONENT_CORRELATION_MAX = 0.60`, E2's `SATURATION_GATE_MAX = 0.20`,
+`RANKABILITY_GATE = 0.90` and `SEPARATION_GATE = 0.25`, E3's
+`TERM_CORRELATION_MAX = 0.60`, raised `IQR_GATE = 0.10`,
+`LEVEL_SEPARATION_DB = 3.0` and `GRADE_SEPARATION_GATE = 0.10`. Each is pinned
+from a measured value with stated headroom, in the same spirit as the existing
+`SPEARMAN_ACCEPT_MAX = 0.50`; the two separation floors are both set at half their
+measured value by the same convention. The author saw both today's and the
+candidate's numbers before pinning them — that is disclosed here rather than
+hidden, and it is exactly why they are frozen at implementation time.
 
 **[assumed]** — that `brightness_med` is a musically better fourth component than
 `sub_duty`. What is *measured* is that it is far less redundant (0.242 vs 0.578)
@@ -1515,3 +1601,18 @@ The first real test is the operator's veto after E4 exists.
 6. *Scope creep into `state_manager.py`.* The E3 change genuinely needs one new
    argument, and it would be easy to "improve" the surrounding block. Prevented by
    the single-hunk `git diff --stat` acceptance item.
+7. *A gate set that a random-number generator passes.* This one **actually
+   happened** — the first draft's six E3 gates were all passed by
+   `random.random()` terms, because G6 read cached dB levels and never touched the
+   composite. Caught by EREV1 F3, fixed by G7, and locked by a regression test
+   that requires the all-random composite to be rejected **with G7's reason
+   specifically**. The general lesson, now written into Part D: a
+   direction-of-truth check computed from inputs the grade does not use is a
+   plumbing test, not a grade test, and every layer needs at least one gate that
+   reads the grade itself.
+8. *A rate extrapolated from a filtered subset.* Also **actually happened** — the
+   E2-b trigger baseline was computed as `6.7% × 24.6% ≈ 1.6%` over long sections
+   only, when the true figure over all sections is 2.25%, which tripped the
+   trigger on landing. Caught by EREV1 F1. Prevented going forward by Task 4c
+   requiring the fraction to be counted directly, and worth generalising: in this
+   spec, if a number is a fraction of a population, measure it on the population.
