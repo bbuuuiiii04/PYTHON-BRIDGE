@@ -922,8 +922,11 @@ static import-fence test enforces the allowlist).
   (`body_basis = "track_drops"`, ranked against the RAW ANLZ marker set) else the
   corpus drop-level distribution from the v2 store (`body_basis = "corpus"`, ~2.18%
   of tracks) — a rank cannot saturate, unlike the v1 level term (pinned at 1.000 on
-  94% of drops); `onset` = clip(mean `onset_density_midhigh` / `onset_mh_p90`);
-  `perc_high` = clip(mean `perc_high` / the track's own `perc_high` p90); `growl` =
+  94% of drops); `activity` = clip(mean `fluxsum_midhigh` / the track's own
+  `fluxsum_midhigh` p90) (R4: replaced the v1 `onset` count term, whose cached
+  `onset_mh_p90` normaliser sat in {2,3,4} on 98.2% of tracks — `onset_mh_p90` is
+  retired from the required set); `perc_high` = clip(mean `perc_high` / the track's
+  own `perc_high` p90); `growl` =
   clip(mean `growl_flatness` / `growl_timbre_p90`). `within_track` = mean of ALL
   FOUR — if any normaliser is absent/non-finite/≤0 the drop is **omitted**, never a
   re-weighted mean over fewer terms (cures a latent v1 silent-reweight). The single

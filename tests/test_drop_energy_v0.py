@@ -143,8 +143,20 @@ class ProductAndWindowTests(unittest.TestCase):
     def test_four_terms_or_omit(self):
         base = grade_drops(_v4(), drop_beats=[16, 40], track_weight=None)
         self.assertEqual(len(base), 2)
-        # onset_mh_p90 <= 0
-        self.assertEqual(grade_drops(_v4(p90=0.0), drop_beats=[16, 40], track_weight=None), [])
+        # R4: the SECOND required normaliser is the in-module fluxsum p90 (onset_mh_p90
+        # retired). Absent / <= 0 / non-finite fluxsum omits the drop.
+        # fluxsum p90 <= 0 (all-zero flux series)
+        self.assertEqual(grade_drops(_v4(flux=tuple(0.0 for _ in range(80))),
+                                     drop_beats=[16, 40], track_weight=None), [])
+        # fluxsum series non-finite
+        nanflux = [2.0] * 80
+        nanflux[18] = float("nan")
+        self.assertEqual(grade_drops(_v4(flux=tuple(nanflux)),
+                                     drop_beats=[16, 40], track_weight=None), [])
+        # fluxsum series absent
+        va = _v4(); sa = dict(va.series); del sa["fluxsum_midhigh"]
+        self.assertEqual(grade_drops(replace(va, series=sa), drop_beats=[16, 40],
+                                     track_weight=None), [])
         # growl_timbre_p90 non-finite
         vg = _v4()
         sc = dict(vg.scalars); sc["growl_timbre_p90"] = float("nan")
@@ -155,12 +167,15 @@ class ProductAndWindowTests(unittest.TestCase):
                                      drop_beats=[16, 40], track_weight=None), [])
         # body basis absent (1 own drop, no corpus)
         self.assertEqual(grade_drops(_v4(), drop_beats=[16], track_weight=None), [])
-        # and no within_track is ever a mean over fewer than four terms
+        # renamed term: the key is 'activity' (not 'onset') and within_track is the
+        # mean over EXACTLY the four terms body/activity/perc_high/growl.
         pool = drop_body_levels(_v4(), [16, 40])
         for row in score_windows(_v4(), [16, 40], body_pool=pool):
+            self.assertIn("activity", row)
+            self.assertNotIn("onset", row)
             self.assertAlmostEqual(
                 row["within_track"],
-                (row["body"] + row["onset"] + row["perc_high"] + row["growl"]) / 4.0,
+                (row["body"] + row["activity"] + row["perc_high"] + row["growl"]) / 4.0,
                 places=12)
 
     def test_perc_high_only_variation_still_differs(self):
@@ -172,7 +187,7 @@ class ProductAndWindowTests(unittest.TestCase):
         for i in range(40, 56):
             perc[i] = 0.9
         v4 = _v4(n_beats=n, full=tuple(-3.0 for _ in range(n)),
-                 onset=tuple(2.0 for _ in range(n)),
+                 flux=tuple(2.0 for _ in range(n)),
                  growl=tuple(0.2 for _ in range(n)), perc=tuple(perc))
         g = grade_drops(v4, drop_beats=[0, 40], track_weight=None)
         self.assertEqual(len(g), 2)
@@ -353,7 +368,7 @@ class GatesVerdictTests(unittest.TestCase):
         # test that proves the E3 gate set is no longer noise-passable.
         rng = random.Random(20260724)
         terms = {k: [rng.random() for _ in range(2000)]
-                 for k in ("body", "onset", "perc", "growl")}
+                 for k in ("body", "activity", "perc", "growl")}
         drops = [sum(terms[k][i] for k in terms) / 4.0 for i in range(2000)]
         lows = [rng.random() for _ in range(600)]
 
