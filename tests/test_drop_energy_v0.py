@@ -44,23 +44,21 @@ def _p95(xs):
     return v[lo] * (1 - (pos - lo)) + v[hi] * (pos - lo)
 
 
-def _v4(n_beats=80, full=None, onset=None, perc=None, growl=None, ref="auto",
-        p90=2.0):
+def _v4(n_beats=80, full=None, flux=None, perc=None, growl=None, ref="auto"):
     z = tuple(0.0 for _ in range(n_beats))
     if full is None:
         full = tuple(-2.0 + 0.05 * i for i in range(n_beats))   # near-ceiling body
-    if onset is None:
-        onset = tuple(2.0 for _ in range(n_beats))
+    if flux is None:
+        flux = tuple(2.0 for _ in range(n_beats))               # fluxsum p90 > 0
     if perc is None:
         perc = tuple(0.3 + 0.002 * i for i in range(n_beats))   # non-degenerate p90
     if growl is None:
         growl = tuple(0.2 + 0.001 * i for i in range(n_beats))
     series = {k: z for k in V4_SERIES_KEYS}
     series.update({"full_db": tuple(full),
-                   "onset_density_midhigh": tuple(onset),
+                   "fluxsum_midhigh": tuple(flux),
                    "perc_high": tuple(perc), "growl_flatness": tuple(growl)})
     scalars = {k: 0.5 for k in V4_SCALAR_KEYS}      # growl_timbre_p90 = 0.5 (>0)
-    scalars["onset_mh_p90"] = p90
     if ref == "auto":
         scalars["loudness_ref_db"] = _p95(full)
     elif ref is None:
