@@ -22,15 +22,19 @@ than the relative-dB construction the v1 terms used:
                 (`body_basis = "corpus"`, measured 2.18% of tracks). A rank CANNOT
                 saturate — this replaced the v1 level `body` term, which was pinned
                 at 1.000 on 94% of drops.
-- `onset`     = clip01(mean `onset_density_midhigh` / `onset_mh_p90`).
+- `activity`  = clip01(mean `fluxsum_midhigh` / this track's own p90 of
+                `fluxsum_midhigh`). A dB-domain onset-flux window sum normalised to
+                the track's own range — it REPLACED the v1 `onset` count term, whose
+                cached `onset_mh_p90` normaliser sat in {2,3,4} on 98.2% of tracks.
 - `perc_high` = clip01(mean `perc_high` / this track's own p90 of `perc_high`).
 - `growl`     = clip01(mean `growl_flatness` / `growl_timbre_p90`).
 `within_track` = mean of ALL FOUR terms; `library_scaled` = `within_track ×
 track_weight` or None.
 
 Four-terms-or-omit law (5f): if ANY of the four normalisers is absent, non-finite,
-or ≤ 0 — `onset_mh_p90`, `growl_timbre_p90`, the in-module `perc_high` p90, or the
-body basis — that drop is omitted. `within_track` is ALWAYS a mean over exactly
+or ≤ 0 — the in-module `fluxsum_midhigh` p90, `growl_timbre_p90`, the in-module
+`perc_high` p90, or the body basis — that drop is omitted. `within_track` is
+ALWAYS a mean over exactly
 four terms or the drop does not exist; it is NEVER a re-weighted mean over fewer.
 `score_windows` is the ONE implementation of the term math — `grade_drops` wraps
 it and the report tool / G7 reuse it, so no second copy of the formula can drift.
@@ -172,38 +176,50 @@ def drop_body_levels(v4, drop_beats) -> "list[float]":
 
 
 def _track_normalisers(v4) -> "Optional[tuple]":
-    """(onset_mh_p90, growl_timbre_p90, perc_high_p90) as finite positives, or None
-    if ANY is unusable — the four-terms-or-omit law applies at the track level. The
-    perc_high p90 has no cached scalar, so it is computed in-module over the track's
-    own n_beats (one sorted() on the ANLZ worker thread, never the push loop)."""
+    """(fluxsum_p90, growl_timbre_p90, perc_high_p90) as finite positives, or None
+    if ANY is unusable — the four-terms-or-omit law applies at the track level.
+    `onset_mh_p90` is RETIRED from the required set (R4): the fluxsum p90 and the
+    perc_high p90 have no cached scalar, so each is computed in-module over the
+    track's own n_beats (one sorted() on the ANLZ worker thread, never the push
+    loop) — the fluxsum p90 exactly the way the perc_high p90 always was."""
     scalars = getattr(v4, "scalars", None) or {}
-    onset_p90 = _finite_pos(scalars.get("onset_mh_p90"))
     growl_p90 = _finite_pos(scalars.get("growl_timbre_p90"))
-    if onset_p90 is None or growl_p90 is None:
+    if growl_p90 is None:
         return None
     series = getattr(v4, "series", None) or {}
-    perc = series.get("perc_high")
     n = int(getattr(v4, "n_beats", 0) or 0)
-    if not perc or n <= 0 or len(perc) < n:
+    if n <= 0:
+        return None
+    flux = series.get("fluxsum_midhigh")
+    if not flux or len(flux) < n:
+        return None
+    fb = flux[:n]
+    if not _all_finite(fb):
+        return None
+    flux_p90 = _finite_pos(_percentile(sorted(fb), 90))
+    if flux_p90 is None:
+        return None
+    perc = series.get("perc_high")
+    if not perc or len(perc) < n:
         return None
     pb = perc[:n]
     if not _all_finite(pb):
         return None
-    perc_p90 = _percentile(sorted(pb), 90)
-    perc_p90 = _finite_pos(perc_p90)
+    perc_p90 = _finite_pos(_percentile(sorted(pb), 90))
     if perc_p90 is None:
         return None
-    return (onset_p90, growl_p90, perc_p90)
+    return (flux_p90, growl_p90, perc_p90)
 
 
 def score_windows(v4, window_beats, *, body_pool) -> "list[dict]":
     """Per window with coverage >= MIN_WINDOW_BEATS and all-finite data: a dict
-    {"beat", "coverage", "body", "onset", "perc_high", "growl", "within_track"}.
+    {"beat", "coverage", "body", "activity", "perc_high", "growl", "within_track"}.
     `body_pool` is the rank basis the body term ranks against (the track's own drop
     levels, or the corpus distribution) — it is sorted here. Returns [] if the
-    track's loudness_ref_db, any of the three cached/in-module normalisers, or the
-    body_pool is unusable (four-terms-or-omit). This is the ONE copy of the E3 term
-    math: grade_drops wraps it and the report / G7 reuse it so no formula drifts."""
+    track's loudness_ref_db, any of the three normalisers (the in-module
+    fluxsum/perc_high p90s or the cached growl p90), or the body_pool is unusable
+    (four-terms-or-omit). This is the ONE copy of the E3 term math: grade_drops
+    wraps it and the report / G7 reuse it so no formula drifts."""
     if not body_pool:
         return []
     ref = _finite_ref(v4)
