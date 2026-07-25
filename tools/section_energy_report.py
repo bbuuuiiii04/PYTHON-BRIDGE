@@ -136,7 +136,8 @@ def run(argv: "Sequence[str]") -> int:
     counts = {"no_grid": 0, "no_v4": 0}
     all_section_withins = []       # every graded by_genre section (G2 saturation)
     chorus_withins = []            # chorus sections (G4 + 4c bottom-rail)
-    low_withins = []               # 'low' sections (G4 separation)
+    low_withins = []               # 'low' sections (G4 separation + 1e top-rail)
+    up_withins = []                # 'up' buildup sections (Task 1e bottom-rail)
     jitter = {off: [] for off in JITTER_OFFSETS}   # 4b, report-only
     for t in tracks:
         if t["by_genre"]:
@@ -179,6 +180,8 @@ def run(argv: "Sequence[str]") -> int:
                         chorus_here.append(w)
                     elif g["label"] == "low":
                         low_withins.append(w)
+                    elif g["label"] == "up":
+                        up_withins.append(w)
                 if len(chorus_here) >= 3:
                     n_chorus_tracks += 1
                     if len(set(chorus_here)) >= 2:
@@ -203,6 +206,10 @@ def run(argv: "Sequence[str]") -> int:
     separation = (chorus_med - low_med) if (chorus_med is not None
                                             and low_med is not None) else None
     chorus_bottom = sum(1 for w in chorus_withins if w <= 0.0)
+    # Task 1e E2 law counters — at_floor (<= 0.0) / at_max (>= 1.0) predicates
+    # extracted from c3_e2_tension.py:70-76, over the already-clipped within grades.
+    up_bottom = sum(1 for w in up_withins if w <= 0.0)
+    low_top = sum(1 for w in low_withins if w >= 1.0)
 
     if forced_partial:
         accepted, reason = False, "partial_run"
@@ -248,6 +255,15 @@ def run(argv: "Sequence[str]") -> int:
     pct_bottom = (100.0 * chorus_bottom / n_chorus) if n_chorus else 0.0
     emit("  chorus sections at the bottom rail = %d / %d = %.2f%%  (INFORMATIONAL; median aggregator, expect ~0.6%%)"
          % (chorus_bottom, n_chorus, pct_bottom))
+    # Task 1e — the two missing E2 law counters (G3.3 reads these run-to-run)
+    n_up = len(up_withins)
+    pct_up_bottom = (100.0 * up_bottom / n_up) if n_up else 0.0
+    emit("  buildup ('up') sections at the bottom rail = %d / %d = %.2f%%  (INFORMATIONAL; E2 law counter, Task 1e)"
+         % (up_bottom, n_up, pct_up_bottom))
+    n_low = len(low_withins)
+    pct_low_top = (100.0 * low_top / n_low) if n_low else 0.0
+    emit("  breakdown ('low') sections at the top rail = %d / %d = %.2f%%  (INFORMATIONAL; E2 law counter, Task 1e)"
+         % (low_top, n_low, pct_low_top))
     emit("")
     emit("## Boundary-jitter sensitivity (INFORMATIONAL — not a gate)")
     emit("  offset  median |delta|  p90 |delta|")

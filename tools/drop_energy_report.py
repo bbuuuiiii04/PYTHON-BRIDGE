@@ -33,9 +33,63 @@ from rb_ss_bridge_v2.section_energy_v0 import (  # noqa: E402
 from rb_ss_bridge_v2.drop_energy_v0 import (  # noqa: E402
     COVERAGE_GATE, TERM_SATURATION_MAX, TERM_CORRELATION_MAX, IQR_GATE,
     RANKABILITY_GATE, LEVEL_SEPARATION_DB, GRADE_SEPARATION_GATE,
-    drop_body_levels, score_windows, grade_drops, gates_verdict, _all_finite)
+    DROP_WINDOW_BEATS, MIN_WINDOW_BEATS,
+    drop_body_levels, score_windows, grade_drops, gates_verdict, _all_finite,
+    _finite_ref, _finite_pos, _percentile, _corpus_pool)
 
-TERMS = ("body", "onset", "perc_high", "growl")
+TERMS = ("body", "activity", "perc_high", "growl")
+
+
+def _gradeable(v4, raw_drops, corpus_dist, *, third):
+    """True iff the track produces >=1 grade under the given third-normaliser set:
+    `third`='flux' = the R4 v3 set {in-module fluxsum p90, growl, perc p90};
+    'onset' = the PRE-swap v2 set {onset_mh_p90, growl, perc p90}. The
+    population-reconciliation probe for the swap — mirrors grade_drops/score_windows
+    eligibility, and the 'flux' verdict is asserted equal to bool(grade_drops) every
+    run, so it cannot silently drift from the live module.
+    # ponytail: reproduces the retired v2 normaliser set only to MEASURE the
+    # population delta the swap creates; drift-guarded against the module each run."""
+    ref = _finite_ref(v4)
+    if ref is None:
+        return False
+    scalars = getattr(v4, "scalars", None) or {}
+    if _finite_pos(scalars.get("growl_timbre_p90")) is None:
+        return False
+    n = int(getattr(v4, "n_beats", 0) or 0)
+    if n <= 0:
+        return False
+    series = getattr(v4, "series", None) or {}
+    full = series.get("full_db")
+    perc = series.get("perc_high")
+    growl = series.get("growl_flatness")
+    third_series = series.get(
+        "fluxsum_midhigh" if third == "flux" else "onset_density_midhigh")
+    if not full or not perc or not growl or not third_series:
+        return False
+    if min(len(full), len(perc), len(growl), len(third_series)) < n:
+        return False
+    pb = perc[:n]
+    if not _all_finite(pb) or _finite_pos(_percentile(sorted(pb), 90)) is None:
+        return False
+    if third == "flux":
+        tb = third_series[:n]
+        if not _all_finite(tb) or _finite_pos(_percentile(sorted(tb), 90)) is None:
+            return False
+    elif _finite_pos(scalars.get("onset_mh_p90")) is None:
+        return False
+    own = drop_body_levels(v4, raw_drops)
+    if len(own) < 2 and not _corpus_pool(corpus_dist):
+        return False
+    for raw in raw_drops:
+        b = int(raw)
+        s = max(0, b)
+        e = min(n, b + DROP_WINDOW_BEATS)
+        if e - s < MIN_WINDOW_BEATS:
+            continue
+        if (_all_finite(full[s:e]) and _all_finite(third_series[s:e])
+                and _all_finite(perc[s:e]) and _all_finite(growl[s:e])):
+            return True
+    return False
 
 SHARE_ROOT = Path("~/Library/Pioneer/rekordbox/share").expanduser()
 DB_PATH = Path("~/Library/Pioneer/rekordbox/master.db").expanduser()
@@ -124,6 +178,9 @@ def run(argv: "Sequence[str]") -> int:
     n_graded = 0
     total_graded_drops = 0
     corpus_basis_count = 0
+    n_graded_v2 = 0          # R4 population reconciliation: v2 onset_mh_p90 set
+    entered_ids = []         # eligible tracks in v3 but not v2 (build report)
+    left_ids = []            # eligible tracks in v2 but not v3 (build report)
     n_drop_tracks = 0        # eligible tracks with >= 3 graded drops (G5)
     n_drop_rankable = 0      # ... of those, with >= 2 distinct composite grades
     term_vals = {k: [] for k in TERMS}   # G2 saturation + G3 correlation
@@ -169,6 +226,20 @@ def run(argv: "Sequence[str]") -> int:
         own_levels = drop_body_levels(v4, raw_drops)
         grades = grade_drops(v4, drop_beats=raw_drops, track_weight=tw,
                              corpus_drop_levels=corpus_dist)
+        # R4 population reconciliation (INFORMATIONAL): grade under both the v3
+        # activity set and the retired v2 onset set; the flux probe is drift-guarded
+        # against the live module.
+        gv3 = _gradeable(v4, raw_drops, corpus_dist, third="flux")
+        gv2 = _gradeable(v4, raw_drops, corpus_dist, third="onset")
+        if gv3 != bool(grades):
+            raise AssertionError(
+                "reconcile probe drift vs grade_drops at %s" % t["content_id"])
+        if gv2:
+            n_graded_v2 += 1
+        if gv3 and not gv2:
+            entered_ids.append(t["content_id"])
+        elif gv2 and not gv3:
+            left_ids.append(t["content_id"])
         if grades:
             n_graded += 1
             basis = grades[0]["body_basis"]
@@ -277,6 +348,11 @@ def run(argv: "Sequence[str]") -> int:
     emit("  attach-match rate (smart drops on a graded raw beat) = %s (%d/%d, INFORMATIONAL)"
          % (("%.3f" % match_rate) if match_rate is not None else "n/a",
             smart_matched, smart_total))
+    emit("  population reconciliation (R4 swap): graded %d tracks / %d drops (v3 activity set)"
+         "  vs  %d tracks (v2 onset_mh_p90 set)  delta %+d tracks [entered %d, left %d;"
+         " content_ids in build report] (INFORMATIONAL)"
+         % (n_graded, total_graded_drops, n_graded_v2, n_graded - n_graded_v2,
+            len(entered_ids), len(left_ids)))
     emit("")
     g1 = (n_graded / n_by_genre_eligible) if n_by_genre_eligible else 0.0
     emit("ACCEPTANCE: %s   reason=%s" % ("ACCEPTED" if accepted else "NOT ACCEPTED", reason))
@@ -318,6 +394,13 @@ def run(argv: "Sequence[str]") -> int:
     if forced_partial:
         emit("")
         emit("!! PARTIAL RUN (--limit %s): acceptance forced FALSE (partial_run)." % args.limit)
+
+    # entered/left content_ids -> stderr for the build report (NOT the report text:
+    # a variable-length per-track list would make the Task-2 pin fragile).
+    sys.stderr.write("RECONCILE entered(%d)=%s\n"
+                     % (len(entered_ids), ",".join(entered_ids) or "-"))
+    sys.stderr.write("RECONCILE left(%d)=%s\n"
+                     % (len(left_ids), ",".join(left_ids) or "-"))
 
     if args.out:
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)
