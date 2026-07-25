@@ -1,8 +1,8 @@
 ---
 doc_status: current
-truth_level: operator-ratified amendment log (design authority companion; not code-derived)
-last_verified_commit: 12db265e
-last_verified_date: 2026-07-24
+truth_level: mixed — operator-ratified where an entry says so, otherwise exec-adopted process law (each entry's provenance paragraph is authoritative; design authority companion; not code-derived)
+last_verified_commit: a88c5921
+last_verified_date: 2026-07-25
 validation_scope: >
   Design/architecture amendments only. SOFTWARE-VALIDATED ONLY /
   HARDWARE-UNVALIDATED. Authorizes no implementation, dependency, runtime, or
@@ -267,3 +267,199 @@ document stand unchanged everywhere not explicitly supplemented above.
 
 *(End of AMENDMENT-3. Next amendment, if ever adopted, appends below as AMENDMENT-4.)*
 
+## AMENDMENT-4 (2026-07-25) — four checks from the blind-test failure: entry gates (4a), exemplar hygiene (4b), evidence sufficiency (4c), the suspicious-caveat obligation (4d)
+
+**Adoption provenance:** on 2026-07-25 the operator blind-tested the program's first shipped laser
+list and it hard-failed; the four faults and the root process failure are recorded in
+`local/spectral_v5_2026_07_17/OPUS_EXEC8_handoff_2026_07_25.md` §2–§4 (provenance reference only —
+every normative clause below is inlined). The contamination half of the diagnosis is the hostile
+review `local/spectral_v5_2026_07_17/CTREV1_review.md` (reviewer ≠ author, ruling DISPUTED), §1 F1 and
+§2. Drafted into this log by the A4DRAFT spec-authoring seat (Opus, exec8 dispatch, 2026-07-25),
+cured through the A4REV / A4REV2 hostile reviews and the A4FIX1 / A4FIX2 exec adjudications; applied to
+this log by the executive seat after review.
+
+**Provenance distinction (binding on how this entry is read):** clause 4a's fourth gate RECORDS an
+operator law already ruled (`user_acceptance_gate_the_list`, 2026-07-25 — "length is co-equal with
+location"); this entry records it, it does not create it. The other three 4a gates and clauses 4b, 4c,
+4d are exec-adopted PROCESS law derived from the failure — they become program law ONLY by the exec
+adopting this entry after review, they are exec-adopted NOT operator-ratified, and nothing here is
+approved by operator silence. The operator's standing veto applies to every clause at any time.
+
+**This amendment authorizes no implementation, dependency, runtime, or lighting change.** §7 validation
+doctrine, §8 runtime gates, and §9 step-by-step authorization stand unchanged and govern how every
+clause below may ever be pursued. AMENDMENTS 1–3 stand unchanged.
+
+**The root failure these four clauses close.** Every gate this program built asked *"is this internally
+consistent?"* — byte-fidelity, sha match, bar reproduction, hunk-map coverage. None ever asked *"does
+this design use the evidence he actually gave us?"* His words were converted to coordinates ONCE, early
+(*"lasts 8 beats and then tapers off"* → `[416,424)`); from then on every gate verified the translation
+against itself, and eight review rounds passed while the design ignored 48 of his 54 verdict records.
+The clauses below make those questions failable.
+
+### Clause 4a — Four mandatory entry gates, before any laser or accent spec is sealed
+
+**Base clauses touched:** §7 (validation doctrine) — SUPPLEMENTED with pre-seal entry gates; §0's
+deliverable (the acceptance list) — constrained.
+
+**Law text:** every laser/accent spec passes all four gates below before it is sealed; each gate names
+its instrument, a configuration in which it can fail, and the consequence of failing, and a gate that
+cannot fail is not a gate (see 4c). The reasons a gate accepts — a record declared unusable (gate 1), a
+structure declared unrepresentable (gate 3), and the significance a run asserts (gate 2) — are REVIEWABLE
+EVIDENCE at the sealing review, not a checkbox: a spec does not pass by declaring everything unusable,
+unrepresentable, or weakly significant with plausible prose.
+
+**The satisfiability standard is not scoped to gates.** It binds EVERY mandatory obligation a spec
+imposes, gate or not: each must name the instrument that computes or checks it, and must be dischargeable
+by a lawful route without violating any closed set or other obligation in the same document. An
+obligation with no instrument, or one no lawful route can satisfy, is a DEFECT TO REPORT as an open
+adjudication — never patched, never satisfied by widening a closed set. A sweep for this class MUST NOT
+be scoped to gates alone: the energy lane demonstrated the hole live — a mandatory NON-gate obligation
+with no instrument, colliding with another gate's closed permitted set, fell straight through a
+gate-scoped sweep (`ER5REV_review.md` finding 1, `:39`; "instrumented: no … explicitly not a gate,"
+`:322-323`).
+
+**Gate 1 — Corpus-use declaration.** *Required:* the spec enumerates every record in his sealed verdict
+corpus — 54 records, one revised by the 2026-07-22 addendum (55 lines across
+`local/laser_drop_spans_2026_07_16/review_verdicts.jsonl`, 54 records, and `verdict_addenda_2026_07_22.jsonl`,
+1 revision of item 3) — and states, per record, whether the design uses it and why, or why it cannot. A
+record that cannot be used is REPORTED, never silently dropped. *Instrument / can-fail:* the enumeration
+lives in the spec and is checked against the corpus record count (54); it fails if any record is neither
+used-with-reason nor reported-unusable. *Consequence:* the spec is not sealable. *(Closes: 48 of 54
+records invisible to eight review rounds.)*
+
+**Gate 2 — Operator-positives.** *Required:* his confirmed positives outrank the presentation floor,
+measured on the RUN'S OWN OUTPUT plus his verdict corpus, BEFORE any list reaches him, with self-matches
+excluded (an exemplar matching itself is not evidence; leave-one-out per class). "Presentation floor" is
+the score of the lowest row actually presented (`laser_drop_warrant_spec_v7.md:112-116`, §C). *Pass
+threshold (governed — no self-owned number):* the pass count/fraction is PROPOSED by the authoring spec,
+APPROVED by the sealing review (reviewer ≠ author) and the exec on adoption, NEVER self-approved by the
+authoring seat; PREDECLARED before the run's output is scored, provably (the mtime chain that proved
+`CORPUSTEST1_predeclaration.md` predated its results by 11 minutes, `CTREV1_review.md:58`, is the
+standard); and stated as a count/fraction of the **M** non-self-matching confirmed positives, with **M**
+printed beside it so the bar is legible against how many positives exist. It is INADMISSIBLE if an
+uninformative ranking would clear it, at the run's own n, more often than the significance the spec
+asserts (4c's best-achievable-significance test, turned on this gate itself), or if it could be met by
+self-matches. *Instrument / can-fail:* the corpus-vs-output separation measurement CTREV1 confirmed sound
+— reference `local/spectral_v5_2026_07_17/CORPUSTEST1_separation.py` (its arithmetic was independently
+re-derived and banked; its DIAGNOSIS was disputed — run it against a 4b-clean exemplar set); the gate
+fails when fewer than the predeclared admissible threshold of his confirmed positives clear the floor
+once self-matches are removed. *Consequence:* the run does not ship a list; the failure is reported by
+which positives fell below the floor. *(Closes: of 31 confirmed-YES growls, only the 3 self-matching
+exemplars cleared the shipped floor — and a self-owned threshold of 1 would have waved that run through.)*
+
+**Gate 3 — Representability.** *Required:* for each structure he states — *skips the 1st beat*, *skips
+the 8th beat*, *rests N beats then repeats*, *tapers off*, *stabs N times in one bar*, *repeats
+throughout*, *lasts the entire drop section* — the spec states how the design CARRIES it, or declares it
+UNREPRESENTABLE and why. *Instrument / can-fail:* a per-structure table in the spec, each row a checkable
+property (carried / unrepresentable-with-reason), not prose; it fails if any stated structure is
+neither. *Consequence:* the spec is not sealable. *(His descriptions must survive as properties later
+checks can still fail against, instead of dying at the first translation to coordinates.)*
+
+**Gate 4 — Length is a required output, co-equal with location.** Operator law, verbatim
+(`user_acceptance_gate_the_list`, 2026-07-25): *"how long the lasers last for is literally AS important
+because the LASERS need to ACCENT the moment."* *Required:* every laser/accent row emits a start AND an
+extent, each with honest uncertainty; that uncertainty takes the AMENDMENT-3 clause 3c form
+(`spectral_program_design_authority_amendments.md:257-261`) — an interval and/or a categorical basis
+record — NEVER a numeric confidence float, which 3c bans at every layer. *Instrument / can-fail:* the
+output-shape check — every deliverable row carries both a start field and a length/extent field; it fails
+if any row carries a location and no length, or if the output shape has no length field at all.
+*Consequence:* a row without a length is NOT a deliverable row and cannot be presented; such a spec is
+not sealable. This CORRECTS the program's earlier reading of the detector-v3 stop ruling as "route
+around length": that ruling made length first-class UNCERTAINTY, never absent.
+
+### Clause 4b — Exemplar hygiene
+
+**Base clauses touched:** §2 warrant-family definitions — constrained; supplements AMENDMENT-3 clause 3a
+with an exemplar-provenance law.
+
+**Law text:** an exemplar drawn from a moment the operator ruled warrant-negative may NEVER score
+candidates. Demoting such an exemplar from a bar LEG while leaving it SCORING every candidate does not
+satisfy this — that exact half-measure is what shipped: P3, drawn from item 12 (operator verdict NO), was
+demoted from the §D.1 ship condition to a printed diagnostic (`laser_drop_warrant_spec_v7.md:124-133`)
+yet still scored every candidate (`:31-34`, §A.2), and CTREV1 measured it driving both the failed
+separation and the inversion (`CTREV1_review.md` §1 F1, §2). *Audit obligation:* every exemplar family
+declares each exemplar's operator verdict; any family carrying a warrant-negative or cross-track-spliced
+anchor is REPORTED before the family is used. *Instrument / can-fail:* the per-exemplar verdict table in
+the spec, checked against the verdict corpus; it fails if any exemplar with a NO / warrant-negative
+verdict appears in a candidate-scoring set. *Consequence:* the family is not usable until that anchor is
+removed.
+
+**Selection discipline (the cure's own trap):** exemplar sets are chosen BY LAW, not by score. Choosing
+among law-clean exemplars by maximising a statistic on his corpus is fitting to the test set. Among
+law-clean candidates the default is KEEP THEM ALL; a better-scoring subset is REPORTED AS A SENSITIVITY,
+never adopted as a selection.
+
+### Clause 4c — Evidence sufficiency: a test that cannot fail is not evidence
+
+**Base clauses touched:** §7 (validation doctrine) — SUPPLEMENTED.
+
+The Stage-A representation was crowned "pilot winner" on SIX pair-ordering comparisons — two positives ×
+three negatives (`r4_stage_a_v1/results/metrics.json`, `falsifiers.F1.n_pairs` = 6). Under the null that
+the representation is uninformative, a perfect score there occurs with probability 1/C(5,2) = 1/10, so
+the best achievable p-value of the whole eligibility test was 0.10 — one in ten uninformative
+representations passes it perfectly. And Stage-A won by ELIMINATION: the pilot's own verdict was
+"NEITHER" (`RBT4_report.md:23-25`, `:29-33`), all three learned encoders disqualified on inversions,
+none reaching the beat-the-baseline comparison; half its positive evidence came from the contaminated
+exemplar of 4b (`CTREV1_review.md` §2).
+
+**Law text (binds forward and backward):**
+
+- Every comparative claim states the BEST ACHIEVABLE SIGNIFICANCE OF ITS OWN DESIGN — what the test could
+  have shown had it worked perfectly — BEFORE the result is reported. *Instrument / can-fail:* the
+  significance is computed from the test's own n (the null probability of a perfect score) and printed
+  beside the claim; it fails if the claim is reported without it, or if that best-achievable significance
+  does not clear what the claim asserts.
+- "Won by elimination" and "won by demonstrated skill" are DIFFERENT CLAIMS and are never interchangeable
+  in later documents. The specific overclaim to stop propagating: downstream specs promoted the pilot to
+  *"the only eligible representation"* (`laser_warrant_list_spec_v3.md:16`, identically `v2:14`), and the
+  phrase then did load-bearing work in every spec after it.
+- A superseded claim is CORRECTED where it is carried, not merely footnoted somewhere newer. For an
+  editable (non-sealed) carrier this is an in-place correction. **For a sealed, sha-pinned, or
+  append-only carrier — whose bytes may never be edited (`spectral_program_design_authority_amendments.md:16-19`,
+  the same byte-freeze that protects this log) — the correction is a BINDING SUPERSESSION recorded in the
+  controlling forward authority (this amendment log, or a superseding non-sealed spec) that (i) names the
+  sealed document and the exact superseded claim, and (ii) is MANDATORY for anyone citing that document —
+  so the correction travels WITH the sealed claim and is not a stray unlinked footnote. The sealed bytes
+  are never edited.**
+
+*Consequence:* a spec resting on a comparative claim that fails either the significance test or the
+elimination-vs-skill distinction is not sealable; the claim is corrected — in place if editable, else by
+binding forward supersession — before any successor cites it.
+
+**Correction at source, recorded here (the binding supersession 4c requires — MANDATORY for anyone
+citing these documents):** the claim that the Stage-A engineered representation (R-ENG) is the *"pilot
+winner"* / *"the only eligible representation"* — carried at `laser_warrant_list_spec_v2.md:14`,
+`laser_warrant_list_spec_v3.md:16`, and `laser_warrant_v1/results/report.md:3` — is SUPERSEDED. It won
+its eligibility pilot by ELIMINATION, not demonstrated skill: the pilot's own verdict was "NEITHER"
+(`RBT4_report.md:23-25`), the three learned encoders were disqualified on inversions and none reached
+the beat-the-baseline comparison, the whole test's best achievable p-value was 0.10 (six pair-orderings;
+`r4_stage_a_v1/results/metrics.json`, `falsifiers.F1.n_pairs` = 6), and half its positive evidence came
+from the P3 exemplar since ruled warrant-negative (`CTREV1_review.md` §2). Spec v3 is content-pinned by a
+frozen package (`laser_warrant_v1/MANIFEST.json` — `pin_table` + `spec` block, `frozen_at: LWT1`) and
+`report.md` is a regenerable output of the frozen runner, so their bytes stay untouched; THIS record is
+the lawful correction, and any document citing R-ENG as a "winner" or "the only eligible representation"
+must carry this supersession with it.
+
+### Clause 4d — A suspicious caveat is a test to run, not a sentence to write
+
+**Base clauses touched:** §7 (validation doctrine) and §5 (presentation discipline) — SUPPLEMENTED;
+obligation on the delivering seat.
+
+**Law text:** when a delivery's own disclosure names, in one sentence, a large SHARE of the output AND a
+WEAKNESS in the evidence under it, that is a MEASUREMENT TO RUN BEFORE DELIVERY, not a caveat to write.
+*Trigger (concrete):* any caveat pairing a share of the output with a weakness in the same sentence.
+*Instrument / can-fail:* the delivering seat runs the measurement the caveat implies and reports the
+result in place of the caveat; it fails if a delivery ships carrying such a caveat unmeasured.
+*Consequence:* the delivery is held until the measurement runs; if it fails, no rows ship. *(The instinct
+was correct — exec reported "12 of the 24 shipped rows rest on your most doubtful example" to the
+operator AS A CAVEAT and treated a defect as a disclosure — `OPUS_EXEC8_handoff_2026_07_25.md` §5; the
+one-minute measurement it implied would have caught the contamination first.)*
+
+**Effect on the program:** every future laser / accent / energy spec, scored run, and operator delivery
+is judged against these four clauses. A spec that cannot show it passed 4a's four gates, kept 4b's
+exemplar hygiene, stated 4c's best-achievable significance, and ran 4d's implied measurement is not
+sealed and does not deliver; agents cite these clauses and never re-derive them. Boundaries (§1),
+rejections (§3), validation doctrine (§7), and runtime gates (§8) of the base document, and AMENDMENTS
+1–3, stand unchanged everywhere not explicitly supplemented above.
+
+*(End of AMENDMENT-4. Next amendment, if ever adopted, appends below as AMENDMENT-5.)*
