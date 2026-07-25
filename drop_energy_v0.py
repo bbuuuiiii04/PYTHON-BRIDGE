@@ -228,16 +228,16 @@ def score_windows(v4, window_beats, *, body_pool) -> "list[dict]":
     norms = _track_normalisers(v4)
     if norms is None:
         return []
-    onset_p90, growl_p90, perc_p90 = norms
+    flux_p90, growl_p90, perc_p90 = norms
     series = getattr(v4, "series", None) or {}
     full = series.get("full_db")
-    onset = series.get("onset_density_midhigh")
+    flux = series.get("fluxsum_midhigh")
     perc = series.get("perc_high")
     growl = series.get("growl_flatness")
-    if not full or not onset or not perc or not growl:
+    if not full or not flux or not perc or not growl:
         return []
     n = int(getattr(v4, "n_beats", 0) or 0)
-    if n <= 0 or min(len(full), len(onset), len(perc), len(growl)) < n:
+    if n <= 0 or min(len(full), len(flux), len(perc), len(growl)) < n:
         return []
     pool = sorted(body_pool)
     out: "list[dict]" = []
@@ -248,18 +248,18 @@ def score_windows(v4, window_beats, *, body_pool) -> "list[dict]":
         coverage = e - s
         if coverage < MIN_WINDOW_BEATS:
             continue
-        fw, ow, pw, gw = full[s:e], onset[s:e], perc[s:e], growl[s:e]
-        if not (_all_finite(fw) and _all_finite(ow)
+        fw, xw, pw, gw = full[s:e], flux[s:e], perc[s:e], growl[s:e]
+        if not (_all_finite(fw) and _all_finite(xw)
                 and _all_finite(pw) and _all_finite(gw)):
             continue
         level = (sum(fw) / coverage) - ref
         body = _mid_rank(pool, level)
-        onset_term = _clip01((sum(ow) / coverage) / onset_p90)
+        activity_term = _clip01((sum(xw) / coverage) / flux_p90)
         perc_term = _clip01((sum(pw) / coverage) / perc_p90)
         growl_term = _clip01((sum(gw) / coverage) / growl_p90)
-        within = (body + onset_term + perc_term + growl_term) / 4.0
+        within = (body + activity_term + perc_term + growl_term) / 4.0
         out.append({"beat": beat, "coverage": coverage, "body": body,
-                    "onset": onset_term, "perc_high": perc_term,
+                    "activity": activity_term, "perc_high": perc_term,
                     "growl": growl_term, "within_track": within})
     return out
 
