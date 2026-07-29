@@ -567,8 +567,8 @@ def _slope_read_sites(text: str,
     (the EBUILD3REV3 defect: `.pop`, `.__getitem__`, an `.items()` key check and a
     `case {"slope": …}` mapping pattern all slipped past a two-spelling detector),
     this inverts the test: it finds EVERY `ast.Constant` whose value is exactly
-    `"slope"` and allows exactly ONE context — the slice of a `Subscript` in **Store**
-    context, i.e. the producer statement `grade["slope"] = value`. An augmented
+    `"slope"` and allows exactly ONE SITE — the producer module's plain-assignment
+    write `grade["slope"] = value` (see the site-specific rule above). An augmented
     assignment (`grade["slope"] += x`) is Store context but READS first, so it is
     flagged explicitly. Everything else is reported with a form label. That makes the
     covered set "every read form whose key is a literal in this file", which is
@@ -577,10 +577,17 @@ def _slope_read_sites(text: str,
     `energy_model`, `anlz_reader` — verified: they contain no `"slope"` string
     constant), because an attribute `obj.slope` is not a string constant.
 
-    **What this CANNOT see (stated because the contract says "any", and a fence that
-    overclaims is the defect this whole cure round exists to fix):**
-    1. a COMPUTED or run-time key — `k = "sl" + "ope"; g[k]`, `g[f"sl{x}"]`, or
-       `g[some_variable]` where the value arrives from data;
+    **What this CANNOT see — EXACTLY FOUR CATEGORIES.** One count is used in every
+    document (this docstring, the fence's failure message, the E2 contract entry, the
+    build reports, the exec ruling); source-in-a-string is folded into category 1
+    rather than counted as a fifth (EBUILD3REV4 fix 3). Stated because the contract's
+    LAW says "any read", and a fence that overclaims is the defect this cure round
+    exists to fix:
+    1. a COMPUTED or RUN-TIME key — `k = "sl" + "ope"; g[k]`, `g[f"sl{x}"]`,
+       `g[some_variable]` where the value arrives from data, **and source-in-a-string
+       (`eval('g["slope"]')`), which belongs to this same category**: in every one of
+       these the literal `"slope"` never appears as a key constant. (`eval` in a
+       runtime module is additionally its own defect.)
     2. a CROSS-FILE alias — `from other import KEY` then `g[KEY]`. The *defining*
        file is still flagged (its `KEY = "slope"` is a literal), so the alias has to
        be defined in an exempt or allowlisted file to hide;
@@ -590,9 +597,10 @@ def _slope_read_sites(text: str,
        or payload builder that later reads it dynamically. That is a different
        violation shape (it surfaces every facet at once) and is what the
        `current_section` five-key projection and the status-shape test guard.
-    These four are genuinely outside static reach for a single-file AST scan; they
-    are disclosed in the fence's failure message, in `EBUILD3FIX3_report.md`, and in
-    the E2 contract entry rather than papered over by the word "any"."""
+    All four are genuinely outside static reach for a single-file AST scan, and all
+    four — **including the cross-file alias** (EBUILD3REV4 fix 1) — are ASSERTED BLIND
+    by `test_documented_blind_spots_are_really_blind`, so the disclosure cannot go
+    stale without the suite failing."""
     try:
         tree = ast.parse(text)
     except SyntaxError:
@@ -602,6 +610,10 @@ def _slope_read_sites(text: str,
             child._slope_parent = parent
     aug_targets = {id(n.target) for n in ast.walk(tree)
                    if isinstance(n, ast.AugAssign)}
+    # ONLY a direct target of a plain `x[...] = v` assignment can be the producer write
+    assign_targets = {id(t) for n in ast.walk(tree) if isinstance(n, ast.Assign)
+                      for t in n.targets}
+    is_producer = (rel_path == _PRODUCER_REL)
     sites: "list[tuple[int, str]]" = []
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Constant) and node.value == "slope"):
@@ -609,12 +621,19 @@ def _slope_read_sites(text: str,
         p = getattr(node, "_slope_parent", None)
         if isinstance(p, ast.Subscript) and p.slice is node:
             ctx = type(p.ctx).__name__
-            if ctx == "Store" and id(p) not in aug_targets:
-                continue                               # the producer's WRITE: allowed
             if id(p) in aug_targets:
                 sites.append((node.lineno, "augmented-assign read"))
             elif ctx == "Del":
                 sites.append((node.lineno, "del of the key"))
+            elif ctx == "Store":
+                if is_producer and id(p) in assign_targets:
+                    continue                  # THE producer write — the one exemption
+                if id(p) not in assign_targets:
+                    sites.append((node.lineno,
+                                  "non-assignment store of the key (e.g. for-target)"))
+                else:
+                    sites.append((node.lineno,
+                                  "write of the key OUTSIDE the producer module"))
             else:
                 sites.append((node.lineno, "subscript read"))
         elif isinstance(p, ast.Call):
@@ -681,7 +700,7 @@ class SlopeConsumerFenceTests(unittest.TestCase):
                 text = path.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError):
                 continue
-            sites = _slope_read_sites(text)
+            sites = _slope_read_sites(text, rel_path=rel)
             if sites:
                 readers[rel] = sites
         offenders = {r: s for r, s in readers.items() if r not in self.CONSUMER_ALLOW}
@@ -692,10 +711,12 @@ class SlopeConsumerFenceTests(unittest.TestCase):
             "only (the clock choice moves 11.66%% of individual published values); an "
             "individual-section consumer requires C1 REOPENED by an explicitly amended "
             "consumer spec — see the E2 entry in docs/agents/change_contracts.yml. "
-            "NOTE the fence's four disclosed blind spots (computed keys, cross-file "
-            "aliases, **-unpacking into a `slope` parameter, whole-dict passthrough) "
-            "are documented on _slope_read_sites: a green fence is not proof that no "
-            "read exists, only that no LITERAL-KEY read does." % offenders)
+            "NOTE the fence's FOUR disclosed blind spots — (1) computed/run-time keys "
+            "(source-in-a-string belongs here), (2) cross-file key aliases, (3) "
+            "**-unpacking into a `slope` parameter, (4) whole-dict passthrough — are "
+            "documented on _slope_read_sites and each is asserted-blind by a test: a "
+            "green fence is not proof that no read exists, only that no LITERAL-KEY "
+            "read does." % offenders)
 
     # every read spelling the fence claims to reject — one planted case each. The
     # EBUILD3REV3 probes (.pop / .__getitem__ / .items()-key-check / match-case) are
@@ -744,14 +765,53 @@ class SlopeConsumerFenceTests(unittest.TestCase):
         ("format_call", 'v = g["{}".format("slope")]'),
     )
 
-    # forms that are NOT flagged, each for a stated reason
+    # forms that are NOT flagged, each for a stated reason. `producer_write` is ignored
+    # ONLY when the file is the producer — see test_store_exemption_is_site_specific.
     IGNORED_FORMS = (
-        ("producer_write", 'grade["slope"] = value'),
         ("unrelated_attribute", 'x = obj.slope'),
         ("unrelated_key", 'd["within_track"] = 1.0'),
         ("unrelated_word_in_comment", '# the slope of the ramp\nx = 1'),
         ("unrelated_identifier", 'slope = compute()\nreturn slope'),
     )
+
+    # writes that must be FLAGGED because they are not THE producer write
+    NON_PRODUCER_WRITE_FORMS = (
+        ("write_in_other_file", 'grade["slope"] = value', None),
+        ("write_in_named_other_file", 'grade["slope"] = value', "state_manager.py"),
+        ("for_target_in_producer", 'for grade["slope"] in values:\n    pass',
+         _PRODUCER_REL),
+        ("augmented_in_producer", 'grade["slope"] += 1.0', _PRODUCER_REL),
+        ("del_in_producer", 'del grade["slope"]', _PRODUCER_REL),
+    )
+
+    # EBUILD3REV4 (b): the 33 snippets are LITERAL-USE PROBES, and several are writes,
+    # presence checks or bare literal uses rather than value reads. Rather than delete
+    # those probes (they are cheap and they catch evasion), the split is recorded here
+    # so any document can cite an exact, tested count instead of calling all 33 "read
+    # forms". Ids listed here are the genuine INDIVIDUAL-VALUE reads.
+    VALUE_READ_IDS = frozenset({
+        # from COVERED_READ_FORMS
+        "subscript", "get", "pop", "dunder_getitem", "items_key_check",
+        "match_mapping", "setdefault", "key_collection", "key_alias_in_file",
+        "augmented_assign", "comprehension", "nested_call_arg",
+        # from EXOTIC_READ_FORMS
+        "fstring_no_placeholder", "implicit_concat", "literal_method_call",
+        "unbound_dict_get", "lambda_sort_key", "getattr_indirection", "ternary_key",
+        "format_call",
+    })
+
+    def test_probe_taxonomy_counts_are_exact(self):
+        """The supported wording, tested rather than asserted in prose: 33 literal-use
+        probes = 20 genuine individual-value reads + 13 conservative probes (writes,
+        presence checks, reader constructions, bare literal uses). All 33 are flagged;
+        only the 20 are 'read forms'. Any document quoting these numbers cites here."""
+        all_ids = [n for n, _ in self.COVERED_READ_FORMS + self.EXOTIC_READ_FORMS]
+        self.assertEqual(len(all_ids), 33)
+        self.assertEqual(len(set(all_ids)), 33, "probe ids must be unique")
+        self.assertTrue(self.VALUE_READ_IDS.issubset(set(all_ids)),
+                        "VALUE_READ_IDS must all be real probe ids")
+        self.assertEqual(len(self.VALUE_READ_IDS), 20)
+        self.assertEqual(len(all_ids) - len(self.VALUE_READ_IDS), 13)
 
     def test_fence_rejects_every_covered_read_form(self):
         """CAN-FAIL per spelling (EBUILD3REV3 cure item 2): each covered form is
@@ -763,11 +823,34 @@ class SlopeConsumerFenceTests(unittest.TestCase):
                 self.assertTrue(sites, "form %r NOT detected: %r" % (name, snippet))
 
     def test_fence_ignores_the_producer_write_and_unrelated_slope_words(self):
+        # the producer write is ignored ONLY under the producer's own path
+        self.assertEqual(
+            _slope_read_sites('grade["slope"] = value', rel_path=_PRODUCER_REL), [],
+            "the producer's own write must stay green")
         for name, snippet in self.IGNORED_FORMS:
             with self.subTest(form=name):
                 self.assertEqual(
                     _slope_read_sites(snippet), [],
                     "form %r should NOT trip the fence: %r" % (name, snippet))
+
+    def test_store_exemption_is_site_specific(self):
+        """EBUILD3REV4 fix 2 — truth-by-tightening. The contract and ruling say only
+        the PRODUCER'S ACTUAL WRITE is exempt. Previously any direct Store-context
+        subscript was skipped in any file, so a `grade["slope"] = v` write added to a
+        non-producer module, and a `for grade["slope"] in values:` target inside the
+        producer, both passed. Each of those is now RED, and only the producer's plain
+        assignment is green — so the instrument matches the stated constraint instead
+        of being broader than it."""
+        for name, snippet, rel in self.NON_PRODUCER_WRITE_FORMS:
+            with self.subTest(form=name):
+                sites = _slope_read_sites(snippet, rel_path=rel)
+                self.assertTrue(
+                    sites,
+                    "form %r (file=%r) must be flagged — only the producer's plain "
+                    "assignment is exempt: %r" % (name, rel, snippet))
+        # and the unknown-caller default is STRICT (an unlabeled file is not the producer)
+        self.assertTrue(_slope_read_sites('grade["slope"] = value'),
+                        "rel_path=None must default to NOT-the-producer")
 
     def test_documented_blind_spots_are_really_blind(self):
         """The four disclosed blind spots are ASSERTED blind, so the disclosure cannot
@@ -775,16 +858,24 @@ class SlopeConsumerFenceTests(unittest.TestCase):
         test fails and the docstring/contract/report wording must be updated to claim
         the wider coverage. An honest limit is a tested limit."""
         blind = (
-            ("computed_key", 'k = "sl" + "ope"\nv = grade[k]'),
-            ("fstring_key", 'v = grade[f"sl{tail}"]'),
-            ("variable_key_from_data", 'v = grade[field_name]'),
-            ("kwargs_unpack_into_param", 'def f(slope=None):\n    return slope\n'
-                                         'f(**grade)'),
-            ("whole_dict_passthrough", 'payload = dict(grade)\nsend(payload)'),
-            # source-in-a-string: the constant is the PROGRAM text, not the key. Same
-            # class as a computed key (blind spot 1); listed because it is the obvious
-            # deliberate evasion, and `eval` in a runtime module is its own defect.
-            ("eval_source_string", 'v = eval(\'g["slope"]\')'),
+            # category 1 — computed / run-time keys (source-in-string folded in here,
+            # NOT counted as a fifth category: EBUILD3REV4 fix 3)
+            ("cat1_computed_key", 'k = "sl" + "ope"\nv = grade[k]'),
+            ("cat1_fstring_key", 'v = grade[f"sl{tail}"]'),
+            ("cat1_variable_key_from_data", 'v = grade[field_name]'),
+            ("cat1_eval_source_string", 'v = eval(\'g["slope"]\')'),
+            # category 2 — CROSS-FILE alias (EBUILD3REV4 fix 1: disclosed as blind but
+            # never asserted blind until now). The READING file carries no "slope"
+            # literal at all; only the DEFINING file does, and that file is flagged.
+            ("cat2_cross_file_alias",
+             'from other import KEY\nv = grade[KEY]'),
+            ("cat2_cross_file_alias_module_attr",
+             'import other\nv = grade[other.KEY]'),
+            # category 3 — **-unpacking into a parameter named slope
+            ("cat3_kwargs_unpack_into_param",
+             'def f(slope=None):\n    return slope\nf(**grade)'),
+            # category 4 — whole-dict passthrough to a dynamic reader
+            ("cat4_whole_dict_passthrough", 'payload = dict(grade)\nsend(payload)'),
         )
         for name, snippet in blind:
             with self.subTest(blind_spot=name):
