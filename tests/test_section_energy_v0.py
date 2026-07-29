@@ -261,6 +261,17 @@ _SEG_VOCAB = {"markers", "section_map"}
 _CONTRAST_VOCAB = {"flat", "normal"}
 
 
+def _trailing_t_pos(slope_win, s, e, w):
+    """The FORBIDDEN trailing reduction (`lo = s`, C3's sign-inverting MODE), written
+    here in the TEST only so a case can prove production does not implement it. This
+    is the one difference from `section_energy_v0._section_slope`, whose in-section
+    form starts at `min(e - 1, s + w - 1)`."""
+    vals = [x for x in slope_win[s:e] if x is not None]
+    if not vals:
+        return None
+    return sum(max(0.0, x) for x in vals) / len(vals)
+
+
 class FacetPublicationTests(unittest.TestCase):
     def _grade(self, v4=None, drops=(32,), ups=(0,), downs=(), tw=None):
         return grade_sections(v4 or _v4(), anlz_drops=list(drops),
@@ -320,6 +331,49 @@ class FacetPublicationTests(unittest.TestCase):
         params = inspect.signature(section_energy_v0._section_slope).parameters
         self.assertNotIn("mode", params)
         self.assertNotIn("MODE", params)
+
+    def test_reduction_is_in_section_not_trailing(self):
+        """DISCRIMINATING (EBUILD3REV finding 2): the no-`mode`-parameter check above
+        still passes an implementation that HARD-CODES the forbidden trailing form
+        `lo = s`. This case fails it. A cross-boundary slope series is built whose
+        IN-SECTION reduction (`lo = min(e-1, s+w-1)`, skipping the beats whose
+        attentional window reaches back into the PREVIOUS section) and TRAILING
+        reduction (`lo = s`, carrying that rise in) provably differ; production must
+        return the in-section value. C3 measured that the trailing window inverts the
+        predicted label ordering, which is why it is forbidden."""
+        w, s, e = 6, 8, 20
+        # beats 8..12 carry a strong rise in from the previous section; 13..19 are flat
+        slope_win = [None] * 8 + [2.0] * 5 + [0.0] * 7
+        in_section = section_energy_v0._section_slope(slope_win, s, e, w)
+        trailing = _trailing_t_pos(slope_win, s, e, w)          # the FORBIDDEN form
+        # the fixture is discriminating: the two reductions are far apart
+        self.assertAlmostEqual(in_section, 0.0, places=12)
+        self.assertAlmostEqual(trailing, 10.0 / 12.0, places=12)
+        self.assertGreater(abs(trailing - in_section), 0.5)
+        # and production implements the in-section one
+        self.assertAlmostEqual(in_section, 0.0, places=12)
+        self.assertNotAlmostEqual(in_section, trailing, places=6)
+
+    def test_published_slope_uses_in_section_reduction(self):
+        """The same discrimination through the PUBLISHED path: a rise-then-flat track
+        whose second section is flat. The in-section reduction reads ~0 there; the
+        trailing reduction carries the earlier rise in and reads materially higher.
+        The published `slope` must equal the in-section value."""
+        n = 64
+        full = tuple([-40.0 + 1.0 * i for i in range(32)] + [-8.0] * 32)
+        v4 = _v4(n_beats=n, full=full, ref=-8.0)
+        g = self._grade(v4=v4)                       # sections [0,32) up, [32,64) chorus
+        flat = [r for r in g if r["start_beat"] == 32]
+        self.assertTrue(flat, "expected a section starting at beat 32")
+        published = flat[0]["slope"]
+        bpm = section_energy_v0._derive_bpm(v4)
+        slope_win, w = section_energy_v0._slope_series(full, -8.0, n, bpm)
+        want_in = section_energy_v0._section_slope(slope_win, 32, 64, w)
+        want_trailing = _trailing_t_pos(slope_win, 32, 64, w)
+        self.assertAlmostEqual(published, want_in, places=12)
+        # the fixture genuinely separates the two reductions on the published path
+        self.assertGreater(want_trailing, want_in)
+        self.assertNotAlmostEqual(published, want_trailing, places=6)
 
     def test_slope_absent_without_a_beat_clock(self):
         # duration_s <= 0 or non-finite -> no derivable bpm -> slope ABSENT (never a
