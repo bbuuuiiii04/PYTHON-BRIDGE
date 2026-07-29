@@ -541,9 +541,27 @@ class ImportFenceTests(unittest.TestCase):
 # --------------------------------------------------------------------------- #
 # Slope consumer fence (C1 aggregate-only condition, A4 enforcement instrument) #
 # --------------------------------------------------------------------------- #
-def _slope_read_sites(text: str) -> "list[tuple[int, str]]":
+_PRODUCER_REL = "section_energy_v0.py"     # the ONE module allowed to write the key
+
+
+def _slope_read_sites(text: str,
+                      rel_path: "Optional[str]" = None) -> "list[tuple[int, str]]":
     """Every LITERAL-KEY use of the `"slope"` grade key that is not the producer's
-    own write, as `[(lineno, form), …]`.
+    own write statement, as `[(lineno, form), …]`.
+
+    **The exemption is SITE-SPECIFIC, not context-generic (EBUILD3REV4 fix 2).** An
+    earlier version skipped *any* direct Store-context subscript in *any* file, which
+    was broader than what the contract and ruling claimed: a `grade["slope"] = v`
+    write added to a NON-producer module, or a `for grade["slope"] in values:` loop
+    target inside the producer, both slipped through. The exemption now requires all
+    three of: `rel_path` **is the producer module**, the subscript is in **Store**
+    context, and the subscript is a **direct target of a plain `ast.Assign`**. A
+    for-loop target, a `with … as`, an augmented assignment, or a write in any other
+    file is reported. `rel_path=None` (an unknown caller, e.g. a bare snippet) is
+    treated as NOT the producer — the strict default, so an unlabeled file can never
+    be silently granted the producer's exemption. Deliberately NOT line-pinned: a line
+    number breaks on any innocuous shift above it, which would make the fence noisy
+    rather than truthful.
 
     **Method, and why it is shaped this way.** Rather than enumerate read spellings
     (the EBUILD3REV3 defect: `.pop`, `.__getitem__`, an `.items()` key check and a
