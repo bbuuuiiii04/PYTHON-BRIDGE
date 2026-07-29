@@ -890,26 +890,41 @@ allows only `state_manager.py` + `tools/` + `tests/` to import it.
   `build_phrase_segments_from_markers` (markers → up/chorus/low), falling back to
   `section_map` blocks (label "other"), then `[]`. Grades carry their own
   `start_beat`/`end_beat`.
-- **Facets published (§2/§3), recorded not surfaced.** Every grade dict also
-  carries `segmentation_basis` in {`markers`, `section_map`} (WHICH lawful basis
-  drew the boundaries — `_normalized_segments` now RETURNS it), `contrast_class` in
-  {`flat`, `normal`} (`flat` iff the unclipped per-section `rel` range < 5.0 dB;
-  the `label` stays the runway authority), and **`slope`** — the within-section
-  loudness-trajectory channel: the mean POSITIVE per-beat slope (`t_pos`) of the
-  smoothed `full_db` over a ~3 s attentional window, published RAW in dB per
-  window, NON-negative and NOT mapped to [0,1] (that presentation belongs to E4).
-  The slope beat clock is derived IN-MODULE (`60 × n_beats / duration_s`) so
-  `grade_sections` keeps its signature; the windowed math is a byte-copy of the C3
-  prototype; only the in-section window is offered (the trailing window inverts the
-  sign); an underivable clock or a section with no finite windowed slope yields an
-  ABSENT `slope`, never a fabricated 0.0. The facets ride the ANLZ payload record
-  but NEVER the status block: `current_section` PROJECTS the per-deck E2 block to
-  the frozen `{start_beat, end_beat, label, within_track, library_scaled}`, so the
-  status shape is unchanged while the grade dicts grow.
+- **Facets published (§2/§3), recorded not surfaced.** Two facets are on **every**
+  grade dict: `segmentation_basis` in {`markers`, `section_map`} (WHICH lawful basis
+  drew the boundaries — `_normalized_segments` now RETURNS it) and `contrast_class`
+  in {`flat`, `normal`} (`flat` iff the unclipped per-section `rel` range < 5.0 dB;
+  the `label` stays the runway authority).
+- **`slope` — a CONDITIONAL third facet (present when derivable, ABSENT otherwise —
+  never fabricated).** The within-section loudness-trajectory channel: the mean
+  POSITIVE per-beat slope (`t_pos`) of the smoothed `full_db` over a ~3 s attentional
+  window, published RAW in dB per window, NON-negative and NOT mapped to [0,1] (that
+  presentation belongs to E4). The beat clock is derived IN-MODULE
+  (`60 × n_beats / duration_s`) so `grade_sections` keeps its signature; the windowed
+  math is a byte-copy of the C3 prototype; only the in-section window is offered (the
+  trailing window inverts the sign). **The key is OMITTED — not `0.0`, not `null` —**
+  whenever the clock is underivable (`n_beats ≤ 0`, or `duration_s` non-finite/≤ 0)
+  or no finite windowed slope lands inside the section, so a reader must treat
+  `slope` as optional and MUST NOT read its absence as a zero rise. `within_track` /
+  `library_scaled` are unaffected by an absent slope.
+- **Facets are recorded, never surfaced.** All three ride the ANLZ payload record but
+  NEVER the status block: `current_section` PROJECTS the per-deck E2 block to the
+  frozen `{start_beat, end_beat, label, within_track, library_scaled}`, so the status
+  shape is unchanged while the grade dicts grow.
 - **Flag-off byte-identity.** `RBSS_SECTION_ENERGY` defaults OFF ⇒ zero new
   computation, zero new payload keys, zero new status keys — proven by the kill
   test (UNCHANGED by AWR-291). All compute + the single memoized store read run on
-  the ANLZ worker; the 200 Hz push loop gains nothing.
+  the ANLZ worker.
+- **Push-loop cost: one disclosed exception, not "nothing".** With the flag OFF the
+  push loop gains nothing at all (the path does not execute). With the flag ON, the
+  facet round adds exactly one thing to a push-loop-thread path: `current_section`'s
+  projection BUILDS a five-key dict per deck per status publish (`_publish_snapshot`,
+  up to 20 Hz at `_SNAPSHOT_PUBLISH_INTERVAL_S = 0.05`) where it previously returned
+  an existing dict. Constant-size, allocation-only — no I/O, no lock, no growth with
+  track length, on a call that already scans a few dozen sections. It is stated here
+  rather than quietly excepted, because an invariant this program asserts has to stay
+  literally true: the honest claim is "no I/O and no blocking work in the push loop",
+  not "no work of any kind".
 - **Pinned gates (offline `tools/section_energy_report.py`):** G1 coverage
   `n_graded / n_by_genre_eligible ≥ 0.95`, **G2 saturation** (railed fraction of
   all graded sections `≤ 0.20` — the gate that would have caught the v1 collapse),
