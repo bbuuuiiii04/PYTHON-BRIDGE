@@ -538,5 +538,98 @@ class ImportFenceTests(unittest.TestCase):
                          "section_energy_v0 imported outside allowlist: %s" % offenders)
 
 
+# --------------------------------------------------------------------------- #
+# Slope consumer fence (C1 aggregate-only condition, A4 enforcement instrument) #
+# --------------------------------------------------------------------------- #
+def _reads_slope_key(text: str) -> bool:
+    """True if the source READS a "slope" dict key — `x["slope"]` or `x.get("slope")`.
+
+    Deliberately narrow. It targets the shape an E2 grade consumer takes, NOT an
+    unrelated attribute named `slope` on some other object (`approach_features_v0`
+    and `energy_model` legitimately use that word), because a fence that fires on
+    unrelated code gets disabled instead of obeyed. A WRITE (`d["slope"] = v`) is
+    not a read: the producer assigns the key, consumers subscript it."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return False
+    written = set()
+    for node in ast.walk(tree):          # collect Subscript targets of assignments
+        if isinstance(node, ast.Assign):
+            for tgt in node.targets:
+                if isinstance(tgt, ast.Subscript):
+                    written.add(id(tgt))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Subscript) and id(node) not in written:
+            sl = node.slice
+            if isinstance(sl, ast.Constant) and sl.value == "slope":
+                return True
+        elif isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Attribute) and func.attr == "get":
+                for arg in node.args:
+                    if isinstance(arg, ast.Constant) and arg.value == "slope":
+                        return True
+    return False
+
+
+class SlopeConsumerFenceTests(unittest.TestCase):
+    """The C1 clock ruling permits the per-section `slope` channel for AGGREGATE /
+    label-level use only: the measured clock disagreement moves ~11.66% of individual
+    published slope values (and 10 sections move from exactly 0.0 to positive), so no
+    production consumer may read an INDIVIDUAL grade's slope until C1 is reopened by
+    an explicitly amended consumer spec.
+
+    This is that condition's ENFORCEMENT INSTRUMENT (A4: a mandatory obligation with
+    no instrument is a defect). The IMPORT fence above cannot catch this — it checks
+    which modules import `section_energy_v0`, and `state_manager.py` is already
+    allowed, so a `grade["slope"]` read added there would pass it silently.
+
+    CONSUMER_ALLOW is deliberately EMPTY. Adding an entry here is the visible,
+    reviewable act that says a consumer spec amended C1 — never a quiet edit."""
+
+    SKIP_DIRS = {".git", "graphify-out", "__pycache__", "node_modules", "build",
+                 "dist", "local"}
+    PRODUCER = "section_energy_v0.py"    # WRITES the key; not a consumer
+    CONSUMER_ALLOW = ()                  # EMPTY: no approved individual-slope consumer
+
+    def test_no_production_consumer_reads_an_individual_slope(self):
+        readers = []
+        for path in REPO_ROOT.rglob("*.py"):
+            rel = path.relative_to(REPO_ROOT).as_posix()
+            if any(part in self.SKIP_DIRS or part.startswith(".")
+                   for part in rel.split("/")):
+                continue
+            # tools/ + tests/ are offline/aggregate readers, exempt as the import
+            # fence treats them; the producer writes the key it owns.
+            if rel == self.PRODUCER or rel.startswith("tools/") \
+                    or rel.startswith("tests/"):
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            if _reads_slope_key(text):
+                readers.append(rel)
+        offenders = [r for r in readers if r not in self.CONSUMER_ALLOW]
+        self.assertEqual(
+            offenders, [],
+            "C1 condition violated — production read of an individual section grade's "
+            "'slope' in %s. The slope channel is validated for AGGREGATE/label use "
+            "only; an individual-section consumer requires C1 reopened by an "
+            "explicitly amended consumer spec (see the E2 entry in "
+            "docs/agents/change_contracts.yml)." % offenders)
+
+    def test_fence_detects_both_read_shapes_and_ignores_the_write(self):
+        """The fence itself is tested, so a silently-broken fence cannot pass as a
+        clean corpus (the failure mode of every static check)."""
+        self.assertTrue(_reads_slope_key('v = grade["slope"]'))
+        self.assertTrue(_reads_slope_key('v = grade.get("slope")'))
+        self.assertTrue(_reads_slope_key('if g["slope"] > 0.5: pass'))
+        self.assertFalse(_reads_slope_key('grade["slope"] = value'))   # producer write
+        self.assertFalse(_reads_slope_key('x = obj.slope'))            # unrelated attr
+        self.assertFalse(_reads_slope_key('d["within_track"] = 1.0'))
+
+
 if __name__ == "__main__":
     unittest.main()
