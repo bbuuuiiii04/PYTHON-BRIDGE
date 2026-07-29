@@ -541,36 +541,88 @@ class ImportFenceTests(unittest.TestCase):
 # --------------------------------------------------------------------------- #
 # Slope consumer fence (C1 aggregate-only condition, A4 enforcement instrument) #
 # --------------------------------------------------------------------------- #
-def _reads_slope_key(text: str) -> bool:
-    """True if the source READS a "slope" dict key — `x["slope"]` or `x.get("slope")`.
+def _slope_read_sites(text: str) -> "list[tuple[int, str]]":
+    """Every LITERAL-KEY use of the `"slope"` grade key that is not the producer's
+    own write, as `[(lineno, form), …]`.
 
-    Deliberately narrow. It targets the shape an E2 grade consumer takes, NOT an
-    unrelated attribute named `slope` on some other object (`approach_features_v0`
-    and `energy_model` legitimately use that word), because a fence that fires on
-    unrelated code gets disabled instead of obeyed. A WRITE (`d["slope"] = v`) is
-    not a read: the producer assigns the key, consumers subscript it."""
+    **Method, and why it is shaped this way.** Rather than enumerate read spellings
+    (the EBUILD3REV3 defect: `.pop`, `.__getitem__`, an `.items()` key check and a
+    `case {"slope": …}` mapping pattern all slipped past a two-spelling detector),
+    this inverts the test: it finds EVERY `ast.Constant` whose value is exactly
+    `"slope"` and allows exactly ONE context — the slice of a `Subscript` in **Store**
+    context, i.e. the producer statement `grade["slope"] = value`. An augmented
+    assignment (`grade["slope"] += x`) is Store context but READS first, so it is
+    flagged explicitly. Everything else is reported with a form label. That makes the
+    covered set "every read form whose key is a literal in this file", which is
+    strictly larger than any spelling list, and it stays green on unrelated modules
+    that merely use the WORD slope for their own attributes (`approach_features_v0`,
+    `energy_model`, `anlz_reader` — verified: they contain no `"slope"` string
+    constant), because an attribute `obj.slope` is not a string constant.
+
+    **What this CANNOT see (stated because the contract says "any", and a fence that
+    overclaims is the defect this whole cure round exists to fix):**
+    1. a COMPUTED or run-time key — `k = "sl" + "ope"; g[k]`, `g[f"sl{x}"]`, or
+       `g[some_variable]` where the value arrives from data;
+    2. a CROSS-FILE alias — `from other import KEY` then `g[KEY]`. The *defining*
+       file is still flagged (its `KEY = "slope"` is a literal), so the alias has to
+       be defined in an exempt or allowlisted file to hide;
+    3. `**grade` unpacked into a function whose PARAMETER is named `slope` — the
+       parameter is an identifier, not a string constant;
+    4. whole-dict PASSTHROUGH — handing an entire grade dict to a generic serializer
+       or payload builder that later reads it dynamically. That is a different
+       violation shape (it surfaces every facet at once) and is what the
+       `current_section` five-key projection and the status-shape test guard.
+    These four are genuinely outside static reach for a single-file AST scan; they
+    are disclosed in the fence's failure message, in `EBUILD3FIX3_report.md`, and in
+    the E2 contract entry rather than papered over by the word "any"."""
     try:
         tree = ast.parse(text)
     except SyntaxError:
-        return False
-    written = set()
-    for node in ast.walk(tree):          # collect Subscript targets of assignments
-        if isinstance(node, ast.Assign):
-            for tgt in node.targets:
-                if isinstance(tgt, ast.Subscript):
-                    written.add(id(tgt))
+        return []
+    for parent in ast.walk(tree):                      # annotate parents once
+        for child in ast.iter_child_nodes(parent):
+            child._slope_parent = parent
+    aug_targets = {id(n.target) for n in ast.walk(tree)
+                   if isinstance(n, ast.AugAssign)}
+    sites: "list[tuple[int, str]]" = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.Subscript) and id(node) not in written:
-            sl = node.slice
-            if isinstance(sl, ast.Constant) and sl.value == "slope":
-                return True
-        elif isinstance(node, ast.Call):
-            func = node.func
-            if isinstance(func, ast.Attribute) and func.attr == "get":
-                for arg in node.args:
-                    if isinstance(arg, ast.Constant) and arg.value == "slope":
-                        return True
-    return False
+        if not (isinstance(node, ast.Constant) and node.value == "slope"):
+            continue
+        p = getattr(node, "_slope_parent", None)
+        if isinstance(p, ast.Subscript) and p.slice is node:
+            ctx = type(p.ctx).__name__
+            if ctx == "Store" and id(p) not in aug_targets:
+                continue                               # the producer's WRITE: allowed
+            if id(p) in aug_targets:
+                sites.append((node.lineno, "augmented-assign read"))
+            elif ctx == "Del":
+                sites.append((node.lineno, "del of the key"))
+            else:
+                sites.append((node.lineno, "subscript read"))
+        elif isinstance(p, ast.Call):
+            func = p.func
+            attr = func.attr if isinstance(func, ast.Attribute) else (
+                func.id if isinstance(func, ast.Name) else "?")
+            sites.append((node.lineno, "call-argument read via %s()" % attr))
+        elif isinstance(p, ast.Compare):
+            sites.append((node.lineno, "key-membership / equality check"))
+        elif isinstance(p, ast.MatchMapping):
+            sites.append((node.lineno, "match-case mapping pattern"))
+        elif isinstance(p, (ast.List, ast.Tuple, ast.Set)):
+            sites.append((node.lineno, "literal key collection"))
+        elif isinstance(p, ast.Dict):
+            sites.append((node.lineno, "dict literal key/value"))
+        elif isinstance(p, (ast.Assign, ast.AnnAssign, ast.NamedExpr)):
+            sites.append((node.lineno, "assigned to a name (key alias)"))
+        else:
+            sites.append((node.lineno, "other literal use (%s)" % type(p).__name__))
+    return sites
+
+
+def _reads_slope_key(text: str) -> bool:
+    """Bool wrapper over `_slope_read_sites` — see that docstring for the covered
+    forms and the four disclosed static-analysis blind spots."""
+    return bool(_slope_read_sites(text))
 
 
 class SlopeConsumerFenceTests(unittest.TestCase):
@@ -590,45 +642,139 @@ class SlopeConsumerFenceTests(unittest.TestCase):
 
     SKIP_DIRS = {".git", "graphify-out", "__pycache__", "node_modules", "build",
                  "dist", "local"}
-    PRODUCER = "section_energy_v0.py"    # WRITES the key; not a consumer
     CONSUMER_ALLOW = ()                  # EMPTY: no approved individual-slope consumer
 
     def test_no_production_consumer_reads_an_individual_slope(self):
-        readers = []
-        for path in REPO_ROOT.rglob("*.py"):
+        """The PRODUCER IS INSPECTED TOO (EBUILD3REV3: exempting the whole module was
+        broader than required — only its write needs exempting, and the detector
+        already tells a write from a read). So a future individual-slope read added
+        inside `section_energy_v0.py` itself trips this fence."""
+        readers = {}
+        for path in sorted(REPO_ROOT.rglob("*.py")):
             rel = path.relative_to(REPO_ROOT).as_posix()
             if any(part in self.SKIP_DIRS or part.startswith(".")
                    for part in rel.split("/")):
                 continue
-            # tools/ + tests/ are offline/aggregate readers, exempt as the import
-            # fence treats them; the producer writes the key it owns.
-            if rel == self.PRODUCER or rel.startswith("tools/") \
-                    or rel.startswith("tests/"):
+            # tools/ + tests/ stay exempt as offline/aggregate readers, exactly as the
+            # import fence treats them. NOTHING else is exempt — not even the producer.
+            if rel.startswith("tools/") or rel.startswith("tests/"):
                 continue
             try:
                 text = path.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError):
                 continue
-            if _reads_slope_key(text):
-                readers.append(rel)
-        offenders = [r for r in readers if r not in self.CONSUMER_ALLOW]
+            sites = _slope_read_sites(text)
+            if sites:
+                readers[rel] = sites
+        offenders = {r: s for r, s in readers.items() if r not in self.CONSUMER_ALLOW}
         self.assertEqual(
-            offenders, [],
+            offenders, {},
             "C1 condition violated — production read of an individual section grade's "
-            "'slope' in %s. The slope channel is validated for AGGREGATE/label use "
-            "only; an individual-section consumer requires C1 reopened by an "
-            "explicitly amended consumer spec (see the E2 entry in "
-            "docs/agents/change_contracts.yml)." % offenders)
+            "'slope' key: %s. The slope channel is validated for AGGREGATE/label use "
+            "only (the clock choice moves 11.66%% of individual published values); an "
+            "individual-section consumer requires C1 REOPENED by an explicitly amended "
+            "consumer spec — see the E2 entry in docs/agents/change_contracts.yml. "
+            "NOTE the fence's four disclosed blind spots (computed keys, cross-file "
+            "aliases, **-unpacking into a `slope` parameter, whole-dict passthrough) "
+            "are documented on _slope_read_sites: a green fence is not proof that no "
+            "read exists, only that no LITERAL-KEY read does." % offenders)
 
-    def test_fence_detects_both_read_shapes_and_ignores_the_write(self):
-        """The fence itself is tested, so a silently-broken fence cannot pass as a
-        clean corpus (the failure mode of every static check)."""
-        self.assertTrue(_reads_slope_key('v = grade["slope"]'))
-        self.assertTrue(_reads_slope_key('v = grade.get("slope")'))
-        self.assertTrue(_reads_slope_key('if g["slope"] > 0.5: pass'))
-        self.assertFalse(_reads_slope_key('grade["slope"] = value'))   # producer write
-        self.assertFalse(_reads_slope_key('x = obj.slope'))            # unrelated attr
-        self.assertFalse(_reads_slope_key('d["within_track"] = 1.0'))
+    # every read spelling the fence claims to reject — one planted case each. The
+    # EBUILD3REV3 probes (.pop / .__getitem__ / .items()-key-check / match-case) are
+    # the first four after the two original forms and are named in the ids.
+    COVERED_READ_FORMS = (
+        ("subscript", 'v = grade["slope"]'),
+        ("get", 'v = grade.get("slope")'),
+        ("pop", 'v = grade.pop("slope")'),
+        ("dunder_getitem", 'v = grade.__getitem__("slope")'),
+        ("items_key_check", 'for k, v in grade.items():\n'
+                            '    if k == "slope":\n        use(v)'),
+        ("match_mapping", 'match grade:\n    case {"slope": v}:\n        use(v)'),
+        ("setdefault", 'v = grade.setdefault("slope", 0.0)'),
+        ("membership", 'if "slope" in grade:\n    use(grade)'),
+        ("keys_membership", 'if "slope" in grade.keys():\n    use(grade)'),
+        ("itemgetter", 'from operator import itemgetter\nf = itemgetter("slope")'),
+        ("key_collection", 'for k in ("slope",):\n    v = grade[k]'),
+        ("key_alias_in_file", 'KEY = "slope"\nv = grade[KEY]'),
+        ("augmented_assign", 'grade["slope"] += 1.0'),
+        ("del_key", 'del grade["slope"]'),
+        ("comprehension", 'xs = [g["slope"] for g in grades]'),
+        ("nested_call_arg", 'use(compute(grade.get("slope")))'),
+    )
+
+    # EXOTIC literal-key forms — probed because the claim is "every LITERAL-key read",
+    # and a claim that broad needs its evidence in the suite rather than in a report.
+    # All of these are caught by the inversion design (any "slope" string constant that
+    # is not the producer's write), including ones a spelling list would never list.
+    EXOTIC_READ_FORMS = (
+        ("keyword_arg", 'partial(dict.get, key="slope")'),
+        ("fstring_no_placeholder", 'v = g[f"slope"]'),
+        ("implicit_concat", 'v = g["slo" "pe"]'),
+        ("literal_method_call", 'v = g["slope".lower()]'),
+        ("unbound_dict_get", 'v = dict.get(g, "slope")'),
+        ("dunder_contains", 'if g.__contains__("slope"): pass'),
+        ("dict_update_key", 'g.update({"slope": 0.0})'),
+        ("dict_merge_key", 'g |= {"slope": 1}'),
+        ("lambda_sort_key", 'sorted(gs, key=lambda g: g["slope"])'),
+        ("nested_dict_literal", 'cfg = {"read": {"key": "slope"}}'),
+        ("getattr_indirection", 'v = getattr(g, "get")("slope")'),
+        ("key_list_element", 'KEYS = ["a", "slope"]'),
+        ("ternary_key", 'v = g["slope" if flag else "x"]'),
+        ("annotated_alias", 'K: str = "slope"'),
+        ("returned_literal", 'def k():\n    return "slope"'),
+        ("set_literal", 'S = {"slope"}'),
+        ("format_call", 'v = g["{}".format("slope")]'),
+    )
+
+    # forms that are NOT flagged, each for a stated reason
+    IGNORED_FORMS = (
+        ("producer_write", 'grade["slope"] = value'),
+        ("unrelated_attribute", 'x = obj.slope'),
+        ("unrelated_key", 'd["within_track"] = 1.0'),
+        ("unrelated_word_in_comment", '# the slope of the ramp\nx = 1'),
+        ("unrelated_identifier", 'slope = compute()\nreturn slope'),
+    )
+
+    def test_fence_rejects_every_covered_read_form(self):
+        """CAN-FAIL per spelling (EBUILD3REV3 cure item 2): each covered form is
+        planted and must be detected. A fence is only as good as its detector, so the
+        detector is tested directly rather than trusted."""
+        for name, snippet in self.COVERED_READ_FORMS + self.EXOTIC_READ_FORMS:
+            with self.subTest(form=name):
+                sites = _slope_read_sites(snippet)
+                self.assertTrue(sites, "form %r NOT detected: %r" % (name, snippet))
+
+    def test_fence_ignores_the_producer_write_and_unrelated_slope_words(self):
+        for name, snippet in self.IGNORED_FORMS:
+            with self.subTest(form=name):
+                self.assertEqual(
+                    _slope_read_sites(snippet), [],
+                    "form %r should NOT trip the fence: %r" % (name, snippet))
+
+    def test_documented_blind_spots_are_really_blind(self):
+        """The four disclosed blind spots are ASSERTED blind, so the disclosure cannot
+        silently become stale: if a future detector starts catching one of these, this
+        test fails and the docstring/contract/report wording must be updated to claim
+        the wider coverage. An honest limit is a tested limit."""
+        blind = (
+            ("computed_key", 'k = "sl" + "ope"\nv = grade[k]'),
+            ("fstring_key", 'v = grade[f"sl{tail}"]'),
+            ("variable_key_from_data", 'v = grade[field_name]'),
+            ("kwargs_unpack_into_param", 'def f(slope=None):\n    return slope\n'
+                                         'f(**grade)'),
+            ("whole_dict_passthrough", 'payload = dict(grade)\nsend(payload)'),
+            # source-in-a-string: the constant is the PROGRAM text, not the key. Same
+            # class as a computed key (blind spot 1); listed because it is the obvious
+            # deliberate evasion, and `eval` in a runtime module is its own defect.
+            ("eval_source_string", 'v = eval(\'g["slope"]\')'),
+        )
+        for name, snippet in blind:
+            with self.subTest(blind_spot=name):
+                self.assertEqual(
+                    _slope_read_sites(snippet), [],
+                    "blind spot %r is now DETECTED — update the disclosure wording in "
+                    "_slope_read_sites, the E2 contract entry, and the report, then "
+                    "move this case into COVERED_READ_FORMS." % name)
 
 
 if __name__ == "__main__":
