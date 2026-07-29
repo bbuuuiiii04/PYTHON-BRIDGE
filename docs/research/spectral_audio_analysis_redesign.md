@@ -890,6 +890,22 @@ allows only `state_manager.py` + `tools/` + `tests/` to import it.
   `build_phrase_segments_from_markers` (markers → up/chorus/low), falling back to
   `section_map` blocks (label "other"), then `[]`. Grades carry their own
   `start_beat`/`end_beat`.
+- **Facets published (§2/§3), recorded not surfaced.** Every grade dict also
+  carries `segmentation_basis` in {`markers`, `section_map`} (WHICH lawful basis
+  drew the boundaries — `_normalized_segments` now RETURNS it), `contrast_class` in
+  {`flat`, `normal`} (`flat` iff the unclipped per-section `rel` range < 5.0 dB;
+  the `label` stays the runway authority), and **`slope`** — the within-section
+  loudness-trajectory channel: the mean POSITIVE per-beat slope (`t_pos`) of the
+  smoothed `full_db` over a ~3 s attentional window, published RAW in dB per
+  window, NON-negative and NOT mapped to [0,1] (that presentation belongs to E4).
+  The slope beat clock is derived IN-MODULE (`60 × n_beats / duration_s`) so
+  `grade_sections` keeps its signature; the windowed math is a byte-copy of the C3
+  prototype; only the in-section window is offered (the trailing window inverts the
+  sign); an underivable clock or a section with no finite windowed slope yields an
+  ABSENT `slope`, never a fabricated 0.0. The facets ride the ANLZ payload record
+  but NEVER the status block: `current_section` PROJECTS the per-deck E2 block to
+  the frozen `{start_beat, end_beat, label, within_track, library_scaled}`, so the
+  status shape is unchanged while the grade dicts grow.
 - **Flag-off byte-identity.** `RBSS_SECTION_ENERGY` defaults OFF ⇒ zero new
   computation, zero new payload keys, zero new status keys — proven by the kill
   test (UNCHANGED by AWR-291). All compute + the single memoized store read run on
@@ -932,6 +948,12 @@ static import-fence test enforces the allowlist).
   re-weighted mean over fewer terms (cures a latent v1 silent-reweight). The single
   term-math implementation is `score_windows`; `grade_drops` wraps it and the report
   / G7 reuse it. `library_scaled` = `within_track × track_weight` or null.
+- **Facet publication (§2).** Every grade dict also carries the four term VALUES
+  (`body`, `activity`, `perc_high`, `growl`) beside
+  `within_track`/`library_scaled`/`coverage`/`body_basis` — computed per window,
+  previously discarded, now RECORDED on the grade and in the ANLZ payload but NEVER
+  surfaced (the per-deck status block projects only `beat`/`within_track`/
+  `library_scaled`). `body_basis` is the E3 basis record; no new basis field.
 - **True-drop law honored structurally.** The worker grades RAW ANLZ-marker
   windows, but grades ATTACH to plan decisions built from `meta.smart_drops` and
   ONLY plan-attached true-drop grades are surfaced; `body_basis` is recorded on
