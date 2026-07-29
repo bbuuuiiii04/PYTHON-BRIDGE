@@ -29,7 +29,12 @@ than the relative-dB construction the v1 terms used:
 - `perc_high` = clip01(mean `perc_high` / this track's own p90 of `perc_high`).
 - `growl`     = clip01(mean `growl_flatness` / `growl_timbre_p90`).
 `within_track` = mean of ALL FOUR terms; `library_scaled` = `within_track ×
-track_weight` or None.
+track_weight` or None. Each grade dict also PUBLISHES the four term values
+(`body`, `activity`, `perc_high`, `growl`) beside `within_track` / `library_scaled`
+/ `coverage` / `body_basis` (§2 facet publication) — they were already computed
+per window and until now discarded; they are RECORDED on the grade and in the
+ANLZ payload, and the per-deck status block projects them off (it surfaces only
+`beat` / `within_track` / `library_scaled`).
 
 Four-terms-or-omit law (5f): if ANY of the four normalisers is absent, non-finite,
 or ≤ 0 — the in-module `fluxsum_midhigh` p90, `growl_timbre_p90`, the in-module
@@ -305,9 +310,15 @@ def grade_drops(v4, *, drop_beats, track_weight: "Optional[float]",
         lib = (within * track_weight
                if isinstance(track_weight, (int, float))
                and math.isfinite(track_weight) else None)
+        # §2 facet publication: carry the four term values (already computed by
+        # score_windows one line before the mean, and until now discarded)
+        # through onto the grade dict, beside within_track/library_scaled/
+        # coverage/body_basis. body_basis is the E3 basis record; no new basis.
         out.append({"drop_beat": row["beat"], "within_track": within,
                     "library_scaled": lib, "coverage": row["coverage"],
-                    "body_basis": body_basis})
+                    "body_basis": body_basis,
+                    "body": row["body"], "activity": row["activity"],
+                    "perc_high": row["perc_high"], "growl": row["growl"]})
     return out
 
 

@@ -138,6 +138,7 @@ def run(argv: "Sequence[str]") -> int:
     chorus_withins = []            # chorus sections (G4 + 4c bottom-rail)
     low_withins = []               # 'low' sections (G4 separation + 1e top-rail)
     up_withins = []                # 'up' buildup sections (Task 1e bottom-rail)
+    slope_pairs = []               # (slope, within_track, label) — §3 G3.2 + expressibility
     jitter = {off: [] for off in JITTER_OFFSETS}   # 4b, report-only
     for t in tracks:
         if t["by_genre"]:
@@ -182,6 +183,9 @@ def run(argv: "Sequence[str]") -> int:
                         low_withins.append(w)
                     elif g["label"] == "up":
                         up_withins.append(w)
+                    sl = g.get("slope")   # §3: absent when no derivable clock
+                    if sl is not None:
+                        slope_pairs.append((sl, w, g["label"]))
                 if len(chorus_here) >= 3:
                     n_chorus_tracks += 1
                     if len(set(chorus_here)) >= 2:
@@ -264,6 +268,51 @@ def run(argv: "Sequence[str]") -> int:
     pct_low_top = (100.0 * low_top / n_low) if n_low else 0.0
     emit("  breakdown ('low') sections at the top rail = %d / %d = %.2f%%  (INFORMATIONAL; E2 law counter, Task 1e)"
          % (low_top, n_low, pct_low_top))
+    emit("")
+
+    # ---- §3 slope trajectory channel — RAW t_pos, dB per attentional window ----
+    # G3.2 ordering gate: median published slope must order up > low AND up > chorus.
+    # Per AMENDMENT-4 clause 4c the group ns AND this gate's best-achievable
+    # significance (p = 1/3 — one named group being the max of three is cleared one
+    # time in three by an uninformative channel) are printed BEFORE the verdict.
+    # The research medians (up 0.308 > low 0.207 > chorus 0.180) are the MAPPED-scale
+    # provenance under the B1 ruling; the landed channel is RAW dB/window, so those
+    # are NOT targets — a landed median differing in magnitude while ordering
+    # correctly is a PASS, and the landed medians are reported here for the record.
+    def _fmt(x):
+        return ("%.4f" % x) if x is not None else "n/a"
+    up_sl = sorted(s for s, _w, lab in slope_pairs if lab == "up")
+    low_sl = sorted(s for s, _w, lab in slope_pairs if lab == "low")
+    chorus_sl = sorted(s for s, _w, lab in slope_pairs if lab == "chorus")
+    up_med_s = _pct(up_sl, 50) if up_sl else None
+    low_med_s = _pct(low_sl, 50) if low_sl else None
+    chorus_med_s = _pct(chorus_sl, 50) if chorus_sl else None
+    ordering_ok = (up_med_s is not None and low_med_s is not None
+                   and chorus_med_s is not None
+                   and up_med_s > low_med_s and up_med_s > chorus_med_s)
+    emit("## Slope trajectory channel (§3) — RAW t_pos, dB per attentional window")
+    emit("  G3.2 ordering (up > low AND up > chorus): median slope by label")
+    emit("  group n (slope present): up=%d  low=%d  chorus=%d"
+         % (len(up_sl), len(low_sl), len(chorus_sl)))
+    emit("  best-achievable significance of this ORDERING gate: p = 1/3 (4c; one named group the max of three)")
+    emit("  median slope  up=%s  low=%s  chorus=%s  (RAW dB/window; research MAPPED medians 0.308/0.207/0.180 are provenance, NOT targets)"
+         % (_fmt(up_med_s), _fmt(low_med_s), _fmt(chorus_med_s)))
+    emit("  G3.2 VERDICT: %s" % ("PASS (up > low AND up > chorus)" if ordering_ok
+                                 else "FAIL"))
+    # Expressibility (INFORMATIONAL, not gated): sections a SCALAR cannot express —
+    # top-tercile slope AND bottom-tercile magnitude — now carry distinct 2-vectors.
+    all_sl = sorted(s for s, _w, _l in slope_pairs)
+    all_mag = sorted(w for _s, w, _l in slope_pairs)
+    t_hi = _pct(all_sl, 66.667) if all_sl else None
+    m_lo = _pct(all_mag, 33.333) if all_mag else None
+    for lab in ("low", "up"):
+        pop = [(s, w) for s, w, l in slope_pairs if l == lab]
+        if pop and t_hi is not None and m_lo is not None:
+            n_cross = sum(1 for s, w in pop if s >= t_hi and w <= m_lo)
+            emit("  expressibility %-4s (top-tercile slope & bottom-tercile magnitude) = %d / %d = %.2f%%  (INFORMATIONAL)"
+                 % (lab, n_cross, len(pop), 100.0 * n_cross / len(pop)))
+        else:
+            emit("  expressibility %-4s = n/a  (INFORMATIONAL)" % lab)
     emit("")
     emit("## Boundary-jitter sensitivity (INFORMATIONAL — not a gate)")
     emit("  offset  median |delta|  p90 |delta|")

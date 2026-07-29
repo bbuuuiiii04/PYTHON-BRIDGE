@@ -120,6 +120,21 @@ class ProductAndWindowTests(unittest.TestCase):
         bad[18] = float("nan")
         self.assertEqual(drop_body_levels(_v4(full=bad), [16]), [])  # non-finite window
 
+    def test_facet_publication_terms_on_grade_dict(self):
+        # §2 (Task 3a): every E3 grade dict PUBLISHES the four term values beside
+        # within_track/library_scaled/coverage/body_basis, and within_track is still
+        # exactly their mean (identity preserved — the facets are additive).
+        g = grade_drops(_v4(), drop_beats=[16, 40], track_weight=0.5)
+        self.assertTrue(g)
+        for row in g:
+            for k in ("body", "activity", "perc_high", "growl"):
+                self.assertIn(k, row)
+            self.assertAlmostEqual(
+                row["within_track"],
+                (row["body"] + row["activity"] + row["perc_high"] + row["growl"])
+                / 4.0, places=12)
+            self.assertNotIn("onset", row)     # the retired v1 key never returns
+
     def test_body_basis_selection(self):
         v4 = _v4()
         g = grade_drops(v4, drop_beats=[16, 40], track_weight=None)

@@ -254,6 +254,95 @@ class CurrentSectionTests(unittest.TestCase):
         self.assertIsNone(current_section(grades, 99))                   # outside
 
 
+# --- §2/§3 facet publication + slope channel + 3e status-shape projection -------
+_FROZEN_STATUS_KEYS = {"start_beat", "end_beat", "label",
+                       "within_track", "library_scaled"}
+_SEG_VOCAB = {"markers", "section_map"}
+_CONTRAST_VOCAB = {"flat", "normal"}
+
+
+class FacetPublicationTests(unittest.TestCase):
+    def _grade(self, v4=None, drops=(32,), ups=(0,), downs=(), tw=None):
+        return grade_sections(v4 or _v4(), anlz_drops=list(drops),
+                              anlz_buildups=list(ups), anlz_breakdowns=list(downs),
+                              track_weight=tw)
+
+    def test_facets_present_and_closed_vocab(self):
+        g = self._grade()
+        self.assertTrue(g)
+        for row in g:
+            # segmentation_basis + contrast_class on EVERY grade; slope present on
+            # each here (a valid v4 clock: duration_s = n_beats*0.5).
+            self.assertIn("segmentation_basis", row)
+            self.assertIn("contrast_class", row)
+            self.assertIn("slope", row)
+            self.assertIn(row["segmentation_basis"], _SEG_VOCAB)
+            self.assertIn(row["contrast_class"], _CONTRAST_VOCAB)
+
+    def test_facets_do_not_move_within_or_library(self):
+        # additive facets must not perturb the two graded scalars (G3.1 identity)
+        g = self._grade(tw=0.5)
+        for row in g:
+            self.assertTrue(0.0 <= row["within_track"] <= 1.0)
+            self.assertAlmostEqual(row["library_scaled"],
+                                   row["within_track"] * 0.5, places=12)
+
+    def test_segmentation_basis_markers_vs_section_map(self):
+        gm = self._grade(drops=(32,), ups=(0,))
+        self.assertTrue(gm and all(r["segmentation_basis"] == "markers" for r in gm))
+        gs = grade_sections(_v4(), anlz_drops=[], anlz_buildups=[],
+                            anlz_breakdowns=[], track_weight=None)     # no markers
+        self.assertTrue(gs and all(r["segmentation_basis"] == "section_map"
+                                   for r in gs))
+
+    def test_contrast_class_flat_vs_normal(self):
+        # two 32-beat sections at fixed levels -> unclipped rel range = |L1 - L2|.
+        flat = _v4(n_beats=64, full=tuple([-3.0] * 32 + [-6.0] * 32), ref=-3.0)
+        gflat = self._grade(v4=flat)                       # range 3.0 < 5.0
+        self.assertTrue(gflat and all(r["contrast_class"] == "flat" for r in gflat))
+        norm = _v4(n_beats=64, full=tuple([-3.0] * 32 + [-10.0] * 32), ref=-3.0)
+        gnorm = self._grade(v4=norm)                       # range 7.0 >= 5.0
+        self.assertTrue(gnorm and all(r["contrast_class"] == "normal"
+                                      for r in gnorm))
+
+    def test_slope_sign_positive_on_rising_section(self):
+        # the default _v4 full_db rises monotonically -> t_pos > 0 on graded sections.
+        g = self._grade()
+        slopes = [r["slope"] for r in g if "slope" in r]
+        self.assertTrue(slopes)
+        self.assertTrue(all(s >= 0.0 for s in slopes))     # non-negative (t_pos)
+        self.assertTrue(any(s > 0.0 for s in slopes))      # a rise reads positive
+
+    def test_trailing_mode_is_structurally_unreachable(self):
+        # the in-section slope has no MODE knob; grade_sections can never select the
+        # sign-inverting trailing window (structurally excluded, not merely untested).
+        import inspect
+        params = inspect.signature(section_energy_v0._section_slope).parameters
+        self.assertNotIn("mode", params)
+        self.assertNotIn("MODE", params)
+
+    def test_slope_absent_without_a_beat_clock(self):
+        # duration_s <= 0 or non-finite -> no derivable bpm -> slope ABSENT (never a
+        # fabricated 0.0), while within_track / library_scaled are unaffected.
+        for dur in (0.0, -1.0, float("nan"), float("inf")):
+            v4 = replace(_v4(), duration_s=dur)
+            g = self._grade(v4=v4, tw=0.5)
+            self.assertTrue(g, "sections still grade without a clock (dur=%s)" % dur)
+            self.assertTrue(all("slope" not in r for r in g))
+            self.assertTrue(all(r["within_track"] is not None for r in g))
+            self.assertTrue(all(r["library_scaled"] is not None for r in g))
+
+    def test_3e_current_section_projects_to_frozen_five_keys(self):
+        # grades carry the three facet keys; current_section must strip them so the
+        # per-deck status block SHAPE stays frozen (RED against 3b without 3e).
+        g = self._grade(tw=0.5)
+        self.assertTrue(g and any("slope" in r for r in g))
+        proj = current_section(g, g[0]["start_beat"])
+        self.assertEqual(set(proj.keys()), _FROZEN_STATUS_KEYS)
+        for facet in ("slope", "segmentation_basis", "contrast_class"):
+            self.assertNotIn(facet, proj)
+
+
 def _anlz_fixture(n=80):
     return TrackAnlzData(
         [64], buildup_beat_indices=[0, 32], breakdown_beat_indices=[48],
