@@ -271,8 +271,12 @@ def run(argv: "Sequence[str]") -> int:
         ref = float(v4.scalars["loudness_ref_db"])
         full = v4.series["full_db"]
         n_beats = int(v4.n_beats)
-        for (start, end, label) in section_energy_v0._normalized_segments(
-                v4, raw_drops, buildups, breakdowns):
+        # _normalized_segments now returns (segments, segmentation_basis) — the
+        # basis is unused here; the section iteration is unchanged (byte-identical
+        # report output).
+        _segs, _basis = section_energy_v0._normalized_segments(
+            v4, raw_drops, buildups, breakdowns)
+        for (start, end, label) in _segs:
             if label != "low":
                 continue
             s = max(0, int(start))
