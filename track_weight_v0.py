@@ -38,12 +38,12 @@ hold at all on beats pinned at the fixed −100.0 dB power floor (``:35``,
 at two gains, not by adding an offset to cached values
 (``tools/energy_perturbation_check.py``).
 
-Three acceptance controls police the aggregate on the by_genre split: the loudness
-proxy (|rho(loudness_ref_db, weight)| ≤ 0.50), the compression negative control
-(|rho(weight, robust dynamic range)| ≤ 0.55 via ``robust_dynamic_range``, because
-a loud master is made by limiting and reshaping the level distribution, which a dB
-duty reads almost directly), and component redundancy (worst |rho| between any two
-components ≤ 0.60, the mirror of E3's term gate).
+TWO acceptance controls gate the aggregate on the by_genre split — the loudness
+proxy (|rho(loudness_ref_db, weight)| ≤ 0.50) and component redundancy (worst |rho|
+between any two components ≤ 0.60, the mirror of E3's term gate) — and ONE printed
+DIAGNOSTIC accompanies them: the dynamic-range correlation (|rho(weight, robust
+dynamic range)|, reported against the 0.55 reference in ``DRAMA_ACCEPT_MAX``, gating
+nothing since the E1SCRAMBLE demotion).
 
 Constants are pinned; changing any — including the acceptance thresholds — is a
 spec amendment for the exec, NEVER an implementation decision to make a run pass.
@@ -63,7 +63,15 @@ MIN_BEATS = 64               # tracks shorter than 16 bars yield None
 COMPONENT_KEYS = ("body_duty", "brightness_med", "onset_mh_mean",
                   "growl_flatness_mean")
 SPEARMAN_ACCEPT_MAX = 0.50   # |rho| loudness gate, by_genre split (Part D)
-DRAMA_ACCEPT_MAX = 0.55      # |rho(track_weight, robust dynamic range)| ceiling (E1-a)
+DRAMA_ACCEPT_MAX = 0.55      # |rho(track_weight, robust dynamic range)| REFERENCE
+                             # ceiling for the printed DIAGNOSTIC line. It GATES
+                             # NOTHING: the E1SCRAMBLE round demoted this control
+                             # from gate to diagnostic (the compression-family
+                             # secondaries showed a formulation correlating with
+                             # dynamic range is most likely reading ARRANGEMENT, so
+                             # gating at 0.55 gates against real signal). The
+                             # constant stays so the diagnostic has its reference;
+                             # moving the NUMBER is still a spec amendment.
 COMPONENT_CORRELATION_MAX = 0.60  # worst |rho| between any two components (F6)
 STORE_SCHEMA_VERSION = 2     # AWR-291 bump; FIRST of two declarations
                              # (section_energy_v0 restates the literal — no import)
@@ -256,14 +264,13 @@ def acceptance_verdict(n_by_genre: int, rho: "Optional[float]",
                        rho_components_max: "Optional[float]",
                        degenerate: "Sequence[str]") -> "tuple":
     """Pure accept decision (Part-D gate, test seam). Returns (accepted, reason).
-    Precedence: corpus size -> loudness proxy -> compression proxy -> component
-    redundancy -> degenerate component -> ok. Every None fails closed."""
+    Precedence: corpus size -> loudness proxy -> component redundancy -> degenerate
+    component -> ok. Every None in that chain fails closed; ``rho_drama`` is accepted
+    for the printed diagnostic and read by nothing here."""
     if n_by_genre < MIN_ACCEPT_N:
         return (False, "insufficient_corpus")
     if rho is None or abs(rho) > SPEARMAN_ACCEPT_MAX:
         return (False, "loudness_proxy")
-    if rho_drama is None or abs(rho_drama) > DRAMA_ACCEPT_MAX:
-        return (False, "compression_proxy")
     if rho_components_max is None or rho_components_max > COMPONENT_CORRELATION_MAX:
         return (False, "redundant_components")
     if list(degenerate):
