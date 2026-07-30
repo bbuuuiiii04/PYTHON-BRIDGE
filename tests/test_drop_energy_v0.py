@@ -692,6 +692,54 @@ class GradeLexiconFenceTests(unittest.TestCase):
         # and the production surface is clean, so the test above is not vacuous
         self.assertEqual(self._governance_violations(), [])
 
+    def test_governance_rejects_an_added_or_missing_skip_directory(self):
+        """CAN-FAIL for EBUILD5REV2 finding 1, run through the REAL governance helper.
+
+        The reviewer added `future_consumer` to `SKIP_DIRS`, placed
+        `brightness = grade["within_track"] * 255` beneath it, and got: governance `[]`,
+        scan `[]`, and all three guard tests GREEN — the forbidden module invisible again,
+        one surface over. Each planted skip set below must now be REJECTED."""
+        cases = {
+            "the reviewer's plant (+future_consumer)":
+                set(self.SKIP_DIRS) | {"future_consumer"},
+            "an innocuous-looking addition (+vendor)":
+                set(self.SKIP_DIRS) | {"vendor"},
+            "a pin REMOVED (-local)": set(self.SKIP_DIRS) - {"local"},
+            "emptied entirely": set(),
+            "not a set at all": 42,
+        }
+        for label, planted in cases.items():
+            with self.subTest(planted=label):
+                bad = self._governance_violations(skip_dirs=planted)
+                self.assertTrue(bad, "planted skip set %r was ACCEPTED" % label)
+                self.assertTrue(any(k == "skip-dir" for k, _e, _p in bad),
+                                "rejection must name the skip-dir surface: %r" % (bad,))
+        # production is clean, so the rejections above are not vacuous
+        self.assertEqual(self._governance_violations(), [])
+
+    def test_a_planted_skip_dir_hides_a_carrier_but_governance_catches_it(self):
+        """The two halves of the combined gate, stated together, because neither alone is
+        the protection.
+
+        A skipped directory DOES blind the scan — that is what skipping means, and the
+        raw scan cannot be blamed for it. What stands between a new skip dir and a silent
+        blind area is governance. This proves both halves against the reviewer's exact
+        plant: the scan goes blind, AND governance goes red, so the COMBINED gate holds."""
+        planted = set(self.SKIP_DIRS) | {"future_consumer"}
+        # half 1: the scan is blind to anything under the planted skip dir (by design)
+        self.assertEqual(self._scan(skip_dirs=planted), [],
+                         "the raw scan necessarily ignores a skipped directory")
+        # half 2: governance rejects the planted set, so the combined gate is RED
+        bad = self._governance_violations(skip_dirs=planted)
+        self.assertTrue(bad)
+        self.assertIn("future_consumer", [e for _k, e, _p in bad])
+        # and the direction test stays non-vacuous: real carriers DO live under local/,
+        # so the pinned skip set is still doing measurable work in this checkout.
+        revealed = self._scan(skip_dirs=set(self.SKIP_DIRS) - {"local"})
+        self.assertTrue(revealed,
+                        "expected real carrier mentions under local/ — without them the "
+                        "pinned-skip direction test would be passing vacuously")
+
     def test_an_unreasoned_prefix_cannot_hide_a_carrier_mention(self):
         """The consequence the governance protects, stated as its own case: the scan
         WILL go blind to anything under a new prefix — that is what a prefix does — so
