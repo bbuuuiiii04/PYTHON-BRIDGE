@@ -362,7 +362,14 @@ def load_panel(path: "Path") -> "tuple":
 
     Every refusal is a REASONED fail-closed return, never a traceback: malformed
     metadata (`seed: null`, `n: "not-an-int"`) used to escape through the `int(...)`
-    conversions and raise TypeError / ValueError (EBUILD4REV finding 3).
+    conversions and raise TypeError / ValueError (EBUILD4REV finding 3), and a
+    `panel_id` that is a JSON list used to raise TypeError at `set(pids)`
+    (EBUILD4REV2 cure 1).
+
+    `n` and `seed` are validated STRICTLY, never coerced: `n: 100.5` and
+    `seed: 20260724.5` previously truncated into acceptance. A float is accepted only
+    when exactly integral, since JSON has no int/float distinction. `panel_id` shape is
+    validated BEFORE any set/dict use, because those ids key the compared population.
 
     The declared `n` is NOT trusted as the population. A panel declaring `n=100` while
     carrying 99 records was previously accepted, after which the header printed the
@@ -382,13 +389,27 @@ def load_panel(path: "Path") -> "tuple":
         return None, "panel malformed (no tracks list)"
 
     def _as_int(value, field):
-        if isinstance(value, bool) or not isinstance(value, (int, float, str)):
-            return None, "panel %s is %r (%s), not an integer" % (
-                field, value, type(value).__name__)
-        try:
+        """STRICT integer validation — never coercion (EBUILD4REV2 cure 1). The prior
+        version called `int(value)`, so `n: 100.5` truncated to 100 and
+        `seed: 20260724.5` truncated to the pinned seed, and both were ACCEPTED: a
+        malformed panel passed the trust boundary because the helper coerced instead of
+        validating. A float is accepted only when it is exactly integral (JSON has no
+        int/float distinction, so `100.0` is a lawful spelling of 100); a fractional
+        value, a numeric string, a bool, or anything else is REFUSED with a reason."""
+        if isinstance(value, bool):
+            return None, "panel %s is %r (bool), not an integer" % (field, value)
+        if isinstance(value, int):
+            return value, None
+        if isinstance(value, float):
+            if not math.isfinite(value):
+                return None, "panel %s is %r — not a finite integer" % (field, value)
+            if value != int(value):
+                return None, ("panel %s is %r — a FRACTIONAL value, not an integer "
+                              "(refusing to truncate malformed metadata)"
+                              % (field, value))
             return int(value), None
-        except (TypeError, ValueError):
-            return None, "panel %s is %r — not an integer" % (field, value)
+        return None, "panel %s is %r (%s), not an integer" % (
+            field, value, type(value).__name__)
 
     seed, err = _as_int(doc.get("seed"), "seed")
     if err:
@@ -411,6 +432,16 @@ def load_panel(path: "Path") -> "tuple":
     pids = [t.get("panel_id") for t in tracks]
     if any(p is None for p in pids):
         return None, "panel malformed (a track record has no panel_id)"
+    # SHAPE before set/dict use (EBUILD4REV2 cure 1): a panel_id that is a JSON list
+    # or object is UNHASHABLE, so `set(pids)` raised TypeError — a traceback, breaking
+    # this loader's "every refusal is a reasoned return" contract. panel_ids are also
+    # used as dict keys for the baseline vector, so a non-string id is malformed even
+    # when it happens to be hashable.
+    bad_shape = [p for p in pids if not isinstance(p, str)]
+    if bad_shape:
+        return None, ("panel malformed: %d panel_id value(s) are not strings, first is "
+                      "%r (%s) — panel_ids key the compared population"
+                      % (len(bad_shape), bad_shape[0], type(bad_shape[0]).__name__))
     if len(set(pids)) != len(pids):
         dupes = sorted({p for p in pids if pids.count(p) > 1})
         return None, ("panel has duplicate panel_id values %r — they would collapse "
