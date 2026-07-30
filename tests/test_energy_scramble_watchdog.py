@@ -206,10 +206,14 @@ class PanelLoaderTests(unittest.TestCase):
 
     def _load(self, doc):
         import json as _json
+        return self._load_raw(_json.dumps(doc))
+
+    def _load_raw(self, text):
+        """Load from raw JSON text, so fixtures can express things `json.dumps` of a
+        Python object cannot (bare `NaN` / `Infinity` literals)."""
         import tempfile as _tf
-        d = _tf.mkdtemp()
-        p = Path(d) / "panel.json"
-        p.write_text(_json.dumps(doc), encoding="utf-8")
+        p = Path(_tf.mkdtemp()) / "panel.json"
+        p.write_text(text, encoding="utf-8")
         return W.load_panel(p)
 
     def test_healthy_panel_loads_and_reports_the_loaded_count(self):
@@ -246,6 +250,46 @@ class PanelLoaderTests(unittest.TestCase):
                 tracks, reason = self._load(doc)          # must not raise
                 self.assertIsNone(tracks)
                 self.assertIn(needle, reason)
+
+    def test_fractional_metadata_is_REFUSED_not_truncated(self):
+        """EBUILD4REV2 cure 1, CAN-FAIL pinned: `int(100.5)` silently truncated to the
+        pinned 100 and `int(20260724.5)` to the pinned seed, so a malformed panel was
+        ACCEPTED. Strict validation must refuse rather than coerce."""
+        tracks, reason = self._load(_panel_doc(n=100.5))
+        self.assertIsNone(tracks, "n=100.5 must NOT be truncated into acceptance")
+        self.assertIn("FRACTIONAL", reason)
+        tracks, reason = self._load(_panel_doc(seed=20260724.5))
+        self.assertIsNone(tracks, "a fractional seed must NOT be truncated")
+        self.assertIn("FRACTIONAL", reason)
+        # a bool is not an integer even though isinstance(True, int) holds
+        tracks, reason = self._load(_panel_doc(n=True))
+        self.assertIsNone(tracks)
+        self.assertIn("bool", reason)
+        # non-finite metadata
+        for bad in (float("nan"), float("inf")):
+            tracks, reason = self._load_raw('{"n": %s, "seed": 20260724, "tracks": []}'
+                                           % ("NaN" if bad != bad else "Infinity"))
+            self.assertIsNone(tracks)
+            self.assertIn("n", reason)
+
+    def test_integral_float_metadata_is_ACCEPTED(self):
+        """JSON has no int/float distinction, so `100.0` is a lawful spelling of 100 and
+        must not be refused — strictness must not become brittleness."""
+        tracks, meta = self._load(_panel_doc(n=100.0, seed=20260724.0))
+        self.assertIsNotNone(tracks, "an exactly-integral float is a lawful integer")
+        self.assertEqual((meta["n"], meta["seed"]), (100, 20260724))
+
+    def test_unhashable_panel_id_is_REFUSED_without_raising(self):
+        """EBUILD4REV2 cure 1, CAN-FAIL pinned: a `panel_id` that is a JSON list reached
+        `set(pids)` and raised `TypeError: unhashable type: 'list'` — a traceback, not a
+        refusal, straight through the frozen-panel trust boundary."""
+        for bad_id in (["x"], {"a": 1}, 7, 7.5, True):
+            with self.subTest(panel_id=repr(bad_id)):
+                bad = ([{"panel_id": bad_id}]
+                       + [{"panel_id": "P%03d" % (i + 2)} for i in range(99)])
+                tracks, reason = self._load(_panel_doc(tracks=bad))   # must not raise
+                self.assertIsNone(tracks)
+                self.assertIn("not strings", reason)
 
     def test_wrong_seed_is_REFUSED(self):
         tracks, reason = self._load(_panel_doc(seed=1234))
