@@ -461,5 +461,148 @@ class ImportFenceTests(unittest.TestCase):
                          "drop_energy_v0 imported outside allowlist: %s" % offenders)
 
 
+# --------------------------------------------------------------------------- #
+# §4 pool-selection law — the DENY-BY-DEFAULT grade-key lexicon tripwire       #
+# (AWR-291 Task 5c; law text in the ladder §B.0 / AMENDMENT-3 clause 3b)       #
+# --------------------------------------------------------------------------- #
+class GradeLexiconFenceTests(unittest.TestCase):
+    """Stage-1 tripwire for the pool-selection law: *energy grades select pools and pick
+    within pools; they NEVER scale a level.*
+
+    Built DENY-BY-DEFAULT, in the same style as the import fence above: it WALKS
+    `REPO_ROOT.rglob("*.py")` and fails on any file mentioning a grade CARRIER
+    identifier outside an explicit allowlist. Because it is a walk and not a fixed
+    target list, `led_dispatch_coordinator.py`, `beat_sync_engine.py`, `osl_output.py`,
+    `soundswitch_*.py`, `streamdeck/` and every FUTURE module are covered by default —
+    which is the whole point: silent consumer growth becomes loud.
+
+    **What this is, at its true strength.** It is a COARSE TRIPWIRE, not the law's real
+    enforcement. It cannot tell a lawful pool selection from an unlawful level mapping;
+    it only says "a non-allowlisted module now mentions a grade carrier". The test that
+    actually enforces the law — grade identifiers never an argument to a level-lexicon
+    parameter — is the E4-stage assertion, out of scope this round, landing with E4's own
+    spec (which adds the cast resolver to the allowlist).
+
+    **What it does NOT cover, said out loud.** The identifier set is CLOSED to the six
+    CARRIER names. The seven grade-VALUE keys the facet round publishes — `body`,
+    `activity`, `perc_high`, `growl` (E3) and `slope`, `segmentation_basis`,
+    `contrast_class` (E2) — are deliberately NOT in it, so a module that receives a grade
+    dict and reads `["slope"]` trips nothing here. That is by design (the lexicon is
+    design-fixed by AMENDMENT-3 clause 3b), not an oversight, and not a licence to widen
+    it in this round: facet reads are governed by the E4-stage assertion, where reading a
+    facet is the thing under governance. (`section_energy_v0`'s own
+    `SlopeConsumerFenceTests` separately forbids a production read of an individual
+    `slope` value, with its own four disclosed blind spots.)
+    """
+
+    # PINNED VERBATIM from ImportFenceTests above (and identical to
+    # tests/test_section_energy_v0.py). This set is the line that decides green-vs-red:
+    # measured at this desk, the scan returns 0 offenders WITH it and 35 WITHOUT the
+    # `local/` skip (research and sealed-package copies). That count DRIFTS with what
+    # sits under local/ (the spec measured 33, an earlier review 23) — which is exactly
+    # why the PINNED thing is the skip set and never a fixed offender or allowlist list.
+    # A seat that omits it gets a fence RED on arrival and is pushed toward widening the
+    # ALLOWLIST with dozens of fictional "reasons", permanently narrowing the fence.
+    SKIP_DIRS = {".git", "graphify-out", "__pycache__", "node_modules", "build",
+                 "dist", "local"}
+
+    # The CARRIER identifiers — closed set, design-fixed (AMENDMENT-3 clause 3b).
+    GRADE_IDENTIFIERS = ("within_track", "library_scaled", "track_weight",
+                         "drop_grades", "section_grades", "energy_grade")
+
+    # Every entry carries its STATED REASON, because each addition NARROWS the fence.
+    # An entry added without a reason is a review-blocking defect in that change.
+    ALLOW = {
+        "track_weight_v0.py": "E1 grade module — computes the weight",
+        "section_energy_v0.py": "E2 grade module — computes the section grades",
+        "drop_energy_v0.py": "E3 grade module — computes the drop grades",
+        "state_manager.py": "the ONE runtime owner: computes on the ANLZ worker and "
+                            "attaches; the only authorized wiring",
+        "models.py": "DEFINES the DeckState fields that CARRY the grades (declared and "
+                     "reset in clear()); never consumes them",
+        "anlz_reader.py": "the ANLZ payload dataclass fields carrying E2/E3 grades; "
+                          "never consumes them",
+        "drop_presentation.py": "the DropDecision.energy_grade slot/ctor/repr and the "
+                                "plan-builder attach; never consumes it",
+    }
+    ALLOW_PREFIXES = ("tools/", "tests/")   # offline tooling + the tests that verify
+
+    def _scan(self, skip_dirs=None, allow=None):
+        """The tripwire itself, parameterised ONLY so the tests below can prove it
+        discriminates. Production behaviour always uses the pinned defaults."""
+        skip_dirs = self.SKIP_DIRS if skip_dirs is None else skip_dirs
+        allow = self.ALLOW if allow is None else allow
+        offenders = []
+        for path in sorted(REPO_ROOT.rglob("*.py")):
+            rel = path.relative_to(REPO_ROOT).as_posix()
+            if any(part in skip_dirs or part.startswith(".")
+                   for part in rel.split("/")):
+                continue
+            if rel in allow or rel.startswith(self.ALLOW_PREFIXES):
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            hits = sorted(k for k in self.GRADE_IDENTIFIERS if k in text)
+            if hits:
+                offenders.append((rel, hits))
+        return offenders
+
+    def test_no_unallowlisted_module_mentions_a_grade_carrier(self):
+        offenders = self._scan()
+        self.assertEqual(
+            offenders, [],
+            "POOL-SELECTION LAW tripwire: non-allowlisted module(s) now mention grade "
+            "carrier identifiers: %s. Energy grades select pools and pick within pools; "
+            "they NEVER scale a level — no grade value may be multiplied into, added to, "
+            "or mapped onto any brightness/intensity/dimmer/floor/level parameter, at "
+            "any layer, on any path. If this is a lawful new consumer, it needs an "
+            "allowlist entry WITH a stated reason (and, for a real consumer, its own "
+            "spec); if it maps a grade onto a level, it is invalid by construction, not "
+            "a tuning choice." % offenders)
+
+    def test_every_allowlist_entry_has_a_stated_reason(self):
+        """The rule the spec makes enforceable: each entry narrows the fence, so each
+        entry must say why it exists."""
+        for rel, reason in self.ALLOW.items():
+            with self.subTest(entry=rel):
+                self.assertTrue(reason and reason.strip(),
+                                "allowlist entry %r has no stated reason" % rel)
+                self.assertGreater(len(reason.strip()), 15,
+                                   "allowlist entry %r needs a real reason" % rel)
+
+    def test_allowlisted_files_all_exist(self):
+        """A stale allowlist silently widens the fence's blind area."""
+        for rel in self.ALLOW:
+            with self.subTest(entry=rel):
+                self.assertTrue((REPO_ROOT / rel).is_file(),
+                                "allowlist names a missing file: %s" % rel)
+
+    def test_the_pinned_skip_set_is_what_makes_the_fence_green(self):
+        """CAN-FAIL on the pinned style itself: dropping `local/` from the skip set makes
+        the same scan RED on research/sealed copies. Recorded because a seat that omits
+        the skip set is pushed toward widening the ALLOWLIST instead — permanently
+        narrowing the fence. The exact count drifts with what sits under local/, so this
+        asserts the DIRECTION, never a number."""
+        self.assertEqual(self._scan(), [])
+        without_local = self._scan(skip_dirs=self.SKIP_DIRS - {"local"})
+        self.assertTrue(without_local,
+                        "expected local/ research copies to trip a scan without the "
+                        "local/ skip — if this is empty the pinned skip set is no longer "
+                        "load-bearing and the comment above must be re-measured")
+        self.assertTrue(all(r.startswith("local/") for r, _ in without_local),
+                        "only local/ paths should appear: %s" % without_local)
+
+    def test_fence_discriminates_a_planted_consumer(self):
+        """CAN-FAIL for the tripwire's own logic: with `state_manager.py` removed from the
+        allowlist, the scan must FIND it. Proves the walk actually reads files and that a
+        real consumer is caught — the fence is not vacuously green."""
+        allow_without_sm = {k: v for k, v in self.ALLOW.items()
+                            if k != "state_manager.py"}
+        offenders = self._scan(allow=allow_without_sm)
+        self.assertIn("state_manager.py", [r for r, _ in offenders])
+
+
 if __name__ == "__main__":
     unittest.main()

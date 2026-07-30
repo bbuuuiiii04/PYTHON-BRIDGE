@@ -776,6 +776,12 @@ contracts:
     docs_update:
       - docs/research/spectral_audio_analysis_redesign.md
       - AGENTS.md
+      # Added CONTRACT-FIRST by AWR-291 §4/§6 (Task 5) before its doc edits landed: the
+      # pool-selection law (ladder B.0 + the B.3 replacement) and the §6 record
+      # corrections edit these three, and they were in no contract's docs_update.
+      - docs/plans/active/energy_fabric_ladder_spec_v1.md
+      - docs/plans/active/EFSPEC_report.md
+      - docs/plans/active/energy_formulation_revision_spec_v1.md
     consumers:
       - "LIGHTING ENGINE v2 F4 texture layer (AWR-164) is a pure CONSUMER of the v4 classes (stab/sustained_bass/growl/sustained_synth/kick_prominence/bright_tilt/thick/bottom_gone/roll/lowmid_pulse); it added ZERO analysis code here (spectral_profile.py unchanged). sustained_synth is the clean-euphoric proxy (counts vocals) and must never be surfaced as 'synth'; lowmid_pulse ships computed-not-consumed."
     forbidden_assumptions:

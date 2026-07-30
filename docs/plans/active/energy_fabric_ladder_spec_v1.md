@@ -117,8 +117,12 @@ breath-hold presentation behavior — LED-first, laser layer untouched.
 - [confirmed] `pre_drop_gap_beats()` (`spectral_profile.py:183-199`) measures
   the bottom-gone run immediately before a drop beat, purely descriptive, drop
   beat always from ANLZ markers. Its docstring says "consumer caps it, e.g. ~4
-  bars" — but a repo-wide search finds **no callers outside
-  `tests/test_spectral_profile.py`**. The consumer is aspirational, not built.
+  bars". **CORRECTED (AWR-291 §6 item 5) — the earlier "no callers outside
+  `tests/test_spectral_profile.py`" claim was a failed repo-wide sweep:**
+  `pre_drop_gap_beats()` IS called — `drop_window_vector()`
+  (`spectral_profile.py:667`) computes `pre_gap_beats`, and the offline
+  `tools/spectral_pilot` reads it (firewall allowlist + distance vector). No RUNTIME or
+  LIGHTING consumer reads it; the breath-hold consumer remains unbuilt.
 - [confirmed] The laser side has a *fixed* `pre_drop_blackout_beats: 4`
   (`laser_config.py:73`) — fixed-length, not audio-matched, and laser-only.
   The LED side has no breath-hold behavior at all.
@@ -166,6 +170,13 @@ runtime, no new detectors, no re-derivation of true drops.
 - Cast, never cycle: where a cast is defined, an RNG fallback may only fire
   when cast inputs are missing (fail-open to today's behavior), never as a
   variety mechanism within a defined cast.
+- **Energy grades select pools and pick within pools; they NEVER scale a level.** A grade may
+  decide WHICH look / cue / palette family is cast and WHERE within a candidate pool a pick
+  lands; no grade value may be multiplied into, added to, or otherwise mapped onto any
+  brightness, intensity, dimmer, floor, or level parameter, at any layer, on any path. This
+  protects no-dim-drops BY CONSTRUCTION: a low grade can only select a different full-strength
+  treatment, never attenuate one. An import-fence-style test enforces it; wiring that
+  violates it is invalid by construction, not a tuning choice.
 - No dim drop looks ever — the fabric may grade a drop LOW, and the floor of
   what a low-grade drop receives is still a full-brightness drop treatment.
   Dim belongs to breakdowns/tails only.
@@ -237,8 +248,10 @@ scaled against library-typical drop energy via layer 1.
   (extending `DropDecision`, `drop_presentation.py:192`, which today has no
   energy field). Which drops are true drops, runway math, tag/learned/finale
   logic: all unchanged.
-- `drop_grade` is presentation input only: it biases which cue is cast and how
-  hard the accent/impact reads — it never gates whether a drop is treated as a
+- `drop_grade` is presentation input only: `drop_grade` biases WHICH cue is cast —
+  including whether harder-reading cues are in the candidate pool — and never maps
+  onto any magnitude/level parameter; casting harder-reading cues is pool selection,
+  not amplitude. It never gates whether a drop is treated as a
   drop (that stays `resolve_presentation()`'s ladder), and per B.0 it can never
   produce a dim drop.
 
