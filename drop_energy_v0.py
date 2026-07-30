@@ -64,6 +64,11 @@ is rounded to 0.1 dB (`audio_spectral_features.py:307-311`); and it does not hol
 at all on beats pinned at the fixed −100.0 dB power floor (`:35`, `:313-314`),
 which occurs on ~19% of BY GENRE tracks. Verified by re-extraction at two gains,
 not by adding an offset to cached values (`tools/energy_perturbation_check.py`).
+That invariance is exact about LEVEL and SILENT ABOUT SPECTRUM: a mastering EQ tilt
+moves E1's `brightness_med` (measured dose-response, E1SCRAMBLE §10), and the measured
+mastering leak is a median +0.044 weight (p90 ~0.11) — which reaches `library_scaled`
+through the track weight — so "level-invariant" must never be read as
+"mastering-immune".
 
 True-drop law: this module grades whatever raw-marker beats it is handed — the
 ATTACHMENT to plan decisions (`grades_by_beat` + `plan_track`) and every surface

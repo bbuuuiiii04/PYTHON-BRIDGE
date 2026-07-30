@@ -36,7 +36,11 @@ is rounded to 0.1 dB (``audio_spectral_features.py:307-311``); and it does not
 hold at all on beats pinned at the fixed −100.0 dB power floor (``:35``,
 ``:313-314``), which occurs on ~19% of BY GENRE tracks. Verified by re-extraction
 at two gains, not by adding an offset to cached values
-(``tools/energy_perturbation_check.py``).
+(``tools/energy_perturbation_check.py``). That invariance is exact about LEVEL and
+SILENT ABOUT SPECTRUM: a mastering EQ tilt moves ``brightness_med`` (measured
+dose-response, E1SCRAMBLE §10 — a +/-1 dB shelf moves a track up to 22/100 ranks), and
+the measured mastering leak is a median +0.044 weight (p90 ~0.11), so "level-invariant"
+must never be read as "mastering-immune".
 
 TWO acceptance controls gate the aggregate on the by_genre split — the loudness
 proxy (|rho(loudness_ref_db, weight)| ≤ 0.50) and component redundancy (worst |rho|

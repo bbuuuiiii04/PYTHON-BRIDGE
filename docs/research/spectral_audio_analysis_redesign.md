@@ -843,16 +843,42 @@ loudness.
   pinned at the −100.0 dB power floor (`:35`, `:313-314`), ~19% of BY GENRE tracks
   — checked by re-extraction (`tools/energy_perturbation_check.py`), not by an
   offset to cached values.
-- **Three pinned acceptance controls.** `tools/track_weight_report.py` sweeps the
-  library read-only, writes a version-owned sidecar
-  `<cache_dir>/trackweight_v1/track_weight_store.json` (**schema_version 2**, now
-  carrying `drop_body_distribution` — E3's body-term corpus fallback; machine-local,
-  never committed), and on the BY GENRE split (contract law: BY GENRE tracks only,
-  `n ≥ 100`) ACCEPTS iff loudness proxy `|Spearman(loudness_ref_db, weight)| ≤
-  0.50`, compression negative control `|Spearman(robust_dynamic_range = p95−p25
-  full_db, weight)| ≤ 0.55`, worst component-pair `|rho| ≤ 0.60`, and no component
-  is degenerate. Every constant moves only by spec amendment — never by the
-  implementer to make a run pass. A failed acceptance is a valid, reported result.
+- **TWO pinned gating acceptance controls + one printed diagnostic.**
+  `tools/track_weight_report.py` sweeps the library read-only, writes a version-owned
+  sidecar `<cache_dir>/trackweight_v1/track_weight_store.json` (**schema_version 2**,
+  now carrying `drop_body_distribution` — E3's body-term corpus fallback;
+  machine-local, never committed), and on the BY GENRE split (contract law: BY GENRE
+  tracks only, `n ≥ 100`) ACCEPTS iff loudness proxy
+  `|Spearman(loudness_ref_db, weight)| ≤ 0.50`, worst component-pair `|rho| ≤ 0.60`,
+  and no component is degenerate. Every constant moves only by spec amendment — never
+  by the implementer to make a run pass. A failed acceptance is a valid, reported
+  result.
+- **The dynamic-range control is a DIAGNOSTIC, not a gate (AWR-291 §5, the E1SCRAMBLE
+  demotion).** `|Spearman(robust_dynamic_range = p95−p25 full_db, weight)|` is still
+  computed and printed against the same `0.55` reference (`DRAMA_ACCEPT_MAX`), but it
+  decides nothing: the compression-family secondaries showed that a formulation
+  correlating with dynamic range is most likely reading **arrangement** — the thing E1
+  is asked to rank — so gating there gates against real signal. The primary
+  predeclared statistic fired SCRAMBLE on an **EQ** op, not a compressor, so the
+  demotion rests on named secondaries. Mastering is not free either (median tax
+  **+0.044** weight, p90 **~0.11**, up to **32/100** ranks under a full chain), which
+  is why the line stays printed forever — it just stops deciding. The demotion landed
+  ONLY together with its replacement, `tools/energy_scramble_watchdog.py`
+  (below): demote-without-replacement was out of scope by construction.
+- **The replacement watchdog battery.** `tools/energy_scramble_watchdog.py` (offline,
+  zero runtime importers, temp-dir extractions only) runs four E1SCRAMBLE probe
+  classes on the frozen 100-track / 66-cell / seed-20260724 panel: `c0b_invert`
+  (polarity-only exact null — GATE `rho = 1.0000` exactly, displacement `0`),
+  `c1a_gain` (per-track gain **drawn** in `[-12, 0]` dB + TPDF dither at −90 dBFS,
+  reproduced from the `c1_static` seed stream — GATE `rho ≥ 0.999`, a floor sitting ON
+  its single measured `0.9990` with no margin, so a marginal miss is reported as
+  instrument drift and never re-floored), and `c1c_tilt_mild` / `c1b_tilt` (±1 dB and
+  ±3 dB shelves — **INFORMATIONAL, comparative-only**, because the incumbent measurably
+  sits at `0.9673` / `0.7938` and any pinned floor would either fail the accepted
+  formulation or be tuned to pass it). **Stated plainly and printed verbatim in the
+  tool's own report header: this trade removes one acceptance gate and adds ZERO** —
+  both new gates test the INSTRUMENT (harness integrity, extraction fidelity), so it
+  is gate-for-diagnostic, not gate-for-gate.
 - **No live consumer.** E1 decides nothing live; nothing runtime reads the store
   (E2+ consumers arrive under their own specs). The bridge is byte-identical.
 - **Status:** `implemented` / `software-tested` (unit tests incl. the exact
