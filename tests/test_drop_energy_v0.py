@@ -525,20 +525,33 @@ class GradeLexiconFenceTests(unittest.TestCase):
         "drop_presentation.py": "the DropDecision.energy_grade slot/ctor/repr and the "
                                 "plan-builder attach; never consumes it",
     }
-    ALLOW_PREFIXES = ("tools/", "tests/")   # offline tooling + the tests that verify
+    # PREFIX exemptions are held in a REASON-BEARING mapping, exactly like the
+    # exact-file allowlist above, and are governed by the SAME two tests
+    # (EBUILD5REV finding 1). They were a bare tuple, outside both governance tests and
+    # trusted wholesale by the scan — so a future unreasoned prefix could hide a whole
+    # directory's carrier mentions while both governance tests stayed green. A prefix
+    # exempts far MORE than a single file, so it needs at least as much justification.
+    ALLOW_PREFIXES = {
+        "tools/": "offline tooling lane — computes, reports and verifies the grades; "
+                  "zero runtime importers, so no live path is exempted here",
+        "tests/": "the tests that verify the grades and enforce these fences; test code "
+                  "must mention the carriers to assert on them",
+    }
 
-    def _scan(self, skip_dirs=None, allow=None):
+    def _scan(self, skip_dirs=None, allow=None, prefixes=None):
         """The tripwire itself, parameterised ONLY so the tests below can prove it
         discriminates. Production behaviour always uses the pinned defaults."""
         skip_dirs = self.SKIP_DIRS if skip_dirs is None else skip_dirs
         allow = self.ALLOW if allow is None else allow
+        prefixes = self.ALLOW_PREFIXES if prefixes is None else prefixes
+        prefix_tuple = tuple(prefixes)
         offenders = []
         for path in sorted(REPO_ROOT.rglob("*.py")):
             rel = path.relative_to(REPO_ROOT).as_posix()
             if any(part in skip_dirs or part.startswith(".")
                    for part in rel.split("/")):
                 continue
-            if rel in allow or rel.startswith(self.ALLOW_PREFIXES):
+            if rel in allow or (prefix_tuple and rel.startswith(prefix_tuple)):
                 continue
             try:
                 text = path.read_text(encoding="utf-8")
@@ -562,22 +575,93 @@ class GradeLexiconFenceTests(unittest.TestCase):
             "spec); if it maps a grade onto a level, it is invalid by construction, not "
             "a tuning choice." % offenders)
 
-    def test_every_allowlist_entry_has_a_stated_reason(self):
-        """The rule the spec makes enforceable: each entry narrows the fence, so each
-        entry must say why it exists."""
-        for rel, reason in self.ALLOW.items():
-            with self.subTest(entry=rel):
-                self.assertTrue(reason and reason.strip(),
-                                "allowlist entry %r has no stated reason" % rel)
-                self.assertGreater(len(reason.strip()), 15,
-                                   "allowlist entry %r needs a real reason" % rel)
+    MIN_REASON_CHARS = 15
 
-    def test_allowlisted_files_all_exist(self):
-        """A stale allowlist silently widens the fence's blind area."""
-        for rel in self.ALLOW:
-            with self.subTest(entry=rel):
-                self.assertTrue((REPO_ROOT / rel).is_file(),
-                                "allowlist names a missing file: %s" % rel)
+    @classmethod
+    def _governance_violations(cls, allow=None, prefixes=None):
+        """Every governance problem across BOTH exemption kinds, as
+        `[(kind, entry, problem), …]`. Empty list == the exemption surface is governed.
+
+        Parameterised so the CAN-FAIL test can run the REAL governance logic against a
+        planted exemption surface — the check and the thing checked are the same code, so
+        a green production result cannot come from a governance path that is never
+        exercised (EBUILD5REV finding 1: the prefix tuple was outside both tests, and a
+        planted unreasoned prefix hid a carrier mention with both of them still green).
+        """
+        allow = cls.ALLOW if allow is None else allow
+        prefixes = cls.ALLOW_PREFIXES if prefixes is None else prefixes
+        bad = []
+        # a bare sequence of prefixes is itself the defect this cure removes
+        if not isinstance(prefixes, dict):
+            bad.append(("prefix", repr(prefixes),
+                        "prefix exemptions must be a reason-bearing mapping, not a bare "
+                        "%s — a bare sequence cannot carry the required reasons"
+                        % type(prefixes).__name__))
+            return bad
+        for kind, mapping in (("file", allow), ("prefix", prefixes)):
+            for entry, reason in mapping.items():
+                if not isinstance(reason, str) or not reason.strip():
+                    bad.append((kind, entry, "no stated reason"))
+                elif len(reason.strip()) < cls.MIN_REASON_CHARS:
+                    bad.append((kind, entry, "reason too thin to be a real reason"))
+                target = REPO_ROOT / entry
+                if kind == "file" and not target.is_file():
+                    bad.append((kind, entry, "names a missing file (stale exemption)"))
+                if kind == "prefix" and not target.is_dir():
+                    bad.append((kind, entry,
+                                "names a missing directory (stale exemption)"))
+        return bad
+
+    def test_every_exemption_has_a_stated_reason_and_exists(self):
+        """The rule the spec makes enforceable, now over the WHOLE exemption surface:
+        each exemption narrows the fence, so each must say why it exists AND must still
+        point at something real (a stale exemption silently widens the blind area)."""
+        self.assertEqual(
+            self._governance_violations(), [],
+            "exemption governance violations — every exact-file AND prefix exemption "
+            "needs a stated reason and an existing target: %s"
+            % self._governance_violations())
+
+    def test_governance_rejects_an_unreasoned_or_stale_prefix(self):
+        """CAN-FAIL for finding 1, run through the REAL governance logic.
+
+        The reviewer planted an unreasoned `future_consumer/` prefix and a
+        `brightness = grade["within_track"] * 255` module under it; both governance tests
+        stayed GREEN and the scan reported no offenders, so a forbidden module became
+        invisible with no reason and no existence check. Each planted shape below must
+        now be REJECTED."""
+        cases = {
+            "bare tuple (the pre-cure shape)": ("tools/", "tests/"),
+            "unreasoned new prefix": {"tools/": self.ALLOW_PREFIXES["tools/"],
+                                      "future_consumer/": ""},
+            "reason-free None": {"tools/": None},
+            "thin reason": {"tools/": "because"},
+            "stale prefix (no such directory)": {
+                "no_such_dir_xyz/": "a plausible-sounding but false justification "
+                                    "that points nowhere at all"},
+        }
+        for label, planted in cases.items():
+            with self.subTest(planted=label):
+                bad = self._governance_violations(prefixes=planted)
+                self.assertTrue(bad, "planted prefix surface %r was ACCEPTED" % label)
+        # and the production surface is clean, so the test above is not vacuous
+        self.assertEqual(self._governance_violations(), [])
+
+    def test_an_unreasoned_prefix_cannot_hide_a_carrier_mention(self):
+        """The consequence the governance protects, stated as its own case: the scan
+        WILL go blind to anything under a new prefix — that is what a prefix does — so
+        the only thing standing between a new prefix and a silent blind area is the
+        governance test above. This pins that dependency: with `tools/` exempted the
+        tools lane is invisible to the scan, and removing the exemption reveals it."""
+        with_tools = self._scan()
+        self.assertEqual(with_tools, [])
+        without_tools = self._scan(prefixes={"tests/": self.ALLOW_PREFIXES["tests/"]})
+        self.assertTrue(
+            without_tools,
+            "expected tools/ modules to mention grade carriers — if this is empty the "
+            "tools/ prefix exemption is no longer load-bearing and should be removed")
+        self.assertTrue(all(r.startswith("tools/") for r, _ in without_tools),
+                        "only tools/ paths should appear: %s" % without_tools)
 
     def test_the_pinned_skip_set_is_what_makes_the_fence_green(self):
         """CAN-FAIL on the pinned style itself: dropping `local/` from the skip set makes
