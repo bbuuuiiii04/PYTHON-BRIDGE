@@ -503,8 +503,21 @@ class GradeLexiconFenceTests(unittest.TestCase):
     # why the PINNED thing is the skip set and never a fixed offender or allowlist list.
     # A seat that omits it gets a fence RED on arrival and is pushed toward widening the
     # ALLOWLIST with dozens of fictional "reasons", permanently narrowing the fence.
-    SKIP_DIRS = {".git", "graphify-out", "__pycache__", "node_modules", "build",
-                 "dist", "local"}
+    # PINNED as an EXACT SET, and governed as the THIRD exclusion surface
+    # (EBUILD5REV2 finding 1). A skipped directory excludes EVERYTHING beneath it from
+    # the walk — a broader exemption than either an exact file or a prefix — and it was
+    # the one surface `_governance_violations()` never saw: the reviewer added
+    # `future_consumer` to this set, put `brightness = grade["within_track"] * 255`
+    # under it, and governance, the carrier scan and the pinned-skip test all stayed
+    # green. The set is pinned as a whole rather than made reason-bearing per member,
+    # because that is how the spec defines it — copied VERBATIM from the sibling fence
+    # (`ImportFenceTests` above; identical in tests/test_section_energy_v0.py), with one
+    # documented rationale for the set rather than seven: measured at this desk, the scan
+    # returns 0 offenders WITH it and 35 WITHOUT the `local/` skip, and that count drifts
+    # with whatever sits under local/ (the spec measured 33, an earlier review 23).
+    PINNED_SKIP_DIRS = frozenset({".git", "graphify-out", "__pycache__", "node_modules",
+                                  "build", "dist", "local"})
+    SKIP_DIRS = set(PINNED_SKIP_DIRS)
 
     # The CARRIER identifiers — closed set, design-fixed (AMENDMENT-3 clause 3b).
     GRADE_IDENTIFIERS = ("within_track", "library_scaled", "track_weight",
@@ -578,19 +591,48 @@ class GradeLexiconFenceTests(unittest.TestCase):
     MIN_REASON_CHARS = 15
 
     @classmethod
-    def _governance_violations(cls, allow=None, prefixes=None):
-        """Every governance problem across BOTH exemption kinds, as
-        `[(kind, entry, problem), …]`. Empty list == the exemption surface is governed.
+    def _governance_violations(cls, allow=None, prefixes=None, skip_dirs=None):
+        """Every governance problem across ALL THREE exclusion surfaces, as
+        `[(kind, entry, problem), …]`. Empty list == the exclusion surface is governed.
 
-        Parameterised so the CAN-FAIL test can run the REAL governance logic against a
-        planted exemption surface — the check and the thing checked are the same code, so
-        a green production result cannot come from a governance path that is never
-        exercised (EBUILD5REV finding 1: the prefix tuple was outside both tests, and a
-        planted unreasoned prefix hid a carrier mention with both of them still green).
+        **There are three ways to hide a module from this fence, and all three are
+        checked here** (EBUILD5REV2 finding 1 — an earlier version of this docstring
+        called exact files + prefixes the whole surface, which was false):
+          1. `ALLOW` — an exact-file exemption; must carry a stated reason and exist;
+          2. `ALLOW_PREFIXES` — a prefix exemption, hiding a whole subtree; same rules;
+          3. `SKIP_DIRS` — a skipped directory, hiding everything beneath it ANYWHERE in
+             the walk. Governed as an EXACT SET against `PINNED_SKIP_DIRS`: any added or
+             missing member is a violation, because the spec pins this set verbatim and
+             it is the line that decides green-vs-red for the whole scan.
+
+        Parameterised so the CAN-FAIL tests can run the REAL governance logic against a
+        planted surface — the check and the thing checked are the same code, so a green
+        production result cannot come from a governance path that is never exercised.
+        That property is what these cures keep re-learning: each round's hole was a
+        surface the helper did not receive.
         """
         allow = cls.ALLOW if allow is None else allow
         prefixes = cls.ALLOW_PREFIXES if prefixes is None else prefixes
+        skip_dirs = cls.SKIP_DIRS if skip_dirs is None else skip_dirs
         bad = []
+        # --- surface 3: the skipped-directory set, pinned exactly --------------------
+        try:
+            given = set(skip_dirs)
+        except TypeError:
+            given = None
+            bad.append(("skip-dir", repr(skip_dirs),
+                        "skip dirs must be a set of directory names"))
+        if given is not None:
+            for extra in sorted(given - set(cls.PINNED_SKIP_DIRS)):
+                bad.append(("skip-dir", extra,
+                            "NOT in the pinned skip set — a skipped directory hides "
+                            "every file beneath it from the carrier scan; adding one is "
+                            "the broadest exemption available and is not permitted "
+                            "without a spec amendment"))
+            for missing in sorted(set(cls.PINNED_SKIP_DIRS) - given):
+                bad.append(("skip-dir", missing,
+                            "MISSING from the pinned skip set — removing a pin changes "
+                            "what the fence measures (the 0-vs-35 result depends on it)"))
         # a bare sequence of prefixes is itself the defect this cure removes
         if not isinstance(prefixes, dict):
             bad.append(("prefix", repr(prefixes),
@@ -613,14 +655,17 @@ class GradeLexiconFenceTests(unittest.TestCase):
         return bad
 
     def test_every_exemption_has_a_stated_reason_and_exists(self):
-        """The rule the spec makes enforceable, now over the WHOLE exemption surface:
-        each exemption narrows the fence, so each must say why it exists AND must still
-        point at something real (a stale exemption silently widens the blind area)."""
+        """The rule the spec makes enforceable, over ALL THREE exclusion surfaces:
+        exact-file and prefix exemptions must each state why they exist and still point
+        at something real (a stale exemption silently widens the blind area), and the
+        skipped-directory set must match its pin exactly (a skipped directory hides
+        everything beneath it, so an addition is the broadest exemption available)."""
         self.assertEqual(
             self._governance_violations(), [],
-            "exemption governance violations — every exact-file AND prefix exemption "
-            "needs a stated reason and an existing target: %s"
-            % self._governance_violations())
+            "exclusion governance violations — every exact-file exemption, prefix "
+            "exemption AND skipped directory is governed: files/prefixes need a stated "
+            "reason and an existing target, and SKIP_DIRS must equal PINNED_SKIP_DIRS "
+            "exactly: %s" % self._governance_violations())
 
     def test_governance_rejects_an_unreasoned_or_stale_prefix(self):
         """CAN-FAIL for finding 1, run through the REAL governance logic.

@@ -1,3 +1,8 @@
+> **Correction — 2026-07-30 (operator ruling from 2026-07-16):** The F2 cluster/treatment-group names in this historical prompt—**Blackout Hit, Strobe Barrage, Low Simmer, Color Chase, Blinder Bloom, Dark Floor, Sweep & Bump, and Dimmer Pulse**—were **VETOED by the operator on 2026-07-16** and are **not current naming authority**. Current naming authority is the code in `led_look_director.py`, `govee_frame_renderer.py`, and LED config.
+>
+> Operator's verbatim reason:
+> "not a big fan of these names because blackout hit infers that every drop with a silence gap before the hit will get treated the same and low simmer drops suck and dark floor also sucks these are all terrible"
+
 ---
 doc_status: historical
 truth_level: executive seat-handoff state brief (AWR-195 program, overnight shift 2026-07-16) — RETIRED 10:57 2026-07-16: the morning review seat took the watch (morning.REVIEWBOOT.done); results in docs/prompts/active/spectral_morning_review_2026_07_16.md
