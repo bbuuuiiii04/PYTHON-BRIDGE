@@ -808,9 +808,14 @@ defined** (EREV1 F7) — E4's author will read this and must not misread
 
 1. **The ranking population is the RAW ANLZ marker set, not the true drops.**
    `drop_beats` is `data.drop_beat_indices`, and the true-drop law means only
-   plan-attached true drops ever reach a surface. Measured: **3,335 raw graded
-   drop windows vs 1,659 surfaced true drops — 49.7% of the ranking population is
-   never shown to anyone.** So a surfaced drop's body term means "how this moment
+   plan-attached true drops ever reach a surface. Measured (**CORRECTED, AWR-291 §6
+   item 1 — 1,659 is the SMART-drop count, not the true-drop count**): **3,335 raw
+   graded windows; 1,659 SMART drops attach (50.3% of the ranking population never
+   attaches); the runway-filtered TRUE drops the presentation layer keys off number
+   1,243 (62.7% of the ranking population never reaches a surface).** Carry the
+   measured consequence with the correction: aggregates barely move, but re-basing the
+   body rank raw→true shifts individual drops by median 0.125 = 21% of composite IQR
+   (raw-vs-true basis rho +0.7426, p95 |Δ| 0.40). So a surfaced drop's body term means "how this moment
    ranks among *all* of this track's raw Rekordbox drop markers", and the value
    **moves if Rekordbox re-analysis adds or removes a marker anywhere in the
    track.** That is a defensible choice — the raw set is the stable, complete,
@@ -1279,8 +1284,11 @@ heading, carrying **five** items: the three from A.4 (the unexamined compression
 confound, the unrecorded §B.2 narrowing, the docstring overclaims), plus:
 
 4. **The body term ranks against the RAW ANLZ marker set** (EREV1 F7, detailed in
-   Task 5c): 3,335 raw graded drop windows against 1,659 surfaced true drops, so
-   **49.7% of the ranking population is never surfaced**, and a surfaced drop's
+   Task 5c): **CORRECTED (AWR-291 §6 item 1)** — 3,335 raw graded windows; 1,659 SMART
+   drops attach (50.3% of the ranking population never attaches); the runway-filtered
+   TRUE drops the presentation layer keys off number 1,243 (62.7% of the ranking
+   population never reaches a surface). 1,659 was mislabeled "true drops". A surfaced
+   drop's
    grade moves if Rekordbox re-analysis adds or removes a marker anywhere in the
    track. Recorded beside the §B.2 item because it is the same class of thing —
    a defensible narrowing that must not be silent.

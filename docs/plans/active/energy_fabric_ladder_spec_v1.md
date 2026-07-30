@@ -132,8 +132,14 @@ breath-hold presentation behavior — LED-first, laser layer untouched.
   bags/cursors per (role, backend); the deterministic transport plan picks WHICH
   transport, the RNG bag picks WHICH look inside it. Roles in play include
   "utility", "emergency", "manual", "post_drop" plus a config `role_map`
-  (`led_look_director.py:179-233, 278-279, 299`). This is exactly the
-  "selected from a pool" behavior the vision retires.
+  (`led_look_director.py:179-233, 278-279, 299`). **CORRECTED (AWR-291 §6 item 6) — the
+  earlier "this is exactly the 'selected from a pool' behavior the vision retires" told
+  only part of the story.** Casting PARTIALLY exists already: the family × tier
+  coordinate narrows the pool BEFORE the RNG bag, on both the LED and laser paths. The
+  measured defects are **emptiness and constancy**, not total absence — all four tier-1
+  routing cells are EMPTY in the live config (so tier-1 drops fall through to the plain
+  RNG bag), and the coordinate is a per-track CONSTANT on half the library (53.9% of
+  multi-drop tracks single-tier, 57.9% single-family).
 - [confirmed] Color already has a journey: `led_color_engine.py` palette
   selection with rarity-compressed weights (`led_color_engine.py:158-163`) —
   color is spectrally-informed (Lighting Engine v2 F1), but *look/cue* choice
