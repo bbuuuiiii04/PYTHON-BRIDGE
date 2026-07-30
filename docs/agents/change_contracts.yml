@@ -752,6 +752,11 @@ contracts:
       - grade_drops
       - grades_by_beat
       - drop_body_levels
+      # The in-module fluxsum-p90 helper (AWR-292 §6a): a `def` in drop_energy_v0.py, a
+      # REPO-ROOT module — valid on both of the shipped checker's constraints. Verified
+      # with check_agent_contracts.symbol_defined() against all_code_text() BEFORE being
+      # added, as 6a requires: resolves True.
+      - _track_normalisers
       # NOTE: the watchdog's pure seam (compare_probe / battery_verdict) is NOT listed
       # here on purpose — check_agent_contracts.py resolves key_symbols against
       # ROOT.glob("*.py") (repo-root modules only), so a tools/ symbol can never be
