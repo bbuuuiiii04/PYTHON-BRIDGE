@@ -473,9 +473,12 @@ class GradeLexiconFenceTests(unittest.TestCase):
     Built DENY-BY-DEFAULT, in the same style as the import fence above: it WALKS
     `REPO_ROOT.rglob("*.py")` and fails on any file mentioning a grade CARRIER
     identifier outside an explicit allowlist. Because it is a walk and not a fixed
-    target list, `led_dispatch_coordinator.py`, `beat_sync_engine.py`, `osl_output.py`,
-    `soundswitch_*.py`, `streamdeck/` and every FUTURE module are covered by default —
-    which is the whole point: silent consumer growth becomes loud.
+    target list, a module needs no entry here to be covered: `led_dispatch_coordinator.py`,
+    `beat_sync_engine.py`, `osl_output.py`, `soundswitch_*.py`, `streamdeck/` and any
+    future module **that falls inside the instrumented scope** are covered without
+    anyone remembering to add them — which is the point: silent consumer growth inside
+    that scope becomes loud. It is NOT a claim that every future module is covered;
+    modules outside the instrumented scope are disclosed below and are not seen.
 
     **What this is, at its true strength.** It is a COARSE TRIPWIRE, not the law's real
     enforcement. It cannot tell a lawful pool selection from an unlawful level mapping;
@@ -493,7 +496,7 @@ class GradeLexiconFenceTests(unittest.TestCase):
     it in this round: facet reads are governed by the E4-stage assertion, where reading a
     facet is the thing under governance. (`section_energy_v0`'s own
     `SlopeConsumerFenceTests` separately forbids a production read of an individual
-    `slope` value, with its own four disclosed blind spots.)
+    `slope` value, with its own disclosed blind spots.)
     """
 
     # PINNED VERBATIM from ImportFenceTests above (and identical to
@@ -624,9 +627,10 @@ class GradeLexiconFenceTests(unittest.TestCase):
         under Ruling B): UTF-8/`tokenize`-readable `*.py` files reachable by the stated
         walk from the repo root — dot-prefixed components and the pinned skip dirs
         excluded, directory symlinks not descended — with a read/decode failure REPORTED
-        as a violation. FOUR blind categories are disclosed and each is ASSERTED BLIND by
-        a test above: dot-hidden paths, directory symlinks, non-`*.py` extensions, and
-        dynamically generated source. **The §4 pool-selection LAW binds everywhere,
+        as a violation. Blind categories are disclosed as REQUIRED, NON-EXHAUSTIVE examples
+        (Ruling B′ — never an inventory), each ASSERTED BLIND by a test above: dot-hidden
+        paths, directory symlinks, non-`*.py` extensions, dynamically generated source,
+        and the INTERIOR of an exempted file. **The §4 pool-selection LAW binds everywhere,
         including inside those four**; the instrument simply cannot see them. A green
         fence proves no carrier mention exists IN THE INSTRUMENTED SCOPE — never that no
         consumer exists anywhere.
@@ -693,7 +697,8 @@ class GradeLexiconFenceTests(unittest.TestCase):
             "exact-file exemptions, prefix exemptions and skipped directories: "
             "files/prefixes need a stated reason and an existing target, and SKIP_DIRS "
             "must equal PINNED_SKIP_DIRS exactly. (Governing these three is NOT a claim "
-            "that nothing else can hide source — four blind categories are disclosed and "
+            "that nothing else can hide source — blind categories are disclosed as "
+            "required, non-exhaustive examples and are "
             "asserted-blind above.) Violations: %s" % self._governance_violations())
 
     def test_governance_rejects_an_unreasoned_or_stale_prefix(self):
@@ -812,7 +817,7 @@ class GradeLexiconFenceTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmp)
 
-    # ---- the FOUR disclosed blind categories, each ASSERTED BLIND -------------------
+    # ---- the DISCLOSED blind categories, each ASSERTED BLIND ------------------------
     # Modelled on the E2 slope fence's DISCLOSED LIMITS pattern: enumerate the blind
     # categories, assert each one blind with a test so the disclosure cannot go stale,
     # and state that the LAW binds inside them even though the instrument cannot see
@@ -839,7 +844,7 @@ class GradeLexiconFenceTests(unittest.TestCase):
                    'brightness = grade["within_track"] * 255\n')
 
     def test_blind_category_1_dot_hidden_paths(self):
-        """BLIND (1/4): dot-prefixed components. The spec's own walk text requires
+        """BLIND (disclosed category): dot-prefixed components. The spec's own walk text requires
         skipping them, so this is a spec-required exclusion, not an implementation
         choice — and it is still a way an executable module stays unseen."""
         import shutil
@@ -852,7 +857,7 @@ class GradeLexiconFenceTests(unittest.TestCase):
             shutil.rmtree(tmp)
 
     def test_blind_category_2_directory_symlinks(self):
-        """BLIND (2/4): `rglob()` does not descend directory symlinks."""
+        """BLIND (disclosed category): `rglob()` does not descend directory symlinks."""
         import shutil
         tmp = self._blind_tree({"real_pkg/bad.py": self.CARRIER_SRC})
         try:
@@ -870,7 +875,7 @@ class GradeLexiconFenceTests(unittest.TestCase):
             shutil.rmtree(tmp)
 
     def test_blind_category_3_non_py_extensions(self):
-        """BLIND (3/4): the walk is `rglob("*.py")`, so `.pyw` (and any other executable
+        """BLIND (disclosed category): the walk is `rglob("*.py")`, so `.pyw` (and any other executable
         extension) is out of scope."""
         import shutil
         tmp = self._blind_tree({"consumer.pyw": self.CARRIER_SRC,
@@ -886,7 +891,7 @@ class GradeLexiconFenceTests(unittest.TestCase):
             shutil.rmtree(tmp)
 
     def test_blind_category_4_dynamically_generated_source(self):
-        """BLIND (4/4): source that does not exist on disk as a file at scan time —
+        """BLIND (disclosed category): source that does not exist on disk as a file at scan time —
         built at run time, `exec`'d from a string, or fetched — cannot be walked. Same
         class as the E2 slope fence's computed-key blind spot: the literal never appears
         in a file the scanner reads."""
@@ -902,6 +907,43 @@ class GradeLexiconFenceTests(unittest.TestCase):
                 self._scan_tree(tmp), [],
                 "dynamically generated source is a DISCLOSED blind category; if this "
                 "now reports, the instrument gained reach — update the disclosure")
+        finally:
+            shutil.rmtree(tmp)
+
+    def test_blind_category_5_interior_of_an_exempted_file(self):
+        """BLIND (disclosed category, added by Ruling B′): the INTERIOR of an exempted
+        file. An exact-file or prefix exemption hides everything inside that file, so an
+        unlawful level mapping added LATER inside an already-allowlisted carrier module is
+        invisible to this coarse lexicon tripwire — the fence asks "does a non-exempt
+        module mention a carrier", never "what does an exempt module do with one".
+
+        EBUILD5REV4 demonstrated it by planting the forbidden expression inside a file
+        named `state_manager.py` (allowlisted, with its authorized-wiring reason): the
+        module executed with `brightness == 255` while scan and governance both returned
+        `[]`. That plant is reproduced here.
+
+        **The real enforcement for allowlisted carriers is the E4-stage assertion** —
+        which reads ARGUMENTS rather than filenames and is out of scope this round. The §4
+        pool-selection law binds inside this blind spot regardless of what this instrument
+        can see: an allowlist entry is permission to MENTION a carrier, never permission
+        to map one onto a level."""
+        import shutil
+        import tempfile
+        tmp = Path(tempfile.mkdtemp(prefix="fence_exempt_interior_"))
+        try:
+            # an allowlisted exact-file NAME carrying the forbidden expression
+            (tmp / "state_manager.py").write_text(self.CARRIER_SRC, encoding="utf-8")
+            blind = self._scan_tree(tmp, allow=self.ALLOW)
+            self.assertEqual(
+                blind, [],
+                "the interior of an exempted file is a DISCLOSED blind category; if this "
+                "now reports, the instrument gained reach — update the disclosure in the "
+                "r8 spec clause 5c and the docstrings")
+            # CONTROL (non-vacuous): the identical file, NOT allowlisted, IS reported —
+            # so the blindness is the exemption, not the fixture.
+            seen = dict(self._scan_tree(tmp, allow={}))
+            self.assertIn("state_manager.py", seen)
+            self.assertEqual(seen["state_manager.py"], ["within_track"])
         finally:
             shutil.rmtree(tmp)
 
