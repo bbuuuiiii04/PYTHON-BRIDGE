@@ -868,7 +868,9 @@ loudness.
   out of scope by construction. **What actually happened, recorded rather than
   smoothed over:** the repo's auto-sync hook published two intermediate commits
   (`d1c30cf0`, `5887c503`) carrying the demotion *without* the watchdog, which arrived
-  nine minutes later in `51a7e639` — so the same-change rule was VIOLATED in published
+  **11m49s** later in `51a7e639` (22:58:05 → 23:09:54, measured from the commit
+  timestamps; an earlier "nine minutes" here was the `5887c503`→`51a7e639` interval,
+  not the exposure from the demotion) — so the same-change rule was VIOLATED in published
   history. That split is accepted by explicit exec amendment, with the rule
   re-specified in a form this repo can actually satisfy: see
   `local/spectral_v5_2026_07_17/EBUILD4_coupling_adjudication.md`. Coupling is now
