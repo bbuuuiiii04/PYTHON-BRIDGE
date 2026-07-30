@@ -463,3 +463,400 @@ rejections (§3), validation doctrine (§7), and runtime gates (§8) of the base
 1–3, stand unchanged everywhere not explicitly supplemented above.
 
 *(End of AMENDMENT-4. Next amendment, if ever adopted, appends below as AMENDMENT-5.)*
+
+
+## AMENDMENT-5 (2026-07-29) — source preservation: the source outlives the conclusion (5a the source record and its citations, 5b the method behind a number, 5c pointer direction and integrity)
+
+**Adoption provenance:** on 2026-07-29 the operator asked whether his sound descriptions had actually
+survived the 2026-07-25 handoff. They had not. An audit that day found three losses with one mechanism, and
+the exec8 seat then composed the one-sentence law this entry builds on and OFFERED it to the operator:
+*"Operator-supplied source material is preserved VERBATIM, and a derived artifact never replaces its
+source. This binds his words, his descriptions, and the script behind any reported number."* **That
+sentence is the exec's wording, not the operator's** — its two on-disk carriers both say so
+(`local/spectral_v5_2026_07_17/A5DRAFT_work_order.md:7` heads it *"as proposed by the exec8 audit …
+operator offered, NOT ratified"*, and the program's own memory record calls it a *"PROPOSED AMENDMENT-4
+CLAUSE 5, offered to the operator … NOT YET RATIFIED"*), and no record anywhere shows the operator
+formulating it. It is quoted here as an exec proposal and is NOT presented as an operator quotation; the
+first draft of this entry got that wrong, and the producer check in clause 5a is what caught it. The audit's
+on-disk record is the three cures it produced — `OPERATOR_SOUND_DESCRIPTIONS_VERBATIM.md` (his words
+transcribed, with the third-party description sets kept separate and attributed),
+`OPERATOR_SPANS_2026_07_25.md:3` (the pointer added the same day), `operator_spans_measure.py` +
+`operator_spans_measure.json` (the method behind the six span measurements) — plus
+`A5DRAFT_work_order.md` §"Provenance exhibits". There is no standalone audit report, which is itself a
+small instance of the class this entry closes. Drafted by the A5DRAFT seat (Opus 5, exec dispatch,
+2026-07-29), cured through two hostile reviews (A5REV, A5REV2 — reviewer ≠ author, both ruling FIX) and the
+A5FIX1 / A5FIX2 rounds; applied to this log by the executive seat after a fresh review. Provenance
+references only — every normative clause below is inlined.
+
+**Provenance distinction (binding on how this entry is read):** nothing in this entry is
+operator-ratified. The founding sentence is an EXEC PROPOSAL offered to him and not ruled on; the three
+clauses, their instruments, their consequences and their limits are exec-adopted PROCESS law that becomes
+program law ONLY by the exec adopting this entry after review. Nothing here is approved by his silence, and
+his standing veto applies to every clause at any time. If he rules on the founding sentence — restating,
+narrowing, or rejecting it — his words become the source and this entry is corrected forward, never edited
+in place.
+
+**This amendment authorizes no implementation, dependency, runtime, or lighting change.** §7 validation
+doctrine, §8 runtime gates, and §9 step-by-step authorization stand unchanged and govern how every clause
+below may ever be pursued. AMENDMENTS 1–4 stand unchanged. No repo tool, hard check, or CI gate is
+authorized here: the one instrument this entry adds is a lane script, run by hand at review time.
+
+**It binds FORWARD only, and it certifies nothing already shipped.** Adopting this entry does not declare
+any existing spec, report, run, or delivery compliant, and it does not require any of them to be reworked.
+It also proves nothing about completeness: the recovered files show that named material exists NOW; no
+record establishes that nothing else was lost, or that the recovered transcriptions are complete. Every
+count below is a count of KNOWN losses.
+
+**Every mandatory obligation below names the check that fails when it is broken, and no obligation is
+wider than its check.** Where a promise exceeded what could be checked, the promise was NARROWED to the
+check and the remainder is named as a REVIEW OBLIGATION carrying no gate — a duty a human reviewer owes,
+stated as unenforced rather than dressed as enforcement. Where nothing can check a promise at all, this
+entry says so. That rule is applied to this entry's own text: three rounds of hostile review found it
+describing checks it did not have, which is why it is stated here rather than assumed.
+
+**The root failure these three clauses close.** The program kept what it CONCLUDED and discarded what it
+concluded FROM. One audit, three known losses, one mechanism:
+
+1. **The description corpus.** None of the sound-description text existed in any file — neither his
+   definitions in his own voice nor the four description sets a third-party model wrote from his
+   boundaries, whose adjectives (*raspy*, *foghorn*, *tea-kettle*, *wall-of-sound*, *masking the
+   percussion*) are hypotheses and not his words, a distinction that itself nearly went missing. Only
+   summaries survived. These were the definitions the program had waited nine months for, and the text of
+   them lived in a chat session about to be closed.
+2. **Three measured numbers.** New Sky's per-slot pump shape, the Twin pump depths, and the Twin
+   `sustain_high_db` lift existed nowhere on disk — recorded once in conversation, then gone.
+3. **Every method behind a number.** All six Tier-3 span measurements were taken with throwaway shell
+   python. The numbers were written down; the way they were derived was not. Re-deriving them four days
+   later reproduced one family of numbers exactly and failed to reproduce two others (clause 5b).
+
+AMENDMENT-4's root-failure paragraph names this same class — *"lasts 8 beats and then tapers off"* became
+`[416,424)` and the words were gone. But 4a's gates require OBTAINING his definitions (gate 1) and
+CARRYING his structures (gate 3); none of them requires the SOURCE to still exist. A program can pass all
+four gates while the evidence they were checked against evaporates. That is the gap this entry closes.
+
+**What this entry binds, and what it does not.** BINDS: the laser / accent / energy program's artifacts —
+design specs, design rounds, hostile reviews, scored runs and their reports, operator deliveries, and
+entries in this log. Does NOT bind: repo runtime code and its docstrings, the general upkeep of the
+tracked `docs/` tree, other programs or repos, and it creates **no duty to transcribe everything the
+operator ever says** — the duty attaches only to source material a program artifact actually uses.
+Third-party generated description text is not operator truth: it is preserved WITH its generator named and
+its producer intact, and is never promoted to a label.
+
+### Clause 5a — The source record, and what a citation of it must survive
+
+**Base clauses touched:** §7 (validation doctrine) — SUPPLEMENTED; AMENDMENT-4 clause 4a gates 1 and 3 —
+supplemented (they require his evidence be used and carried; this requires it still exist in his own
+words). §1 boundary 3 (taste is human authority) is unchanged and is why this matters: if his words are the
+authority, a paraphrase of them is not. AMENDMENT-3 clause 3c's closed-categorical-set discipline is
+followed, not modified — the producer vocabulary below is a closed set.
+
+**Law text, part 1 — the source record, in the form the instrument parses.** Operator source material a
+program artifact will use is transcribed by the receiving seat into a PASSAGE of a source record: a file
+carrying a `SOURCE-RECORD:` header, an `INDEX:` line listing every passage ID, and one block per passage —
+
+```
+PASSAGE <ID> | PRODUCER: <producer> | RECEIPT: <YYYY-MM-DD> | seat: <seat> | arrival: <how it arrived> | raw: no|<path>
+> the text
+END PASSAGE
+```
+
+- **producer** comes from the closed set {`OPERATOR`, `THIRD-PARTY:<name>`, `EXEC-MEASUREMENT`,
+  `EXEC-RECORD`}. `THIRD-PARTY` without a name is not a lawful value.
+- **receipt** carries all four fields — date, seat, arrival route, and `raw:` either `no` or the path to
+  the retained raw material. **The date is written `YYYY-MM-DD` and only that.** Other real date syntaxes
+  a parser might accept (`20260729`, `2026-W31-3`) are not this form and are rejected; the same rule binds
+  the date a citation cites on.
+- **text** is transcribed with no word added, removed, reordered, or respelled. **This is what "VERBATIM"
+  means in this entry, exactly:** the only differences permitted between raw material and passage are line
+  wrapping and a `>` prefix per line.
+- **The grammar is validated, and a malformed record is not a lawful source.** A header-form record must
+  carry the header; **EXACTLY ONE `INDEX:` line — counted whether or not it carries any IDs** — which must
+  itself be non-empty and **list no ID twice**; complete `PASSAGE … END PASSAGE` blocks; unique passage IDs;
+  and an index whose ID set matches the body. A record failing any of those is not a source at all
+  (check S) — a header line alone does not make one, neither does an index that repeats an ID, nor a second
+  index line quietly replacing the first, **nor a bare `INDEX:` followed by a real one**: two index lines
+  are two index lines even when the first is empty.
+- **Legacy form, still lawful, and closed at three:** a file that declares producers as `TIER n` headings is
+  a source record whose passages are cited by line range, with the mapping TIER 1 → `OPERATOR`, TIER 2 →
+  `THIRD-PARTY:<name from the heading>`, TIER 3 → `EXEC-MEASUREMENT`. **Those three are the whole lawful
+  set:** any other tier number is not a source form, and a TIER 2 heading that names no producer is not
+  one either. Legacy files carry no receipts and no index; what that costs is stated in the instrument
+  below rather than papered over.
+- A file that is neither form is a DERIVED artifact and may never be cited as a source.
+
+**Law text, part 2 — the citation.** A derived artifact quoting source material names the source FILE, the
+PASSAGE (its ID, or its line range in a legacy file), the PRODUCER it claims, and the DATE it cites on. A
+quote naming only a file is not a citation. **Everything mandatory in this clause binds the citations an
+artifact DECLARES.** Declaring every quotation it makes is a REVIEW OBLIGATION on the authoring seat and
+the sealing reviewer, NOT a gate: the instrument's coverage scan is advisory only, and an undeclared
+quotation is invisible to it. That is stated here so no one mistakes a clean run for a complete one. Any omission — inside the quotation or at its end — is MARKED
+with an elision mark; a citation that stops before the end of its passage and does not mark it is a
+violation, whether or not it ends in punctuation. A remainder that is only punctuation is the end of the
+passage and needs no mark.
+
+**Law text, part 3 — the permitted normalization (closed, because "verbatim" cannot be enforced against an
+open set).** Comparing a citation to its passage folds only: Unicode quotes/apostrophes/dashes to ASCII;
+apostrophes dropped; markdown markers `>` `*` `_` and backticks stripped; whitespace runs collapsed; case
+folded; fragment-edge punctuation trimmed. A word-level difference — a word added, dropped, changed, or
+reordered — fails check C or O below. A difference INSIDE that list passes by design and is not a
+violation.
+
+*Instrument:* `local/spectral_v5_2026_07_17/a5_quote_check.py`, run over a manifest that declares the
+citation cases and the `scan` windows of the citing artifacts:
+
+```
+python3 -B a5_quote_check.py --manifest <manifest>.json [--baseline <baseline>.json] \
+                            [--write-baseline <baseline>.json] --out <results>.json
+```
+
+Seven checks gate a citation; a citation passes only if every gate that applies to it holds:
+
+- **S — source, not derivative, and well-formed.** The cited file must be a source record: header form
+  with a valid grammar (header + exactly one index line, counted even when bare, whose value is non-empty
+  and free of duplicate IDs + complete blocks + unique passage IDs + index matching body), or legacy tier
+  form using ONLY tiers 1, 2 and 3. A derived artifact FAILS; a malformed header-form record FAILS —
+  including `INDEX: P1, P1`, a record carrying two index lines, a bare `INDEX:` followed by a valid one,
+  and a record whose only index line is bare; a `TIER 999` file FAILS; a TIER 2 heading naming no producer
+  FAILS. *(This is the check that
+  refuses to let a work order, a spec, or an amendment entry stand in for the words it quotes — and that
+  refuses a record whose own bookkeeping does not parse.)*
+- **T — producer.** The passage's declared producer must equal the producer claimed, matched against the
+  closed vocabulary. `THIRD-PARTY` with no name FAILS; a claim against a file that declares no producer
+  FAILS; a third-party passage claimed as `OPERATOR` FAILS.
+- **C — containment.** Every fragment of the citation appears in the cited passage under part 3's
+  normalization.
+- **O — order.** The fragments appear in the passage in the citation's order, non-overlapping.
+- **E — omission marking.** An omission inside a quotation breaks C or O for free. A terminal omission —
+  the citation stopping anywhere before the end of its passage, punctuated or not — FAILS unless the
+  citation carries a trailing elision mark.
+- **R — receipt.** For a source record: the four receipt fields must be present, the receipt date must be
+  a real calendar date **written `YYYY-MM-DD`**, and it must be on or before the citation's date — which
+  must satisfy the same rule. A missing field FAILS; `2026-99-99` FAILS; `20260729` and `2026-W31-3` FAIL,
+  because they are dates in a form the law does not print; a receipt dated after the citation FAILS. **For a legacy tier
+  file the receipt is REPORTED, not gated** — legacy files predate the form, and retrofitting them is not
+  required by this entry.
+- **X — raw versus passage.** Where the receipt names retained raw material, the passage must match it
+  under transcription normalization (line wrapping and `>` prefixes only, since transcription may not
+  respell). A mismatch FAILS, and a receipt naming a raw file that does not exist FAILS. **Where no raw was
+  retained, this is REPORTED as `not-available` and is not gated:** a passage transcribed from a display
+  cannot be verified against material that no longer exists, and no check here can pretend otherwise.
+
+One check gates the RUN rather than one citation:
+
+- **B — integrity against a preserved baseline.** `--write-baseline` first VALIDATES every cited source
+  record and **refuses to write anything if one is malformed**; what it then records, per record, is the
+  index ID set and each passage's producer, TEXT, and COMPLETE receipt metadata — date, seat, arrival and
+  raw. `--baseline` re-verifies and FAILS on: a deleted passage, mutated text, a changed producer, ANY
+  changed receipt field (a rewritten `seat:` or `arrival:` alone is enough), an index ID set that shrank,
+  a record that no longer parses, a cited source record that has no baseline entry at all, **and a CITED
+  PASSAGE APPENDED AFTER the baseline was taken and not yet armed** — which is the hole a passage could
+  otherwise slip through by being added later and quoted immediately.
+- **Arming an appended passage — `--extend-baseline IN OUT`.** Appending is lawful and must stay lawful, so
+  the law names the procedure rather than forbidding growth: the extension **re-verifies every recorded
+  passage first and REFUSES to write when any of them changed**, then records the new IDs. An extension can
+  therefore arm new material but can never launder an edit to old material, and a record whose earlier
+  passages were quietly rewritten cannot be re-baselined into cleanliness. The baseline stores text and
+  metadata in the clear — no hashes — so it detects any change to material it has a record of, and nothing
+  about material it does not.
+
+*Advisory, never gating — M, the coverage scan.* For each `scan` window the manifest declares, the
+instrument parses the citing artifact and prints any double-quoted span of twelve characters or more that
+no case covers. **It is not a completeness check and this entry does not claim it is:** a manifest that
+declares no windows produces no output at all, two identical quotation occurrences covered by one case
+report clean, and quotations not wrapped in quote characters are never seen. It is a reading aid for the
+reviewer who owns the declaration duty, and nothing more.
+
+*Reported, never gating:* a citation that starts mid-passage without a leading mark. This entry does not
+require a leading mark, so it is not made a gate; it is printed so a reviewer can see it.
+
+*The temporal duties, downgraded honestly.* "In the receiving round" is not provable by any check available
+here. What check R enforces is narrower and real: that a receipt exists, carries its four fields, and is
+dated on or before the citation. File mtimes are corroboration only and bind nothing. **A receipt is a
+declaration; nothing here detects a backfilled or untruthful one, and this entry claims no more than it can
+check.**
+
+*Can-fail — measured, with every gate demonstrated firing separately (33 cases, 9 PASS / 24 FAIL; 5 gating
+run rows, 4 PASS / 1 FAIL; 2 advisory rows that gate nothing):*
+
+| gate | case that fails it | case that passes it |
+|---|---|---|
+| **S** | the exec work order (`A5DRAFT_work_order.md:9-11`) cited as an `EXEC-RECORD` source; a `TIER 999` file cited as `EXEC-MEASUREMENT`; a header-form record with no `INDEX:`; one whose index lists an ID twice; one carrying two index lines; **one whose first index line is bare and whose second is valid**; and one whose only index line is bare | any citation into a valid source record or a tier-1/2/3 file |
+| **T** | *"raspy, brassy resonance"* (`OPERATOR_SOUND_DESCRIPTIONS_VERBATIM.md:76-77`) claimed as `OPERATOR`; and the same words claimed as unnamed `THIRD-PARTY` | the same words as `THIRD-PARTY:Gemini`; a Tier-3 measurement as `EXEC-MEASUREMENT` |
+| **C** | `accent_moment_spec_v9.md:15` — *"on the drop the elephant toots…"* where he wrote *"on the beat drop (or later in the drop)…"*; a control sentence never written; this entry's founding sentence claimed as his | the five v9 quotations whose words match |
+| **O** | his correction at `:49-50` with its two fragments swapped | the same correction in his order |
+| **E** | five live v9 quotations that stop mid-passage unmarked, including *"a broadly defined musical element that can take many forms"* (`:41-47`), which carries no punctuation at all | the identical quotation with a trailing `…`; and quotations that reach the end of their passage |
+| **R** | a fixture passage with no `RECEIPT:` field; one dated the day AFTER the citation; one dated `2026-99-99`, which is ten characters and not a date; one dated `20260729`, which is a real date in a form the law does not print; and a citation whose own `cited_on` is `20260729` | a fixture passage with all four fields, dated `YYYY-MM-DD` on or before the citation date |
+| **X** | a fixture passage that respells one word of its retained raw material (*"whilst"* for *"while"*) | a fixture passage that matches its raw file exactly |
+| **B** | a mutated copy of the fixture record (passage deleted, text mutated, index shrunk — all reported in one run); a copy with ONLY `seat:` and `arrival:` rewritten; a cited source record with no baseline entry; **a cited passage appended after the baseline (`EXT-02`), whether quoted faithfully or after being reworded**; `--write-baseline` refusing to write while a cited record is malformed; and `--extend-baseline` refusing to arm while a recorded passage has changed | the unmutated record against its own baseline; a passage cited after being armed by a lawful extension |
+| M *(advisory)* | — it gates nothing. It reports five uncovered quotations in one declared window of `accent_moment_spec_v9.md` and none in the `:14-23` window | — |
+
+Two of the eight operator-quote spans in `accent_moment_spec_v9.md:14-23` pass; six fail — one for altered
+words, five for unmarked terminal omissions. **That is the honest price of check E, and it is one character
+per quote.** The alternative — excusing a cut that lands on a sentence boundary — was considered and
+rejected: it is exactly the hole that let a quotation drop the whole second half of his accented-moment
+definition while passing.
+
+*Consequence — a failed citation has exactly two lawful outcomes.* CORRECT the citation — re-quote, add the
+mark, fix the producer, add the receipt — or RECLASSIFY it as a paraphrase, dropping the quotation marks
+and any "verbatim" claim with them. **No reviewer may accept altered words as the operator's verbatim
+words:** a reviewer can verify a transcription or reject it, but cannot make words he did not write into
+words he wrote. The sealing review (reviewer ≠ author) confirms which outcome occurred and records it; the
+authoring seat may not self-certify either. A spec quoting operator words with no source passage at all is
+not sealable, and a delivery in that state does not ship.
+
+*What no check here does.* It cannot tell whether a faithful, correctly-attributed, correctly-marked
+quotation is being used out of context or selected to mislead; it cannot verify a passage transcribed from a
+display; and it cannot detect an untruthful receipt. The producer binding and the operator's veto are the
+only guards on those, and neither is a check. This is claimed as a transcription-fidelity and
+record-integrity instrument, and nothing more.
+
+### Clause 5b — A reported number names the method that reproduces it
+
+**Base clauses touched:** §7 (validation doctrine) — SUPPLEMENTED (what may be claimed now includes how it
+may be re-derived); AMENDMENT-4 clause 4c — extended from a claim's SIGNIFICANCE to a number's
+REPRODUCIBILITY, and its sealed-carrier supersession mechanism is reused below.
+
+**Law text:** any measured or computed number — derived from audio, the spectral cache, a corpus, or a
+run's output — that a program artifact REPORTS or CITES names, at the point of citation, the on-disk
+method that reproduces it: a committed repo tool, a preserved lane script, or a frozen manifest-pinned
+runner, together with the exact command. Ad-hoc shell and throwaway interpreter sessions remain a lawful
+way to EXPLORE and are never a lawful way to REPORT: the moment a number leaves the session, its method is
+written down, or the number does not travel.
+
+*Instrument / can-fail:* the citing artifact prints the method path and the exact command; the sealing
+review RE-RUNS the numbers its own pass/fail decision depends on and records which ones it re-ran. It fails
+when a cited number names no method, when the named method does not produce it, or when a review's decision
+rested on a number the review never re-ran and did not say so. This one is discharged by a human reading and
+a re-run, not by a script, and it says so plainly — the demonstrations below are what a re-run found both
+times it was done.
+
+*Consequence, including when a re-run is not possible.* A number with no named method does not travel: the
+artifact is not sealable on it and does not ship it. When the method is named but re-running is genuinely
+unavailable — cost, missing hardware, an environment that no longer exists — the artifact MAY still seal on
+that number by naming the RUN IDENTITY it relies on instead: the frozen manifest-pinned package or the
+recorded prior run of the named script, identified in the artifact, with the review recording that it
+relied on a prior run rather than its own. What may never happen is sealing on a number whose method is
+absent, or a review recording an open item and sealing anyway as if the check had passed. An open item is a
+disclosure, not a discharge.
+
+*Demonstration 1 — the method that came back, and the error it exposed.* The six Tier-3 span measurements
+of 2026-07-25 were taken with throwaway shell python; numbers recorded, method lost.
+`operator_spans_measure.py`, written 2026-07-29 to cure exactly that, reproduces all six figure/ground
+lifts EXACTLY as recorded (+1.4 / +8.4 / +8.4 / +13.2 / +13.2 / +2.6 dB) — **and it exposed a number the
+ad-hoc version had produced differently.** New Sky's track air-duck baseline was recorded as 6.0 dB
+(`OPERATOR_SPANS_2026_07_25.md:59`); the preserved script reproduces 6.14 dB, because the ad-hoc version
+excluded the span itself from the track baseline while the script includes the whole track
+(`operator_spans_measure.py:159`). Same span, same cache, a method difference nobody could see and nobody
+chose.
+
+*Demonstration 2 — the numbers that did NOT come back (found by the hostile review of this entry, not by
+its author).* Two other recorded families do not reproduce as printed. The I Cannot growl's stereo width was
+recorded as side/mid `0.163` and L-R correlation `0.949`
+(`OPERATOR_SPANS_2026_07_25.md:42-45`); the preserved run gives `0.15989` and `0.95015`. Its band-limited
+centre was recorded as moving `159 → 172 Hz`
+(`OPERATOR_SOUND_DESCRIPTIONS_VERBATIM.md:86-87`); the preserved run prints per-quarter values
+`[158.1, 180.5, 171.8, 163.6]`, in which the recorded pair cannot be located unambiguously — first-to-last
+is `158.1 → 163.6`, a net of `+5.5 Hz`, not the recorded pair at all. **Why they differ is UNKNOWN and
+cannot be determined, because the method that produced the recorded values no longer exists.** The
+conclusions those numbers supported are unaffected in direction (the width contrast and the absence of a
+pitch dive both survive), and both are recorded here as *reproduced approximately, not exactly*. This is
+the clause's real argument: **an unpreserved method does not merely inconvenience a later reader — it hides
+errors, and it makes the errors it hides unattributable afterwards.** Three number families, one
+reproduces exactly, two do not, and nobody can say why.
+
+*Legacy numbers, and the route that edits no sealed byte:* this clause binds at the ACT OF CITATION, so it
+is satisfiable without touching one existing byte anywhere. A number already recorded whose method is
+unrecoverable is DEMOTED to *recorded, not reproducible* and REPORTED as such; it may not be cited as
+measured evidence by a NEW artifact until a reproducer exists — and writing one is always available, which
+is how the three lost measurements came back. Where the carrier is sealed, sha-pinned, or append-only, the
+demotion is recorded as a BINDING SUPERSESSION in the controlling forward authority exactly as AMENDMENT-4
+clause 4c requires, mandatory for anyone citing that document; sealed bytes are never edited. Numbers
+produced by a frozen, manifest-pinned runner ALREADY satisfy this clause — the runner IS the preserved
+method — and nothing here reopens a sealed package.
+
+### Clause 5c — The derived artifact points at its source, and the cited source is integrity-checked
+
+**Base clauses touched:** §7 (validation doctrine) — SUPPLEMENTED. Consistent with, and modifying nothing
+in, this log's own byte-freeze and append-only rules (`:16-22`), which are the same discipline applied to
+this document.
+
+**Law text:** every derived artifact — spec, review, report, delivery, entry in this log — names the
+preserved source passages it draws on, in the artifact itself, near its top. The pointer runs **derived →
+source**; a source that happens to point forward at its derivatives does not discharge the derivative's
+duty to point back, and a pointer that lands on another derived artifact is not a source pointer (check S).
+A summary, table, coordinate, or grade is an ADDITION to its source, never a REPLACEMENT.
+
+**Source records are append-only, and that is enforced against a baseline, not on trust.** The superseded
+passage keeps its bytes and its ID; a source record carries an `INDEX:` whose ID set only grows. What
+enforces this is check B: a baseline is taken with `--write-baseline` — which validates first and refuses
+to write over a malformed record — and re-verified with `--baseline`, failing on a deleted passage, mutated
+text, a changed producer, any changed receipt field, a shrunken index, an index that no longer matches the
+body, or a cited record with no baseline entry. **The obligation is exactly co-extensive with that check,
+and no wider:**
+
+- It binds source records that have a baseline, and a cited record without one now FAILS rather than
+  passing in silence — taking the baseline is part of creating the record.
+- **It binds the passages the baseline records, and a cited passage appended later is NOT protected until
+  it is armed — which is a failure, not a silence.** A record can grow lawfully; what it cannot do is grow
+  a passage, have that passage quoted, and call the result integrity-checked. Arming is
+  `--extend-baseline`, which re-verifies everything already recorded and refuses to proceed if any of it
+  changed, so growth can never be used to bless an edit. Until a passage is armed, any run citing it fails
+  B by name.
+- **A correction appending a passage that NAMES what it supersedes is a REVIEW OBLIGATION, not a gate.**
+  The schema carries no `supersedes` field, the instrument does not parse one, and a correction added
+  without a back-link passes B. The reviewer owns that link; this entry does not pretend a check owns it.
+- For a LEGACY tier file, what is verified is the cited passages — their text, order and producer section,
+  re-checked by re-running the citation manifest (checks C, O, T) plus any baseline entry that exists. **A
+  legacy file's uncited passages are not protected**, and this entry does not claim they are.
+- No hashes are used, so this is not tamper-evidence: a coordinated rewrite of both a source record and its
+  baseline would pass. Detection is also only as fresh as the last re-run.
+
+*Instrument / can-fail:* at seal or delivery, the citation manifest is run: every named passage resolves,
+its quoted words pass 5a's gates against that passage, its cited numbers carry 5b's command, and every
+cited source record AND every cited passage re-verifies against its baseline (B). The coverage scan (M)
+prints alongside and gates nothing. Demonstrated failing states for B: a mutated copy of a fixture record
+(passage deleted, text mutated, index shrunk — all reported in one run); a copy with only `seat:` and
+`arrival:` rewritten; a cited record with no baseline; a cited passage appended after the baseline, both as
+quoted and after being reworded; `--write-baseline` refusing to write while a cited record is malformed;
+and `--extend-baseline` refusing to arm while a recorded passage has changed. Demonstrated failing states
+for S: a derived work order, a `TIER 999` file, a header-form record with no index, one whose index repeats
+an ID, and one carrying two index lines.
+
+*Consequence:* the artifact is not sealable and does not deliver until every pointer resolves, its cited
+passages re-verify, and its baselined records pass. A source that turns out to be missing is REPORTED —
+never reconstructed from a derived artifact that quoted it, and never re-titled as a source. Copying a
+derivative into a file named for its source changes the filename, not the provenance.
+
+*Stated limit:* no check can detect a source that was never written — which is precisely why the pointer
+duty attaches at AUTHORING time. A seat that cannot name a source passage is discovering, in that moment,
+that the source does not exist; the lawful move is to write it (5a) if the material is still in hand, and
+to REPORT it if it is not. That report is a legitimate outcome, not a blocked lane — an honest "his words
+for this were never saved and cannot be recovered" is worth more than a spec that quietly quotes a
+reconstruction. This entry's own founding sentence is the worked example: it is attributed to the exec
+because no operator source for it exists, and check S refuses the work order as a substitute.
+
+**Durability — the honest limit of the word "preserved", and one open adjudication.** `local/` is
+gitignored (`.gitignore:49`), so nothing in the program's lane directory is in git history. "Preserved" in
+the clauses above therefore means **a file in the working tree**, whose only backstop is the repo's
+standing ban on `git clean -fd` (`AGENTS.md:47`) — a ban earned by an actual multi-gigabyte loss. Two
+durability tiers exist and are named, never conflated: **TRACKED** (committed repo paths — this log,
+`docs/`, `tools/`) and **WORKING-TREE** (the lane). **No tracked SOURCE record exists for lane material,
+and the law text inlined into an amendment entry is not one:** an amendment entry is a derived artifact,
+and treating its embedded quotation as the source would be the very substitution clause 5c forbids. What
+inlining buys is a tracked, durable copy of the LAW; the source it was drawn from stays in the working
+tree, and the entry carries the pointer to it. Closing that gap — a tracked mirror, a backup, a policy
+change about what may be committed — is **NOT authorized by this entry** and is REPORTED as an OPEN
+ADJUDICATION for the exec. Per AMENDMENT-4's satisfiability standard, a gap this entry cannot instrument is
+disclosed, not quietly widened; the three clauses are fully satisfiable as written against working-tree
+files, and what is undecided is only how much durability the program buys.
+
+**Effect on the program:** every future laser / accent / energy spec, design round, hostile review, scored
+run, and operator delivery is judged against these three clauses alongside AMENDMENT-4's four, from
+adoption forward. A spec that quotes him without a source passage, a report whose numbers name no method,
+or a derived artifact with no path back to what it was derived FROM is not sealed and does not deliver;
+agents cite these clauses and never re-derive them. Boundaries (§1), rejections (§3), validation doctrine
+(§7), and runtime gates (§8) of the base document, and AMENDMENTS 1–4, stand unchanged everywhere not
+explicitly supplemented above.
+
+*(End of AMENDMENT-5. Next amendment, if ever adopted, appends below as AMENDMENT-6.)*
+
