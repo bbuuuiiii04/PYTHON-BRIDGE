@@ -48,9 +48,13 @@ validation_scope: >
 
 ## Load-bearing findings
 
-- **`pre_drop_gap_beats` is an orphan**: no callers outside
-  `tests/test_spectral_profile.py`; its docstring's "consumer" is
-  aspirational. Breath-hold (spec §B.5) wires this existing detector — no new
+- **`pre_drop_gap_beats` — CORRECTED (AWR-291 §6 item 5).** The earlier "is an orphan:
+  no callers outside `tests/test_spectral_profile.py`; its docstring's 'consumer' is
+  aspirational" claim was a failed repo-wide sweep. `pre_drop_gap_beats()` IS called —
+  `drop_window_vector()` (`spectral_profile.py:667`) computes `pre_gap_beats`, and the
+  offline `tools/spectral_pilot` reads it (firewall allowlist + distance vector). No
+  RUNTIME or LIGHTING consumer reads it; the breath-hold consumer remains unbuilt.
+  Breath-hold (spec §B.5) wires this existing detector — no new
   detection is proposed. Laser's `pre_drop_blackout_beats: 4`
   (`laser_config.py:73`) is fixed-length, laser-only, untouched.
 - **No library-relative track weight exists anywhere** — layer 1 is genuinely
