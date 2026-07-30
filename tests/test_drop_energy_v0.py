@@ -7,6 +7,7 @@ import ast
 import queue
 import random
 import sys
+import tokenize
 import unittest
 from dataclasses import replace
 from pathlib import Path
@@ -566,9 +567,20 @@ class GradeLexiconFenceTests(unittest.TestCase):
                 continue
             if rel in allow or (prefix_tuple and rel.startswith(prefix_tuple)):
                 continue
+            # READ FAILURE FAILS CLOSED (fence-scope adjudication Ruling A). This used
+            # to `continue` on OSError/UnicodeDecodeError — i.e. inability to inspect was
+            # treated as permission, and a VALID Python module with a
+            # `# -*- coding: latin-1 -*-` cookie (importable, executing the forbidden
+            # grade->brightness expression) became invisible inside the stated walk.
+            # `tokenize.open()` honors coding cookies, so such a file is now SCANNED
+            # rather than skipped; anything still unreadable is REPORTED as a violation
+            # naming the file, never silently passed.
             try:
-                text = path.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
+                with tokenize.open(path) as fh:
+                    text = fh.read()
+            except (OSError, UnicodeDecodeError, SyntaxError, ValueError) as exc:
+                offenders.append((rel, ["<unreadable: %s: %s>"
+                                        % (type(exc).__name__, exc)]))
                 continue
             hits = sorted(k for k in self.GRADE_IDENTIFIERS if k in text)
             if hits:
@@ -592,18 +604,32 @@ class GradeLexiconFenceTests(unittest.TestCase):
 
     @classmethod
     def _governance_violations(cls, allow=None, prefixes=None, skip_dirs=None):
-        """Every governance problem across ALL THREE exclusion surfaces, as
-        `[(kind, entry, problem), …]`. Empty list == the exclusion surface is governed.
+        """Every governance problem across the THREE NAMED GOVERNANCE SURFACES, as
+        `[(kind, entry, problem), …]`. Empty list == those three surfaces are governed.
 
-        **There are three ways to hide a module from this fence, and all three are
-        checked here** (EBUILD5REV2 finding 1 — an earlier version of this docstring
-        called exact files + prefixes the whole surface, which was false):
+        **Scope, not completeness (fence-scope adjudication Ruling C).** Earlier versions
+        of this docstring claimed "three ways to hide a module … and all three are checked
+        here". That was FALSE and the claim is banned: EBUILD5REV3 executed four further
+        pre-inspection exits (a latin-1-cookie module, a dot-hidden path, a symlinked
+        directory, a `.pyw`). What this helper governs is exactly the three surfaces a
+        seat can WIDEN by editing this class — nothing more:
           1. `ALLOW` — an exact-file exemption; must carry a stated reason and exist;
           2. `ALLOW_PREFIXES` — a prefix exemption, hiding a whole subtree; same rules;
           3. `SKIP_DIRS` — a skipped directory, hiding everything beneath it ANYWHERE in
              the walk. Governed as an EXACT SET against `PINNED_SKIP_DIRS`: any added or
              missing member is a violation, because the spec pins this set verbatim and
              it is the line that decides green-vs-red for the whole scan.
+
+        **The instrumented scope of the scan itself** (r8 spec fence clause, as corrected
+        under Ruling B): UTF-8/`tokenize`-readable `*.py` files reachable by the stated
+        walk from the repo root — dot-prefixed components and the pinned skip dirs
+        excluded, directory symlinks not descended — with a read/decode failure REPORTED
+        as a violation. FOUR blind categories are disclosed and each is ASSERTED BLIND by
+        a test above: dot-hidden paths, directory symlinks, non-`*.py` extensions, and
+        dynamically generated source. **The §4 pool-selection LAW binds everywhere,
+        including inside those four**; the instrument simply cannot see them. A green
+        fence proves no carrier mention exists IN THE INSTRUMENTED SCOPE — never that no
+        consumer exists anywhere.
 
         Parameterised so the CAN-FAIL tests can run the REAL governance logic against a
         planted surface — the check and the thing checked are the same code, so a green
@@ -655,17 +681,20 @@ class GradeLexiconFenceTests(unittest.TestCase):
         return bad
 
     def test_every_exemption_has_a_stated_reason_and_exists(self):
-        """The rule the spec makes enforceable, over ALL THREE exclusion surfaces:
-        exact-file and prefix exemptions must each state why they exist and still point
-        at something real (a stale exemption silently widens the blind area), and the
-        skipped-directory set must match its pin exactly (a skipped directory hides
-        everything beneath it, so an addition is the broadest exemption available)."""
+        """The rule the spec makes enforceable, over the three NAMED GOVERNANCE SURFACES
+        (not a completeness claim — see the helper's scope statement): exact-file and
+        prefix exemptions must each state why they exist and still point at something
+        real (a stale exemption silently widens the blind area), and the skipped-directory
+        set must match its pin exactly (a skipped directory hides everything beneath it,
+        so an addition is the broadest exemption available)."""
         self.assertEqual(
             self._governance_violations(), [],
-            "exclusion governance violations — every exact-file exemption, prefix "
-            "exemption AND skipped directory is governed: files/prefixes need a stated "
-            "reason and an existing target, and SKIP_DIRS must equal PINNED_SKIP_DIRS "
-            "exactly: %s" % self._governance_violations())
+            "exclusion governance violations — the three named governance surfaces are "
+            "exact-file exemptions, prefix exemptions and skipped directories: "
+            "files/prefixes need a stated reason and an existing target, and SKIP_DIRS "
+            "must equal PINNED_SKIP_DIRS exactly. (Governing these three is NOT a claim "
+            "that nothing else can hide source — four blind categories are disclosed and "
+            "asserted-blind above.) Violations: %s" % self._governance_violations())
 
     def test_governance_rejects_an_unreasoned_or_stale_prefix(self):
         """CAN-FAIL for finding 1, run through the REAL governance logic.
@@ -691,6 +720,190 @@ class GradeLexiconFenceTests(unittest.TestCase):
                 self.assertTrue(bad, "planted prefix surface %r was ACCEPTED" % label)
         # and the production surface is clean, so the test above is not vacuous
         self.assertEqual(self._governance_violations(), [])
+
+    # ---- the scan's own reader, exposed so boundary tests drive the REAL logic ------
+    @staticmethod
+    def _read_source(path):
+        """Exactly what `_scan()` does to read one file: `tokenize.open()`, honoring
+        coding cookies. Raises on unreadable input — the caller reports, never skips."""
+        with tokenize.open(path) as fh:
+            return fh.read()
+
+    def _scan_tree(self, root, skip_dirs=None, allow=(), prefixes=()):
+        """`_scan()`'s walk + read + report logic against an arbitrary root, so the
+        boundary tests below exercise the SAME rules the production scan uses rather
+        than a paraphrase of them."""
+        skip_dirs = self.SKIP_DIRS if skip_dirs is None else skip_dirs
+        prefix_tuple = tuple(prefixes)
+        out = []
+        for p in sorted(root.rglob("*.py")):
+            rel = p.relative_to(root).as_posix()
+            if any(part in skip_dirs or part.startswith(".")
+                   for part in rel.split("/")):
+                continue
+            if rel in allow or (prefix_tuple and rel.startswith(prefix_tuple)):
+                continue
+            try:
+                text = self._read_source(p)
+            except (OSError, UnicodeDecodeError, SyntaxError, ValueError) as exc:
+                out.append((rel, ["<unreadable: %s>" % type(exc).__name__]))
+                continue
+            hits = sorted(k for k in self.GRADE_IDENTIFIERS if k in text)
+            if hits:
+                out.append((rel, hits))
+        return out
+
+    def test_coding_cookie_source_is_scanned_not_skipped(self):
+        """CAN-FAIL for adjudication Ruling A, BOTH DIRECTIONS.
+
+        EBUILD5REV3 wrote a valid `# -*- coding: latin-1 -*-` module carrying
+        `brightness = grade["within_track"] * 255`, imported it (brightness == 255), and
+        the fence returned `[]` — because `read_text(encoding="utf-8")` raised
+        `UnicodeDecodeError` and the old code treated inability to inspect as
+        permission. `tokenize.open()` honors the cookie, so:
+
+          direction 1 — a cookie file WITH a carrier must be REPORTED;
+          direction 2 — a legitimate cookie file WITHOUT a carrier must scan CLEAN
+                        (proving the cure reads such files rather than blanket-failing
+                        them, which would be a different kind of dishonest green).
+        """
+        import shutil
+        import tempfile
+        tmp = Path(tempfile.mkdtemp(prefix="fence_cookie_"))
+        try:
+            carrier = ("# -*- coding: latin-1 -*-\n"
+                       "LABEL = 'caf\xe9 na\xefve'\n"
+                       'grade = {"within_track": 1}\n'
+                       'brightness = grade["within_track"] * 255\n')
+            (tmp / "latin1_consumer.py").write_bytes(carrier.encode("latin-1"))
+            clean = ("# -*- coding: latin-1 -*-\n"
+                     "LABEL = 'caf\xe9 na\xefve'\n"
+                     "value = 1\n")
+            (tmp / "latin1_innocent.py").write_bytes(clean.encode("latin-1"))
+
+            found = dict(self._scan_tree(tmp))
+            # direction 1: the planted carrier is now VISIBLE
+            self.assertIn("latin1_consumer.py", found,
+                          "a latin-1 module carrying a grade carrier must be REPORTED")
+            self.assertEqual(found["latin1_consumer.py"], ["within_track"])
+            # direction 2: the innocent cookie file is read and passes cleanly
+            self.assertNotIn("latin1_innocent.py", found,
+                             "a legitimate coding-cookie file must scan CLEAN, not be "
+                             "reported as unreadable")
+        finally:
+            shutil.rmtree(tmp)
+
+    def test_unreadable_source_is_reported_never_skipped(self):
+        """The other half of Ruling A: whatever `tokenize.open()` still cannot read is a
+        REPORTED VIOLATION naming the file. Inability to inspect is never permission."""
+        import shutil
+        import tempfile
+        tmp = Path(tempfile.mkdtemp(prefix="fence_unreadable_"))
+        try:
+            # a declared-utf-8 file containing bytes that are not valid utf-8
+            (tmp / "broken.py").write_bytes(
+                b"# -*- coding: utf-8 -*-\nx = '\xff\xfe not utf8'\n")
+            found = dict(self._scan_tree(tmp))
+            self.assertIn("broken.py", found,
+                          "an undecodable module must be REPORTED, never skipped")
+            self.assertTrue(found["broken.py"][0].startswith("<unreadable:"),
+                            "the report must name it as unreadable: %r"
+                            % (found["broken.py"],))
+        finally:
+            shutil.rmtree(tmp)
+
+    # ---- the FOUR disclosed blind categories, each ASSERTED BLIND -------------------
+    # Modelled on the E2 slope fence's DISCLOSED LIMITS pattern: enumerate the blind
+    # categories, assert each one blind with a test so the disclosure cannot go stale,
+    # and state that the LAW binds inside them even though the instrument cannot see
+    # them. Authorized by the fence-scope adjudication Ruling B: the walk is
+    # NARROWED-AND-DISCLOSED, not widened — a consumer deliberately hidden behind a
+    # symlink, a dot-path or an alternate extension is adversarial evasion no static
+    # scan defeats, and this fence exists to catch ACCIDENTAL drift.
+    #
+    # If any of these four starts FAILING, the walk has widened and the disclosure in
+    # the r8 spec fence clause + the docstrings must be updated to claim the new
+    # coverage. An honest limit is a TESTED limit.
+
+    def _blind_tree(self, layout):
+        """Build a temp tree, return the scan result. `layout` maps relpath -> source."""
+        import tempfile
+        tmp = Path(tempfile.mkdtemp(prefix="fence_blind_"))
+        for rel, src in layout.items():
+            p = tmp / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(src, encoding="utf-8")
+        return tmp
+
+    CARRIER_SRC = ('grade = {"within_track": 1}\n'
+                   'brightness = grade["within_track"] * 255\n')
+
+    def test_blind_category_1_dot_hidden_paths(self):
+        """BLIND (1/4): dot-prefixed components. The spec's own walk text requires
+        skipping them, so this is a spec-required exclusion, not an implementation
+        choice — and it is still a way an executable module stays unseen."""
+        import shutil
+        tmp = self._blind_tree({".future_consumer/bad.py": self.CARRIER_SRC})
+        try:
+            self.assertEqual(self._scan_tree(tmp), [],
+                             "dot-hidden paths are a DISCLOSED blind category; if this "
+                             "now reports, the walk widened — update the disclosure")
+        finally:
+            shutil.rmtree(tmp)
+
+    def test_blind_category_2_directory_symlinks(self):
+        """BLIND (2/4): `rglob()` does not descend directory symlinks."""
+        import shutil
+        tmp = self._blind_tree({"real_pkg/bad.py": self.CARRIER_SRC})
+        try:
+            (tmp / "linked_consumer").symlink_to(tmp / "real_pkg",
+                                                 target_is_directory=True)
+            found = [rel for rel, _ in self._scan_tree(tmp)]
+            self.assertNotIn("linked_consumer/bad.py", found,
+                             "directory symlinks are a DISCLOSED blind category; if "
+                             "this now reports, the walk widened — update the "
+                             "disclosure")
+            # the REAL directory is still seen — the blindness is the symlink, not the
+            # content, so this test cannot pass by the tree being empty
+            self.assertIn("real_pkg/bad.py", found)
+        finally:
+            shutil.rmtree(tmp)
+
+    def test_blind_category_3_non_py_extensions(self):
+        """BLIND (3/4): the walk is `rglob("*.py")`, so `.pyw` (and any other executable
+        extension) is out of scope."""
+        import shutil
+        tmp = self._blind_tree({"consumer.pyw": self.CARRIER_SRC,
+                                "consumer.py": self.CARRIER_SRC})
+        try:
+            found = [rel for rel, _ in self._scan_tree(tmp)]
+            self.assertNotIn("consumer.pyw", found,
+                             "non-.py extensions are a DISCLOSED blind category; if "
+                             "this now reports, the walk widened — update the "
+                             "disclosure")
+            self.assertIn("consumer.py", found)   # the .py sibling IS seen
+        finally:
+            shutil.rmtree(tmp)
+
+    def test_blind_category_4_dynamically_generated_source(self):
+        """BLIND (4/4): source that does not exist on disk as a file at scan time —
+        built at run time, `exec`'d from a string, or fetched — cannot be walked. Same
+        class as the E2 slope fence's computed-key blind spot: the literal never appears
+        in a file the scanner reads."""
+        import shutil
+        tmp = self._blind_tree({
+            "generator.py": (
+                "KEY = 'within' + '_track'\n"          # the carrier is COMPUTED
+                "SRC = 'brightness = grade[KEY] * 255'\n"
+                "def run(grade):\n"
+                "    exec(SRC)\n")})
+        try:
+            self.assertEqual(
+                self._scan_tree(tmp), [],
+                "dynamically generated source is a DISCLOSED blind category; if this "
+                "now reports, the instrument gained reach — update the disclosure")
+        finally:
+            shutil.rmtree(tmp)
 
     def test_governance_rejects_an_added_or_missing_skip_directory(self):
         """CAN-FAIL for EBUILD5REV2 finding 1, run through the REAL governance helper.
