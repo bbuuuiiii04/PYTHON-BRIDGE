@@ -672,6 +672,15 @@ clear their floors with margin. Accepted trade.
 **3e. The silence-gated reference is MEASURED INERT — do not implement it; exec
 decision requested.**
 
+> **ADDITION (AWR-291 §6 item 12) — the design basis for any FUTURE silence handling.
+> This item's own "measured inert, not implemented" verdict STANDS unchanged; what
+> attaches is why, and what the working form would be.** The −100 dB FLOOR GATE is
+> nearly inert on aggregates because near-silent −70 dB beats do the same damage; the
+> WORKING form is a **−40 dB RELATIVE gate + p75 aggregation**; and floored beats are
+> **90.6% track-edge**, so the merged-outro / basis-flag design covers most of the real
+> exposure. (§3's `SILENCE_GUARD_DB = 60.0` in `section_energy_v0.py` is the relative
+> form of exactly this class — the first shipped instance of it.)
+
 The adjudication paired E2-b's median with an EBU Tech 3342-style silence gate on
 the reference ("exclude quiet material before forming the p95"). I specified it,
 measured it, and it does nothing. Candidate: exclude beats below
@@ -875,6 +884,15 @@ definition:
 The two terms being deleted are the two weakest discriminators in the entire
 cached feature set under **both** definitions.
 
+**ADDITION (AWR-291 §6 item 10) — three measured limits on the table above. Nothing in
+it is false; these were unrecorded.** (i) `perc_high` is the LEAST self-consistent v2
+term (even/odd split-half tau 0.291), so "best of all 21 cached series" is a spread
+statistic, not a reliability one. (ii) It is scale-compressed WITHOUT railing, so the
+railed-fraction G2 gate structurally cannot see its degeneracy. (iii) The
+range-over-IQR selection statistic itself **rewards fat-tailed noise** — it happened to
+pick the four most reliable candidates anyway, which is luck, not method. Any FUTURE
+term selection uses the R7 toolbox, never range-over-IQR alone.
+
 **5e. E3-d: `fluxsum_midhigh` is REJECTED — argued.** `fluxsum_midhigh` is the
 continuous version of `onset_density_midhigh` (which is an integer count per
 beat), so it is superficially attractive. Measured, it loses on every axis that
@@ -883,10 +901,17 @@ carries the two highest correlations of any candidate pair (**+0.248** with
 `onset`, **+0.268** with `perc_high`, both in term space — see the correction
 below); and adding it as a fifth term would
 reintroduce exactly the correlated-component disease this spec is removing from
-E1 (A.5, Wilks/Wainer/Dawes). The coarseness argument does not survive contact
-with the data either: averaging 16 integer counts gives 1/16 resolution, and
-today's composite already achieves a mean distinct-fraction of 0.82 across a
-track's own drops. **Four terms, not five.** Do not add it.
+E1 (A.5, Wilks/Wainer/Dawes). **CORRECTED (AWR-291 §6 item 15) — the DILUTION half
+above stands untouched (adding `fluxsum_midhigh` as a FIFTH term remains rejected), but
+the coarseness half is REFUTED by measurement.** The sentence previously here ("The
+coarseness argument does not survive contact with the data either: averaging 16 integer
+counts gives 1/16 resolution, and today's composite already achieves a mean
+distinct-fraction of 0.82 across a track's own drops") is withdrawn: the cached
+normaliser `onset_mh_p90` sits in {2,3,4} on 98.2% of tracks and IS the coarseness root
+cause, and under the §1 form swap the term moves from 80 to 1,187 distinct values (raw
+appendix 110 → 3,192). Note also that 5e's argument leans on the range-over-IQR
+statistic (fluxsum 0.95 vs onset 1.10) that §6 item 10 downgrades as a selection
+statistic. **Four terms, not five.** Do not add it.
 
 **Correlation figures, stated in full because EREV1 N2 could not reproduce them.**
 The number depends entirely on which space you measure in, so name it:
@@ -1655,9 +1680,11 @@ record-keeping items from A.4 plus the two EREV1 additions:
    to cached values.
 
 4. **The body term ranks against the RAW ANLZ marker set, not the true drops**
-   (EREV1 F7, Task 5c). Measured: 3,335 raw graded drop windows against 1,659
-   surfaced true drops, so **49.7% of the ranking population is never surfaced**, and
-   a surfaced drop's grade **moves if Rekordbox re-analysis adds or removes a marker
+   (EREV1 F7, Task 5c). Measured (**CORRECTED, AWR-291 §6 item 1**): 3,335 raw graded
+   windows; 1,659 SMART drops attach (50.3% of the ranking population never attaches);
+   the runway-filtered TRUE drops the presentation layer keys off number 1,243 (62.7%
+   of the ranking population never reaches a surface) — 1,659 was mislabeled "true
+   drops". A surfaced drop's grade **moves if Rekordbox re-analysis adds or removes a marker
    anywhere in the track**. A defensible narrowing — the raw set is the stable,
    complete, tick-independent population — recorded here because it is the same class
    of thing as the §B.2 item: a choice that must not be silent. `body_basis` is

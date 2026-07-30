@@ -46,8 +46,11 @@ it and the report tool / G7 reuse it, so no second copy of the formula can drift
 
 Three properties of the rank `body` term the reader must not misread as absolute:
 1. The ranking population is the RAW ANLZ marker set (`data.drop_beat_indices`),
-   NOT the true drops. Measured 3,335 raw graded windows vs 1,659 surfaced true
-   drops — 49.7% of the population is never shown — so the term means "how this
+   NOT the true drops. Measured 3,335 raw graded windows; 1,659 SMART drops attach
+   (50.3% of the ranking population never attaches); the runway-filtered TRUE drops
+   the presentation layer keys off number 1,243 (62.7% of the ranking population
+   never reaches a surface). (1,659 was previously mislabeled here as "surfaced true
+   drops" — it is the SMART-drop count.) So the term means "how this
    moment ranks among ALL of this track's raw Rekordbox drop markers", and it
    MOVES if Rekordbox re-analysis adds/removes a marker anywhere in the track. A
    deliberate choice (the raw set is the stable, complete, tick-independent
@@ -57,6 +60,11 @@ Three properties of the rank `body` term the reader must not misread as absolute
    0.75}` (measured 6.2% of tracks). The rank is doing what a rank does with n=2.
 3. Exact within-track level ties (measured 3.0% of levels) share a value via the
    mid-rank definition `(less + 0.5·equal)/n`, never ordered arbitrarily.
+4. The LEVEL DEFINITION under the rank is itself unstable (AWR-291 §6 item 11):
+   median within-track drop-level spread is 1.27 dB ≈ 13 storage quanta (0.1 dB),
+   and the rank is not stable across defensible level definitions — the raw-vs-true
+   basis alone measures rho +0.7426 with median |Δ| 0.125. Level is signal-exhausted
+   inside drops, so the rank is honest about ORDER, not about margins.
 
 Gain-invariant by construction in exact arithmetic. In the shipped pipeline the
 cancellation is exact to about ±0.005 grade units, because every stored dB value
