@@ -495,6 +495,12 @@ def run(argv: "Sequence[str]") -> int:
     emit("## PANEL BOUND ON EVERYTHING BELOW (AMENDMENT-4 clause 4c)")
     emit("  panel n = %d tracks in %d genre x weight-tercile cells, seed %d"
          % (PANEL_N, PANEL_CELLS, RUN_SEED))
+    # print the population actually in hand beside the pinned constant, and say so when
+    # they differ (a --limit slice) — the constant alone once implied 100 loaded records
+    # when fewer were present (EBUILD4REV finding 3).
+    emit("  tracks actually loaded for THIS run: %d%s"
+         % (len(tracks),
+            "" if len(tracks) == PANEL_N else "   <-- NOT the full pinned panel"))
     emit("  read from the FROZEN artifact %s (never re-drawn)" % args.panel)
     emit("  No significance claim beyond harness reproduction is available from this")
     emit("  design, and none is made. The two gated probes test the INSTRUMENT")

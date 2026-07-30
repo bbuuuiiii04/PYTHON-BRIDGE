@@ -862,13 +862,27 @@ loudness.
   predeclared statistic fired SCRAMBLE on an **EQ** op, not a compressor, so the
   demotion rests on named secondaries. Mastering is not free either (median tax
   **+0.044** weight, p90 **~0.11**, up to **32/100** ranks under a full chain), which
-  is why the line stays printed forever — it just stops deciding. The demotion landed
-  ONLY together with its replacement, `tools/energy_scramble_watchdog.py`
-  (below): demote-without-replacement was out of scope by construction.
+  is why the line stays printed forever — it just stops deciding. The demotion was
+  specified to land only alongside its replacement,
+  `tools/energy_scramble_watchdog.py` (below), because demote-without-replacement is
+  out of scope by construction. **What actually happened, recorded rather than
+  smoothed over:** the repo's auto-sync hook published two intermediate commits
+  (`d1c30cf0`, `5887c503`) carrying the demotion *without* the watchdog, which arrived
+  nine minutes later in `51a7e639` — so the same-change rule was VIOLATED in published
+  history. That split is accepted by explicit exec amendment, with the rule
+  re-specified in a form this repo can actually satisfy: see
+  `local/spectral_v5_2026_07_17/EBUILD4_coupling_adjudication.md`. Coupling is now
+  discharged by **WRITE-ORDER** — the replacement is written to the working tree,
+  complete with tests, *before* the removal edit — so no auto-sync snapshot can hold a
+  removal without its replacement. (The earlier claim that the split was
+  "structurally impossible" was false and is withdrawn.)
 - **The replacement watchdog battery.** `tools/energy_scramble_watchdog.py` (offline,
   zero runtime importers, temp-dir extractions only) runs four E1SCRAMBLE probe
   classes on the frozen 100-track / 66-cell / seed-20260724 panel: `c0b_invert`
-  (polarity-only exact null — GATE `rho = 1.0000` exactly, displacement `0`),
+  (polarity-only exact null — GATE `rho == 1.0` by **literal equality, no rounding**,
+  plus displacement `0`; it first shipped comparing `round(rho, 4)`, which admitted
+  `rho = 0.999996999695469` on a tied pair, and that false pass is now pinned as a
+  regression),
   `c1a_gain` (per-track gain **drawn** in `[-12, 0]` dB + TPDF dither at −90 dBFS,
   reproduced from the `c1_static` seed stream — GATE `rho ≥ 0.999`, a floor sitting ON
   its single measured `0.9990` with no margin, so a marginal miss is reported as
