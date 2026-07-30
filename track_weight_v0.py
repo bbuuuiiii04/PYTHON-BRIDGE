@@ -260,7 +260,9 @@ def degenerate_components(distribution: "dict") -> "list":
 
 
 def acceptance_verdict(n_by_genre: int, rho: "Optional[float]",
-                       rho_drama: "Optional[float]",
+                       rho_drama: "Optional[float]",   # accepted for the diagnostic
+                                                       # line; read by nothing in the
+                                                       # verdict (E1SCRAMBLE demotion)
                        rho_components_max: "Optional[float]",
                        degenerate: "Sequence[str]") -> "tuple":
     """Pure accept decision (Part-D gate, test seam). Returns (accepted, reason).

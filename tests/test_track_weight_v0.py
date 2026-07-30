@@ -230,10 +230,11 @@ class AcceptanceVerdictTests(unittest.TestCase):
                          (False, "loudness_proxy"))
         self.assertEqual(acceptance_verdict(120, None, 0.1, 0.1, []),
                          (False, "loudness_proxy"))
-        self.assertEqual(acceptance_verdict(120, 0.3, 0.7, 0.1, []),
-                         (False, "compression_proxy"))
-        self.assertEqual(acceptance_verdict(120, 0.3, None, 0.1, []),
-                         (False, "compression_proxy"))          # None fails closed
+        # the compression_proxy branch is GONE (E1SCRAMBLE demotion, Task 4b): a
+        # drama value over the old 0.55 ceiling, and a None drama, both now fall
+        # through to the next control instead of failing.
+        self.assertEqual(acceptance_verdict(120, 0.3, 0.7, 0.1, []), (True, "ok"))
+        self.assertEqual(acceptance_verdict(120, 0.3, None, 0.1, []), (True, "ok"))
         self.assertEqual(acceptance_verdict(120, 0.3, 0.4, 0.7, []),
                          (False, "redundant_components"))
         self.assertEqual(acceptance_verdict(120, 0.3, 0.4, None, []),
@@ -243,6 +244,29 @@ class AcceptanceVerdictTests(unittest.TestCase):
         self.assertEqual(acceptance_verdict(120, 0.3, 0.4, 0.2, []), (True, "ok"))
         self.assertEqual(acceptance_verdict(120, -0.50, -0.55, 0.60, []),
                          (True, "ok"))                           # all boundaries
+
+    def test_verdict_does_not_read_the_drama_input(self):
+        """Task 4b (§5 drama-gate demotion): `rho_drama` is accepted-and-ignored — the
+        parameter STAYS in the signature so no caller changes, but the verdict must be
+        identical for None / 0.0 / 0.99. RED before the demotion (today's code returned
+        (False, 'compression_proxy') at 0.99 and at None), green after."""
+        base = dict(n_by_genre=200, rho=0.2, rho_components_max=0.3, degenerate=[])
+        verdicts = {acceptance_verdict(rho_drama=d, **base)
+                    for d in (None, 0.0, 0.99, -0.99, 1.0)}
+        self.assertEqual(verdicts, {(True, "ok")},
+                         "the verdict still depends on rho_drama: %r" % (verdicts,))
+        # and it is ignored on a FAILING path too — the reason must come from the
+        # surviving controls, never from the drama value.
+        self.assertEqual(
+            {acceptance_verdict(n_by_genre=200, rho=0.9, rho_drama=d,
+                                rho_components_max=0.3, degenerate=[])
+             for d in (None, 0.0, 0.99)},
+            {(False, "loudness_proxy")})
+
+    def test_drama_constant_stays_as_a_printed_reference(self):
+        """`DRAMA_ACCEPT_MAX` stays in the module as the diagnostic's reference ceiling
+        (spec 4b: it is not deleted, it stops deciding). Its VALUE is still pinned."""
+        self.assertEqual(track_weight_v0.DRAMA_ACCEPT_MAX, 0.55)
 
 
 class SchemaSkewTests(unittest.TestCase):

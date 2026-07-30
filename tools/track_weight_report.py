@@ -4,9 +4,11 @@ revised by AWR-291).
 Read-only corpus sweep: enumerates on-disk Rekordbox tracks + the BY GENRE
 playlist folder, loads each track's cached v4 spectral features, computes the
 gain-invariant track-weight components (``track_weight_v0``), builds the
-library-relative weight, checks the three pinned acceptance controls on the
-by_genre split — loudness, dynamic-range compression, and component redundancy —
-writes a version-owned sidecar store, and prints a human report.
+library-relative weight, checks the TWO pinned gating acceptance controls on the
+by_genre split — loudness and component redundancy — prints the dynamic-range
+compression correlation as a DIAGNOSTIC beside them (demoted from gate by the
+CDSPEC1 round; see E1SCRAMBLE), writes a version-owned sidecar store, and prints a
+human report.
 
 ZERO runtime behavior change: nothing in the bridge imports this tool or the
 descriptor module (a static test enforces that). The Rekordbox DB, ANLZ files,
@@ -333,8 +335,13 @@ def run(argv: "Sequence[str]") -> int:
                                          reason))
     emit("  Spearman(loudness_ref_db, track_weight) by_genre = %s  (gate |rho| <= %.2f, n >= 100)"
          % (_fmt_rho(rho_by_genre), SPEARMAN_ACCEPT_MAX))
-    emit("  Spearman(dynamic range p95-p25, track_weight) by_genre = %s  (gate |rho| <= %.2f, n >= 100)"
-         % (_fmt_signed(rho_drama), DRAMA_ACCEPT_MAX))
+    # Demoted from gate to diagnostic by the CDSPEC1 round (see E1SCRAMBLE): the
+    # correlation is still computed and printed exactly as before, against the same
+    # 0.55 reference, but it decides nothing and a None prints `unavailable`.
+    emit("  Spearman(dynamic range p95-p25, track_weight) by_genre = %s  "
+         "(DIAGNOSTIC (demoted by CDSPEC1 round; see E1SCRAMBLE); reference |rho| <= %.2f, gates nothing)"
+         % (_fmt_signed(rho_drama) if rho_drama is not None else "unavailable",
+            DRAMA_ACCEPT_MAX))
     emit("  Spearman library-wide = %s  (INFORMATIONAL only)" % _fmt_rho(rho_library))
     emit("  degenerate components: %s" % (degenerate or "none"))
     emit("")
