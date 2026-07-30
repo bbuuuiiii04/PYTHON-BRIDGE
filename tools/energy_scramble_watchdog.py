@@ -17,7 +17,7 @@ E1 track weights against the panel's recorded baseline:
 
   | probe           | class                                   | role                | floor |
   |-----------------|-----------------------------------------|---------------------|-------|
-  | c0b_invert      | polarity-only exact null                | harness integrity   | rho = 1.0000 EXACTLY, displacement 0 |
+  | c0b_invert      | polarity-only exact null                | harness integrity   | rho == 1.0 by LITERAL equality (no rounding), displacement 0 |
   | c1a_gain        | per-track gain DRAWN in [-12, 0] dB +   | gain invariance by  | rho >= 0.999 |
   |                 | TPDF dither at -90 dBFS, reproduced     | real re-extraction  |       |
   |                 | from the c1_static seed stream          |                     |       |
@@ -74,6 +74,7 @@ gate failure). Any gated probe below its floor => exit 1.
 import argparse
 import hashlib
 import json
+import math
 import os
 import sys
 import tempfile
@@ -137,30 +138,34 @@ def max_displacement(a: "dict", b: "dict", ids: "Sequence[str]") -> "Optional[in
     return max(abs(ra[p] - rb[p]) for p in ids)
 
 
-def compare_probe(probe: str, baseline: "dict", perturbed: "dict") -> "dict":
-    """THE comparison seam: two id->weight vectors + a probe class -> the per-probe
-    rho / max displacement / n and the pass-fail verdict against the pinned floors.
+def _finite_num(x) -> bool:
+    """True only for a finite real number. `bool` is excluded (a weight is not a flag)
+    and `nan` / `inf` are REJECTED — an isinstance check alone accepts both, which is
+    how a non-finite weight could reach a rank comparison (EBUILD4REV finding 3)."""
+    if isinstance(x, bool) or not isinstance(x, (int, float)):
+        return False
+    return math.isfinite(x)
 
-    Pure: no audio, no extraction, no cache, no I/O. Only ids present in BOTH vectors
-    with finite weights are compared, and `n` reports how many that was — a probe that
-    lost tracks to extraction failures must not silently compare a different
-    population. Fails CLOSED: a missing rho, or fewer than 3 usable pairs, is a
-    verdict of False for a gated probe, never a pass.
+
+def probe_verdict(probe: str, rho: "Optional[float]",
+                  disp: "Optional[int]") -> "tuple":
+    """(floor_text, passed) for one probe from its measured rho / displacement.
+
+    Split out of `compare_probe` so each floor is DIRECTLY testable at its boundary
+    with a literal rho, rather than only through whatever rho a fixture happens to
+    produce (EBUILD4REV findings 2 and 4 — the old c1a boundary test only ever fed
+    1.0, so it asserted the constant without exercising the comparison).
+
+    `c0b_invert` uses LITERAL equality against 1.0. It previously compared
+    `round(rho, 4)`, which passed rho = 0.999996999695469 while the tool printed
+    "EXACTLY" — a real false pass, now pinned as a regression. `passed` is None for
+    an ungated probe, never True/False, so an informational result can never be read
+    as a gate outcome.
     """
-    ids = [p for p in sorted(baseline)
-           if p in perturbed
-           and isinstance(baseline[p], (int, float))
-           and isinstance(perturbed[p], (int, float))]
-    n = len(ids)
-    rho = (track_weight_v0.spearman([baseline[p] for p in ids],
-                                    [perturbed[p] for p in ids])
-           if n >= 3 else None)
-    disp = max_displacement(baseline, perturbed, ids) if n else None
-    gated = probe in GATED_PROBES
     if probe == "c0b_invert":
-        floor = "rho == %.4f EXACTLY and displacement == %d" % (GATE_INVERT_RHO,
-                                                                GATE_INVERT_DISP)
-        passed = (rho is not None and round(rho, 4) == GATE_INVERT_RHO
+        floor = ("rho == %.4f EXACTLY (literal equality, no rounding) and "
+                 "displacement == %d" % (GATE_INVERT_RHO, GATE_INVERT_DISP))
+        passed = (rho is not None and rho == GATE_INVERT_RHO
                   and disp == GATE_INVERT_DISP)
     elif probe == "c1a_gain":
         floor = "rho >= %.3f" % GATE_GAIN_RHO
@@ -168,8 +173,31 @@ def compare_probe(probe: str, baseline: "dict", perturbed: "dict") -> "dict":
     else:
         floor = "INFORMATIONAL — no floor (comparative channel)"
         passed = None
+    return floor, passed
+
+
+def compare_probe(probe: str, baseline: "dict", perturbed: "dict") -> "dict":
+    """THE comparison seam: two id->weight vectors + a probe class -> the per-probe
+    rho / max displacement / n and the pass-fail verdict against the pinned floors.
+
+    Pure: no audio, no extraction, no cache, no I/O. Only ids present in BOTH vectors
+    with FINITE weights are compared (`nan` / `inf` / `None` / non-numerics are
+    dropped), and `n` reports how many that was — a probe that lost tracks to
+    extraction failures must not silently compare a different population. Fails
+    CLOSED: a missing rho, or fewer than 3 usable pairs, is a verdict of False for a
+    gated probe, never a pass.
+    """
+    ids = [p for p in sorted(baseline)
+           if p in perturbed
+           and _finite_num(baseline[p]) and _finite_num(perturbed[p])]
+    n = len(ids)
+    rho = (track_weight_v0.spearman([baseline[p] for p in ids],
+                                    [perturbed[p] for p in ids])
+           if n >= 3 else None)
+    disp = max_displacement(baseline, perturbed, ids) if n else None
+    floor, passed = probe_verdict(probe, rho, disp)
     return {"probe": probe, "n": n, "rho": rho, "max_displacement": disp,
-            "gated": gated, "floor": floor, "passed": passed}
+            "gated": probe in GATED_PROBES, "floor": floor, "passed": passed}
 
 
 def battery_verdict(results: "Sequence[dict]") -> "tuple":
@@ -330,19 +358,64 @@ def _body_dump(fn) -> str:
 # Panel + extraction                                                     #
 # ===================================================================== #
 def load_panel(path: "Path") -> "tuple":
-    """(tracks, meta) from the frozen panel artifact, or (None, reason)."""
+    """(tracks, meta) from the frozen panel artifact, or (None, reason).
+
+    Every refusal is a REASONED fail-closed return, never a traceback: malformed
+    metadata (`seed: null`, `n: "not-an-int"`) used to escape through the `int(...)`
+    conversions and raise TypeError / ValueError (EBUILD4REV finding 3).
+
+    The declared `n` is NOT trusted as the population. A panel declaring `n=100` while
+    carrying 99 records was previously accepted, after which the header printed the
+    constant 100 — so the ACTUAL length is validated, and so is `panel_id` uniqueness,
+    because the baseline dict is keyed by `panel_id` and duplicates would silently
+    collapse the population it compares against.
+    """
     try:
         doc = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         return None, "panel unreadable (%s: %s)" % (type(exc).__name__, exc)
-    if not isinstance(doc, dict) or not isinstance(doc.get("tracks"), list):
+    if not isinstance(doc, dict):
+        return None, "panel malformed (top level is %s, expected an object)" % (
+            type(doc).__name__)
+    tracks = doc.get("tracks")
+    if not isinstance(tracks, list):
         return None, "panel malformed (no tracks list)"
-    if int(doc.get("seed", -1)) != RUN_SEED:
+
+    def _as_int(value, field):
+        if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+            return None, "panel %s is %r (%s), not an integer" % (
+                field, value, type(value).__name__)
+        try:
+            return int(value), None
+        except (TypeError, ValueError):
+            return None, "panel %s is %r — not an integer" % (field, value)
+
+    seed, err = _as_int(doc.get("seed"), "seed")
+    if err:
+        return None, err
+    if seed != RUN_SEED:
         return None, ("panel seed %r != pinned %d — refusing to run against a "
                       "different panel" % (doc.get("seed"), RUN_SEED))
-    if int(doc.get("n", -1)) != PANEL_N:
+    declared_n, err = _as_int(doc.get("n"), "n")
+    if err:
+        return None, err
+    if declared_n != PANEL_N:
         return None, "panel n %r != pinned %d" % (doc.get("n"), PANEL_N)
-    return doc["tracks"], {"n": doc["n"], "seed": doc["seed"]}
+    # the declared n is metadata; THIS is the population that will actually be graded
+    if len(tracks) != PANEL_N:
+        return None, ("panel declares n=%d but carries %d track records — refusing a "
+                      "panel whose declared population is false"
+                      % (declared_n, len(tracks)))
+    if not all(isinstance(t, dict) for t in tracks):
+        return None, "panel malformed (a track record is not an object)"
+    pids = [t.get("panel_id") for t in tracks]
+    if any(p is None for p in pids):
+        return None, "panel malformed (a track record has no panel_id)"
+    if len(set(pids)) != len(pids):
+        dupes = sorted({p for p in pids if pids.count(p) > 1})
+        return None, ("panel has duplicate panel_id values %r — they would collapse "
+                      "the compared population" % dupes)
+    return tracks, {"n": declared_n, "seed": seed, "loaded": len(tracks)}
 
 
 def _extract_perturbed(filepath: str, grid: "Sequence[float]", probe: str,
