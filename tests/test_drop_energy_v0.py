@@ -628,12 +628,12 @@ class GradeLexiconFenceTests(unittest.TestCase):
         walk from the repo root — dot-prefixed components and the pinned skip dirs
         excluded, directory symlinks not descended — with a read/decode failure REPORTED
         as a violation. Blind categories are disclosed as REQUIRED, NON-EXHAUSTIVE examples
-        (Ruling B′ — never an inventory), each ASSERTED BLIND by a test above: dot-hidden
+        (Ruling B′ — never an inventory), each ASSERTED BLIND by a test below: dot-hidden
         paths, directory symlinks, non-`*.py` extensions, dynamically generated source,
         and the INTERIOR of an exempted file. **The §4 pool-selection LAW binds everywhere,
-        including inside those four**; the instrument simply cannot see them. A green
-        fence proves no carrier mention exists IN THE INSTRUMENTED SCOPE — never that no
-        consumer exists anywhere.
+        including inside every disclosed category and any not yet discovered**; the
+        instrument simply cannot see them. A green fence proves no carrier mention exists
+        IN THE INSTRUMENTED SCOPE — never that no consumer exists anywhere.
 
         Parameterised so the CAN-FAIL tests can run the REAL governance logic against a
         planted surface — the check and the thing checked are the same code, so a green
@@ -826,9 +826,9 @@ class GradeLexiconFenceTests(unittest.TestCase):
     # symlink, a dot-path or an alternate extension is adversarial evasion no static
     # scan defeats, and this fence exists to catch ACCIDENTAL drift.
     #
-    # If any of these four starts FAILING, the walk has widened and the disclosure in
-    # the r8 spec fence clause + the docstrings must be updated to claim the new
-    # coverage. An honest limit is a TESTED limit.
+    # If any of the asserted-blind tests starts FAILING, the walk has widened and the
+    # disclosure in the r8 spec fence clause + the docstrings must be updated to claim
+    # the new coverage. An honest limit is a TESTED limit.
 
     def _blind_tree(self, layout):
         """Build a temp tree, return the scan result. `layout` maps relpath -> source."""
