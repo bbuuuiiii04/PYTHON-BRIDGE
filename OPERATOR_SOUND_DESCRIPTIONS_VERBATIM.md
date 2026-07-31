@@ -25,3 +25,15 @@ mandatory as the roles: the organizer's canonical state feeds every seat (boot d
 reviewers); the auditor's adjudicated findings flow INTO the record and INTO live practice, not
 onto a shelf; product lanes consume the record; the org design must specify who feeds whom with
 what artifact. A role whose output nobody consumes is over-engineering by definition.
+
+## 2026-07-31 ~02:4x — TIER 1, operator in the exec10 pane, VERBATIM (audit scope correction)
+
+> "AND THIS PROGRAM HAS BEEN GOING ON SINCE WARLY JULY NOT JUST JULY 17 U FUCK"
+
+**Ruling force:** the program's start is EARLY JULY, not the 07-17 v5 folder date. "The program" =
+the whole effort to make the bridge hear and light his music — the v4-era spectral work,
+calibration expansion (2026-07-08, AWR-147), the ear benchmark (AWR-200, 07-10), hardness/approach
+shadows (AWR-203/204), the gold-label intake he closed (AWR-205, 07-15), the laser span hunt
+(07-16), the smart-drop v2 ceiling era, THEN spectral v5 (07-17) and everything since. The audit
+covers the full arc. The 07-17 framing was the exec encoding a folder date as the program's birth
+— the too-literal disease again, on the exec's own kickstart.
