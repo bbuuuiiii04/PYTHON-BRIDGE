@@ -15,3 +15,13 @@ the verbatim (the exec owns that extraction); designs are reviewed against inten
 fidelity check is the structural half; the auditor's org design must propose the full
 meaning-fidelity function); the burden of proving understanding sits with the seats, never with
 him.
+
+## 2026-07-31 ~02:3x — TIER 1, operator in the exec10 pane, VERBATIM (on the roles)
+
+> "AND THEY ALL NEED TO WORK TOGETHER. YOU SHLILD FUCKING KNLW THAT."
+
+**Ruling force, permanent:** the roles are ONE company, not parallel silos. Interfaces are as
+mandatory as the roles: the organizer's canonical state feeds every seat (boot doc, handoffs,
+reviewers); the auditor's adjudicated findings flow INTO the record and INTO live practice, not
+onto a shelf; product lanes consume the record; the org design must specify who feeds whom with
+what artifact. A role whose output nobody consumes is over-engineering by definition.
