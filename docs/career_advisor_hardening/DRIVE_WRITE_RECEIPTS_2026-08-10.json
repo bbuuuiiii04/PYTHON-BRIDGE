@@ -142,5 +142,15 @@
     "sha256": "21f80074597334199d0fc65ab26402538fa243e41f181a19e6ab51b9a1ed7cf5",
     "readback": "verified",
     "path": "Codex Automations/Morning Briefing/MORNING_BRIEFING_TESTS.py"
+  },
+  {
+    "id": "1MhP6CpqEi6BsbuzQ7_OdhIlyBnMmo_Di",
+    "name": "WEEKLY_CAREER_PLAN_RECALCULATION.md",
+    "bytes": 11797,
+    "mime": "text/markdown",
+    "sha256": "4548cf9f079c73c628b3dbc98c106a92f63318ef4f12751fce8dcf1ffe700a61",
+    "readback": "verified",
+    "path": "Codex Automations/Weekly Career Plan Recalculation/WEEKLY_CAREER_PLAN_RECALCULATION.md",
+    "note": "appended real ## COMPACT STATE json fence (verifier claim 14 fix)"
   }
 ]

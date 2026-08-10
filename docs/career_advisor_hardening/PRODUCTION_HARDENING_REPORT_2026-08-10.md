@@ -35,7 +35,7 @@ Architecture / behavior repairs written to live Google Drive (readback-verified)
 | GPA calculator | **implemented** + baseline-**tested** this run | Course-row fixture not shipped; no auto ingestion |
 | Interview engine + CTL required card | **implemented** | First real calibrated rep **not observed**; 2/8 cards |
 | Letter runway monitor | **implemented** | No production trigger fired yet (classes start Aug 20) |
-| Weekly Plan Recalc silent-death state | **implemented** (fence) | Unattended Sunday run **not verified** |
+| Weekly Plan Recalc silent-death state | **implemented** (live `## COMPACT STATE` fence readback-verified 2026-08-10 post-verifier) | Unattended Sunday run **not verified** |
 | CAA deadline watcher | **specified**/dormant | Starts Jan 2027; no Drive state yet |
 | Application object | **not implemented** | Defer to PIPELINE CAA section when cycle opens |
 | Drive↔Val sync / ledger migration / KEYS remediation | **blocked** | See remaining blockers |
@@ -67,10 +67,11 @@ Architecture / behavior repairs written to live Google Drive (readback-verified)
 
 ## 5. Evidence
 
-- Drive write receipts (readback-verified): `16` primary file updates this run, plus ENGINES rewrite, Plan Recalc contract fence, MB test-results update.
+- Drive write receipts (readback-verified): `16` primary file updates this run, plus ENGINES rewrite, MB test-results update, and a post-verifier fix appending the real `## COMPACT STATE` json fence to `WEEKLY_CAREER_PLAN_RECALCULATION.md` (references alone were insufficient).
 - Morning Briefing adversarial suite: **54/54 pass** (post-hardening).
 - GPA calculator this run: official 3.47; computed 3.4776; BCPM 3.3390; Physics A projection 3.4308.
 - Live spot-checks: STATE contains GRE Aug 11–12, Physics wait-state carve-out, HCA One Thing, 07:00 cadence, dual BCPM; REFERENCE contains Sep 24 8:20 exam; AGENTS contains silent-death / Canvas-empty / 05:30 rules.
+- Independent verifier ([Verify repaired Drive system](bc-ec404ead-5f4d-5f9e-bc97-181f2f9dd3f5)): 17/18 claims PASS; claim 14 (Plan Recalc COMPACT STATE fence) initially FAIL — repaired same day with live readback.
 
 ## 6. Brandon-required actions
 
