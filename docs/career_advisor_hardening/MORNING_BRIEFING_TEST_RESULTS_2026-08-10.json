@@ -1,0 +1,392 @@
+{
+  "schema_version": 1,
+  "suite": "Morning Briefing v2 adversarial contract suite",
+  "scenario_count": 54,
+  "passed": 54,
+  "failed": 0,
+  "result": "pass",
+  "procedure_sha256": "c2ff370c269b799d1408c6817e6a64ba803184ab230bda9f81aa343435513667",
+  "state_sha256": "20b8020ee245577d12d4c48e5b9c1646f788e9b4bd8c4f27b874ee6af1106860",
+  "production_verification": false,
+  "note": "Mechanic contract tests only; unattended delivery/runtime acceptance requires future production evidence.",
+  "scenarios": [
+    {
+      "id": "MB-01",
+      "category": "owner_selection",
+      "name": "application owner wins",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-02",
+      "category": "owner_selection",
+      "name": "relationship owner wins",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-03",
+      "category": "owner_selection",
+      "name": "program owner wins",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-04",
+      "category": "owner_selection",
+      "name": "completed experience owner wins",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-05",
+      "category": "owner_selection",
+      "name": "dated schedule owner wins",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-06",
+      "category": "owner_selection",
+      "name": "study durable state owner wins",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-07",
+      "category": "owner_selection",
+      "name": "current attention owner remains STATE",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-08",
+      "category": "day_type",
+      "name": "urgent dominates pressure",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-09",
+      "category": "day_type",
+      "name": "recovery day",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-10",
+      "category": "day_type",
+      "name": "won't tradeoff day",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-11",
+      "category": "day_type",
+      "name": "reentry day",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-12",
+      "category": "day_type",
+      "name": "pressure day",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-13",
+      "category": "day_type",
+      "name": "normal execution day",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-14",
+      "category": "day_type",
+      "name": "urgent supersedes reentry",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-15",
+      "category": "progress_state",
+      "name": "verified transition is moving",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-16",
+      "category": "progress_state",
+      "name": "unchanged unresolved action is stalled",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-17",
+      "category": "progress_state",
+      "name": "named real blocker is blocked",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-18",
+      "category": "progress_state",
+      "name": "reentry remains reentry",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-19",
+      "category": "progress_state",
+      "name": "recovery remains recovery",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-20",
+      "category": "progress_state",
+      "name": "explicit won't remains tradeoff",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-21",
+      "category": "unsupported_progress",
+      "name": "intent alone is not moving",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-22",
+      "category": "front_constraint",
+      "name": "at most two fronts",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-23",
+      "category": "front_constraint",
+      "name": "top two fronts selected",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-24",
+      "category": "salience_suppression",
+      "name": "low-salience item suppressed",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-25",
+      "category": "completed_item_suppression",
+      "name": "completed item suppressed",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-26",
+      "category": "salience_suppression",
+      "name": "salient deadline can outrank background",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-27",
+      "category": "activation_fit",
+      "name": "reentry activation",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-28",
+      "category": "activation_fit",
+      "name": "recovery activation",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-29",
+      "category": "activation_fit",
+      "name": "won't uses tradeoff not moralizing frame",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-30",
+      "category": "activation_fit",
+      "name": "moving may use earned competence",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-31",
+      "category": "activation_fit",
+      "name": "pressure uses evidence-fitting frame",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-32",
+      "category": "unsupported_readiness",
+      "name": "no work observation means no recommendation-readiness claim",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-33",
+      "category": "recovery_handling",
+      "name": "can't-week does not become won't",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-34",
+      "category": "targeted_schedule_recalc",
+      "name": "material change with sources recalculates now",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-35",
+      "category": "targeted_schedule_recalc",
+      "name": "material change without sources marks stale",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-36",
+      "category": "stale_source",
+      "name": "AGENTS failure fails closed",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-37",
+      "category": "stale_source",
+      "name": "required domain failure omits/unresolves claim",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-38",
+      "category": "runway_uncertainty",
+      "name": "unknown deadline does not fabricate countdown",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-39",
+      "category": "lowercase_rendering",
+      "name": "visible sample is lowercase",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-40",
+      "category": "exact_ending",
+      "name": "exact required final line",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-41",
+      "category": "opening_phrase",
+      "name": "opening contains required phrase",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-42",
+      "category": "no_google_calendar",
+      "name": "procedure explicitly forbids calendar fallback",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-43",
+      "category": "no_google_calendar",
+      "name": "source order does not require Google Calendar",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-44",
+      "category": "repeated_day",
+      "name": "same state is not changed",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-45",
+      "category": "changed_state",
+      "name": "changed facts change state",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-46",
+      "category": "no_fake_novelty",
+      "name": "unchanged fingerprint cannot be labeled changed",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-47",
+      "category": "anti_repetition",
+      "name": "activation frame rotates when alternative fits",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-48",
+      "category": "anti_hardcoded_template",
+      "name": "procedure rejects canned quote/theme pools",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-49",
+      "category": "strong_fear_cooldown",
+      "name": "strong fear suppressed inside seven-day cooldown",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-50",
+      "category": "bounded_state",
+      "name": "state has ~30-day retention and stores no briefing prose",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-51",
+      "category": "email_morning_slot",
+      "name": "procedure requires 05:30\u201308:00 morning-slot freshness",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-52",
+      "category": "email_morning_slot",
+      "name": "prior-evening success alone is degraded for overnight mail",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-53",
+      "category": "interview_not_default_front",
+      "name": "interview digs are not default Morning Briefing fronts",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "MB-54",
+      "category": "silent_death",
+      "name": "procedure mentions unverified delivery when last_run missing",
+      "pass": true,
+      "detail": ""
+    }
+  ]
+}

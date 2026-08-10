@@ -1,0 +1,146 @@
+[
+  {
+    "id": "1pKT2BNwzKMfmupc90udqRFNSU164SNWf",
+    "name": "STATE.md",
+    "bytes": 5379,
+    "mime": "text/plain",
+    "sha256": "a9df288d3ac8fb3e6673225175958e3cb17f2db60c645867bcc69631577c457f",
+    "readback": "verified",
+    "path": "STATE.md"
+  },
+  {
+    "id": "1dYnMR2Rn_u0UpMDb8ZSyn4Nh2RaYhgCe",
+    "name": "REFERENCE.md",
+    "bytes": 19117,
+    "mime": "text/plain",
+    "sha256": "e5606a7802b2944cfc89432516215a478ba0a990c8282a5e671bc8285a189dca",
+    "readback": "verified",
+    "path": "REFERENCE.md"
+  },
+  {
+    "id": "1BNIQAA5zxeKPepYtmjFJ1c-F22ozuCxT",
+    "name": "ROADMAP.md",
+    "bytes": 7633,
+    "mime": "text/markdown",
+    "sha256": "d5a2c4e477227bf16aa8083f9a05e7c854d43427ef950322c54d0e5b0e05b7c3",
+    "readback": "verified",
+    "path": "ROADMAP.md"
+  },
+  {
+    "id": "1Fp1HQ3r4wD3glpAKocOLV9Ei0CCPKsRX",
+    "name": "AGENTS.md",
+    "bytes": 56555,
+    "mime": "text/markdown",
+    "sha256": "4032fdc0ed4d8643694c4476b29c27ff1e2faab516b273b62e78cc193ed94e28",
+    "readback": "verified",
+    "path": "AGENTS.md"
+  },
+  {
+    "id": "1uPMQV3DU4h2-BerUOgRVwK2GAVgP5bIy",
+    "name": "LESSONS.md",
+    "bytes": 14873,
+    "mime": "text/plain",
+    "sha256": "ed891c3327b1cf083dff8b5b1dcc9f6c23bb88ee118689917eba93c586bcedf9",
+    "readback": "verified",
+    "path": "LESSONS.md"
+  },
+  {
+    "id": "1-FgRTivZwyRAd9wXo42zqIIrq3Ut8UX1",
+    "name": "MORNING_BRIEFING.md",
+    "bytes": 15680,
+    "mime": "text/markdown",
+    "sha256": "c2ff370c269b799d1408c6817e6a64ba803184ab230bda9f81aa343435513667",
+    "readback": "verified",
+    "path": "Codex Automations/Morning Briefing/MORNING_BRIEFING.md"
+  },
+  {
+    "id": "1FgjGkZCMEbFxV_CgR45Lh9M2BiXSKzMf",
+    "name": "INTERVIEW_ENGINE.md",
+    "bytes": 20067,
+    "mime": "text/plain",
+    "sha256": "cfea8329c1087616277f3345eb82fc35391c262c102fc016a7898de8b80c0105",
+    "readback": "verified",
+    "path": "INTERVIEW_ENGINE.md"
+  },
+  {
+    "id": "1luxWl1-crDh80ICyE3CgUcYmcgrn4Wo4",
+    "name": "ESSAY_BANK.md",
+    "bytes": 4689,
+    "mime": "text/plain",
+    "sha256": "c6db1586bbb572d5505eb059cb44b7408cb8e6bc3511059ffbc3da521757a08e",
+    "readback": "verified",
+    "path": "ESSAY_BANK.md"
+  },
+  {
+    "id": "1afIvzs9Mg5K5HosUYcYQQtH2kD0mCpVC",
+    "name": "CONTACTS.md",
+    "bytes": 12444,
+    "mime": "text/plain",
+    "sha256": "7c38745b8b97b88b6d2426e6c22097c6f26e444923c83fdb8a3d69b0f52293fa",
+    "readback": "verified",
+    "path": "CONTACTS.md"
+  },
+  {
+    "id": "1FisOxVAAPFeFXlAMOpVtWjPjwkcc68RO",
+    "name": "ENGINES.md",
+    "bytes": 8439,
+    "mime": "text/markdown",
+    "sha256": "69fa0860120d2f2fbe22eb1be9f23dd9e0f8f69d7929f558217a58e9973241f0",
+    "readback": "verified",
+    "path": "ENGINES.md"
+  },
+  {
+    "id": "1Vz9oVe8m5iJqc8F6dEg6E3vZQNmFzgIN",
+    "name": "STUDY_ENGINE.md",
+    "bytes": 9093,
+    "mime": "text/plain",
+    "sha256": "9b2c853d1522bff76d21993ce6425dc1eebf4bc4589c6d417282e9a954bc1cc8",
+    "readback": "verified",
+    "path": "STUDY_ENGINE.md"
+  },
+  {
+    "id": "12PukkcPHeu1s77uJ4Lz_1iL5nJgX6x_c",
+    "name": "STUDY_STATE.json",
+    "bytes": 2440,
+    "mime": "application/json",
+    "sha256": "a001eb3b4ee688ecbce446cd08e7ef4c9d7e31bba8e3f3c2ca34bb88c55615b2",
+    "readback": "verified",
+    "path": "Codex Automations/Study/STUDY_STATE.json"
+  },
+  {
+    "id": "1EYd09AjnyvwtlnfJghBMYVMUFXsQ6D1F",
+    "name": "scenarios.md",
+    "bytes": 11162,
+    "mime": "text/plain",
+    "sha256": "e888edbba8b068fc09d57a742cf6a8b10e8ab35a07a21f0a103b213d81f6898d",
+    "readback": "verified",
+    "path": "scenarios.md"
+  },
+  {
+    "id": "1kdlDOYTQ9x9Yp6OeQUMXsIG6PQTdHCen",
+    "name": "PIPELINE.md",
+    "bytes": 10528,
+    "mime": "text/plain",
+    "sha256": "29abb62d122e5f486498960803a5330978f1c148bf0e955dd35c28eb932f1abe",
+    "readback": "verified",
+    "path": "PIPELINE.md"
+  },
+  {
+    "id": "1R79OzaM78TPubzcdKafkXApDl0y0no82",
+    "name": "CANDIDACY.md",
+    "bytes": 35995,
+    "mime": "text/markdown",
+    "sha256": "f25a3dc9bb5c4746dac01b081541fa5a07d4fb024ab7ea4460619fdc6289c22c",
+    "readback": "verified",
+    "path": "CANDIDACY.md"
+  },
+  {
+    "id": "1LMPBh9d39irAGfsmzMc7q6ppRqTRzUki",
+    "name": "MORNING_BRIEFING_TESTS.py",
+    "bytes": 11566,
+    "mime": "text/x-python",
+    "sha256": "21f80074597334199d0fc65ab26402538fa243e41f181a19e6ab51b9a1ed7cf5",
+    "readback": "verified",
+    "path": "Codex Automations/Morning Briefing/MORNING_BRIEFING_TESTS.py"
+  }
+]
