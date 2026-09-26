@@ -8,6 +8,13 @@ validation_scope: software-only plus Rekordbox 7.2.11 passive mixer RE evidence 
 
 # Active Work Registry
 
+USB rebuild maintenance (2026-09-25): `make_stick.sh` prepares the locked
+Stream Deck hidapi library after Python environment setup, because that setup
+can replace its containing wheelhouse. `tests.test_make_stick` checks the
+ordering before PyInstaller. The clean-source publication gate remains in place.
+This change does not alter reader or lighting behavior; foreign-Mac attach and
+physical lighting remain unvalidated.
+
 This is the single repo-facing place for unfinished work. Old prompts and plans are not active unless listed here.
 
 ## Active engineering work

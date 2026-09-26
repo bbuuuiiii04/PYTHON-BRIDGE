@@ -8,6 +8,13 @@ validation_scope: software-validated only; Rekordbox 7.2.16 direct-reader offset
 
 # Software Test Inventory
 
+USB rebuild maintenance (2026-09-25): `make_stick.sh` prepares the locked
+Stream Deck hidapi library after Python environment setup, because that setup
+can replace its containing wheelhouse. `tests.test_make_stick` checks the
+ordering before PyInstaller. The clean-source publication gate remains in place.
+This change does not alter reader or lighting behavior; foreign-Mac attach and
+physical lighting remain unvalidated.
+
 This inventory routes agents to tests without pretending software tests validate physical lighting hardware.
 
 AWR-215 firework-remnants coverage lives in `PostDropFireworkRemnantsTests` inside

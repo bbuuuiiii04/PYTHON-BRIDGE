@@ -861,8 +861,6 @@ if [ -n "$PREBUILT_APP" ]; then
     fi
 else
     cd "$REPO_ROOT"
-    verify_hidapi_lock \
-        || fail "built libhidapi (locked source @ $MACOSX_DEPLOYMENT_TARGET) is required before PyInstaller (AWR-237); no app or DMG was produced."
     # Reuse the venv ONLY if it has pyinstaller AND every runtime dep (--check-deps
     # imports the full required set). A narrow probe (pyinstaller + a few libs) would
     # let a STALE venv built before a dep was added (e.g. mutagen) pass, skip the pip
@@ -891,6 +889,9 @@ else
             fail "locked macOS 12.3 build environment setup failed; no app or DMG was produced."
         }
     fi
+    # Environment setup can replace WHEELHOUSE; prepare hidapi only afterwards.
+    verify_hidapi_lock \
+        || fail "built libhidapi (locked source @ $MACOSX_DEPLOYMENT_TARGET) is required before PyInstaller (AWR-237); no app or DMG was produced."
     RBSS_GENERATION="$GENERATION" "$VENV/bin/pyinstaller" packaging/rbss_launcher.spec \
         --noconfirm --distpath dist --workpath build
     # Stamp the same generation into Info.plist again before signing so a

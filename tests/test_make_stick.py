@@ -308,10 +308,12 @@ class MakeStickTests(unittest.TestCase):
         self.assertNotIn("/opt/homebrew/opt/hidapi", script)
         self.assertNotIn("/usr/local/opt/hidapi", script)
         # Gate runs before PyInstaller; finished-app check runs after.
-        verify_idx = script.index("verify_hidapi_lock")
+        verify_idx = script.index("    verify_hidapi_lock ")
+        reset_idx = script.index('rm -rf "$VENV" "$WHEELHOUSE"')
         py_idx = script.index('RBSS_GENERATION="$GENERATION" "$VENV/bin/pyinstaller"')
         require_idx = script.index("require_hidapi_in_app \"$REPO_ROOT/dist/RBSS Bridge.app\"")
         self.assertLess(verify_idx, py_idx)
+        self.assertLess(reset_idx, verify_idx)
         self.assertLess(py_idx, require_idx)
 
     def test_hidapi_source_lock_read_and_tarball_gate(self):

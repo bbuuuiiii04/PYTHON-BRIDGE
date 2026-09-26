@@ -43,6 +43,13 @@ validation_scope: >
 
 # USB Bridge Launcher — Runbook (M1 build · M2 install/PURGE)
 
+USB rebuild maintenance (2026-09-25): `make_stick.sh` prepares the locked
+Stream Deck hidapi library after Python environment setup, because that setup
+can replace its containing wheelhouse. `tests.test_make_stick` checks the
+ordering before PyInstaller. The clean-source publication gate remains in place.
+This change does not alter reader or lighting behavior; foreign-Mac attach and
+physical lighting remain unvalidated.
+
 > **Pause before another foreign-Mac show test (AWR-222 honesty, 2026-07-13).**
 > Packaging can ship, but stock Apple-Silicon foreign-Mac attach after a
 > successful patch + deep verify + GTA=true + relaunch is still
