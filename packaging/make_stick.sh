@@ -45,20 +45,23 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+WORKTREE_ROOT="${RBSS_SNAPSHOT_WORKTREE:-$REPO_ROOT}"
+SOURCE_WORK="${RBSS_SNAPSHOT_WORK:-}"
+SOURCE_SHA256="${RBSS_SNAPSHOT_SHA256:-}"
 SUPPORT="$HOME/Library/Application Support/RBSS Bridge"
-CONFIG_DIR="${RBSS_MAKE_STICK_CONFIG_DIR:-$REPO_ROOT/config}"
+CONFIG_DIR="${RBSS_MAKE_STICK_CONFIG_DIR:-$WORKTREE_ROOT/config}"
 PREBUILT_APP="${RBSS_MAKE_STICK_APP:-}"
 STAGE_ONLY="${RBSS_MAKE_STICK_STAGE_ONLY:-}"
 SIDECAR_EXPORTER="${RBSS_MAKE_STICK_SIDECAR_EXPORTER:-$REPO_ROOT/tools/lighting_sidecar_export.py}"
-BINDINGS_SRC="${RBSS_MAKE_STICK_BINDINGS:-$REPO_ROOT/local/soundswitch/.rbss_canonical_pack.midi_bindings.json}"
+BINDINGS_SRC="${RBSS_MAKE_STICK_BINDINGS:-$WORKTREE_ROOT/local/soundswitch/.rbss_canonical_pack.midi_bindings.json}"
 # Build venv from a python.org, LOW-deployment-target Python (NOT Homebrew, whose
 # arm64 macOS-15 libpython hard-binds macOS-13 symbols like _mkfifoat and crashes
 # on older Macs — DEFECT-1). python.org ships a universal2 interpreter, but the
 # PRODUCED APP IS arm64 / Apple-Silicon-ONLY (pip pulls arm64 wheels on Apple
 # Silicon; the spec sets no target_arch) — the only supported ship target. A
 # post-build lipo assertion (below) fails closed if the built arch drifts from it.
-VENV="$REPO_ROOT/.build-venv-u2"
-WHEELHOUSE="$REPO_ROOT/.build-wheelhouse-macos12-arm64-cp313"
+VENV="$WORKTREE_ROOT/.build-venv-u2"
+WHEELHOUSE="$WORKTREE_ROOT/.build-wheelhouse-macos12-arm64-cp313"
 WHEEL_LOCK="$REPO_ROOT/packaging/macos12_arm64_cp313.lock"
 SOURCE_LOCK="$REPO_ROOT/packaging/macos12_arm64_cp313_source.lock"
 HIDAPI_LOCK="$REPO_ROOT/packaging/libhidapi_arm64.lock"
@@ -79,28 +82,27 @@ HOME_PARITY_FILES=(
 
 fail() { echo "make_stick: $1" >&2; exit 1; }
 
-GIT_HEAD="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null)" \
+GIT_HEAD="${RBSS_SNAPSHOT_HEAD:-$(git -C "$WORKTREE_ROOT" rev-parse HEAD 2>/dev/null)}" \
     || fail "cannot read the repository generation; refusing an unidentifiable build."
 [[ "$GIT_HEAD" =~ ^[0-9a-f]{40}$ ]] \
     || fail "repository generation is malformed; refusing an unidentifiable build."
 BUILD_TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 BUILD_TIMESTAMP_COMPACT="$(date -u +%Y%m%dT%H%M%SZ)"
 SOURCE_DIRTY=false
-if [ -n "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=normal)" ]; then
+if [ -n "$(git -C "$WORKTREE_ROOT" status --porcelain --untracked-files=normal)" ]; then
     SOURCE_DIRTY=true
 fi
+SOURCE_DIRTY="${RBSS_SNAPSHOT_DIRTY:-$SOURCE_DIRTY}"
 GENERATION="${GIT_HEAD:0:12}-${BUILD_TIMESTAMP_COMPACT}"
 [ "$SOURCE_DIRTY" = false ] || GENERATION="$GENERATION-dirty"
 
-require_unchanged_clean_source() {
-    local current_head current_status
-    current_head="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null)" \
-        || fail "cannot re-read repository generation; refusing to publish."
-    [ "$current_head" = "$GIT_HEAD" ] \
-        || fail "repository HEAD changed during the USB build; refusing to publish mixed sources."
-    current_status="$(git -C "$REPO_ROOT" status --porcelain --untracked-files=normal)"
-    [ -z "$current_status" ] \
-        || fail "repository files changed during the USB build; refusing to publish mixed sources."
+require_verified_source_snapshot() {
+    [ -n "$SOURCE_WORK" ] || return 0  # prebuilt-app test seam
+    local actual
+    actual="$(python3 "$REPO_ROOT/packaging/source_snapshot.py" --verify "$REPO_ROOT")" \
+        || fail "source snapshot verification failed; refusing to publish."
+    [ "$actual" = "$SOURCE_SHA256" ] \
+        || fail "source snapshot manifest changed; refusing to publish."
 }
 
 version_at_most() {
@@ -433,7 +435,7 @@ validate_locked_wheelhouse() {
 
 build_lock_fingerprint() {
     local py="$1"
-    { shasum -a 256 "$WHEEL_LOCK" "$SOURCE_LOCK"; "$py" -VV; } | shasum -a 256 | awk '{print $1}'
+    { shasum -a 256 "$WHEEL_LOCK" "$SOURCE_LOCK" | awk '{print $1}'; "$py" -VV; } | shasum -a 256 | awk '{print $1}'
 }
 
 venv_is_locked() {
@@ -536,7 +538,8 @@ PY
 write_build_manifest() {
     RBSS_MANIFEST_ROOT="$1" RBSS_MANIFEST_PATH="$2" \
     RBSS_GENERATION="$GENERATION" RBSS_BUILD_TIMESTAMP="$BUILD_TIMESTAMP" \
-    RBSS_GIT_HEAD="$GIT_HEAD" RBSS_SOURCE_DIRTY="$SOURCE_DIRTY" python3 - <<'PY'
+    RBSS_GIT_HEAD="$GIT_HEAD" RBSS_SOURCE_DIRTY="$SOURCE_DIRTY" \
+    RBSS_SOURCE_SHA256="$SOURCE_SHA256" python3 - <<'PY'
 import hashlib
 import json
 import os
@@ -574,6 +577,7 @@ value = {
     "built_at": os.environ["RBSS_BUILD_TIMESTAMP"],
     "git_head": os.environ["RBSS_GIT_HEAD"],
     "source_dirty": os.environ["RBSS_SOURCE_DIRTY"] == "true",
+    "source_sha256": os.environ["RBSS_SOURCE_SHA256"],
     "files": files,
 }
 dest.parent.mkdir(parents=True, exist_ok=True)
@@ -836,8 +840,6 @@ if [ -z "$STAGE_ONLY" ]; then
         *) fail "'$STICK' is not mounted under /Volumes; refusing to write to a normal folder." ;;
     esac
     [ -d "$STICK/PIONEER" ] || fail "'$STICK' has no PIONEER/ — not the rekordbox-exported stick. Refusing."
-    [ "$SOURCE_DIRTY" = false ] \
-        || fail "repository has tracked or untracked changes; commit or remove them before a real USB build."
     DEST="$STICK/RBSS BRIDGE USB"
 fi
 
@@ -847,8 +849,8 @@ if [ -n "$STAGE_ONLY" ]; then
     mkdir -p "$STAGING"
 else
     STAGING="$(mktemp -d /tmp/rbss_stick_staging.XXXXXX)"
-    trap 'rm -rf "$STAGING"' EXIT
 fi
+trap 'if [ -z "$STAGE_ONLY" ]; then rm -rf "$STAGING"; fi; if [ -n "$SOURCE_WORK" ]; then rm -rf "$SOURCE_WORK"; fi' EXIT
 
 # ── 1. build + sign (M1 runbook commands, verbatim), unless a test app given ─
 if [ -n "$PREBUILT_APP" ]; then
@@ -860,6 +862,21 @@ if [ -n "$PREBUILT_APP" ]; then
             || fail "prebuilt app is missing libhidapi.dylib (AWR-237); rebuild with a current make_stick."
     fi
 else
+    if [ -z "$SOURCE_WORK" ]; then
+        SOURCE_WORK="$(mktemp -d /tmp/rbss_source_snapshot.XXXXXX)"
+        SOURCE_SHA256="$(python3 "$REPO_ROOT/packaging/source_snapshot.py" \
+            "$REPO_ROOT" "$SOURCE_WORK/rb_ss_bridge_v2")" \
+            || fail "could not take a verified source snapshot; prior stick is unchanged."
+        # Run the builder itself from the copy too; later edits cannot alter it.
+        RBSS_SNAPSHOT_WORKTREE="$WORKTREE_ROOT" RBSS_SNAPSHOT_WORK="$SOURCE_WORK" \
+        RBSS_SNAPSHOT_SHA256="$SOURCE_SHA256" RBSS_SNAPSHOT_HEAD="$GIT_HEAD" \
+        RBSS_SNAPSHOT_DIRTY="$SOURCE_DIRTY" \
+            bash "$SOURCE_WORK/rb_ss_bridge_v2/packaging/make_stick.sh" "$@"
+        exit 0
+    fi
+    require_verified_source_snapshot
+    export PYTHONPATH="$SOURCE_WORK"
+    echo "make_stick: verified current-source snapshot $SOURCE_SHA256 (uncommitted files allowed)."
     cd "$REPO_ROOT"
     # Reuse the venv ONLY if it has pyinstaller AND every runtime dep (--check-deps
     # imports the full required set). A narrow probe (pyinstaller + a few libs) would
@@ -1019,8 +1036,9 @@ if [ -n "$STAGE_ONLY" ]; then
 fi
 
 # ── 3. DMG from the staging dir (runbook command, -srcfolder = staging) ──────
-DMG="$REPO_ROOT/dist/RBSS Bridge.dmg"
-require_unchanged_clean_source
+mkdir -p "$WORKTREE_ROOT/dist"
+DMG="$WORKTREE_ROOT/dist/RBSS Bridge.dmg"
+require_verified_source_snapshot
 hdiutil create -volname "RBSS Bridge" -srcfolder "$STAGING" \
     -ov -format UDZO "$DMG" || fail "step 'DMG create' failed."
 verify_dmg_package "$DMG" \
@@ -1028,7 +1046,7 @@ verify_dmg_package "$DMG" \
 
 # ── 4. ship to the stick — into the operator's folder layout (2026-07-09:
 #      everything bridge lives in "RBSS BRIDGE USB/" at the stick root) ───────
-require_unchanged_clean_source
+require_verified_source_snapshot
 publish_generation "$STICK" "$DMG" "$STAGING/RBSS_payload/lighting_sidecar"
 
 DMG_SIZE="$(du -h "$DMG" | cut -f1)"

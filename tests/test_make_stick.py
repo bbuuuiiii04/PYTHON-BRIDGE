@@ -11,6 +11,7 @@ PIONEER/ target refusal.
 import json
 import hashlib
 import os
+import runpy
 import shlex
 import stat
 import subprocess
@@ -19,11 +20,13 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 SCRIPT = Path(__file__).resolve().parents[1] / "packaging" / "make_stick.sh"
 SPEC = SCRIPT.with_name("rbss_launcher.spec")
 WHEEL_LOCK = SCRIPT.with_name("macos12_arm64_cp313.lock")
 SOURCE_LOCK = SCRIPT.with_name("macos12_arm64_cp313_source.lock")
+SNAPSHOT = runpy.run_path(str(SCRIPT.with_name("source_snapshot.py")))
 
 HOME_PARITY_NAMES = [
     "govee.env",
@@ -828,11 +831,74 @@ class MakeStickTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("payload contains a symbolic link", result.stderr)
 
-    def test_real_build_requires_clean_stable_repository(self):
+    def test_real_build_uses_verified_snapshot_not_clean_worktree(self):
         script = SCRIPT.read_text()
-        self.assertIn("status --porcelain --untracked-files=normal", script)
-        self.assertIn("repository HEAD changed during the USB build", script)
-        self.assertGreaterEqual(script.count("require_unchanged_clean_source"), 3)
+        self.assertNotIn("commit or remove them", script)
+        self.assertIn('bash "$SOURCE_WORK/rb_ss_bridge_v2/packaging/make_stick.sh" "$@"', script)
+        self.assertGreaterEqual(script.count("require_verified_source_snapshot"), 3)
+
+    def test_build_lock_fingerprint_is_independent_of_snapshot_path(self):
+        roots = [Path(self.tmp.name) / name for name in ("first", "second")]
+        digests = []
+        for root in roots:
+            root.mkdir()
+            for name in ("wheels.lock", "source.lock"):
+                (root / name).write_text("same locked content")
+            result = self._source_and_run(
+                f"WHEEL_LOCK={shlex.quote(str(root / 'wheels.lock'))}; "
+                f"SOURCE_LOCK={shlex.quote(str(root / 'source.lock'))}; "
+                f"build_lock_fingerprint {shlex.quote(sys.executable)}"
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            digests.append(result.stdout.strip())
+        self.assertEqual(digests[0], digests[1])
+
+    def test_snapshot_copies_current_tracked_untracked_and_deleted_files(self):
+        source = Path(self.tmp.name) / "source"
+        source.mkdir()
+        subprocess.run(["git", "init", "-q", str(source)], check=True)
+        (source / "tracked.py").write_text("old")
+        (source / "deleted.py").write_text("deleted")
+        subprocess.run(["git", "-C", str(source), "add", "."], check=True)
+        (source / "tracked.py").write_text("current")
+        (source / "deleted.py").unlink()
+        (source / "new file.py").write_text("untracked")
+        (source / "internal-link.py").symlink_to("tracked.py")
+        (source / ".gitignore").write_text("secret.env\n")
+        (source / "secret.env").write_text("do not copy")
+        destination = Path(self.tmp.name) / "snapshot" / "rb_ss_bridge_v2"
+        digest = SNAPSHOT["create"](source, destination)
+        self.assertEqual((destination / "tracked.py").read_text(), "current")
+        self.assertEqual((destination / "new file.py").read_text(), "untracked")
+        self.assertTrue((destination / "internal-link.py").is_symlink())
+        self.assertEqual((destination / "internal-link.py").read_text(), "current")
+        self.assertFalse((destination / "deleted.py").exists())
+        self.assertFalse((destination / "secret.env").exists())
+        (source / "tracked.py").write_text("next build")
+        self.assertEqual(SNAPSHOT["verify"](destination), digest)
+        (destination / "tracked.py").write_text("corrupted")
+        with self.assertRaisesRegex(ValueError, "snapshot changed"):
+            SNAPSHOT["verify"](destination)
+
+    def test_snapshot_rejects_source_change_during_copy_and_symlink(self):
+        source = Path(self.tmp.name) / "source"
+        source.mkdir()
+        subprocess.run(["git", "init", "-q", str(source)], check=True)
+        file = source / "code.py"
+        file.write_text("before")
+        destination = Path(self.tmp.name) / "snapshot" / "rb_ss_bridge_v2"
+        copy = SNAPSHOT["shutil"].copy2
+
+        def changing_copy(src, dst, **kwargs):
+            copy(src, dst, **kwargs)
+            file.write_text("after")
+
+        with patch.object(SNAPSHOT["shutil"], "copy2", side_effect=changing_copy):
+            with self.assertRaisesRegex(ValueError, "changed while taking"):
+                SNAPSHOT["create"](source, destination)
+        (source / "link.py").symlink_to(self.exporter)
+        with self.assertRaisesRegex(ValueError, "symlink"):
+            SNAPSHOT["inventory"](source)
 
     def test_refuses_missing_mount(self):
         result = self._run(

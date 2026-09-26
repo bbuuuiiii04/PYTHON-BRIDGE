@@ -46,9 +46,19 @@ relates_to: cross_platform_portability_plan.md, track_identity_move_invariance_d
 USB rebuild maintenance (2026-09-25): `make_stick.sh` prepares the locked
 Stream Deck hidapi library after Python environment setup, because that setup
 can replace its containing wheelhouse. `tests.test_make_stick` checks the
-ordering before PyInstaller. The clean-source publication gate remains in place.
-This change does not alter reader or lighting behavior; foreign-Mac attach and
-physical lighting remain unvalidated.
+ordering before PyInstaller. Rebuild accepts current tracked and untracked files
+without a commit. `packaging/source_snapshot.py` copies Git-listed, non-ignored
+files into a temporary source tree and checks SHA-256 contents and permissions
+against the source before and after copying. Deleted files stay absent; relative
+file symlinks within the copied tree are preserved. Escaping/broken links and
+changes during copying abort. PyInstaller and the sidecar exporter use that
+copy, so later working-tree edits belong to the next rebuild. The build manifest
+records `source_sha256`; the snapshot is checked again before DMG creation and
+USB publication. Ignored live configs, show data, and caches retain their
+separate payload staging and final package-integrity checks. Snapshot tests cover
+current edits, new/deleted files, ignored files, corruption, and mid-copy changes.
+This supersedes the former clean-checkout requirement. Reader and lighting
+behavior is unchanged; foreign-Mac attach and physical lighting are unvalidated.
 
 > **Implementation reality (2026-07-10/11 foreign-Mac fix round, branch `claude/rbss-bridge-install-debug-59yrn6`; see AWR-186).** The first run of the built M2 bundle on a second Mac (macOS 12, Apple Silicon) failed across the board — this design assumed a source/dev host and never captured that the FROZEN bundle must: (a) build against a **python.org universal2, LOW-deployment-target** interpreter — Homebrew's macOS-15 `libpython` hard-binds `_mkfifoat` and crashes on macOS < 15 (`make_stick.sh` now enforces this; **spectral analysis stays REQUIRED**, fail-loud, never dropped); (b) guard the menubar singleton with an **flock**, not argv-`pgrep` (a frozen argv never matches); (c) **surface silent child-process crashes** (bridge start, Rekordbox patch) instead of failing invisibly; (d) point the Laser/LED pads at the **App Support live config**, never the code-signed bundle (a pad Save into the bundle invalidates the signature/TCC grants); (e) resolve `ICON_DIR` and pad assets from the bundle, not `/Users/bbui`. Eight defects fixed, one (unresponsive-menu) refuted. ALL frozen/macOS behavior remains operator-unvalidated.
 
